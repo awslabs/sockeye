@@ -22,10 +22,12 @@ logger = logging.getLogger(__name__)
 
 class LearningRateScheduler:
 
-    def __init__(self, warmup: int = 0) -> None:
+    def __init__(self, warmup: int = 0, scale_num_updates: float = 1.0) -> None:
         self.base_lr = None  # Note: will be overwritten by MXNet optimizer
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
+        check_condition(scale_num_updates > 0, "scale_num_updates needs to be > 0.")
         self.warmup = warmup
+        self.scale_num_updates = scale_num_updates
         self.lr = None  # type: Optional[float]
 
     def __call__(self, num_updates):
@@ -69,6 +71,8 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
     """
 
     def __call__(self, num_updates: int):
+        # Scale number of updates
+        num_updates *= self.scale_num_updates
         # Warmup
         warm_lr = self._warmup(num_updates)
         # Avoid square root of zero
@@ -96,12 +100,14 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
                    linearly increases.
     """
 
-    def __init__(self, max_updates: int, warmup: int = 0):
-        super().__init__(warmup)
+    def __init__(self, max_updates: int, warmup: int = 0, scale_num_updates: float = 1.0):
+        super().__init__(warmup, scale_num_updates)
         check_condition(max_updates >= 0, "max_updates need to be >= 0.")
         self.max_updates = max_updates
 
     def __call__(self, num_updates: int):
+        # Scale number of updates
+        num_updates *= self.scale_num_updates
         # Warmup
         warm_lr = self._warmup(num_updates)
         # Linear decay
@@ -176,6 +182,7 @@ def get_lr_scheduler(scheduler_type: str,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
                      learning_rate_warmup: Optional[int] = 0,
+                     scale_num_updates: Optional[float] = 1.0,
                      max_updates: Optional[int] = None) -> Optional[LearningRateScheduler]:
     """
     Returns a learning rate scheduler.
@@ -186,6 +193,8 @@ def get_lr_scheduler(scheduler_type: str,
            reduced.
     :param learning_rate_warmup: Number of initial updates during which the
                                  learning rate linearly increases.
+    :param scale_num_updates: When computing the current training step, multiply
+                              the number of updates by this value.
     :param max_updates: Number of total training updates.
 
     :raises: ValueError if unknown scheduler_type
@@ -195,12 +204,12 @@ def get_lr_scheduler(scheduler_type: str,
     if scheduler_type is None:
         return None
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
-        return LearningRateSchedulerInvSqrtDecay(learning_rate_warmup)
+        return LearningRateSchedulerInvSqrtDecay(learning_rate_warmup, scale_num_updates)
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
         check_condition(max_updates is not None,
                         "The total number of training updates (--max-updates) must be specified when using the linear "
                         "decay learning rate scheduler.")
-        return LearningRateSchedulerLinearDecay(max_updates, learning_rate_warmup)
+        return LearningRateSchedulerLinearDecay(max_updates, learning_rate_warmup, scale_num_updates)
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
