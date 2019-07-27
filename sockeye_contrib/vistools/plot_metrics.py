@@ -12,10 +12,12 @@
 # permissions and limitations under the License.
 
 import argparse
+import bisect
 import collections
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 PARSE_ENTRY = collections.defaultdict(lambda: str)
@@ -55,11 +57,11 @@ def ax_label(s):
     return s
 
 
-def read_metrics_file(fname: str):
+def read_metrics_file(fname):
     metrics = collections.defaultdict(list)
     for line in open(fname, encoding='utf-8'):
         entries = line.split()
-        metrics['checkpoint'] = int(entries[0])
+        metrics['checkpoint'].append(int(entries[0]))
         for entry in entries[1:]:
             k, v = entry.split('=')
             v = PARSE_ENTRY[k](v)
@@ -67,7 +69,40 @@ def read_metrics_file(fname: str):
     return metrics
 
 
-def plot_metrics(args: argparse.Namespace):
+def average_points(points, num_points, cmp):
+    averaged = []
+    best = []
+    for point in points:
+        bisect.insort(best, point)
+        best = best[:num_points] if cmp is min else best[-num_points:]
+        averaged.append(sum(best) / len(best))
+    return averaged
+
+
+def points_since_improvement(points, cmp):
+    num_not_improved = []
+    best = None
+    since_improvement = 0
+    for point in points:
+        if best is None or (cmp is min and point < best) or (cmp is max and point > best):
+            best = point
+            since_improvement = 0
+        num_not_improved.append(since_improvement)
+        since_improvement += 1
+    return num_not_improved
+
+
+def slope(points, num_points):
+    # First point has no slope
+    slope_at_point = [0]
+    # Start computing slope with second point
+    for i in range(1, len(points)):
+        x, y = list(zip(*enumerate(points[max(i - num_points, 0):i + 1])))
+        slope_at_point.append(np.polyfit(x, y, 1)[0])
+    return slope_at_point
+
+
+def plot_metrics(args):
 
     fig, ax = plt.subplots()
     overall_best_y = None
@@ -75,15 +110,39 @@ def plot_metrics(args: argparse.Namespace):
     for fname, label in zip(args.input,
                             args.legend if args.legend is not None
                             else (os.path.basename(fname) for fname in args.input)):
+        # Read metrics file to dict
         metrics = read_metrics_file(fname)
-        ax.plot(metrics[args.x][args.skip:], metrics[args.y][args.skip:], linewidth=1, alpha=0.75, label=label)
-        ax.set(xlabel=ax_label(args.x), ylabel=ax_label(args.y), title=args.title)
+        x_vals = metrics[args.x][args.skip:]
+        y_vals = metrics[args.y][args.skip:]
+        x_label=ax_label(args.x)
+        y_label=ax_label(args.y)
+        # Optionally average best points so far for each Y point
+        if args.y_average is not None:
+            y_vals = average_points(y_vals, args.y_average, cmp=FIND_BEST[args.y])
+            y_label = '{} (Average of {} Points)'.format(y_label, args.y_average)
+        # Optionally count points since last improvement for each Y point
+        if args.y_since_best:
+            y_vals = points_since_improvement(y_vals, cmp=FIND_BEST[args.y])
+            y_label = '{} (Checkpoints Since Improvement)'.format(y_label)
+        # Optionally compute current slope for each Y point
+        if args.y_slope is not None:
+            y_vals = slope(y_vals, args.y_slope)
+            # Don't plot points for which slope is unreliable (fewer than number
+            # points used to compute slope)
+            x_vals = x_vals[args.y_slope - 1:]
+            y_vals = y_vals[args.y_slope - 1:]
+            y_label = '{} (Slope of {} Points)'.format(y_label, args.y_slope)
+        # Plot values for this metrics file
+        ax.plot(x_vals, y_vals, linewidth=1, alpha=0.75, label=label)
+        ax.set(xlabel=x_label, ylabel=y_label, title=args.title)
+        # Optionally track best point so far
         if args.best:
-            best_y = FIND_BEST[args.y](metrics[args.y][args.skip:])
+            best_y = FIND_BEST[args.y](y_vals)
             if overall_best_y is None:
                 overall_best_y = best_y
             else:
                 overall_best_y = FIND_BEST[args.y](best_y, overall_best_y)
+    # Optionally mark best Y point across metrics files
     if args.best:
         ax.axhline(y=overall_best_y, color='gray', linewidth=1, linestyle='--', zorder=999)
 
@@ -99,6 +158,10 @@ def main():
     params.add_argument('-o', '--output', required=True, help='Output file to write (ex: plot.pdf).')
     params.add_argument('-x', default='time-elapsed', help='X axis metric.')
     params.add_argument('-y', default='perplexity-val', help='Y axis metric.')
+    params.add_argument('-ya', '--y-average', type=int, help='Average the N best points so far for each Y value.')
+    params.add_argument('-ysb', '--y-since-best', action='store_true',
+                        help='Use number of points since improvement for each Y value.')
+    params.add_argument('-ysl', '--y-slope', type=int, help='Compute current slope for each Y value.')
     params.add_argument('-l', '--legend', nargs='+', help='Labels in legend (one per input file).')
     params.add_argument('-t', '--title', help='Plot title.')
     params.add_argument('-b', '--best', action='store_true', help='Draw horizontal line at best Y value.')
