@@ -60,8 +60,6 @@ This argument accepts a (space separated) list of components where to apply the 
 
 Again it may be beneficial to adjust the learning parameters for the adaptation run.
 
-**Note:** At the moment LHUC is not supported for convolutional models.
-
 ## References
 
 > Markus Freitag and Yaser Al-Onaizan. 2016.
