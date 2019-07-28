@@ -855,12 +855,6 @@ def add_training_args(params):
                               default=0,
                               help="Number of warmup steps. If set to x, linearly increases learning rate from 10%% "
                                    "to 100%% of the initial learning rate. Default: %(default)s.")
-    train_params.add_argument('--learning-rate-scale-num-updates',
-                              type=float,
-                              default=1.0,
-                              help='For schedulers that set the learning rate based on the number of training updates, '
-                                   'multiply the actual number of updates by this value to stretch or compress the time'
-                                   ' scale. Default: %(default)s.')
 
     train_params.add_argument('--fixed-param-strategy',
                                default=None,

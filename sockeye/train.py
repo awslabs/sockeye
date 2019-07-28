@@ -610,7 +610,6 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
                                              args.learning_rate_warmup,
-                                             args.learning_rate_scale_num_updates,
                                              args.max_updates)
     config = OptimizerConfig(name=args.optimizer,
                              params=optimizer_params,

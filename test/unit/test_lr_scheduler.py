@@ -18,20 +18,18 @@ import numpy as np
 from sockeye import lr_scheduler
 
 
-@pytest.mark.parametrize('learning_rate_warmup, scale_num_updates',
-                         [(1, 1.0), (3, 2.0), (10, 0.5), (20, 4)])
-def test_inv_sqrt_decay_scheduler(learning_rate_warmup, scale_num_updates):
+@pytest.mark.parametrize('learning_rate_warmup',
+                         [1, 3, 10, 20])
+def test_inv_sqrt_decay_scheduler(learning_rate_warmup):
     scheduler = lr_scheduler.get_lr_scheduler('inv-sqrt-decay',
                                               learning_rate_reduce_factor=0,
                                               learning_rate_reduce_num_not_improved=0,
                                               learning_rate_warmup=learning_rate_warmup,
-                                              scale_num_updates=scale_num_updates,
                                               max_updates=10)
     scheduler.base_lr = 1
 
     # Reference formula from Transformer paper
-    alternate_implementation = lambda t: min((t * scale_num_updates)**-0.5,
-                                             (t * scale_num_updates) * learning_rate_warmup**-1.5)
+    alternate_implementation = lambda t: min((t)**-0.5, (t) * learning_rate_warmup**-1.5)
 
     expected_schedule = [alternate_implementation(t) for t in range(1, 11)]
 
@@ -46,7 +44,6 @@ def test_linear_decay_scheduler():
                                               learning_rate_reduce_factor=0,
                                               learning_rate_reduce_num_not_improved=0,
                                               learning_rate_warmup=3,
-                                              scale_num_updates=1.0,
                                               max_updates=10)
     scheduler.base_lr = 1
 
@@ -76,7 +73,6 @@ def test_get_lr_scheduler(scheduler_type, expected_instance):
                                               learning_rate_reduce_factor=0.5,
                                               learning_rate_reduce_num_not_improved=16,
                                               learning_rate_warmup=1000,
-                                              scale_num_updates=1.0,
                                               max_updates=10000)
     assert isinstance(scheduler, expected_instance)
 
