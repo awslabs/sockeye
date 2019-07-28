@@ -32,7 +32,8 @@ def foo(bar: <type of bar>) -> <returnType>:
     """
 ```
 
-- When using MXNet operators, preceding symbolic statements in the code with the resulting, expected shape of the tensor greatly improves readability of the code:
+- Sockeye 2 uses the [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html).
+- When using MXNet operators, preceding symbolic or hybridizable statements in the code with the resulting, expected shape of the tensor greatly improves readability of the code:
 
 ```python
 # (batch_size, num_hidden)
@@ -42,8 +43,6 @@ data = mx.sym.reshape(data=data, shape=(-1))
 ```
 
 - The desired line length of Python modules should not exceed 120 characters.
-
-- When writing symbol-generating classes (such as encoders/decoders), initialize variables in the constructor of the class and re-use them in the class methods.
 
 - Make sure to pass unit tests before submitting a pull request.
 
