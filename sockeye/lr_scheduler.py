@@ -28,17 +28,17 @@ class LearningRateScheduler:
         self.warmup = warmup
         self.lr = None  # type: Optional[float]
 
-    def __call__(self, num_updates):
+    def __call__(self, t):
         pass
 
-    def _warmup(self, num_updates):
+    def _warmup(self, t):
         """
         Returns linearly increasing fraction of base_lr.
         """
         assert self.base_lr is not None
         if not self.warmup:
             return self.base_lr
-        return self.base_lr * min(1.0, num_updates / self.warmup)
+        return self.base_lr * min(1.0, t / self.warmup)
 
 
 class AdaptiveLearningRateScheduler(LearningRateScheduler):
@@ -59,7 +59,7 @@ class AdaptiveLearningRateScheduler(LearningRateScheduler):
 
 class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
     """
-    Learning rate schedule: lr / sqrt(max(step, warmup_steps)).
+    Learning rate schedule: lr / sqrt(max(t, warmup_steps)).
 
     This is the schedule used by Vaswani et al. in the Transformer paper
     (https://arxiv.org/pdf/1706.03762.pdf)
@@ -68,13 +68,13 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
                    linearly increases.
     """
 
-    def __call__(self, num_updates: int):
+    def __call__(self, t: int):
         # Warmup
-        warm_lr = self._warmup(num_updates)
+        warm_lr = self._warmup(t)
         # Avoid square root of zero
-        warmup_updates = max(1, self.warmup)
+        warmup_steps = max(1, self.warmup)
         # Warmup first N steps, then decay
-        lr = warm_lr / sqrt(max(num_updates, warmup_updates))
+        lr = warm_lr / sqrt(max(t, warmup_steps))
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
         self.lr = lr
@@ -84,7 +84,7 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
 
 class LearningRateSchedulerLinearDecay(LearningRateScheduler):
     """
-    Learning rate schedule: lr * (1 - step / total_steps)
+    Learning rate schedule: lr * (1 - t / total_steps)
     Step grows until it reaches decay_steps then remains constant.
 
     This is the schedule used by Devlin et al. in the BERT paper
@@ -96,17 +96,17 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
                    linearly increases.
     """
 
-    def __init__(self, max_updates: int, warmup: int = 0):
+    def __init__(self, total_steps: int, warmup: int = 0):
         super().__init__(warmup)
-        check_condition(max_updates >= 0, "max_updates need to be >= 0.")
-        self.max_updates = max_updates
+        check_condition(total_steps >= 0, "total_steps need to be >= 0.")
+        self.total_steps = total_steps
 
-    def __call__(self, num_updates: int):
+    def __call__(self, t: int):
         # Warmup
-        warm_lr = self._warmup(num_updates)
+        warm_lr = self._warmup(t)
         # Linear decay
-        bounded_updates = min(max(num_updates, 1), self.max_updates)
-        lr = warm_lr * (1 - bounded_updates / self.max_updates)
+        bounded_t = min(max(t, 1), self.total_steps)
+        lr = warm_lr * (1 - bounded_t / self.total_steps)
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
         self.lr = lr
@@ -123,7 +123,7 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
 
     def __init__(self, reduce_factor: float, reduce_num_not_improved: int, warmup: int = 0) -> None:
         super().__init__(warmup)
-        check_condition(0.0 < reduce_factor <= 1, "reduce_factor should be in ]0,1].")
+        check_condition(0.0 < reduce_factor < 1, "reduce_factor should be between (0, 1).")
         self.reduce_factor = reduce_factor
         self.reduce_num_not_improved = reduce_num_not_improved
         self.num_not_improved = 0
@@ -195,20 +195,20 @@ def get_lr_scheduler(scheduler_type: str,
     if scheduler_type is None:
         return None
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
-        return LearningRateSchedulerInvSqrtDecay(learning_rate_warmup)
+        return LearningRateSchedulerInvSqrtDecay(warmup=learning_rate_warmup)
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
         check_condition(max_updates is not None,
                         "The total number of training updates (--max-updates) must be specified when using the linear "
                         "decay learning rate scheduler.")
-        return LearningRateSchedulerLinearDecay(max_updates, learning_rate_warmup)
+        return LearningRateSchedulerLinearDecay(total_steps=max_updates, warmup=learning_rate_warmup)
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
         check_condition(learning_rate_reduce_num_not_improved is not None,
                         "learning_rate_reduce_num_not_improved needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
         if learning_rate_reduce_factor >= 1.0:
-            logger.warning("Not using %s learning rate scheduling: learning_rate_reduce_factor == 1.0"
-                           % C.LR_SCHEDULER_PLATEAU_REDUCE)
+            logger.warning("Not using %s learning rate scheduling: learning_rate_reduce_factor == 1.0",
+                           C.LR_SCHEDULER_PLATEAU_REDUCE)
             return None
         return LearningRateSchedulerPlateauReduce(learning_rate_reduce_factor, learning_rate_reduce_num_not_improved,
                                                   learning_rate_warmup)
