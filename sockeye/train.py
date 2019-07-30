@@ -621,9 +621,8 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     config.set_lr_scheduler(lr_sched)
     logger.info("Optimizer: %s | kvstore=%s | params=%s | initializer=%s",
                 config.name, config.kvstore, config.params, config.initializer)
-    if args.update_interval > 1:
-        logger.info("Gradient accumulation over %d batches by %d worker(s). Effective batch size: %d",
-                    args.update_interval, num_workers, effective_batch_size)
+    logger.info("Gradient accumulation over %d batch(es) by %d worker(s). Effective batch size: %d",
+                args.update_interval, num_workers, effective_batch_size)
     return config
 
 
