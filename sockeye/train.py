@@ -93,7 +93,7 @@ def check_resume(args: argparse.Namespace, output_folder: str, using_horovod: bo
 
     :param args: Arguments as returned by argparse.
     :param output_folder: Main output folder for the model.
-    :param using_horovod_rank: Running training with Horovod/MPI.
+    :param using_horovod: Running training with Horovod/MPI.
 
     :return: Flag signaling if we are resuming training and the directory with
         the training status.
@@ -705,7 +705,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
     # launched via OpenMPI.  Each worker has a rank (unique among all workers in
     # the training run) and a local rank (unique on the current host).  For
     # example, running on 2 hosts with 4 slots each will assign ranks 0-7 and
-    # local ranks 0-4.
+    # local ranks 0-3.
     using_horovod = False
     if args.horovod:
         using_horovod = True

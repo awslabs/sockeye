@@ -19,6 +19,15 @@ Recent developments and changes are tracked in our [CHANGELOG](https://github.co
 If you have any questions or discover problems, please [file an issue](https://github.com/awslabs/sockeye/issues/new).
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 
+## Installation
+
+The easiest way to use Sockeye is with [Docker](https://www.docker.com) or [nvidia-docker](https://github.com/NVIDIA/nvidia-docker).
+To build a Docker image of Sockeye with all features enabled, run the build script:
+
+```bash
+bash sockeye_contrib/docker/build.sh
+```
+
 ## Documentation
 
 For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).

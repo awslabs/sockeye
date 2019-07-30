@@ -475,8 +475,8 @@ def determine_context(device_ids: List[int],
     :param disable_device_locking: Disable Sockeye's device locking feature.
     :param lock_dir: Directory to place device lock files in.
     :param exit_stack: An ExitStack from contextlib.
-    :param using_horovod_local_rank: Running training with Horovod/OpenMPI:
-                                     GPU(s) are determined by worker local rank.
+    :param using_horovod: Running training with Horovod/OpenMPI: GPU(s) are
+                          determined by worker local rank.
 
     :return: A list with the context(s) to run on.
     """
