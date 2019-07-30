@@ -96,7 +96,7 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
                    linearly increases.
     """
 
-    def __init__(self, total_steps: int, warmup: int = 0):
+    def __init__(self, total_steps: int, warmup: int = 0) -> None:
         super().__init__(warmup)
         check_condition(total_steps >= 0, "total_steps need to be >= 0.")
         self.total_steps = total_steps

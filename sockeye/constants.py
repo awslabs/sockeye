@@ -37,13 +37,7 @@ DECODER_PREFIX = "decoder_"
 EMBEDDING_PREFIX = "embed_"
 ATTENTION_PREFIX = "att_"
 COVERAGE_PREFIX = "cov_"
-BIDIRECTIONALRNN_PREFIX = ENCODER_PREFIX + "birnn_"
-STACKEDRNN_PREFIX = ENCODER_PREFIX + "rnn_"
-FORWARD_PREFIX = "forward_"
-REVERSE_PREFIX = "reverse_"
 TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
-CNN_ENCODER_PREFIX = ENCODER_PREFIX + "cnn_"
-CHAR_SEQ_ENCODER_PREFIX = ENCODER_PREFIX + "char_"
 DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
 LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
 
@@ -60,27 +54,13 @@ SOURCE_FACTORS_COMBINE_CONCAT = 'concat'
 SOURCE_FACTORS_COMBINE_CHOICES = [SOURCE_FACTORS_COMBINE_SUM, SOURCE_FACTORS_COMBINE_CONCAT]
 
 # encoder names (arguments)
-RNN_NAME = "rnn"
-RNN_WITH_CONV_EMBED_NAME = "rnn-with-conv-embed"
 TRANSFORMER_TYPE = "transformer"
-CONVOLUTION_TYPE = "cnn"
-TRANSFORMER_WITH_CONV_EMBED_TYPE = "transformer-with-conv-embed"
-IMAGE_PRETRAIN_TYPE = "image-pretrain-cnn"
 
 # available encoders
-ENCODERS = [RNN_NAME, RNN_WITH_CONV_EMBED_NAME, TRANSFORMER_TYPE, TRANSFORMER_WITH_CONV_EMBED_TYPE, CONVOLUTION_TYPE, IMAGE_PRETRAIN_TYPE]
+ENCODERS = [TRANSFORMER_TYPE]
 
 # available decoder
-DECODERS = [RNN_NAME, TRANSFORMER_TYPE, CONVOLUTION_TYPE]
-
-# rnn types
-LSTM_TYPE = 'lstm'
-LNLSTM_TYPE = 'lnlstm'
-LNGLSTM_TYPE = 'lnglstm'
-GRU_TYPE = 'gru'
-LNGRU_TYPE = 'lngru'
-LNGGRU_TYPE = 'lnggru'
-CELL_TYPES = [LSTM_TYPE, LNLSTM_TYPE, LNGLSTM_TYPE, GRU_TYPE, LNGRU_TYPE, LNGGRU_TYPE]
+DECODERS = [TRANSFORMER_TYPE]
 
 # positional embeddings
 NO_POSITIONAL_EMBEDDING = "none"
@@ -110,29 +90,6 @@ EMBED_INIT_NORMAL = 'normal'
 EMBED_INIT_TYPES = [EMBED_INIT_DEFAULT, EMBED_INIT_NORMAL]
 DEFAULT_NUM_EMBED = 512
 
-# RNN init types
-RNN_INIT_PATTERN = ".*h2h.*"
-RNN_INIT_ORTHOGONAL = 'orthogonal'
-RNN_INIT_ORTHOGONAL_STACKED = 'orthogonal_stacked'
-# use the default initializer used also for all other weights
-RNN_INIT_DEFAULT = 'default'
-
-# RNN decoder state init types
-RNN_DEC_INIT_ZERO = "zero"
-RNN_DEC_INIT_LAST = "last"
-RNN_DEC_INIT_AVG = "avg"
-RNN_DEC_INIT_CHOICES = [RNN_DEC_INIT_ZERO, RNN_DEC_INIT_LAST, RNN_DEC_INIT_AVG]
-
-# attention types
-ATT_BILINEAR = 'bilinear'
-ATT_DOT = 'dot'
-ATT_MH_DOT = 'mhdot'
-ATT_FIXED = 'fixed'
-ATT_LOC = 'location'
-ATT_MLP = 'mlp'
-ATT_COV = "coverage"
-ATT_TYPES = [ATT_BILINEAR, ATT_DOT, ATT_MH_DOT, ATT_FIXED, ATT_LOC, ATT_MLP, ATT_COV]
-
 # weight tying components
 WEIGHT_TYING_SRC = 'src'
 WEIGHT_TYING_TRG = 'trg'
@@ -143,9 +100,7 @@ WEIGHT_TYING_SRC_TRG = 'src_trg'
 WEIGHT_TYING_SRC_TRG_SOFTMAX = 'src_trg_softmax'
 
 # default decoder prefixes
-RNN_DECODER_PREFIX = DECODER_PREFIX + "rnn_"
 TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
-CNN_DECODER_PREFIX = DECODER_PREFIX + "cnn_"
 
 # Activation types
 # Gaussian Error Linear Unit (https://arxiv.org/pdf/1606.08415.pdf)
@@ -159,22 +114,6 @@ SOFT_RELU = "softrelu"
 SWISH1 = "swish1"
 TANH = "tanh"
 TRANSFORMER_ACTIVATION_TYPES = [GELU, RELU, SWISH1]
-CNN_ACTIVATION_TYPES = [GLU, RELU, SIGMOID, SOFT_RELU, TANH]
-
-# Convolutional block pad types:
-CNN_PAD_LEFT = "left"
-CNN_PAD_CENTERED = "centered"
-
-# coverage types
-COVERAGE_COUNT = "count"
-COVERAGE_FERTILITY = "fertility"
-COVERAGE_TYPES = [TANH,
-                  SIGMOID,
-                  RELU,
-                  SOFT_RELU,
-                  GRU_TYPE,
-                  COVERAGE_COUNT,
-                  COVERAGE_FERTILITY]
 
 # default I/O variable names
 SOURCE_NAME = "source"
@@ -290,11 +229,6 @@ TRAIN_ARGS_STOP_ON_DECODER_FAILURE = "--stop-training-on-decoder-failure"
 
 # Used to delimit factors on STDIN for inference
 DEFAULT_FACTOR_DELIMITER = '|'
-
-# data layout strings
-BATCH_MAJOR_IMAGE = "NCHW"
-BATCH_MAJOR = "NTC"
-TIME_MAJOR = "TNC"
 
 BATCH_TYPE_SENTENCE = "sentence"
 BATCH_TYPE_WORD = "word"

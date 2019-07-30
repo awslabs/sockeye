@@ -666,8 +666,7 @@ def fixed_param_names_from_stragegy(config: model.ModelConfig,
             # Any decoder layer.
             return not name.startswith(C.DECODER_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
-            # First and last encoder and decoder layers for RNN,
-            # Transformer, and CNN models.
+            # First and last encoder and decoder layers.
             return not (name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, 0)) or
                         name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, num_encoder_layers - 1)) or
                         name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, 0)) or
