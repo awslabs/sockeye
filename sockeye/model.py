@@ -242,7 +242,12 @@ class SockeyeModel:
                                       "Weight tying requires target embedding size and decoder hidden size " +
                                       "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
                                                                   self.decoder.get_num_hidden()))
-                w_out_target = w_embed_target
+                if self.config.num_pointers > 0:
+                    w_out_target = mx.sym.slice(w_embed_target,
+                        begin=(0, None),
+                        end=(self.config.vocab_target_size - self.config.num_pointers, None))
+                else:
+                    w_out_target = w_embed_target
 
         self._embed_weight_source_name = None
         if w_embed_source is not None:
