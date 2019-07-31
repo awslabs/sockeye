@@ -115,9 +115,10 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
         (see data_io.analyze_sequence_lengths)
         """
         if forced_max_output_len is not None:
-            return forced_max_output_len
+            output_len = forced_max_output_len
         else:
-            return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
+            output_len = int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
+        return min(output_len, max_output_len)
 
     return max_input_len, get_max_output_length
 
@@ -826,6 +827,7 @@ class Translator:
                  models: List[SockeyeModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
+                 beam_size: int = 5,
                  nbest_size: int = 1,
                  restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
                  avoid_list: Optional[str] = None,
@@ -1295,8 +1297,7 @@ class Translator:
             predicted_output_lengths.append(predicted_output_length)
 
             # Decoder init states
-            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths,
-                                                                        is_inference=True)
+            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
             # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
             decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
             model_state = ModelState(decoder_init_states)
@@ -1765,6 +1766,212 @@ class Translator:
                 [self.vocab_target_inv[x] for x in word_ids if x != 0])
             logger.info('%d %d %d %d %.2f %s', i + 1, finished[i].asscalar(), inactive[i].asscalar(), unmet, score,
                         hypothesis)
+
+
+class BeamSearch(mx.gluon.Block):
+
+    def __init__(self, beam_size: int, start_id: int, eos_id: int, target_vocab_size: int, context,
+                 length_penalty: LengthPenalty,
+                 brevity_penalty: Optional[BrevityPenalty] = None):
+        super().__init__(prefix="BeamSearch")
+        self.beam_size = beam_size
+        self.start_id = start_id
+        self.context = context
+        self.target_vocab_size = target_vocab_size
+        
+        with self.name_scope():
+
+            self._update_scores = UpdateScores()
+
+            if self.skip_topk:
+                self._top = Top1()
+            else:
+                self._top = TopK(k=self.beam_size, vocab_size=self.target_vocab_size)
+
+            self._sort_by_index = SortByIndex()
+
+            brevity_penalty_weight = self.brevity_penalty.weight if self.brevity_penalty is not None else 0.0
+            self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
+                                                               eos_id=eos_id,
+                                                               length_penalty_alpha=self.length_penalty.alpha,
+                                                               length_penalty_beta=self.length_penalty.beta,
+                                                               brevity_penalty_weight=brevity_penalty_weight)
+
+    def forward(self, source: mx.nd.NDArray, source_length: mx.nd.NDArray):
+        batch_size = source.shape[0]
+        logger.debug("_beam_search batch size: %d", batch_size)
+
+        # Maximum output length
+        max_output_length = self.get_max_output_length(source.shape[1])
+
+        # General data structure: batch_size * beam_size blocks in total;
+        # a full beam for each sentence, folloed by the next beam-block for the next sentence and so on
+
+        best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
+                                       dtype='int32')
+
+        # offset for hypothesis indices in batch decoding
+        offset = mx.nd.repeat(mx.nd.arange(0, batch_size * self.beam_size, self.beam_size,
+                                           dtype='int32', ctx=self.context), self.beam_size)
+
+        # locations of each batch item when first dimension is (batch * beam)
+        batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
+        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context)
+        first_step_mask[batch_indices] = 1.0
+        pad_dist = mx.nd.full((batch_size * self.beam_size, self.target_vocab_size - 1), val=np.inf,
+                              ctx=self.context)
+
+        # Best word and hypotheses indices across beam search steps from topk operation.
+        best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
+        best_word_indices_list = []  # type: List[mx.nd.NDArray]
+
+        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context)
+        finished = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+
+        # Extending max_output_lengths to shape (batch_size * beam_size,)
+        max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
+
+        # Attention distributions across beam search steps
+        attentions = []  # type: List[mx.nd.NDArray]
+
+        # scores_accumulated: chosen smallest scores in scores (ascending).
+        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context)
+
+        # If using a top-k lexicon, select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        models_output_layer_w = list()
+        models_output_layer_b = list()
+
+        # (0) encode source sentence, returns a list
+        model_states, estimated_reference_lengths = self._encode(source, source_length)
+
+        # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
+        # item on the beam for each sentence
+        inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
+        t = 1
+        for t in range(1, max_output_length):
+            # (1) obtain next predictions and advance models' state
+            # target_dists: (batch_size * beam_size, target_vocab_size)
+            # attention_scores: (batch_size * beam_size, bucket_key)
+            target_dists, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
+                                                                             states=model_states,
+                                                                             models_output_layer_w=models_output_layer_w,
+                                                                             models_output_layer_b=models_output_layer_b)
+
+            # (2) Produces the accumulated cost of target words in each row.
+            # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
+            # finished rows are inf everywhere except column zero, which holds the accumulated model score
+            scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
+
+            # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
+            # far as the active beam size for each sentence.
+
+            # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
+            # of the first row only by setting all other rows to inf
+            if t == 1 and not self.skip_topk:
+                scores *= first_step_mask
+
+            best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
+
+            # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
+            finished, lengths, attention_scores, estimated_reference_lengths \
+                = self._sort_by_index.forward(best_hyp_indices,
+                                              finished,
+                                              lengths,
+                                              attention_scores,
+                                              estimated_reference_lengths)
+
+            # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
+            # next call to topk(), hypotheses may not be in sorted order.
+            finished, scores_accumulated, lengths = self._update_finished.forward(best_word_indices,
+                                                                                  max_output_lengths,
+                                                                                  finished,
+                                                                                  scores_accumulated,
+                                                                                  lengths,
+                                                                                  estimated_reference_lengths)
+
+            # Collect best hypotheses, best word indices, and attention scores
+            best_hyp_indices_list.append(best_hyp_indices)
+            best_word_indices_list.append(best_word_indices)
+            attentions.append(attention_scores)
+
+            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+                at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
+                if at_least_one_finished.sum().asscalar() == batch_size:
+                    break
+            else:
+                if finished.sum().asscalar() == batch_size * self.beam_size:  # all finished
+                    break
+
+            # (9) update models' state with winning hypotheses (ascending)
+            for ms in model_states:
+                ms.sort_state(best_hyp_indices)
+
+        logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
+
+        # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        folded_accumulated_scores = scores_accumulated.reshape((batch_size,
+                                                                self.beam_size * scores_accumulated.shape[-1]))
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + offset
+        best_hyp_indices_list.append(best_hyp_indices)
+        lengths = lengths.take(best_hyp_indices)
+        scores_accumulated = scores_accumulated.take(best_hyp_indices)
+
+        all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
+        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
+        all_attentions = mx.nd.stack(*attentions, axis=1)
+
+        return all_best_hyp_indices.asnumpy(), \
+               all_best_word_indices.asnumpy(), \
+               all_attentions.asnumpy(), \
+               scores_accumulated.asnumpy(), \
+               lengths.asnumpy().astype('int32'), \
+               estimated_reference_lengths.asnumpy()
+
+    def _encode(self, sources: mx.nd.NDArray, source_length: mx.nd.NDArray) -> Tuple[List[ModelState], mx.nd.NDArray]:
+        """
+        Returns a ModelState for each model representing the state of the model after encoding the source.
+
+        :param sources: Source ids. Shape: (batch_size, max_length, num_factors).
+        :param source_length: Valid lengths for each input. Shape: (batch_size,)
+        :return: List of ModelStates and the estimated reference length based on ratios averaged over models.
+        """
+        model_states = []  # type: List[ModelState]
+        predicted_output_lengths = []  # type: List[mx.nd.NDArray]
+        for model in self.models:  # type: SockeyeModel
+            # Encode input. Shape: (batch, length, num_hidden), (batch,)
+            source_encoded, source_encoded_lengths = model.encode(sources, valid_length=source_length)
+
+            # Length task prediction
+            if model.length_ratio is not None:
+                # (batch,)
+                predicted_length_ratio = model.predict_length_ratio(source_encoded, source_encoded_lengths)
+                predicted_output_length = predicted_length_ratio * source_encoded_lengths
+            elif self.constant_length_ratio > 0.0:
+                # (batch,)
+                predicted_output_length = source_encoded_lengths * self.constant_length_ratio
+            else:
+                # (batch,)
+                predicted_output_length = mx.nd.zeros_like(source_encoded_lengths)
+            predicted_output_lengths.append(predicted_output_length)
+
+            # Decoder init states
+            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
+            # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
+            decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
+            model_state = ModelState(decoder_init_states)
+            model_states.append(model_state)
+
+        # (batch,)
+        # average the ratios over the models
+        predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=0), axis=0)
+        # (batch, 1)
+        predicted_output_lengths = mx.nd.expand_dims(predicted_output_lengths, axis=1)
+        # (batch*beam, 1)
+        predicted_output_lengths = mx.nd.repeat(predicted_output_lengths, repeats=self.beam_size, axis=0)
+
+        return model_states, predicted_output_lengths
 
 
 class PruneHypotheses(mx.gluon.HybridBlock):

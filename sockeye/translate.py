@@ -79,7 +79,9 @@ def run_translate(args: argparse.Namespace):
                                                           model_folders=args.models,
                                                           checkpoints=args.checkpoints,
                                                           dtype=args.dtype,
-                                                          hybridize=True)
+                                                          hybridize=True,
+                                                          inference_only=True)
+
 
         restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
         if args.restrict_lexicon is not None:
