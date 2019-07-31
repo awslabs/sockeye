@@ -21,12 +21,14 @@ You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 
 ## Installation
 
-The easiest way to use Sockeye is with [Docker](https://www.docker.com) or [nvidia-docker](https://github.com/NVIDIA/nvidia-docker).
-To build a Docker image of Sockeye with all features enabled, run the build script:
+The easiest way to run Sockeye is with [Docker](https://www.docker.com) or [nvidia-docker](https://github.com/NVIDIA/nvidia-docker).
+To build a Sockeye image with all features enabled, run the build script:
 
 ```bash
 bash sockeye_contrib/docker/build.sh
 ```
+
+See the [Dockerfile README](sockeye_contrib/docker/README.md) for more information.
 
 ## Documentation
 

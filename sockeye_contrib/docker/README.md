@@ -1,4 +1,4 @@
-# Docker Image
+# Sockeye Docker Image
 
 Run the Docker build script from the Sockeye root directory:
 
@@ -7,7 +7,6 @@ bash sockeye_contrib/docker/build.sh
 ```
 
 The script produces a nvidia-docker compatible image with this version Sockeye, including full CPU/GPU support and Horovod/OpenMPI.
-The Dockerfile uses logic from the [official Horovod Dockerfile](https://github.com/horovod/horovod/blob/958695e7343ce470ad3b0d9df1967b5af3bd6ec3/Dockerfile), also released under the Apache 2.0 license.
 
 ## Example: Distributed Training with Horovod
 
