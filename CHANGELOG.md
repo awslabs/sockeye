@@ -18,12 +18,12 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Removed outdated Autopilot module
 - Removed unused training options: Eve, Nadam, RMSProp, Nag, Adagrad, and Adadelta optimizers, `fixed-step` and `fixed-rate-inv-t` learning rate schedulers
 - Updated and renamed learning rate scheduler `fixed-rate-inv-sqrt-t` -> `inv-sqrt-decay`
-- Added script for plotting metrics files: sockeye_contrib/vistools/plot_metrics.py
+- Added script for plotting metrics files: [sockeye_contrib/plot_metrics.py](sockeye_contrib/plot_metrics.py)
 - /TODO/
 
 ### Added
 - Added distrbuted training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
-- Added Dockerfiles that build a Sockeye image with all features enabled.  See sockeye_contrib/docker.
+- Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
 - Added `linear-decay` learning rate scheduler
 
 ## [1.18.103]
