@@ -92,6 +92,22 @@ def points_since_improvement(points, cmp):
     return num_not_improved
 
 
+def window_improvement(points, num_points, cmp):
+    window_improvement_at_point = []
+    best_at_point = []
+    for point in points:
+        if not best_at_point:
+            best_at_point.append(point)
+        elif (cmp is min and point < best_at_point[-1]) or (cmp is max and point > best_at_point[-1]):
+            best_at_point.append(point)
+        else:
+            best_at_point.append(best_at_point[-1])
+        if len(best_at_point) > num_points:
+            best_at_point = best_at_point[-num_points:]
+        window_improvement_at_point.append(abs(best_at_point[-1] - best_at_point[0]))
+    return window_improvement_at_point
+
+
 def slope(points, num_points):
     # First point has no slope
     slope_at_point = [0]
@@ -124,6 +140,14 @@ def plot_metrics(args):
         if args.y_since_best:
             y_vals = points_since_improvement(y_vals, cmp=FIND_BEST[args.y])
             y_label = '{} (Checkpoints Since Improvement)'.format(y_label)
+        # Optionally compute the window improvement for each Y point
+        if args.y_window_improvement is not None:
+            y_vals = window_improvement(y_vals, args.y_window_improvement, cmp=FIND_BEST[args.y])
+            # Don't plot points for which window improvement is unreliable
+            # (fewer than number points used for window)
+            x_vals = x_vals[args.y_window_improvement - 1:]
+            y_vals = y_vals[args.y_window_improvement - 1:]
+            y_label = '{} (Window Improvement over {} Points)'.format(y_label, args.y_window_improvement)
         # Optionally compute current slope for each Y point
         if args.y_slope is not None:
             y_vals = slope(y_vals, args.y_slope)
@@ -145,6 +169,9 @@ def plot_metrics(args):
     # Optionally mark best Y point across metrics files
     if args.best:
         ax.axhline(y=overall_best_y, color='gray', linewidth=1, linestyle='--', zorder=999)
+    # Optionally draw user specified Y line
+    if args.y_line is not None:
+        ax.axhline(y=args.y_line, color='gray', linewidth=1, linestyle='--', zorder=999)
 
     ax.grid()
     ax.legend()
@@ -161,7 +188,10 @@ def main():
     params.add_argument('-ya', '--y-average', type=int, help='Average the N best points so far for each Y value.')
     params.add_argument('-ysb', '--y-since-best', action='store_true',
                         help='Use number of points since improvement for each Y value.')
+    params.add_argument('-ywi', '--y-window-improvement', type=int,
+                        help='Improvement in best over the last N points for each Y value.')
     params.add_argument('-ysl', '--y-slope', type=int, help='Compute current slope for each Y value.')
+    params.add_argument('-yli', '--y-line', type=float, help='Draw a horizontal line at specified Y value.')
     params.add_argument('-l', '--legend', nargs='+', help='Labels in legend (one per input file).')
     params.add_argument('-t', '--title', help='Plot title.')
     params.add_argument('-b', '--best', action='store_true', help='Draw horizontal line at best Y value.')
