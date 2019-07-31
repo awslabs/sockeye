@@ -708,6 +708,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
     # local ranks 0-3.
     using_horovod = False
     if args.horovod:
+        if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
+            raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
         using_horovod = True
         horovod_mpi.hvd.init()
         # Each worker uses a separate output directory.  The primary worker

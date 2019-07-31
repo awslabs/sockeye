@@ -1357,7 +1357,7 @@ class ParallelDataSet(Sized):
         n = len(data) // 2
         source = data[:n]
         target = data[n:2 * n]
-        if horovod_split:
+        if horovod_split and horovod_mpi.hvd.size() > 1:
             split_index = horovod_mpi.hvd.rank()
             total_splits = horovod_mpi.hvd.size()
             i = split_index / total_splits

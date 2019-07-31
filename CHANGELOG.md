@@ -17,9 +17,13 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Removed support for Python 3.4.
 - /TODO/
 
+### Added
+- Added distrbuted training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added a Dockerfile that builds a nvidia-docker-compatible Sockeye image with all features enabled.
+
 ## [1.18.103]
 ### Added
-- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine 
+- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine
   translation to the image captioning module.
 
 ## [1.18.102]
@@ -48,7 +52,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.96]
 ### Changed
-- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line. 
+- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line.
 
 ## [1.18.95]
 ### Changed
