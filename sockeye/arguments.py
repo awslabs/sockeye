@@ -706,18 +706,16 @@ def add_training_args(params):
                               choices=C.METRICS,
                               help='Metric to optimize with early stopping {%(choices)s}. Default: %(default)s.')
 
-    train_params.add_argument('--min-updates',
-                              type=int,
-                              default=None,
-                              help='Minimum number of updates before training can stop. Default: %(default)s.')
-    train_params.add_argument('--max-updates',
-                              type=int,
-                              default=None,
-                              help='Maximum number of updates. Default: %(default)s.')
     train_params.add_argument('--update-interval',
                               type=int,
-                              default=1,
+                              default=2,
                               help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
+    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
+                              type=int_greater_or_equal(1),
+                              default=4000,
+                              help='Checkpoint and evaluate every x updates (update-interval * batches). '
+                                   'Default: %(default)s.')
+
     train_params.add_argument('--min-samples',
                               type=int,
                               default=None,
@@ -726,10 +724,20 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of samples. Default: %(default)s.')
-    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
-                              type=int_greater_or_equal(1),
-                              default=4000,
-                              help='Checkpoint and evaluate every x updates (update-interval * batches). '
+    train_params.add_argument('--min-updates',
+                              type=int,
+                              default=None,
+                              help='Minimum number of updates before training can stop. Default: %(default)s.')
+    train_params.add_argument('--max-updates',
+                              type=int,
+                              default=None,
+                              help='Maximum number of updates. Default: %(default)s.')
+
+    train_params.add_argument('--max-checkpoints',
+                              type=int,
+                              default=None,
+                              help='Maximum number of checkpoints to continue training the model '
+                                   'before training is stopped. '
                                    'Default: %(default)s.')
     train_params.add_argument('--max-num-checkpoint-not-improved',
                               type=int,
@@ -737,12 +745,7 @@ def add_training_args(params):
                               help='Maximum number of checkpoints the model is allowed to not improve in '
                                    '<optimized-metric> on validation data before training is stopped. '
                                    'Default: %(default)s.')
-    train_params.add_argument('--max-checkpoints',
-                              type=int,
-                              default=None,
-                              help='Maximum number of checkpoints to continue training the model '
-                                   'before training is stopped. '
-                                   'Default: %(default)s.')
+
     train_params.add_argument('--min-num-epochs',
                               type=int,
                               default=None,
@@ -842,7 +845,7 @@ def add_training_args(params):
                               help='Learning rate scheduler type. Default: %(default)s.')
     train_params.add_argument('--learning-rate-reduce-factor',
                               type=float,
-                              default=0.7,
+                              default=0.9,
                               help="Factor to multiply learning rate with "
                                    "(for 'plateau-reduce' learning rate scheduler). Default: %(default)s.")
     train_params.add_argument('--learning-rate-reduce-num-not-improved',
@@ -890,7 +893,7 @@ def add_training_args(params):
 
     train_params.add_argument('--seed',
                               type=int,
-                              default=13,
+                              default=1,
                               help='Random seed. Default: %(default)s.')
 
     train_params.add_argument('--keep-last-params',
