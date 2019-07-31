@@ -25,7 +25,7 @@ The easiest way to run Sockeye is with [Docker](https://www.docker.com) or [nvid
 To build a Sockeye image with all features enabled, run the build script:
 
 ```bash
-bash sockeye_contrib/docker/build.sh
+python3 sockeye_contrib/docker/build.py
 ```
 
 See the [Dockerfile README](sockeye_contrib/docker/README.md) for more information.

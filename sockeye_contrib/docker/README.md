@@ -1,14 +1,16 @@
 # Sockeye Docker Image
 
-Run the Docker build script from the Sockeye root directory:
+Run the build script to produce a nvidia-docker compatible image with the current revision of Sockeye, including full CPU/GPU support and Horovod/OpenMPI.
 
 ```bash
-bash sockeye_contrib/docker/build.sh
+python3 sockeye_contrib/docker/build.py
 ```
 
-The script produces a nvidia-docker compatible image with this version Sockeye, including full CPU/GPU support and Horovod/OpenMPI.
+To update the image, run `git pull` and/or make your own code changes, then rerun the build script.
 
 ## Example: Distributed Training with Horovod
+
+Using the Docker image greatly simplifies distributed training.
 
 ### Host Setup
 
@@ -42,7 +44,7 @@ On the primary host, prepare the training data.
 
 ```bash
 docker run --rm -i -v /mnt/share:/mnt/share --user ec2-user:ec2-user sockeye:COMMIT \
-    python -m sockeye.prepare_data \
+    python3 -m sockeye.prepare_data \
         --source /mnt/share/data/train.src \
         --target /mnt/share/data/train.src \
         --output /mnt/share/data/prepared_train
@@ -52,7 +54,7 @@ Start Sockeye training with `horovodrun`.
 
 ```bash
 docker run --rm -i --network=host -v /mnt/share/ssh:/home/ec2-user/.ssh -v /mnt/share:/mnt/share --user ec2-user:ec2-user sockeye:COMMIT \
-    horovodrun -np 2 -H localhost:1,HOST2:1 -p 12345 python -m sockeye.train \
+    horovodrun -np 2 -H localhost:1,HOST2:1 -p 12345 python3 -m sockeye.train \
         --prepared-data /mnt/share/data/prepared_train \
         --validation-source /mnt/share/data/dev.src \
         --validation-target /mnt/share/data/dev.trg \
