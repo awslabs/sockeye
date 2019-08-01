@@ -285,7 +285,8 @@ def load_or_create_vocabs(source_paths: List[str],
             vocab_source = vocab_target = build_from_paths(paths=[source_path, target_path],
                                                            num_words=num_words_source,
                                                            min_count=word_min_count_source,
-                                                           pad_to_multiple_of=pad_to_multiple_of)
+                                                           pad_to_multiple_of=pad_to_multiple_of,
+                                                           num_pointers=num_pointers)
 
         else:
             vocab_path = source_vocab_path if source_vocab_path is not None else target_vocab_path
