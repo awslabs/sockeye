@@ -256,8 +256,6 @@ class GluonEarlyStoppingTrainer:
 
         # send sharded inputs to the backend
         for inputs, labels in batch.shards():
-            if self.dtype == C.DTYPE_FP16:
-                inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)  # type: ignore
             self._parallel.put((inputs, labels))
 
         # get outputs from parallel requests to the backend. Each shard output contains a list of tuples, one for each
