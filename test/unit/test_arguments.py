@@ -94,7 +94,8 @@ def test_device_args(test_params, expected_params):
               lhuc=None,
               encoder=C.TRANSFORMER_TYPE,
               decoder=C.TRANSFORMER_TYPE,
-              dtype='float32'))
+              dtype='float32',
+              amp=False))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)

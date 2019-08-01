@@ -25,6 +25,7 @@ from math import sqrt
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
 
 import mxnet as mx
+from mxnet.contrib import amp
 import numpy as np
 
 import sockeye.multiprocessing_utils as mp_utils
@@ -137,7 +138,8 @@ class GluonEarlyStoppingTrainer:
                  trainer: mx.gluon.Trainer,
                  loss_functions: List[loss.Loss],
                  context: List[mx.context.Context],
-                 dtype: str) -> None:
+                 dtype: str,
+                 using_amp: bool = False) -> None:
         self.config = config
         self.model = sockeye_model
         self.trainer = trainer
@@ -146,7 +148,9 @@ class GluonEarlyStoppingTrainer:
         self._parallel = parallel.Parallel(len(context) if len(context) > 1 else 0,
                                            ParallelModel(sockeye_model,
                                                          loss_functions,
-                                                         rescale_factor=self.config.update_interval))
+                                                         trainer,
+                                                         rescale_factor=self.config.update_interval,
+                                                         using_amp=using_amp))
         self.dtype = dtype
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
@@ -610,10 +614,17 @@ class GluonEarlyStoppingTrainer:
 
 class ParallelModel(parallel.Parallelizable):
 
-    def __init__(self, model: Callable, loss_functions: List[loss.Loss], rescale_factor: float) -> None:
+    def __init__(self,
+                 model: Callable,
+                 loss_functions: List[loss.Loss],
+                 trainer: mx.gluon.Trainer,
+                 rescale_factor: float,
+                 using_amp: bool = False) -> None:
         self.model = model
         self.loss_functions = loss_functions
+        self.trainer = trainer
         self.rescale_factor = rescale_factor
+        self.using_amp = using_amp
 
     def forward_backward(self, shard: Tuple) -> List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]:
         """
@@ -627,8 +638,12 @@ class ParallelModel(parallel.Parallelizable):
             sum_losses = mx.nd.add_n(*loss_values) / self.rescale_factor
             # Note: rescaling works for all loss functions except softmax output, which requires grad_scale to be set
             # directly in the op call (see loss function implementation).
-        # backward on the sum of losses, weights are defined in the loss blocks themselves.
-        sum_losses.backward()
+            if self.using_amp:
+                with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
+                    mx.autograd.backward(scaled_loss)
+            else:
+                # backward on the sum of losses, weights are defined in the loss blocks themselves.
+                sum_losses.backward()
         return loss_outputs
 
 

@@ -32,6 +32,7 @@ from typing import cast, Optional, Dict, List, Tuple, Union
 
 import mxnet as mx
 from mxnet import gluon
+from mxnet.contrib import amp
 
 from . import arguments
 from . import checkpoint_decoder
@@ -701,6 +702,12 @@ def train(args: argparse.Namespace) -> training.TrainState:
         args.output = temp_dir.name
         args.max_updates = 0
 
+    # Automatic mixed precision training
+    using_amp = False
+    if args.amp:
+        using_amp = True
+        amp.init()
+
     # When using Horovod, multiple workers (instances of sockeye.train) are
     # launched via OpenMPI.  Each worker has a rank (unique among all workers in
     # the training run) and a local rank (unique on the current host).  For
@@ -861,7 +868,10 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                           optimizer_config.name,
                                           optimizer_config.params,
                                           kvstore=kvstore,
-                                          update_on_kvstore=None)
+                                          update_on_kvstore=False if using_amp else None)
+
+        if using_amp:
+            amp.init_trainer(gluon_trainer)
 
         losses = create_losses(args)
 
@@ -877,7 +887,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
             trainer=gluon_trainer,
             loss_functions=losses,
             context=context,
-            dtype=args.dtype
+            dtype=args.dtype,
+            using_amp=using_amp
         )
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter)
