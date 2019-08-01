@@ -708,7 +708,7 @@ def add_training_args(params):
 
     train_params.add_argument('--update-interval',
                               type=int,
-                              default=2,
+                              default=1,
                               help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
     train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
                               type=int_greater_or_equal(1),
@@ -741,7 +741,7 @@ def add_training_args(params):
                                    'Default: %(default)s.')
     train_params.add_argument('--max-num-checkpoint-not-improved',
                               type=int,
-                              default=32,
+                              default=None,
                               help='Maximum number of checkpoints the model is allowed to not improve in '
                                    '<optimized-metric> on validation data before training is stopped. '
                                    'Default: %(default)s.')

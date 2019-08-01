@@ -244,7 +244,9 @@ class GluonEarlyStoppingTrainer:
                     ", can be continued later" if not self.state.converged else "",
                     self.state.best_checkpoint, self.state.early_stopping_metric, self.state.best_metric)
 
-        self._cleanup(keep_training_state=not self.state.converged and not self.state.diverged)
+        # Always keep the training state to allow continuing training with
+        # different stopping criteria
+        self._cleanup(keep_training_state=True)
         return self.state
 
     def _forward_backward(self, batch: data_io.Batch):
@@ -374,7 +376,8 @@ class GluonEarlyStoppingTrainer:
         """
         True if model has converged w.r.t early stopping criteria (patience).
         """
-        if 0 <= self.config.max_num_checkpoint_not_improved <= self.state.num_not_improved:
+        if self.config.max_num_checkpoint_not_improved is not None and \
+                0 <= self.config.max_num_checkpoint_not_improved <= self.state.num_not_improved:
             logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                         self.config.max_num_checkpoint_not_improved, self.state.num_not_improved)
             return True
