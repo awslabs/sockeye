@@ -184,7 +184,7 @@ def main():
     params.add_argument('-i', '--input', required=True, nargs='+', help='One or more \'metrics\' files to plot.')
     params.add_argument('-o', '--output', required=True, help='Output file to write (ex: plot.pdf).')
     params.add_argument('-x', default='time-elapsed', help='X axis metric.')
-    params.add_argument('-y', default='perplexity-val', help='Y axis metric.')
+    params.add_argument('-y', default='perplexity-train', help='Y axis metric.')
     params.add_argument('-ya', '--y-average', type=int, help='Average the N best points so far for each Y value.')
     params.add_argument('-ysb', '--y-since-best', action='store_true',
                         help='Use number of points since improvement for each Y value.')
