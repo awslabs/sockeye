@@ -118,6 +118,7 @@ AttentionState = NamedTuple('AttentionState', [
     ('context', mx.sym.Symbol),
     ('probs', mx.sym.Symbol),
     ('dynamic_source', mx.sym.Symbol),
+    ('scores', mx.sym.Symbol),
 ])
 """
 Results returned from attention callables.
@@ -197,7 +198,7 @@ class Attention(object):
         dynamic_source = mx.sym.reshape(mx.sym.zeros_like(source_length), shape=(-1, 1, 1))
         # dynamic_source: (batch_size, source_seq_len, num_hidden_dynamic_source)
         dynamic_source = mx.sym.broadcast_to(dynamic_source, shape=(0, source_seq_len, self.dynamic_source_num_hidden))
-        return AttentionState(context=None, probs=None, dynamic_source=dynamic_source)
+        return AttentionState(context=None, probs=None, dynamic_source=dynamic_source, scores=None)
 
     def make_input(self,
                    seq_idx: int,
@@ -277,10 +278,14 @@ class BilinearAttention(Attention):
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores,
                                                                        self.dtype)
-
+            
+            # (batch_size, seq_len, 1) -> (batch_size, seq_len)
+            attention_scores = mx.sym.reshape(data=attention_scores, shape=(0, 0))
+            
             return AttentionState(context=context,
                                   probs=attention_probs,
-                                  dynamic_source=att_state.dynamic_source)
+                                  dynamic_source=att_state.dynamic_source,
+                                  scores=attention_scores)
 
         return attend
 
@@ -377,10 +382,15 @@ class DotAttention(Attention):
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores,
                                                                        self.dtype)
+            
+            # (batch_size, seq_len, 1) -> (batch_size, seq_len)
+            attention_scores = mx.sym.reshape(data=attention_scores, shape=(0, 0))
+            
             return AttentionState(context=context,
                                   probs=attention_probs,
-                                  dynamic_source=att_state.dynamic_source)
-
+                                  dynamic_source=att_state.dynamic_source,
+                                  scores=attention_scores)
+        
         return attend
 
 
@@ -489,10 +499,14 @@ class MultiHeadDotAttention(Attention):
             attention_probs = mx.sym.reshape(data=attention_probs, shape=(-4, -1, self.heads, source_seq_len))
             # just average over distributions
             attention_probs = mx.sym.mean(attention_probs, axis=1, keepdims=False)
-
+            
+            # (batch_size, seq_len, 1) -> (batch_size, seq_len)
+            attention_scores = mx.sym.reshape(data=attention_scores, shape=(0, 0))
+            
             return AttentionState(context=context,
                                   probs=attention_probs,
-                                  dynamic_source=att_state.dynamic_source)
+                                  dynamic_source=att_state.dynamic_source,
+                                  scores=attention_scores)
 
         return attend
 
@@ -522,7 +536,8 @@ class EncoderLastStateAttention(Attention):
         def attend(att_input: AttentionInput, att_state: AttentionState) -> AttentionState:
             return AttentionState(context=encoder_last_state,
                                   probs=fixed_probs,
-                                  dynamic_source=att_state.dynamic_source)
+                                  dynamic_source=att_state.dynamic_source,
+                                  scores=fixed_probs)
 
         return attend
 
@@ -589,9 +604,14 @@ class LocationAttention(Attention):
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores,
                                                                        self.dtype)
+            
+            # (batch_size, seq_len, 1) -> (batch_size, seq_len)
+            attention_scores = mx.sym.reshape(data=attention_scores, shape=(0, 0))
+            
             return AttentionState(context=context,
                                   probs=attention_probs,
-                                  dynamic_source=att_state.dynamic_source)
+                                  dynamic_source=att_state.dynamic_source,
+                                  scores=attention_scores)
 
         return attend
 
@@ -725,7 +745,10 @@ class MlpAttention(Attention):
 
             context, attention_probs = get_context_and_attention_probs(source, source_length, attention_scores,
                                                                        self.dtype)
-
+            
+            # (batch_size, seq_len, 1) -> (batch_size, seq_len)
+            attention_scores = mx.sym.reshape(data=attention_scores, shape=(0, 0))
+            
             dynamic_source = att_state.dynamic_source
             if self.coverage is not None:
                 # update dynamic source encoding
@@ -737,7 +760,8 @@ class MlpAttention(Attention):
 
             return AttentionState(context=context,
                                   probs=attention_probs,
-                                  dynamic_source=dynamic_source)
+                                  dynamic_source=dynamic_source,
+                                  scores=attention_scores)
 
         return attend
 

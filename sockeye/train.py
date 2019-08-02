@@ -99,6 +99,10 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.decoder_only:
         check_condition(args.decoder != C.TRANSFORMER_TYPE and args.decoder != C.CONVOLUTION_TYPE,
                         "Decoder pre-training currently supports RNN decoders only.")
+    
+    if args.attention_based_copying:
+        check_condition(args.decoder == C.RNN_NAME,
+                        "The attention-based copying mechanism currently supports RNN decoders only.")
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -298,6 +302,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                          else None for i in range(len(args.source_factors))]
             source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
             target_vocab_path = args.target_vocab
+            num_pointers = max_seq_len_source if args.attention_based_copying else 0
             source_vocabs, target_vocab = vocab.load_or_create_vocabs(
                 source_paths=[args.source] + args.source_factors,
                 target_path=args.target,
@@ -308,7 +313,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 num_words_target=num_words_target,
                 word_min_count_source=word_min_count_source,
                 word_min_count_target=word_min_count_target,
-                pad_to_multiple_of=args.pad_vocab_to_multiple_of)
+                pad_to_multiple_of=args.pad_vocab_to_multiple_of,
+                num_pointers=num_pointers)
 
         check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
                         or len(args.source_factors) == len(args.source_factors_num_embed),
@@ -694,7 +700,7 @@ def create_model_config(args: argparse.Namespace,
     else:
         config_length_task = None
         config_length_task_loss = None
-
+    num_pointers = max_seq_len_source if args.attention_based_copying else 0
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
@@ -708,7 +714,8 @@ def create_model_config(args: argparse.Namespace,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
                                      weight_normalization=args.weight_normalization,
-                                     lhuc=args.lhuc is not None)
+                                     lhuc=args.lhuc is not None,
+                                     num_pointers=num_pointers)
     return model_config
 
 
