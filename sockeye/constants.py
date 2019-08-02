@@ -19,6 +19,9 @@ import sys
 import mxnet as mx
 import numpy as np
 
+# MXNet environment variables
+MXNET_SAFE_ACCUMULATION = 'MXNET_SAFE_ACCUMULATION'
+
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"

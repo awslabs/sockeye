@@ -298,9 +298,6 @@ class GluonEarlyStoppingTrainer:
             batch = batch.split_and_load(ctx=self.context)
             sharded_loss_outputs = []  # type: List[List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]]
             for inputs, labels in batch.shards():
-                if self.dtype == C.DTYPE_FP16:
-                    # TODO: cast already in data loader to avoid copy
-                    inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)
                 outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
                 loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
                 sharded_loss_outputs.append(loss_outputs)
