@@ -320,7 +320,7 @@ class TransformerValidLengthMask(mx.gluon.HybridBlock):
         :return:
         """
         # (batch, 1)
-        mask = F.reshape(F.zeros_like(lengths), shape=(-1, 1))
+        mask = F.reshape(F.zeros_like(lengths.astype(self._dtype)), shape=(-1, 1))
         # (batch, seq_len)
         mask = F.broadcast_like(mask, data, lhs_axes=(1,), rhs_axes=(1,))
         # (batch_size, max_length)
