@@ -352,8 +352,8 @@ LARGE_VALUES = {
 LARGEST_INT = sys.maxsize
 
 # see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
-# TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutpu loss for CE.
-FIXED_GRAD_SCALE_FP16 = 128.0
+# TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutput loss for CE.
+FIXED_GRAD_SCALE_FP16 = 1024.0
 
 LHUC_PREFIX = "lhuc_"
 # lhuc application points
