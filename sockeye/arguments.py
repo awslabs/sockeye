@@ -845,6 +845,11 @@ def add_training_args(params):
                               default=C.LR_SCHEDULER_PLATEAU_REDUCE,
                               choices=C.LR_SCHEDULERS,
                               help='Learning rate scheduler type. Default: %(default)s.')
+    train_params.add_argument('--learning-rate-t-scale',
+                              type=float,
+                              default=1.0,
+                              help="Step number is multiplied by this value when determining learning rate for the "
+                                   "current step. Default: %(default)s.")
     train_params.add_argument('--learning-rate-reduce-factor',
                               type=float,
                               default=0.9,

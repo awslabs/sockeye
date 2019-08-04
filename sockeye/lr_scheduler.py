@@ -22,23 +22,26 @@ logger = logging.getLogger(__name__)
 
 class LearningRateScheduler:
 
-    def __init__(self, warmup: int = 0) -> None:
+    def __init__(self, warmup: int = 0, t_scale: float = 1.0) -> None:
         self.base_lr = None  # Note: will be overwritten by MXNet optimizer
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
         self.warmup = warmup
+        self.t_scale = t_scale
         self.lr = None  # type: Optional[float]
 
     def __call__(self, t):
         pass
 
-    def _warmup(self, t):
+    def _warmup(self, scaled_t):
         """
-        Returns linearly increasing fraction of base_lr.
+        Returns linearly increasing fraction of base_lr.  Here t is not scaled
+        by t_scale, as individual schedulers should scale t prior to calling
+        this method.
         """
         assert self.base_lr is not None
         if not self.warmup:
             return self.base_lr
-        return self.base_lr * min(1.0, t / self.warmup)
+        return self.base_lr * min(1.0, scaled_t / self.warmup)
 
 
 class AdaptiveLearningRateScheduler(LearningRateScheduler):
@@ -69,6 +72,8 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
     """
 
     def __call__(self, t: int):
+        # Time scale
+        t *= self.t_scale
         # Warmup
         warm_lr = self._warmup(t)
         # Avoid square root of zero
@@ -96,12 +101,14 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
                    linearly increases.
     """
 
-    def __init__(self, total_steps: int, warmup: int = 0) -> None:
-        super().__init__(warmup)
+    def __init__(self, total_steps: int, warmup: int = 0, t_scale: float = 1.0) -> None:
+        super().__init__(warmup, t_scale)
         check_condition(total_steps >= 0, "total_steps need to be >= 0.")
         self.total_steps = total_steps
 
     def __call__(self, t: int):
+        # Time scale
+        t *= self.t_scale
         # Warmup
         warm_lr = self._warmup(t)
         # Linear decay
@@ -173,6 +180,7 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
 
 
 def get_lr_scheduler(scheduler_type: str,
+                     learning_rate_t_scale: float,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
                      learning_rate_warmup: Optional[int] = 0,
@@ -182,8 +190,9 @@ def get_lr_scheduler(scheduler_type: str,
 
     :param scheduler_type: Scheduler type.
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
-    :param learning_rate_reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is
-           reduced.
+    :param learning_rate_t_scale: Scaling factor for step number.
+    :param learning_rate_reduce_num_not_improved: Number of checkpoints with no
+           improvement after which learning rate is reduced.
     :param learning_rate_warmup: Number of initial updates during which the
                                  learning rate linearly increases.
     :param max_updates: Number of total training updates.
@@ -195,12 +204,14 @@ def get_lr_scheduler(scheduler_type: str,
     if scheduler_type is None:
         return None
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
-        return LearningRateSchedulerInvSqrtDecay(warmup=learning_rate_warmup)
+        return LearningRateSchedulerInvSqrtDecay(warmup=learning_rate_warmup, t_scale=learning_rate_t_scale)
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
         check_condition(max_updates is not None,
                         "The total number of training updates (--max-updates) must be specified when using the linear "
                         "decay learning rate scheduler.")
-        return LearningRateSchedulerLinearDecay(total_steps=max_updates, warmup=learning_rate_warmup)
+        return LearningRateSchedulerLinearDecay(total_steps=max_updates,
+                                                warmup=learning_rate_warmup,
+                                                t_scale=learning_rate_t_scale)
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)

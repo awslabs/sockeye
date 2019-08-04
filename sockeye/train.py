@@ -609,6 +609,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
         raise ValueError("Invalid weight initialization type: %s" % args.weight_init)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                             args.learning_rate_t_scale,
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
                                              args.learning_rate_warmup,
@@ -726,6 +727,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
         # sub-directories.
         if horovod_mpi.hvd.rank() > 0:
             args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_mpi.hvd.rank()))
+            # Do not keep extensive checkpoint histories for secondary workers
+            args.keep_last_params = 1
         # Use a different random seed for each worker
         args.seed += horovod_mpi.hvd.rank()
 
