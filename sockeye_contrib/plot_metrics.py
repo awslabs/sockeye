@@ -123,13 +123,17 @@ def plot_metrics(args):
     fig, ax = plt.subplots()
     overall_best_y = None
 
-    for fname, label in zip(args.input,
-                            args.legend if args.legend is not None
-                            else (os.path.basename(fname) for fname in args.input)):
+    if len(args.skip) == 1:
+        args.skip *= len(args.input)
+
+    for fname, label, skip in zip(args.input,
+                                  args.legend if args.legend is not None
+                                  else (os.path.basename(fname) for fname in args.input),
+                                  args.skip):
         # Read metrics file to dict
         metrics = read_metrics_file(fname)
-        x_vals = metrics[args.x][args.skip:]
-        y_vals = metrics[args.y][args.skip:]
+        x_vals = metrics[args.x][skip:]
+        y_vals = metrics[args.y][skip:]
         x_label=ax_label(args.x)
         y_label=ax_label(args.y)
         # Optionally average best points so far for each Y point
@@ -195,7 +199,8 @@ def main():
     params.add_argument('-l', '--legend', nargs='+', help='Labels in legend (one per input file).')
     params.add_argument('-t', '--title', help='Plot title.')
     params.add_argument('-b', '--best', action='store_true', help='Draw horizontal line at best Y value.')
-    params.add_argument('-s', '--skip', type=int, default=0, help='Skip the first N points for better readability.')
+    params.add_argument('-s', '--skip', type=int, nargs='+', default=(0,),
+                        help='Skip the first N points for better readability.  Single value or value per input.')
     args = params.parse_args()
     plot_metrics(args)
 
