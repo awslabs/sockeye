@@ -130,7 +130,7 @@ class CheckpointDecoder:
         """
         model, source_vocabs, target_vocab = load_model(model_folder=self.model,
                                                         context=self.context,
-                                                        dtype=C.DTYPE_FP32,
+                                                        dtype=None,
                                                         checkpoint=checkpoint,
                                                         hybridize=True)
         translator = inference.Translator(context=self.context,
