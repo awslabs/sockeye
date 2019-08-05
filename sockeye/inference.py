@@ -1133,9 +1133,9 @@ class Translator:
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
-        source_length = mx.nd.array(lengths, ctx=self.context, dtype='int32')  # shape: (batch_size,)
+        source_length = mx.nd.array(lengths, ctx=self.context, dtype='float32')  # shape: (batch_size,)
         max_length = max(len(inp) for inp in trans_inputs)
-        source = mx.nd.zeros((batch_size, max_length, self.num_source_factors), ctx=self.context, dtype='int32')
+        source = mx.nd.zeros((batch_size, max_length, self.num_source_factors), ctx=self.context, dtype='float32')
 
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
