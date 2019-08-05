@@ -320,7 +320,7 @@ class TransformerValidLengthMask(mx.gluon.HybridBlock):
         :return:
         """
         # (batch, 1)
-        mask = F.reshape(F.zeros_like(lengths), shape=(-1, 1))
+        mask = F.reshape(F.zeros_like(lengths.astype(self._dtype)), shape=(-1, 1))
         # (batch, seq_len)
         mask = F.broadcast_like(mask, data, lhs_axes=(1,), rhs_axes=(1,))
         # (batch_size, max_length)
@@ -349,6 +349,7 @@ class AutoRegressiveBias(mx.gluon.HybridBlock):
         # (length)
         x = F.squeeze(F.slice(x, begin=(0, None, 0), end=(1, None, 1)))
         # (length, 1)
+        # TODO: use F.contrib.arange_like with MXNET 1.6.0
         length_array = F.cast(F.contrib.index_array(x, axes=(1,)), dtype=self._dtype)
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         # Shape: (length, length)

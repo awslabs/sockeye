@@ -49,6 +49,7 @@ class ModelConfig(Config):
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
+    :param dtype: Data type of model parameters. Default: float32.
     """
 
     def __init__(self,
@@ -62,7 +63,8 @@ class ModelConfig(Config):
                  config_length_task: layers.LengthRatioConfig = None,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
-                 lhuc: bool = False) -> None:
+                 lhuc: bool = False,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size
@@ -77,6 +79,7 @@ class ModelConfig(Config):
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
         self.lhuc = lhuc
+        self.dtype = dtype
 
 
 class SockeyeModel(mx.gluon.Block):
@@ -101,7 +104,7 @@ class SockeyeModel(mx.gluon.Block):
         super().__init__(prefix=prefix, **kwargs)
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
-        self.dtype = 'float32'
+        self.dtype = config.dtype
 
         with self.name_scope():
             # source & target embeddings
@@ -271,7 +274,8 @@ class SockeyeModel(mx.gluon.Block):
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                      "This is either not a model directory or the first training "
                                                      "checkpoint has not happened yet." % filename)
-        super().load_parameters(filename, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra)
+        super().load_parameters(filename, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra,
+                                cast_dtype=cast_dtype, dtype_source=dtype_source)
         logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
 
     @staticmethod
@@ -362,7 +366,7 @@ class SockeyeModel(mx.gluon.Block):
 
 def load_model(model_folder: str,
                context: Union[List[mx.context.Context], mx.context.Context] = mx.cpu(),
-               dtype: str = C.DTYPE_FP32,
+               dtype: Optional[str] = None,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
                inference_only: bool = False) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
@@ -372,7 +376,7 @@ def load_model(model_folder: str,
     :param model_folder: Model folder.
     :param context: MXNet context to bind modules to.
     :param checkpoint: Checkpoint to use. If none, uses best checkpoint.
-    :param dtype: Float precision to use. Default: float32.
+    :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
@@ -395,17 +399,24 @@ def load_model(model_folder: str,
 
     model = SockeyeModel(model_config, inference_only=inference_only)
     model.initialize(ctx=context)
+    model.cast(model_config.dtype)
 
-    if dtype == C.DTYPE_FP16:
-        logger.info("Using fp16 precision")
-        model.cast(C.DTYPE_FP16)
-
-    # TODO: store training precision in model config, or store final parameters in fp32 to make loading of params more forgiving
+    if dtype is None:
+        logger.info("Model dtype: %s" % model_config.dtype)
+        cast_dtype = False
+        dtype_source = 'saved'
+    else:
+        logger.info("Model dtype: overriden to %s" % dtype)
+        model.cast(dtype)
+        cast_dtype = True
+        dtype_source = 'current'
 
     model.load_parameters(filename=params_fname,
                           ctx=context,
                           allow_missing=False,
-                          ignore_extra=False)
+                          ignore_extra=False,
+                          cast_dtype=cast_dtype,
+                          dtype_source=dtype_source)
     for param in model.collect_params().values():
         param.grad_req = 'null'
 
@@ -422,7 +433,7 @@ def load_model(model_folder: str,
 def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
-                dtype: str = C.DTYPE_FP32,
+                dtype: Optional[str] = C.DTYPE_FP32,
                 hybridize: bool = True,
                 inference_only: bool = False) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
     """
@@ -431,7 +442,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     :param context: MXNet context to bind modules to.
     :param model_folders: List of model folders to load models from.
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
-    :param dtype: Float precision to use. Default: float32.
+    :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.

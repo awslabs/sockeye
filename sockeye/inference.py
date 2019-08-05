@@ -1133,9 +1133,9 @@ class Translator:
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
-        source_length = mx.nd.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
+        source_length = mx.nd.array(lengths, ctx=self.context, dtype='float32')  # shape: (batch_size,)
         max_length = max(len(inp) for inp in trans_inputs)
-        source = mx.nd.zeros((batch_size, max_length, self.num_source_factors), ctx=self.context, dtype=self.dtype)
+        source = mx.nd.zeros((batch_size, max_length, self.num_source_factors), ctx=self.context, dtype='float32')
 
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
@@ -1324,7 +1324,6 @@ class Translator:
         """
         model_outs, model_attention_probs, model_states = [], [], []
         for model, state in zip(self.models, states):
-            prev_word = prev_word.astype(self.dtype, copy=False)
             decoder_out, new_states, step_additional_outputs = model.decode_step(prev_word, state.states)
             state.states = new_states
             # Reduced size of output layer if vocab_slice_ids is not None
@@ -1407,10 +1406,10 @@ class Translator:
 
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
-        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context)
+        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype='float32')
         first_step_mask[batch_indices] = 1.0
         pad_dist = mx.nd.full((batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
-                              ctx=self.context)
+                              ctx=self.context, dtype='float32')
 
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
@@ -1421,7 +1420,7 @@ class Translator:
         if self.store_beam:
             beam_histories = [defaultdict(list) for _ in range(batch_size)]
 
-        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context)
+        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='float32')
         finished = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
@@ -1431,7 +1430,7 @@ class Translator:
         attentions = []  # type: List[mx.nd.NDArray]
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
-        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context)
+        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='float32')
 
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.

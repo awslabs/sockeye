@@ -514,7 +514,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_length_task=config_length_task,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
-                                     lhuc=args.lhuc is not None)
+                                     lhuc=args.lhuc is not None,
+                                     dtype=args.dtype)
     return model_config
 
 
@@ -572,6 +573,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     # store.num_workers * accumulate ??
     optimizer_params["rescale_grad"] = 1.0 / args.update_interval
     if args.dtype == C.DTYPE_FP16:
+        os.environ[C.MXNET_SAFE_ACCUMULATION] = '1'
         optimizer_params["multi_precision"] = True
         optimizer_params["rescale_grad"] /= C.FIXED_GRAD_SCALE_FP16
     # Manually specified params
