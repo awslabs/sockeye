@@ -814,7 +814,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                       update_on_kvstore=None)
         losses = create_losses(args)
 
-        hybridize = True
+        hybridize = False
         if hybridize:
             training_model.hybridize(static_alloc=True)
             for lf in losses:
@@ -829,10 +829,10 @@ def train(args: argparse.Namespace) -> training.TrainState:
             dtype=args.dtype
         )        
         
-        decoder = create_checkpoint_decoder(args, exit_stack, context,
+        cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
                                             training_model, source_vocabs, target_vocab)
 
-        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=decoder)
+        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
         return training_state
 
 

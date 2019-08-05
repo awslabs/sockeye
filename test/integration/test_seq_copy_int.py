@@ -230,15 +230,22 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
     with open(dev_source_path) as dev_fd:
         num_dev_sent = sum(1 for _ in dev_fd)
     sample_size = min(1, int(num_dev_sent * 0.1))
-    cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
+
+    model, source_vocabs, target_vocab = sockeye.model.load_model(
+        model_folder=model_path,
+        context=[mx.cpu()])
+
+    cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(contexts=[mx.cpu()],
                                                               inputs=[dev_source_path],
                                                               references=dev_target_path,
-                                                              model=model_path,
+                                                              source_vocabs=source_vocabs,
+                                                              target_vocab=target_vocab,
+                                                              model=model,
                                                               sample_size=sample_size,
                                                               batch_size=2,
                                                               beam_size=2)
     cp_metrics = cp_decoder.decode_and_evaluate()
     logger.info("Checkpoint decoder metrics: %s", cp_metrics)
-    assert 'bleu-val' in cp_metrics
-    assert 'chrf-val' in cp_metrics
-    assert 'decode-walltime-val' in cp_metrics
+    assert 'bleu' in cp_metrics
+    assert 'chrf' in cp_metrics
+    assert 'decode-walltime' in cp_metrics

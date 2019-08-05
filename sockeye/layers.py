@@ -124,6 +124,7 @@ class OutputLayer(mx.gluon.HybridBlock):
     """
 
     def __init__(self,
+                 hidden_size: int,
                  vocab_size: int,
                  weight: Optional[mx.gluon.Parameter] = None,
                  weight_initializer: Optional[str] = None,

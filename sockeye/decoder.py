@@ -184,8 +184,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         batch_size = encoder_outputs.shape[0]
         self_att_key_value_dummies = [mx.nd.zeros((batch_size, 1, self.config.model_size),
-                                                        ctx=encoder_outputs.context,
-                                                        dtype=encoder_outputs.dtype)] * self.config.num_layers * 2
+                                                   ctx=encoder_outputs.context,
+                                                   dtype=encoder_outputs.dtype)] * self.config.num_layers * 2
         states += self_att_key_value_dummies
 
         return states
@@ -199,7 +199,6 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         :param states: List of initial states, as given by init_state_from_encoder().
         :return: Decoder output. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
-        # TODO: should we return the states?
         outputs, _ = self.forward(inputs, states)
         return outputs
 
@@ -239,7 +238,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         if is_inference:
             # During inference, length dimension of decoder output has size 1, squeeze it
             # (batch, num_hidden)
-            target = mx.nd.reshape((-1, self.get_num_hidden()))
+            target = mx.nd.reshape(target, shape=(-1, self.get_num_hidden()))
 
             # We also increment time step state (2nd state in the list) and add new caches
             step = states[0] + 1
@@ -278,7 +277,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             self_att_kv = other
             self_att_kv = [self_att_kv[i:i + 2] for i in range(0, len(self_att_kv), 2)]
             
-            enc_att_kv = [[None, None] for i in range(0, len(self_att_kv), 2)]    
+            enc_att_kv = [(None, None) for _ in range(self.config.num_layers)]
         
         # Fold the heads of source_mask (batch_size, num_heads, seq_len) -> (batch_size * num_heads, 1, seq_len)
         source_mask = F.expand_dims(F.reshape(source_mask, shape=(-3, -2)), axis=1)

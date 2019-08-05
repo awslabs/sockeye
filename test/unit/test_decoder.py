@@ -33,7 +33,7 @@ def test_get_decoder():
         postprocess_sequence='test_post_seq',
         max_seq_len_source=60,
         max_seq_len_target=70)
-    decoder = sockeye.decoder.get_decoder(config, 'test_')
+    decoder = sockeye.decoder.get_decoder(config, inference_only=False, prefix='test_')
 
     assert type(decoder) == sockeye.decoder.TransformerDecoder
     assert decoder.prefix == 'test_' + C.TRANSFORMER_DECODER_PREFIX

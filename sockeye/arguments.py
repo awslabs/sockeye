@@ -673,9 +673,6 @@ def add_model_parameters(params):
     model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
                               help="Data type.")
 
-    model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
-                              help="Data type.")
-
 
 def add_batch_args(params, default_batch_size=4096):
     params.add_argument('--batch-size', '-b',
