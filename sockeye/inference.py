@@ -1325,7 +1325,6 @@ class Translator:
         """
         model_outs, model_attention_probs, model_states = [], [], []
         for model, state in zip(self.models, states):
-            prev_word = prev_word.astype(self.dtype, copy=False)
             decoder_out, new_states, step_additional_outputs = model.decode_step(prev_word, state.states)
             state.states = new_states
             # Reduced size of output layer if vocab_slice_ids is not None
