@@ -43,6 +43,7 @@ FIND_BEST.update({
 AX_LABEL = {
     'bleu-val': 'Validation BLEU',
     'chrf-val': 'Validation chrF',
+    'checkpoint': 'Checkpoint',
     'epoch': 'Epoch',
     'learning-rate': 'Learning Rate',
     'perplexity-train': 'Training Perplexity',
