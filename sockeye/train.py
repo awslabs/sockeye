@@ -533,7 +533,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_length_task=config_length_task,
                                      weight_tying=args.weight_tying,
                                      weight_tying_type=args.weight_tying_type if args.weight_tying else None,
-                                     lhuc=args.lhuc is not None)
+                                     lhuc=args.lhuc is not None,
+                                     dtype=args.dtype)
     return model_config
 
 
