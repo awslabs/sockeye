@@ -155,7 +155,7 @@ class SockeyeModel(mx.gluon.Block):
         source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
         return source_encoded, source_encoded_length
 
-    def decode_step(self, step_input, states):
+    def decode_step(self, step_input, states, vocab_slice_ids = None):
         """One step decoding of the translation model.
 
         Parameters
@@ -163,6 +163,7 @@ class SockeyeModel(mx.gluon.Block):
         step_input : NDArray
             Shape (batch_size,)
         states : list of NDArrays
+        vocab_slice_ids : NDArray or None
 
         Returns
         -------
@@ -180,7 +181,10 @@ class SockeyeModel(mx.gluon.Block):
         # TODO: add step_additional_outputs
         step_additional_outputs = []
         # TODO: add support for states from the decoder
-        step_output, new_states = self.decoder(target_embed, states)
+        decoder_out, new_states = self.decoder(target_embed, states)
+
+        # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
+        step_output = self.output_layer(decoder_out, vocab_slice_ids)
 
         return step_output, new_states, step_additional_outputs
 
