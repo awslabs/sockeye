@@ -1325,10 +1325,8 @@ class Translator:
         """
         model_outs, model_attention_probs, model_states = [], [], []
         for model, state in zip(self.models, states):
-            decoder_out, new_states, step_additional_outputs = model.decode_step(prev_word, state.states)
-            state.states = new_states
-            # Reduced size of output layer if vocab_slice_ids is not None
-            logits = model.output_layer(decoder_out, vocab_slice_ids).astype('float32', copy=False)
+            logits, state.states, step_additional_outputs = model.decode_step(prev_word, state.states, vocab_slice_ids)
+            logits = logits.astype('float32', copy=False)
             model_out = logits if self.skip_softmax else logits.softmax(axis=-1)
             model_outs.append(model_out)
             model_attention_probs.append(mx.nd.zeros_like(logits))  # TODO
