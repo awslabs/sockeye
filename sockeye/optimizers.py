@@ -16,7 +16,6 @@ from typing import Any, Dict, Optional
 import mxnet as mx
 
 from . import config
-from sockeye_contrib.optimizers import bert_adam, lamb
 from .lr_scheduler import LearningRateScheduler
 
 

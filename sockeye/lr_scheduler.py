@@ -73,13 +73,13 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
 
     def __call__(self, t: int):
         # Time scale
-        t *= self.t_scale
+        scaled_t = t * self.t_scale
         # Warmup
-        warm_lr = self._warmup(t)
+        warm_lr = self._warmup(scaled_t)
         # Avoid square root of zero
         warmup_steps = max(1, self.warmup)
         # Warmup first N steps, then decay
-        lr = warm_lr / sqrt(max(t, warmup_steps))
+        lr = warm_lr / sqrt(max(scaled_t, warmup_steps))
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
         self.lr = lr
@@ -108,11 +108,11 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
 
     def __call__(self, t: int):
         # Time scale
-        t *= self.t_scale
+        scaled_t = t * self.t_scale
         # Warmup
-        warm_lr = self._warmup(t)
+        warm_lr = self._warmup(scaled_t)
         # Linear decay
-        bounded_t = min(max(t, 1), self.total_steps)
+        bounded_t = min(max(scaled_t, 1), self.total_steps)
         lr = warm_lr * (1 - bounded_t / self.total_steps)
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
