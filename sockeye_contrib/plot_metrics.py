@@ -11,16 +11,16 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import argparse
-import bisect
-import collections
-import os
+from argparse import ArgumentParser
+from bisect import insort
+from collections import defaultdict
+from os import path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 
-PARSE_ENTRY = collections.defaultdict(lambda: str)
+PARSE_ENTRY = defaultdict(lambda: str)
 PARSE_ENTRY.update({
     'bleu-val': float,
     'chrf-val': float,
@@ -31,7 +31,7 @@ PARSE_ENTRY.update({
     'time-elapsed': lambda s: float(s) / (60 * 60),
 })
 
-FIND_BEST = collections.defaultdict(lambda: max)
+FIND_BEST = defaultdict(lambda: max)
 FIND_BEST.update({
     'bleu-val': max,
     'chrf-val': max,
@@ -59,7 +59,7 @@ def ax_label(s):
 
 
 def read_metrics_file(fname):
-    metrics = collections.defaultdict(list)
+    metrics = defaultdict(list)
     for line in open(fname, encoding='utf-8'):
         entries = line.split()
         metrics['checkpoint'].append(int(entries[0]))
@@ -74,7 +74,7 @@ def average_points(points, num_points, cmp):
     averaged = []
     best = []
     for point in points:
-        bisect.insort(best, point)
+        insort(best, point)
         best = best[:num_points] if cmp is min else best[-num_points:]
         averaged.append(sum(best) / len(best))
     return averaged
@@ -129,7 +129,7 @@ def plot_metrics(args):
 
     for fname, label, skip in zip(args.input,
                                   args.legend if args.legend is not None
-                                  else (os.path.basename(fname) for fname in args.input),
+                                  else (path.basename(fname) for fname in args.input),
                                   args.skip):
         # Read metrics file to dict
         metrics = read_metrics_file(fname)
@@ -137,6 +137,10 @@ def plot_metrics(args):
         y_vals = metrics[args.y][skip:]
         x_label=ax_label(args.x)
         y_label=ax_label(args.y)
+        # Spread points that collapse into one significant digit (ex: epochs)
+        for i_label, i_vals in zip([args.x, args.y], [x_vals, y_vals]):
+            if i_label in ['epoch']:
+                i_vals[:] = np.linspace(i_vals[0], i_vals[-1], len(i_vals))
         # Optionally average best points so far for each Y point
         if args.y_average is not None:
             y_vals = average_points(y_vals, args.y_average, cmp=FIND_BEST[args.y])
@@ -185,7 +189,7 @@ def plot_metrics(args):
 
 
 def main():
-    params = argparse.ArgumentParser(description='Plot data from \'metrics\' files written during training.')
+    params = ArgumentParser(description='Plot data from \'metrics\' files written during training.')
     params.add_argument('-i', '--input', required=True, nargs='+', help='One or more \'metrics\' files to plot.')
     params.add_argument('-o', '--output', required=True, help='Output file to write (ex: plot.pdf).')
     params.add_argument('-x', default='time-elapsed', help='X axis metric.')
