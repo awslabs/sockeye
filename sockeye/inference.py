@@ -408,53 +408,45 @@ class TranslatorOutput:
     :param sentence_id: Sentence id.
     :param translation: Translation string without sentence boundary tokens.
     :param tokens: List of translated tokens.
-    :param attention_matrix: Attention matrix. Shape: (target_length, source_length).
     :param score: Negative log probability of generated translation.
     :param pass_through_dict: Dictionary of key/value pairs to pass through when working with JSON.
     :param beam_histories: List of beam histories. The list will contain more than one
            history if it was split due to exceeding max_length.
     :param nbest_translations: List of nbest translations as strings.
     :param nbest_tokens: List of nbest translations as lists of tokens.
-    :param nbest_attention_matrices: List of attention matrices, one for each nbest translation.
     :param nbest_scores: List of nbest scores, one for each nbest translation.
     """
     __slots__ = ('sentence_id',
                  'translation',
                  'tokens',
-                 'attention_matrix',
                  'score',
                  'pass_through_dict',
                  'beam_histories',
                  'nbest_translations',
                  'nbest_tokens',
-                 'nbest_attention_matrices',
                  'nbest_scores')
 
     def __init__(self,
                  sentence_id: SentenceId,
                  translation: str,
                  tokens: Tokens,
-                 attention_matrix: np.ndarray,
                  score: float,
                  pass_through_dict: Optional[Dict[str,Any]] = None,
                  beam_histories: Optional[List[BeamHistory]] = None,
                  nbest_translations: Optional[List[str]] = None,
                  nbest_tokens: Optional[List[Tokens]] = None,
-                 nbest_attention_matrices: Optional[List[np.ndarray]] = None,
                  nbest_scores: Optional[List[float]] = None) -> None:
         self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
-        self.attention_matrix = attention_matrix
         self.score = score
         self.pass_through_dict = copy.deepcopy(pass_through_dict) if pass_through_dict else {}
         self.beam_histories = beam_histories
         self.nbest_translations = nbest_translations
         self.nbest_tokens = nbest_tokens
-        self.nbest_attention_matrices = nbest_attention_matrices
         self.nbest_scores = nbest_scores
 
-    def json(self, align_threshold: float = 0.0) -> Dict:
+    def json(self) -> Dict:
         """
         Returns a dictionary suitable for json.dumps() representing all
         the information in the class. It is initialized with any keys
@@ -462,7 +454,6 @@ class TranslatorOutput:
         Keys from here that are not overwritten by Sockeye will thus be passed
         through to the output.
 
-        :param align_threshold: If alignments are defined, only print ones over this threshold.
         :return: A dictionary.
         """
         _d = self.pass_through_dict  # type: Dict[str, Any]
@@ -473,12 +464,6 @@ class TranslatorOutput:
         if self.nbest_translations is not None and len(self.nbest_translations) > 1:
             _d['translations'] = self.nbest_translations
             _d['scores'] = self.nbest_scores
-            if self.nbest_attention_matrices:
-                extracted_alignments = []
-                for alignment_matrix in self.nbest_attention_matrices:
-                    extracted_alignments.append(list(utils.get_alignments(alignment_matrix, threshold=align_threshold)))
-                _d['alignments'] = extracted_alignments
-
         return _d
 
 
@@ -487,22 +472,18 @@ TokenIds = List[int]
 
 class NBestTranslations:
     __slots__ = ('target_ids_list',
-                 'attention_matrices',
                  'scores')
 
     def __init__(self,
                  target_ids_list: List[TokenIds],
-                 attention_matrices: List[np.ndarray],
                  scores: List[float]) -> None:
 
         self.target_ids_list = target_ids_list
-        self.attention_matrices = attention_matrices
         self.scores = scores
 
 
 class Translation:
     __slots__ = ('target_ids',
-                 'attention_matrix',
                  'score',
                  'beam_histories',
                  'nbest_translations',
@@ -510,13 +491,11 @@ class Translation:
 
     def __init__(self,
                  target_ids: TokenIds,
-                 attention_matrix: np.ndarray,
                  score: float,
                  beam_histories: List[BeamHistory] = None,
                  nbest_translations: NBestTranslations = None,
                  estimated_reference_length: Optional[float] = None) -> None:
         self.target_ids = target_ids
-        self.attention_matrix = attention_matrix
         self.score = score
         self.beam_histories = beam_histories if beam_histories is not None else []
         self.nbest_translations = nbest_translations
@@ -530,9 +509,8 @@ def empty_translation(add_nbest: bool = False) -> Translation:
     :param add_nbest: Include (empty) nbest_translations in the translation object.
     """
     return Translation(target_ids=[],
-                       attention_matrix=np.asarray([[0]]),
                        score=-np.inf,
-                       nbest_translations=NBestTranslations([], [], []) if add_nbest else None)
+                       nbest_translations=NBestTranslations([], []) if add_nbest else None)
 
 
 IndexedTranslatorInput = NamedTuple('IndexedTranslatorInput', [
@@ -667,8 +645,7 @@ def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[in
     """
     Combines nbest translations through concatenation.
 
-    :param translations: A list of translations (sequence starting with BOS symbol,
-        attention_matrix), score and length.
+    :param translations: A list of translations (sequence starting with BOS symbol), score and length.
     :param stop_ids: The EOS symbols.
     :param length_penalty: LengthPenalty.
     :param brevity_penalty: Optional BrevityPenalty.
@@ -698,13 +675,11 @@ def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Tr
     best_translation = nbest_translations_list[0]
 
     sequences = [translation.target_ids for translation in nbest_translations_list]
-    attention_matrices = [translation.attention_matrix for translation in nbest_translations_list]
     scores = [translation.score for translation in nbest_translations_list]
 
-    nbest_translations = NBestTranslations(sequences, attention_matrices, scores)
+    nbest_translations = NBestTranslations(sequences, scores)
 
     return Translation(best_translation.target_ids,
-                       best_translation.attention_matrix,
                        best_translation.score,
                        best_translation.beam_histories,
                        nbest_translations,
@@ -720,10 +695,8 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
     :return: A list of Translation objects.
     """
     nbest_list = []  # type = List[Translation]
-    for target_ids, attention_matrix, score in zip(translation.nbest_translations.target_ids_list,
-                                                   translation.nbest_translations.attention_matrices,
-                                                   translation.nbest_translations.scores):
-        nbest_list.append(Translation(target_ids, attention_matrix, score, translation.beam_histories,
+    for target_ids, score in zip(translation.nbest_translations.target_ids_list, translation.nbest_translations.scores):
+        nbest_list.append(Translation(target_ids, score, translation.beam_histories,
                                       estimated_reference_length=translation.estimated_reference_length))
 
     return nbest_list
@@ -736,7 +709,7 @@ def _concat_translations(translations: List[Translation],
     """
     Combines translations through concatenation.
 
-    :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
+    :param translations: A list of translations (sequence starting with BOS symbol), score and length.
     :param stop_ids: The EOS symbols.
     :param length_penalty: Instance of the LengthPenalty class initialized with alpha and beta.
     :param brevity_penalty: Optional Instance of the BrevityPenalty class initialized with a brevity weight.
@@ -744,35 +717,23 @@ def _concat_translations(translations: List[Translation],
     """
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
-    attention_matrices = []
     beam_histories = []  # type: List[BeamHistory]
     estimated_reference_length = None  # type: Optional[float]
 
     for idx, translation in enumerate(translations):
         if idx == len(translations) - 1:
             target_ids.extend(translation.target_ids)
-            attention_matrices.append(translation.attention_matrix)
         else:
             if translation.target_ids[-1] in stop_ids:
                 target_ids.extend(translation.target_ids[:-1])
-                attention_matrices.append(translation.attention_matrix[:-1, :])
             else:
                 target_ids.extend(translation.target_ids)
-                attention_matrices.append(translation.attention_matrix)
         beam_histories.extend(translation.beam_histories)
         if translation.estimated_reference_length is not None:
             if estimated_reference_length is None:
                 estimated_reference_length = translation.estimated_reference_length
             else:
                 estimated_reference_length += translation.estimated_reference_length
-    # Combine attention matrices:
-    attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
-    attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0))
-    pos_t, pos_s = 0, 0
-    for attention_matrix, (len_t, len_s) in zip(attention_matrices, attention_shapes):
-        attention_matrix_combined[pos_t:pos_t + len_t, pos_s:pos_s + len_s] = attention_matrix
-        pos_t += len_t
-        pos_s += len_s
 
     def _brevity_penalty(hypothesis_length, reference_length):
         return 0.0 if brevity_penalty is None else brevity_penalty.get(hypothesis_length, reference_length)
@@ -782,7 +743,7 @@ def _concat_translations(translations: List[Translation],
                     * length_penalty.get(len(translation.target_ids))
                  for translation in translations)
     score = score / length_penalty.get(len(target_ids)) - _brevity_penalty(len(target_ids), estimated_reference_length)
-    return Translation(target_ids, attention_matrix_combined, score, beam_histories,
+    return Translation(target_ids, score, beam_histories,
                        estimated_reference_length=estimated_reference_length)
 
 
@@ -1196,25 +1157,21 @@ class Translator:
                      trans_input: TranslatorInput,
                      translation: Translation) -> TranslatorOutput:
         """
-        Returns a translator result from generated target-side word ids, attention matrices and scores.
+        Returns a translator result from generated target-side word ids and scores.
         Strips stop ids from translation string.
 
         :param trans_input: Translator input.
-        :param translation: The translation + attention and score.
+        :param translation: The translation and score.
         :return: TranslatorOutput.
         """
         target_ids = translation.target_ids
         target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
         target_string = C.TOKEN_SEPARATOR.join(data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids))
 
-        attention_matrix = translation.attention_matrix
-        attention_matrix = attention_matrix[:, :len(trans_input.tokens)]
-
         if translation.nbest_translations is None:
             return TranslatorOutput(sentence_id=trans_input.sentence_id,
                                     translation=target_string,
                                     tokens=target_tokens,
-                                    attention_matrix=attention_matrix,
                                     score=translation.score,
                                     pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories)
@@ -1226,21 +1183,16 @@ class Translator:
                                                    self.vocab_target_inv,
                                                    self.strip_ids)) for target_ids in nbest_target_ids]
 
-            attention_matrices = [matrix[:, :len(trans_input.tokens)] for matrix in
-                                  translation.nbest_translations.attention_matrices]
-
             scores = translation.nbest_translations.scores
 
             return TranslatorOutput(sentence_id=trans_input.sentence_id,
                                     translation=target_string,
                                     tokens=target_tokens,
-                                    attention_matrix=attention_matrix,
                                     score=translation.score,
                                     pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories,
                                     nbest_translations=target_strings,
                                     nbest_tokens=target_tokens_list,
-                                    nbest_attention_matrices=attention_matrices,
                                     nbest_scores=scores)
 
     def _translate_nd(self,
@@ -1313,52 +1265,41 @@ class Translator:
 
     def _decode_step(self, prev_word: mx.nd.NDArray,
                      states: List[ModelState],
-                     vocab_slice_ids: Optional[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, List[ModelState]]:
+                     vocab_slice_ids: Optional[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, List[ModelState]]:
         """
-        Returns decoder predictions (combined from all models), attention scores, and updated states.
+        Returns decoder predictions (combined from all models) and updated states.
 
         :param prev_word: Previous words of hypotheses. Shape: (batch_size * beam_size,).
         :param states: List of model states.
         :param vocab_slice_ids: Optional vocab slice ids for vocabulary selection.
-        :return: (scores, attention scores, list of model states)
+        :return: (scores, list of model states)
         """
-        model_outs, model_attention_probs, model_states = [], [], []
+        model_outs, model_states = [], []
         for model, state in zip(self.models, states):
-            decoder_out, new_states, step_additional_outputs = model.decode_step(prev_word, state.states)
-            state.states = new_states
-            # Reduced size of output layer if vocab_slice_ids is not None
-            logits = model.output_layer(decoder_out, vocab_slice_ids).astype('float32', copy=False)
+            logits, state.states, _ = model.decode_step(prev_word, state.states, vocab_slice_ids)
+            logits = logits.astype('float32', copy=False)
             model_out = logits if self.skip_softmax else logits.softmax(axis=-1)
             model_outs.append(model_out)
-            model_attention_probs.append(mx.nd.zeros_like(logits))  # TODO
             model_states.append(state)
-        scores, attention_probs = self._combine_predictions(model_outs, model_attention_probs)
-        return scores, attention_probs, model_states
+        scores = self._combine_predictions(model_outs)
+        return scores, model_states
 
-    def _combine_predictions(self,
-                             model_outputs: List[mx.nd.NDArray],
-                             attention_probs: List[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
+    def _combine_predictions(self, model_outputs: List[mx.nd.NDArray]) -> mx.nd.NDArray:
         """
-        Returns combined predictions of models and averaged attention prob scores.
+        Returns combined predictions of models.
         If model_outputs are probabilities, they are converted to negative log probabilities before combination.
         If model_outputs are logits (and no ensembling is used),
         no combination is applied and logits are converted to negative logits.
 
         :param model_outputs: List of Shape(beam_size, target_vocab_size).
-        :param attention_probs: List of Shape(beam_size, bucket_key).
-        :return: Combined scores, averaged attention scores.
+        :return: Combined scores.
         """
-        attention_prob_score = utils.average_arrays(attention_probs)
-
         # combine model predictions and convert to neg log probs
         if len(self.models) == 1:
-            if self.skip_softmax:
-                scores = -model_outputs[0]
-            else:
-                scores = -mx.nd.log(model_outputs[0])  # pylint: disable=invalid-unary-operand-type
+            scores = -model_outputs[0] if self.skip_softmax else -mx.nd.log(model_outputs[0])  # pylint: disable=invalid-unary-operand-type
         else:
             scores = self.interpolation_func(model_outputs)
-        return scores, attention_prob_score
+        return scores
 
     def _beam_search(self,
                      source: mx.nd.NDArray,
@@ -1367,7 +1308,6 @@ class Translator:
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                      max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
-                                                                 np.ndarray,
                                                                  np.ndarray,
                                                                  np.ndarray,
                                                                  np.ndarray,
@@ -1384,7 +1324,7 @@ class Translator:
                that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must NOT appear in each output.
-        :return List of best hypotheses indices, list of best word indices, list of attentions,
+        :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
                 predicted lengths of references (if any), constraints (if any), beam histories (if any).
         """
@@ -1425,9 +1365,6 @@ class Translator:
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
         max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
-
-        # Attention distributions across beam search steps
-        attentions = []  # type: List[mx.nd.NDArray]
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='float32')
@@ -1484,10 +1421,9 @@ class Translator:
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
-            # attention_scores: (batch_size * beam_size, bucket_key)
-            target_dists, attention_scores, model_states = self._decode_step(prev_word=best_word_indices,
-                                                                             states=model_states,
-                                                                             vocab_slice_ids=vocab_slice_ids)
+            target_dists, model_states = self._decode_step(prev_word=best_word_indices,
+                                                           states=model_states,
+                                                           vocab_slice_ids=vocab_slice_ids)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
@@ -1533,12 +1469,10 @@ class Translator:
                 best_word_indices = vocab_slice_ids.take(best_word_indices)
 
             # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
-            finished, lengths, attention_scores, estimated_reference_lengths \
-                                                = self._sort_by_index.forward(best_hyp_indices,
-                                                                              finished,
-                                                                              lengths,
-                                                                              attention_scores,
-                                                                              estimated_reference_lengths)
+            finished, lengths, estimated_reference_lengths = self._sort_by_index.forward(best_hyp_indices,
+                                                                                         finished,
+                                                                                         lengths,
+                                                                                         estimated_reference_lengths)
 
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
@@ -1586,10 +1520,9 @@ class Translator:
                         beam_histories[sent]["normalized_scores"].append(
                             normalized_scores[rows].asnumpy().flatten().tolist())
 
-            # Collect best hypotheses, best word indices, and attention scores
+            # Collect best hypotheses, best word indices
             best_hyp_indices_list.append(best_hyp_indices)
             best_word_indices_list.append(best_word_indices)
-            attentions.append(attention_scores)
 
             if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
                 at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
@@ -1617,11 +1550,9 @@ class Translator:
 
         all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
         all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
-        all_attentions = mx.nd.stack(*attentions, axis=1)
 
         return all_best_hyp_indices.asnumpy(), \
                all_best_word_indices.asnumpy(), \
-               all_attentions.asnumpy(), \
                scores_accumulated.asnumpy(), \
                lengths.asnumpy().astype('int32'), \
                estimated_reference_lengths.asnumpy(), \
@@ -1631,7 +1562,6 @@ class Translator:
     def _get_best_from_beam(self,
                             best_hyp_indices: np.ndarray,
                             best_word_indices: np.ndarray,
-                            attentions: np.ndarray,
                             seq_scores: np.ndarray,
                             lengths: np.ndarray,
                             estimated_reference_lengths: Optional[mx.nd.NDArray],
@@ -1642,8 +1572,6 @@ class Translator:
 
         :param best_hyp_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps + 1).
         :param best_word_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps).
-        :param attentions: Array of attentions over source words.
-                           Shape: (batch * beam, num_beam_search_steps, encoded_source_length).
         :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
         :param lengths: The lengths of all items in the beam. Shape: (batch * beam). Dtype: int32.
         :param estimated_reference_lengths: Predicted reference lengths.
@@ -1673,7 +1601,6 @@ class Translator:
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
             nbest_translations.append([self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
                                                                                    lengths[best_ids],
-                                                                                   attentions[best_ids],
                                                                                    seq_scores[best_ids],
                                                                                    histories,
                                                                                    reference_lengths[best_ids])])
@@ -1709,7 +1636,6 @@ class Translator:
     @staticmethod
     def _assemble_translation(sequence: np.ndarray,
                               length: np.ndarray,
-                              attention_lists: np.ndarray,
                               seq_score: np.ndarray,
                               beam_history: Optional[BeamHistory],
                               estimated_reference_length: Optional[float]) -> Translation:
@@ -1718,8 +1644,6 @@ class Translator:
         processing on each, and merges it into a Translation object.
         :param sequence: Array of word ids. Shape: (batch_size, bucket_key).
         :param length: The length of the translated segment.
-        :param attention_lists: Array of attentions over source words.
-                                Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
         :param seq_score: Array of length-normalized negative log-probs.
         :param estimated_reference_length: Estimated reference length (if any).
         :param beam_history: The optional beam histories for each sentence in the batch.
@@ -1727,11 +1651,10 @@ class Translator:
         """
         length = int(length)
         sequence = sequence[:length].tolist()
-        attention_matrix = attention_lists[:length, :]
         score = float(seq_score)
         estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
         beam_history_list = [beam_history] if beam_history is not None else []
-        return Translation(sequence, attention_matrix, score, beam_history_list,
+        return Translation(sequence, score, beam_history_list,
                            nbest_translations=None,
                            estimated_reference_length=estimated_reference_length)
 

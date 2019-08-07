@@ -18,10 +18,10 @@ import binascii
 import errno
 import glob
 import gzip
-from functools import reduce
-import math
 import itertools
 import logging
+import math
+import multiprocessing
 import os
 import random
 import shutil
@@ -29,12 +29,13 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
+from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import mxnet as mx
 import numpy as np
 import portalocker
 
+import sockeye.multiprocessing_utils as mp_utils
 from . import __version__, constants as C
 from .log import log_sockeye_version, log_mxnet_version
 
@@ -280,88 +281,6 @@ def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str
         return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
     else:
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
-
-
-def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str], filename: str):
-    """
-    Uses matplotlib for creating a visualization of the attention matrix.
-
-    :param attention_matrix: The attention matrix.
-    :param source_tokens: A list of source tokens.
-    :param target_tokens: A list of target tokens.
-    :param filename: The file to which the attention visualization will be written to.
-    """
-    try:
-        import matplotlib
-    except ImportError:
-        raise RuntimeError("Please install matplotlib.")
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    assert attention_matrix.shape[0] == len(target_tokens)
-
-    plt.imshow(attention_matrix.transpose(), interpolation="nearest", cmap="Greys")
-    plt.xlabel("target")
-    plt.ylabel("source")
-    plt.gca().set_xticks([i for i in range(0, len(target_tokens))])
-    plt.gca().set_yticks([i for i in range(0, len(source_tokens))])
-    plt.gca().set_xticklabels(target_tokens, rotation='vertical')
-    plt.gca().set_yticklabels(source_tokens)
-    plt.tight_layout()
-    plt.savefig(filename)
-    logger.info("Saved alignment visualization to " + filename)
-
-
-def print_attention_text(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str],
-                         threshold: float):
-    """
-    Prints the attention matrix to standard out.
-
-    :param attention_matrix: The attention matrix.
-    :param source_tokens: A list of source tokens.
-    :param target_tokens: A list of target tokens.
-    :param threshold: The threshold for including an alignment link in the result.
-    """
-    sys.stdout.write("  ")
-    for _ in target_tokens:
-        sys.stdout.write("---")
-    sys.stdout.write("\n")
-    for i, f_i in enumerate(source_tokens):  # type: ignore
-        sys.stdout.write(" |")
-        for j in range(len(target_tokens)):
-            align_prob = attention_matrix[j, i]
-            if align_prob > threshold:
-                sys.stdout.write("(*)")
-            elif align_prob > 0.4:
-                sys.stdout.write("(?)")
-            else:
-                sys.stdout.write("   ")
-        sys.stdout.write(" | %s\n" % f_i)
-    sys.stdout.write("  ")
-    for _ in target_tokens:
-        sys.stdout.write("---")
-    sys.stdout.write("\n")
-    for k in range(max(map(len, target_tokens))):
-        sys.stdout.write("  ")
-        for word in target_tokens:
-            letter = word[k] if len(word) > k else " "
-            sys.stdout.write(" %s " % letter)
-        sys.stdout.write("\n")
-    sys.stdout.write("\n")
-
-
-def get_alignments(attention_matrix: np.ndarray, threshold: float = .9) -> Iterator[Tuple[int, int]]:
-    """
-    Yields hard alignments from an attention_matrix (target_length, source_length)
-    given a threshold.
-
-    :param attention_matrix: The attention matrix.
-    :param threshold: The threshold for including an alignment link in the result.
-    :return: Generator yielding strings of the form 0-0, 0-1, 2-1, 2-2, 3-4...
-    """
-    for src_idx in range(attention_matrix.shape[1]):
-        for trg_idx in range(attention_matrix.shape[0]):
-            if attention_matrix[trg_idx, src_idx] > threshold:
-                yield (src_idx, trg_idx)
 
 
 def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:

@@ -1148,10 +1148,6 @@ def add_inference_args(params):
                                default='translation',
                                choices=C.OUTPUT_HANDLERS,
                                help='Output type. Default: %(default)s.')
-    decode_params.add_argument('--sure-align-threshold',
-                               default=0.9,
-                               type=float,
-                               help='Threshold to consider a soft alignment a sure alignment. Default: %(default)s.')
 
     # common params with score CLI
     add_length_penalty_args(decode_params)

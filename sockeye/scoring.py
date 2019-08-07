@@ -156,7 +156,7 @@ class Scorer:
 
                 # Output handling routines require us to make use of inference classes.
                 output_handler.handle(TranslatorInput(sentence_no, source_tokens),
-                                      TranslatorOutput(sentence_no, target_string, None, None, score),
+                                      TranslatorOutput(sentence_no, target_string, None, score),
                                       batch_time)
 
         if sentence_no != 0:

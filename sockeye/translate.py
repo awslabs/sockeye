@@ -63,8 +63,7 @@ def run_translate(args: argparse.Namespace):
                            C.OUTPUT_HANDLER_JSON, args.output_type)
             args.output_type = C.OUTPUT_HANDLER_JSON
     output_handler = get_output_handler(args.output_type,
-                                        args.output,
-                                        args.sure_align_threshold)
+                                        args.output)
 
     with ExitStack() as exit_stack:
         check_condition(len(args.device_ids) == 1, "translate only supports single device for now")

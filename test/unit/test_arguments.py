@@ -120,7 +120,6 @@ def test_model_parameters(test_params, expected_params):
                       avoid_list=None,
                       softmax_temperature=None,
                       output_type='translation',
-                      sure_align_threshold=0.9,
                       max_output_length_num_stds=2,
                       max_output_length=None,
                       beam_search_stop='all',
@@ -273,11 +272,9 @@ def test_training_arg(test_params, expected_params):
      []),
     # WMT tutorial
     ('-m wmt_model wmt_model_seed2 '
-     '--use-cpu '
-     '--output-type align_plot',
+     '--use-cpu ',
      dict(models=["wmt_model", "wmt_model_seed2"],
-          use_cpu=True,
-          output_type="align_plot"),
+          use_cpu=True),
      # Other parameters mentioned in the WMT tutorial
      ["beam_size",
       "softmax_temperature",
