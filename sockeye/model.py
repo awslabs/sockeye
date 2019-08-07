@@ -390,7 +390,8 @@ def load_model(model_folder: str,
     model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
     logger.info("Disabling dropout layers for performance reasons")
-    model_config.disable_dropout()
+    if inference_only:
+        model_config.disable_dropout()
 
     if checkpoint is None:
         params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)

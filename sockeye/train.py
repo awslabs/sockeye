@@ -159,15 +159,15 @@ def create_checkpoint_decoder(
     else:
         # default decode context is the last training device
         context = train_context[-1]
-    
-    return checkpoint_decoder.CheckpointDecoder(inputs=[args.validation_source] + args.validation_source_factors,
+
+    return checkpoint_decoder.CheckpointDecoder(model_folder=args.output,
+                                                inputs=[args.validation_source] + args.validation_source_factors,
                                                 references=args.validation_target,
                                                 sample_size=sample_size,
                                                 model=sockeye_model,
-                                                model_folder=args.output,
                                                 source_vocabs=source_vocabs,
                                                 target_vocab=target_vocab,
-                                                contexts=[context])
+                                                context=context)
 
 
 def use_shared_vocab(args: argparse.Namespace) -> bool:
@@ -830,9 +830,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
             context=context,
             dtype=args.dtype
         )        
-        
+
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
-                                            training_model, source_vocabs, target_vocab)
+                                               training_model, source_vocabs, target_vocab)
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
         return training_state

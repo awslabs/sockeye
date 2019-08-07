@@ -60,7 +60,7 @@ def score(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
-        model, source_vocabs, target_vocab = load_model(args.model, context=context, dtype=args.dtype)
+        model, source_vocabs, target_vocab = load_model(args.model, inference_only=True, context=context, dtype=args.dtype)
 
         # TODO(fhieber): this will cause trimming of all sentences longer than max training sequence lengths.
         # TODO(fhieber): ideally, we should allow splitting as in actual translation to compute reasonable scores.

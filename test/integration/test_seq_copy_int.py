@@ -235,7 +235,7 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
         model_folder=model_path,
         context=[mx.cpu()])
 
-    cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(contexts=[mx.cpu()],
+    cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
                                                               inputs=[dev_source_path],
                                                               references=dev_target_path,
                                                               source_vocabs=source_vocabs,

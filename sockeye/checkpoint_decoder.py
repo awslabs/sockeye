@@ -40,6 +40,7 @@ class CheckpointDecoder:
     """
     Decodes a (random sample of a) dataset using parameters at given checkpoint and computes BLEU against references.
 
+    :param model_folder: The model folder where checkpoint decoder outputs will be written to.
     :param inputs: Path(s) to file containing input sentences (and their factors).
     :param references: Path to file containing references.
     :param source_vocabs: The source vocabularies.
@@ -57,16 +58,17 @@ class CheckpointDecoder:
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param sample_size: Maximum number of sentences to sample and decode. If <=0, all sentences are used.
     :param random_seed: Random seed for sampling. Default: 42.
-    :param model_folder: The model folder where checkpoint decoder outputs will be written to.
+    :param hybridize: Turn on hybridization of the translator.
     """
 
     def __init__(self,
+                 model_folder: str,
                  inputs: List[str],
                  references: str,
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  model: sockeye.model.SockeyeModel,
-                 contexts: List[mx.Context],
+                 context: mx.Context,
                  max_input_len: Optional[int] = None,
                  batch_size: int = 16,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
@@ -79,7 +81,7 @@ class CheckpointDecoder:
                  ensemble_mode: str = 'linear',
                  sample_size: int = -1,
                  random_seed: int = 42,
-                 model_folder: str = '') -> None:
+                 hybridize: bool = True) -> None:
         self.max_input_len = max_input_len
         self.max_output_length_num_stds = max_output_length_num_stds
         self.ensemble_mode = ensemble_mode
@@ -120,7 +122,6 @@ class CheckpointDecoder:
         self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
 
         # TODO: possibly support decoding on multiple GPUs
-        context = contexts[0]
         self.translator = inference.Translator(
             batch_size=self.batch_size,
             context=context,
@@ -134,7 +135,8 @@ class CheckpointDecoder:
             source_vocabs=source_vocabs,
             target_vocab=target_vocab,
             restrict_lexicon=None,
-            store_beam=False)
+            store_beam=False,
+            hybridize=hybridize)
         
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
                     max_input_len if max_input_len is not None else -1, beam_size, model, len(self.target_sentences))

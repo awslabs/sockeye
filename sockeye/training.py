@@ -24,7 +24,6 @@ import time
 from math import sqrt
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
 
-import gluonnlp
 import mxnet as mx
 import numpy as np
 from mxnet import gluon
@@ -171,7 +170,6 @@ class GluonEarlyStoppingTrainer:
             #self._save_trainer_states(self.best_optimizer_states_fname) # not saving due to deferred initialization
             logger.info("Training started.")
 
-        # TODO: CheckpointDecoder
         tic = time.time()
 
         if self.config.max_checkpoints is not None:
@@ -204,10 +202,6 @@ class GluonEarlyStoppingTrainer:
 
             if self.state.updates > 0 and self.state.batches % (
                     self.config.checkpoint_interval * self.config.update_interval) == 0:
-                # ############
-                # CHECKPOINT
-                ############
-                
                 time_cost = time.time() - tic
                 self.state.checkpoint += 1
 
@@ -352,7 +346,7 @@ class GluonEarlyStoppingTrainer:
                     self.state.best_checkpoint = self.state.checkpoint
                     self.state.num_not_improved = 0
                     return True
-        assert value is not None, "Early stoppin metric %s not found in validation metrics." % self.config.early_stopping_metric
+        assert value is not None, "Early stopping metric %s not found in validation metrics." % self.config.early_stopping_metric
 
         self.state.num_not_improved += 1
         logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
