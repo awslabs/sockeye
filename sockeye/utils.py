@@ -21,7 +21,6 @@ import gzip
 import itertools
 import logging
 import math
-import multiprocessing
 import os
 import random
 import shutil
@@ -35,7 +34,6 @@ import mxnet as mx
 import numpy as np
 import portalocker
 
-import sockeye.multiprocessing_utils as mp_utils
 from . import __version__, constants as C
 from .log import log_sockeye_version, log_mxnet_version
 
