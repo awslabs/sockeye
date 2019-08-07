@@ -15,7 +15,6 @@
 Code for training
 """
 import logging
-import multiprocessing
 import os
 import pickle
 import random
@@ -26,7 +25,6 @@ from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
 
 import mxnet as mx
 import numpy as np
-from mxnet import gluon
 
 from .checkpoint_decoder import CheckpointDecoder
 from . import constants as C
