@@ -1358,12 +1358,21 @@ class ParallelDataSet(Sized):
         source = data[:n]
         target = data[n:2 * n]
         if horovod_split and horovod_mpi.hvd.size() > 1:
+            # When using Horovod, each bucket in the data shard is divided into
+            # N slices, one per worker.
             split_index = horovod_mpi.hvd.rank()
             total_splits = horovod_mpi.hvd.size()
             i = split_index / total_splits
             j = (split_index + 1) / total_splits
-            source = [s[math.floor(i * s.shape[0]):math.floor(j * s.shape[0])] for s in source]
-            target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])] for t in target]
+            # Load this worker's slice of each bucket.  If the bucket is empty,
+            # there is no need to slice and attempting to do so will raise an
+            # error.
+            source = [s[math.floor(i * s.shape[0]):math.floor(j * s.shape[0])]
+                      if s.shape[0] > 0
+                      else s for s in source]
+            target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])]
+                      if t.shape[0] > 0
+                      else t for t in target]
         assert len(source) == len(target)
         return ParallelDataSet(source, target)
 
