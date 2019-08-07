@@ -465,8 +465,7 @@ def determine_context(device_ids: List[int],
                       use_cpu: bool,
                       disable_device_locking: bool,
                       lock_dir: str,
-                      exit_stack: ExitStack,
-                      using_horovod: bool = False) -> List[mx.Context]:
+                      exit_stack: ExitStack) -> List[mx.Context]:
     """
     Determine the MXNet context to run on (CPU or GPU).
 
@@ -475,8 +474,6 @@ def determine_context(device_ids: List[int],
     :param disable_device_locking: Disable Sockeye's device locking feature.
     :param lock_dir: Directory to place device lock files in.
     :param exit_stack: An ExitStack from contextlib.
-    :param using_horovod: Running training with Horovod/OpenMPI: GPU(s) are
-                          determined by worker local rank.
 
     :return: A list with the context(s) to run on.
     """
@@ -486,7 +483,8 @@ def determine_context(device_ids: List[int],
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
                         "No GPUs found, consider running on the CPU with --use-cpu ")
-        if using_horovod:
+        if horovod_mpi.using_horovod():
+            # Running with Horovod/OpenMPI: GPU(s) are determined by local rank
             check_condition(len(device_ids) == 1 and device_ids[0] < 0,
                             "When using Horovod, --device-ids should be a negative integer indicating the number of "
                             "GPUs each worker should use.")

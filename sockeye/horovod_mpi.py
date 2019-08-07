@@ -35,3 +35,13 @@ try:
 except ImportError:
     mpi4py = None
     MPI = None
+
+
+def using_horovod():
+    """
+    Returns true if the MPI environment is initialized, indicating that
+    `hvd.init()` has been called.
+    """
+    if MPI is not None:
+        return MPI.Is_initialized()
+    return False

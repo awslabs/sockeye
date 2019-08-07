@@ -96,20 +96,19 @@ def check_arg_compatibility(args: argparse.Namespace):
                     '--max-num-epochs --max-num-checkpoint-not-improved')
 
 
-def check_resume(args: argparse.Namespace, output_folder: str, using_horovod: bool = False) -> bool:
+def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
     Check if we should resume a broken training run.
 
     :param args: Arguments as returned by argparse.
     :param output_folder: Main output folder for the model.
-    :param using_horovod: Running training with Horovod/MPI.
 
     :return: Flag signaling if we are resuming training and the directory with
         the training status.
     """
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
-    if using_horovod and horovod_mpi.hvd.rank() > 0:
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
         # Horovod secondary workers: wait for primary worker to create the sub-
         # directory where secondary workers create output directories.
         primary_worker_dir_check = False
@@ -142,7 +141,7 @@ def check_resume(args: argparse.Namespace, output_folder: str, using_horovod: bo
                         "Will start training from scratch.", output_folder)
     else:
         os.makedirs(output_folder)
-    if using_horovod and horovod_mpi.hvd.rank() == 0:
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() == 0:
         # Horovod primary worker: make sure sub-directory for secondary worker
         # outputs exists and signal secondary workers.
         os.makedirs(os.path.join(output_folder, C.HOROVOD_SECONDARY_WORKERS_DIRNAME), exist_ok=True)
@@ -262,8 +261,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
-            batch_num_devices=batch_num_devices,
-            using_horovod=args.horovod)
+            batch_num_devices=batch_num_devices)
 
         check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
                         or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
@@ -724,11 +722,9 @@ def train(args: argparse.Namespace) -> training.TrainState:
     # the training run) and a local rank (unique on the current host).  For
     # example, running on 2 hosts with 4 slots each will assign ranks 0-7 and
     # local ranks 0-3.
-    using_horovod = False
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
-        using_horovod = True
         horovod_mpi.hvd.init()
         # Each worker uses a separate output directory.  The primary worker
         # (rank 0) writes files to the root of the output directory (standard
@@ -745,7 +741,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
-    resume_training = check_resume(args, output_folder, using_horovod)
+    resume_training = check_resume(args, output_folder)
 
     setup_main_logger(file_logging=True,
                       console=not args.quiet,
@@ -766,8 +762,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                           use_cpu=args.use_cpu,
                                           disable_device_locking=args.disable_device_locking,
                                           lock_dir=args.lock_dir,
-                                          exit_stack=exit_stack,
-                                          using_horovod=using_horovod)
+                                          exit_stack=exit_stack)
         if args.batch_type == C.BATCH_TYPE_SENTENCE:
             check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
                                                                  "divisible by the number of devices. Choose a batch "
@@ -820,8 +815,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
             min_epochs=args.min_num_epochs,
             max_epochs=args.max_num_epochs,
             update_interval=args.update_interval,
-            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure,
-            using_horovod=using_horovod
+            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure
         )
         if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
             check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
@@ -845,7 +839,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
         # across all workers by broadcasting worker 0's values.  This is not
         # required when resuming training as synchronized training states
         # already exist.
-        if using_horovod and not resume_training:
+        if horovod_mpi.using_horovod() and not resume_training:
             for ctx in context:
                 with mx.Context(ctx):
                     horovod_mpi.hvd.broadcast_parameters(params, root_rank=0)
@@ -862,7 +856,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
         kvstore = mx.kvstore.create(args.kvstore)
 
-        if using_horovod:
+        if horovod_mpi.using_horovod():
             # Horovod provides a trainer that subclasses gluon.Trainer and uses
             # allreduce to collect averaged gradients across all workers for
             # each update.

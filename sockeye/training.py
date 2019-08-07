@@ -66,8 +66,7 @@ class TrainerConfig(Config):
                  min_epochs: Optional[int] = None,
                  max_epochs: Optional[int] = None,
                  update_interval: int = 1,
-                 stop_training_on_decoder_failure: bool = False,
-                 using_horovod: bool = False) -> None:
+                 stop_training_on_decoder_failure: bool = False) -> None:
         super().__init__()
         self.output_dir = output_dir
         self.early_stopping_metric = early_stopping_metric
@@ -84,7 +83,6 @@ class TrainerConfig(Config):
         self.max_epochs = max_epochs
         self.update_interval = update_interval
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
-        self.using_horovod = using_horovod
 
 
 class TrainState:
@@ -344,7 +342,7 @@ class GluonEarlyStoppingTrainer:
                 # workers, causing potential desync if each worker makes its own
                 # check for key training decisions (reducing learning rate,
                 # early stopping, etc.).
-                if self.config.using_horovod and horovod_mpi.hvd.rank() > 0:
+                if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
                     # Horovod secondary workers: wait for primary worker to send
                     # result.
                     value_is_better = None  # type: Optional[bool]
@@ -355,7 +353,7 @@ class GluonEarlyStoppingTrainer:
                     value_is_better = utils.metric_value_is_better(value,
                                                                    self.state.best_metric,
                                                                    self.config.early_stopping_metric)
-                    if self.config.using_horovod and horovod_mpi.hvd.rank() == 0:
+                    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() == 0:
                         # Horovod primary worker: broadcast result.
                         horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
                 if value_is_better:
