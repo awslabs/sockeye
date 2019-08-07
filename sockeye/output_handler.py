@@ -19,17 +19,14 @@ from typing import Optional
 import sockeye.constants as C
 from . import data_io
 from . import inference
-from sockeye.utils import plot_attention, print_attention_text, get_alignments
 
 
 def get_output_handler(output_type: str,
-                       output_fname: Optional[str] = None,
-                       sure_align_threshold: float = 1.0) -> 'OutputHandler':
+                       output_fname: Optional[str] = None) -> 'OutputHandler':
     """
 
     :param output_type: Type of output handler.
     :param output_fname: Output filename. If none sys.stdout is used.
-    :param sure_align_threshold: Threshold to consider an alignment link as 'sure'.
     :raises: ValueError for unknown output_type.
     :return: Output handler.
     """
@@ -42,20 +39,12 @@ def get_output_handler(output_type: str,
         return PairWithScoreOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_SCORE:
         return StringWithScoreOutputHandler(output_stream)
-    elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENTS:
-        return StringWithAlignmentsOutputHandler(output_stream, sure_align_threshold)
-    elif output_type == C.OUTPUT_HANDLER_TRANSLATION_WITH_ALIGNMENT_MATRIX:
-        return StringWithAlignmentMatrixOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_BENCHMARK:
         return BenchmarkOutputHandler(output_stream)
-    elif output_type == C.OUTPUT_HANDLER_ALIGN_PLOT:
-        return AlignPlotHandler(plot_prefix="align" if output_fname is None else output_fname)
-    elif output_type == C.OUTPUT_HANDLER_ALIGN_TEXT:
-        return AlignTextHandler(sure_align_threshold)
     elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
         return BeamStoringHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_JSON:
-        return JSONOutputHandler(output_stream, sure_align_threshold)
+        return JSONOutputHandler(output_stream)
     else:
         raise ValueError("unknown output type")
 
@@ -193,92 +182,6 @@ class PairWithScoreOutputHandler(OutputHandler):
         return True
 
 
-class StringWithAlignmentsOutputHandler(StringOutputHandler):
-    """
-    Output handler to write translations and alignments to a stream. Translation and alignment string
-    are separated by a tab.
-    Alignments are written in the format:
-    <src_index>-<trg_index> ...
-    An alignment link is included if its probability is above the threshold.
-
-    :param stream: Stream to write translations and alignments to.
-    :param threshold: Threshold for including alignment links.
-    """
-
-    def __init__(self, stream, threshold: float) -> None:
-        super().__init__(stream)
-        self.threshold = threshold
-
-    def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
-               t_walltime: float = 0.):
-        """
-        :param t_input: Translator input.
-        :param t_output: Translator output.
-        :param t_walltime: Total wall-clock time for translation.
-        """
-        alignments = " ".join(
-            ["%d-%d" % (s, t) for s, t in get_alignments(t_output.attention_matrix, threshold=self.threshold)])
-        self.stream.write("%s\t%s\n" % (t_output.translation, alignments))
-        self.stream.flush()
-
-    def reports_score(self) -> bool:
-        return False
-
-
-class StringWithAlignmentMatrixOutputHandler(StringOutputHandler):
-    """
-    Output handler to write translations and an alignment matrix to a stream.
-    Note that unlike other output handlers each input sentence will result in an output
-    consisting of multiple lines.
-    More concretely the format is:
-
-    ```
-    sentence id ||| target words ||| score ||| source words ||| number of source words ||| number of target words
-    ALIGNMENT FOR T_1
-    ALIGNMENT FOR T_2
-    ...
-    ALIGNMENT FOR T_n
-    ```
-
-    where the alignment is a list of probabilities of alignment to the source words.
-
-    :param stream: Stream to write translations and alignments to.
-    """
-
-    def __init__(self, stream) -> None:
-        super().__init__(stream)
-
-    def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
-               t_walltime: float = 0.):
-        """
-        :param t_input: Translator input.
-        :param t_output: Translator output.
-        :param t_walltime: Total wall-clock time for translation.
-        """
-        line = "{sent_id} ||| {target} ||| {score:f} ||| {source} ||| {source_len:d} ||| {target_len:d}\n"
-        self.stream.write(line.format(sent_id=t_input.sentence_id,
-                                      target=" ".join(t_output.tokens),
-                                      score=t_output.score,
-                                      source=" ".join(t_input.tokens),
-                                      source_len=len(t_input.tokens),
-                                      target_len=len(t_output.tokens)))
-        attention_matrix = t_output.attention_matrix.T
-        for i in range(0, attention_matrix.shape[0]):
-            attention_vector = attention_matrix[i]
-            self.stream.write(" ".join(["%f" % value for value in attention_vector]))
-            self.stream.write("\n")
-
-        self.stream.write("\n")
-        self.stream.flush()
-
-    def reports_score(self) -> bool:
-        return True
-
-
 class BenchmarkOutputHandler(StringOutputHandler):
     """
     Output handler to write detailed benchmark information to a stream.
@@ -300,62 +203,6 @@ class BenchmarkOutputHandler(StringOutputHandler):
                            len(t_output.tokens),
                            t_walltime))
         self.stream.flush()
-
-    def reports_score(self) -> bool:
-        return False
-
-
-class AlignPlotHandler(OutputHandler):
-    """
-    Output handler to plot alignment matrices to PNG files.
-
-    :param plot_prefix: Prefix for generated PNG files.
-    """
-
-    def __init__(self, plot_prefix: str) -> None:
-        self.plot_prefix = plot_prefix
-
-    def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
-               t_walltime: float = 0.):
-        """
-        :param t_input: Translator input.
-        :param t_output: Translator output.
-        :param t_walltime: Total wall-clock time for translation.
-        """
-        plot_attention(t_output.attention_matrix,
-                       t_input.tokens,
-                       t_output.tokens,
-                       "%s_%s.png" % (self.plot_prefix, t_input.sentence_id))
-
-    def reports_score(self) -> bool:
-        return False
-
-
-class AlignTextHandler(OutputHandler):
-    """
-    Output handler to write alignment matrices as ASCII art.
-
-    :param threshold: Threshold for considering alignment links as sure.
-    """
-
-    def __init__(self, threshold: float) -> None:
-        self.threshold = threshold
-
-    def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
-               t_walltime: float = 0.):
-        """
-        :param t_input: Translator input.
-        :param t_output: Translator output.
-        :param t_walltime: Total wall-clock time for translation.
-        """
-        print_attention_text(t_output.attention_matrix,
-                             t_input.tokens,
-                             t_output.tokens,
-                             self.threshold)
 
     def reports_score(self) -> bool:
         return False
@@ -393,14 +240,14 @@ class BeamStoringHandler(OutputHandler):
     def reports_score(self) -> bool:
         return False
 
+
 class JSONOutputHandler(OutputHandler):
     """
     Output single-line JSON objects.
     Carries over extra fields from the input.
     """
-    def __init__(self, stream, threshold: float = 0.0) -> None:
+    def __init__(self, stream) -> None:
         self.stream = stream
-        self.align_threshold = threshold
 
     def handle(self,
                t_input: inference.TranslatorInput,
@@ -410,7 +257,7 @@ class JSONOutputHandler(OutputHandler):
         Outputs a JSON object of the fields in the `TranslatorOutput` object.
         """
 
-        d_ = t_output.json(self.align_threshold)
+        d_ = t_output.json()
 
         self.stream.write("%s\n" % json.dumps(d_, sort_keys=True))
         self.stream.flush()

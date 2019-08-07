@@ -16,12 +16,6 @@ git clone https://github.com/rsennrich/subword-nmt.git
 export PYTHONPATH=$(pwd)/subword-nmt:$PYTHONPATH
 ```
 
-For visualizating alignments we will need `matplotlib`.
-If you haven't installed the library yet you can do so by running:
-```bash
-pip install matplotlib
-```
-
 We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`. 
 Install it using:
 ```bash
@@ -179,26 +173,6 @@ he is a great guy and a family father .
 
 At decoding time Sockeye will run a beam search.
 You can set the size of the beam (`--beam-size`) or change other decoding parameters such as `--softmax-temperature` and `--length-penalty-alpha`.
-
-### Alignment visualization
-
-Sockeye not only supports text output, but also other output types.
-The following command for example will plot the alignment matrix:
-
-
-```bash
-echo "er ist so ein toller Kerl und ein Familienvater ." | \
-  python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
-                                   --vocabulary-threshold 50 | \
-  python -m sockeye.translate -m wmt_model --output-type align_plot
-```
-
-This will create a file `align_1.png` that looks similar to this:
-
-![Alignment plot](wmt/align.png "Alignment plot")
-
-Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye during translation.
-Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
 
 
 ### Embedding inspection
