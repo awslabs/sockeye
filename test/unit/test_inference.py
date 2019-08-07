@@ -96,20 +96,17 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids)) - \
                      brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
     translations = [sockeye.inference.Translation([0, 1, 2, -1],
-                                                  np.zeros((4, num_src)),
                                                   1.0 / length_penalty.get(4) - brevity_penalty.get(4, 10),
                                                   [beam_history1],
                                                   None,
                                                   10),
                     # Translation without EOS
                     sockeye.inference.Translation([0, 8, 9],
-                                                  np.zeros((3, num_src)),
                                                   2.0 / length_penalty.get(3) - brevity_penalty.get(3, 11),
                                                   [beam_history2],
                                                   None,
                                                   11),
                     sockeye.inference.Translation([0, 3, 4, 5, -1],
-                                                  np.zeros((5, num_src)),
                                                   3.0 / length_penalty.get(5) - brevity_penalty.get(5, 12),
                                                   [beam_history3],
                                                   None,
@@ -118,7 +115,6 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
                                                       length_penalty=length_penalty, brevity_penalty=brevity_penalty)
 
     assert combined.target_ids == expected_target_ids
-    assert combined.attention_matrix.shape == (len(expected_target_ids), len(translations) * num_src)
     assert np.isclose(combined.score, expected_score)
     assert combined.beam_histories == expected_beam_histories
 
@@ -642,31 +638,6 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
                                   [3, 3, 0],
                                   [4, 5, 3]],
                                  dtype='int32')
-    attentions = np.array([[[0.1748407 , 0.17223692, 0.153318  , 0.16618672, 0.15373373,
-                             0.1796839 , 0.        , 0.        , 0.        , 0.        ],
-                            [0.17484048, 0.17223585, 0.15332589, 0.16618879, 0.15374145,
-                             0.17966755, 0.        , 0.        , 0.        , 0.        ],
-                            [0.17483611, 0.17222905, 0.15335034, 0.16619477, 0.15375796,
-                             0.17963174, 0.        , 0.        , 0.        , 0.        ]],
-                           [[0.1748407 , 0.17223692, 0.153318  , 0.16618672, 0.15373373,
-                             0.1796839 , 0.        , 0.        , 0.        , 0.        ],
-                            [0.17484048, 0.17223585, 0.15332589, 0.16618879, 0.15374145,
-                             0.17966755, 0.        , 0.        , 0.        , 0.        ],
-                            [0.1748425 , 0.17223647, 0.15333334, 0.16618758, 0.15375413,
-                             0.17964599, 0.        , 0.        , 0.        , 0.        ]],
-                           [[0.20974289, 0.1808782 , 0.18161033, 0.20220006, 0.22556852,
-                             0.        , 0.        , 0.        , 0.        , 0.        ],
-                            [0.20973803, 0.18088503, 0.18162282, 0.20220187, 0.22555229,
-                             0.        , 0.        , 0.        , 0.        , 0.        ],
-                            [0.20973288, 0.18088858, 0.1816678 , 0.20219383, 0.2255169 ,
-                             0.        , 0.        , 0.        , 0.        , 0.        ]],
-                           [[0.20974289, 0.1808782 , 0.18161033, 0.20220006, 0.22556852,
-                             0.        , 0.        , 0.        , 0.        , 0.        ],
-                            [0.20973803, 0.18088503, 0.18162282, 0.20220187, 0.22555229,
-                             0.        , 0.        , 0.        , 0.        , 0.        ],
-                            [0.20972022, 0.1809091 , 0.18161656, 0.20222935, 0.22552474,
-                             0.        , 0.        , 0.        , 0.        , 0.        ]]],
-                           dtype='float32')
     seq_scores = np.array([[3.8197377],
                            [5.081118 ],
                            [3.8068485],
@@ -679,7 +650,6 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
     expected_result = [sockeye.inference.Translator._assemble_translation(*x) for x in zip(
                             best_word_indices[expected_best_indices, np.arange(expected_best_indices.shape[1])],
                             lengths[expected_best_ids],
-                            attentions[expected_best_ids],
                             seq_scores[expected_best_ids],
                             beam_histories,
                             itertools.repeat(None))]
@@ -689,7 +659,6 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
     actual_result = sockeye.inference.Translator._get_best_from_beam(translator,
                                                                      best_hyp_indices,
                                                                      best_word_indices,
-                                                                     attentions,
                                                                      seq_scores,
                                                                      lengths,
                                                                      None,
@@ -698,7 +667,5 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
 
     for expected_translation, actual_translation in zip(expected_result, actual_result):
         assert expected_translation.target_ids == actual_translation.target_ids
-        assert np.array_equal(expected_translation.attention_matrix,
-                              actual_translation.attention_matrix)
         assert expected_translation.score == actual_translation.score
         assert expected_translation.beam_histories == actual_translation.beam_histories

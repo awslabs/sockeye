@@ -15,7 +15,6 @@ import gzip
 import math
 import os
 import re
-import tempfile
 from tempfile import TemporaryDirectory
 
 import mxnet as mx
@@ -37,19 +36,6 @@ def test_chunks(some_list, expected):
     chunk_size = 3
     chunked_list = list(utils.chunks(some_list, chunk_size))
     assert chunked_list == expected
-
-
-def test_get_alignments():
-    attention_matrix = np.asarray([[0.1, 0.4, 0.5],
-                                   [0.2, 0.8, 0.0],
-                                   [0.4, 0.4, 0.2]])
-    test_cases = [(0.5, [(1, 1)]),
-                  (0.8, []),
-                  (0.1, [(0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (2, 0), (2, 2)])]
-
-    for threshold, expected_alignment in test_cases:
-        alignment = list(utils.get_alignments(attention_matrix, threshold=threshold))
-        assert alignment == expected_alignment
 
 
 device_params = [([-4, 3, 5], 6, [0, 1, 2, 3, 4, 5]),
