@@ -183,7 +183,7 @@ def get_lr_scheduler(scheduler_type: str,
                      learning_rate_t_scale: float,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
-                     learning_rate_warmup: Optional[int] = 0,
+                     learning_rate_warmup: int = 0,
                      max_updates: Optional[int] = None) -> Optional[LearningRateScheduler]:
     """
     Returns a learning rate scheduler.

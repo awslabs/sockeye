@@ -347,7 +347,7 @@ class GluonEarlyStoppingTrainer:
                 if self.config.using_horovod and horovod_mpi.hvd.rank() > 0:
                     # Horovod secondary workers: wait for primary worker to send
                     # result.
-                    value_is_better = None  # type: bool
+                    value_is_better = None  # type: Optional[bool]
                     value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
                 else:
                     # Horovod primary worker or non-Horovod: make authoritative

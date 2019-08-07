@@ -85,7 +85,15 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    pass
+
+    # Require at least one stopping criteria
+    check_condition(any((args.max_samples,
+                         args.max_updates,
+                         args.max_checkpoints,
+                         args.max_num_epochs,
+                         args.max_num_checkpoint_not_improved)),
+                    'Please specify at least one stopping criteria: --max-samples --max-updates --max-checkpoints '
+                    '--max-num-epochs --max-num-checkpoint-not-improved')
 
 
 def check_resume(args: argparse.Namespace, output_folder: str, using_horovod: bool = False) -> bool:
@@ -796,14 +804,6 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
         training_model = model.SockeyeModel(model_config)
 
-        # Stopping criteria
-        check_condition(any((args.max_samples,
-                             args.max_updates,
-                             args.max_checkpoints,
-                             args.max_num_epochs,
-                             args.max_num_checkpoint_not_improved)),
-                        'Please specify at least one stopping criteria: --max-samples --max-updates --max-checkpoints '
-                        '--max-num-epochs --max-num-checkpoint-not-improved')
         # Handle options that override training settings
         trainer_config = training.TrainerConfig(
             output_dir=args.output,
