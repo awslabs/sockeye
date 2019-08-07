@@ -241,6 +241,7 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
                                                               source_vocabs=source_vocabs,
                                                               target_vocab=target_vocab,
                                                               model=model,
+                                                              model_folder=model_path,
                                                               sample_size=sample_size,
                                                               batch_size=2,
                                                               beam_size=2)
