@@ -150,7 +150,8 @@ def create_checkpoint_decoder(
         exit_stack: ExitStack,
         train_context: List[mx.Context],
         sockeye_model: model.SockeyeModel,
-        source_vocabs: List[vocab.Vocab], target_vocab: vocab.Vocab) -> Optional[checkpoint_decoder.CheckpointDecoder]:
+        source_vocabs: List[vocab.Vocab], target_vocab: vocab.Vocab,
+        hybridize: bool = True) -> Optional[checkpoint_decoder.CheckpointDecoder]:
     """
     Returns a checkpoint decoder or None.
 
@@ -160,6 +161,7 @@ def create_checkpoint_decoder(
     :param sockeye_model: The Sockeye model instance.
     :param source_vocabs: The source vocabs.
     :param target_vocabs: The target vocab.
+    :param hybridize: Turn hybridization of the Translator on/off (the model is already hybridized or not).
     :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
     sample_size = args.decode_and_evaluate
@@ -189,7 +191,8 @@ def create_checkpoint_decoder(
                                                 model=sockeye_model,
                                                 source_vocabs=source_vocabs,
                                                 target_vocab=target_vocab,
-                                                context=context)
+                                                context=context,
+                                                hybridize=hybridize)
 
 
 def use_shared_vocab(args: argparse.Namespace) -> bool:
@@ -877,7 +880,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
         losses = create_losses(args)
 
-        hybridize = False
+        hybridize = not args.no_hybridization
         if hybridize:
             training_model.hybridize(static_alloc=True)
             for lf in losses:
@@ -894,7 +897,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
         )        
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
-                                               training_model, source_vocabs, target_vocab)
+                                               training_model, source_vocabs, target_vocab, hybridize=hybridize)
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
         return training_state

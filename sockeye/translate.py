@@ -64,6 +64,7 @@ def run_translate(args: argparse.Namespace):
             args.output_type = C.OUTPUT_HANDLER_JSON
     output_handler = get_output_handler(args.output_type,
                                         args.output)
+    hybridize = not args.no_hybridization
 
     with ExitStack() as exit_stack:
         check_condition(len(args.device_ids) == 1, "translate only supports single device for now")
@@ -78,7 +79,7 @@ def run_translate(args: argparse.Namespace):
                                                           model_folders=args.models,
                                                           checkpoints=args.checkpoints,
                                                           dtype=args.dtype,
-                                                          hybridize=True,
+                                                          hybridize=hybridize,
                                                           inference_only=True)
 
 

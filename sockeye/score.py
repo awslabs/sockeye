@@ -70,6 +70,8 @@ def score(args: argparse.Namespace):
         else:
             max_seq_len_source, max_seq_len_target = args.max_seq_len
 
+        hybridize = not args.no_hybridization
+
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
         target = os.path.abspath(args.target)
@@ -97,7 +99,8 @@ def score(args: argparse.Namespace):
                                            score_type=args.score_type,
                                            softmax_temperature=args.softmax_temperature,
                                            constant_length_ratio=constant_length_ratio)
-        batch_scorer.hybridize(static_alloc=True)
+        if hybridize:
+            batch_scorer.hybridize(static_alloc=True)
 
         scorer = scoring.Scorer(model=model,
                                 batch_scorer=batch_scorer,

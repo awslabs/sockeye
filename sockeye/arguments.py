@@ -674,6 +674,13 @@ def add_batch_args(params, default_batch_size=4096):
                              "number of sentences varies. Default: %(default)s.")
 
 
+def add_hybridization_arg(params):
+    params.add_argument('--no-hybridization',
+                        action='store_true',
+                        help='Turn off hybridization. Hybridization builds a static computation graph and computations will therefore be faster. '
+                             'The downside is that one can not set breakpoints to inspect intermediate results. Default: %(default)s.')
+
+
 def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
 
@@ -921,12 +928,14 @@ def add_train_cli_args(params):
     add_training_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_hybridization_arg(params)
 
 
 def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_hybridization_arg(params)
 
 
 def add_score_cli_args(params):
@@ -934,6 +943,7 @@ def add_score_cli_args(params):
     add_vocab_args(params)
     add_device_args(params)
     add_batch_args(params, default_batch_size=500)
+    add_hybridization_arg(params)
 
     params = params.add_argument_group("Scoring parameters")
 

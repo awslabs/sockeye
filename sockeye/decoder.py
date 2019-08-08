@@ -85,8 +85,7 @@ class Decoder(mx.gluon.Block):
     @abstractmethod
     def init_state_from_encoder(self,
                                 encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None,
-                                is_inference: bool = True) -> List[mx.nd.NDArray]:
+                                encoder_valid_length: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
         raise NotImplementedError()
 
     @abstractmethod
