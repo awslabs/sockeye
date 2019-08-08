@@ -14,7 +14,7 @@
 import mxnet as mx
 import numpy as np
 from collections import defaultdict
-
+from abc import abstractmethod, ABC
 
 from . import lexical_constraints as constrained
 from . import lexicon
@@ -26,6 +26,122 @@ from typing import Tuple, Optional, List, Dict, Callable, Union, cast
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class Inference(ABC):
+
+    @abstractmethod
+    def encode_and_initialize(self,
+                              inputs: mx.nd.NDArray,
+                              valid_length: Optional[mx.nd.NDArray] = None,
+                              constant_length_ratio: float = 0.0):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def decode_step(self,
+                    step_input: mx.nd.NDArray,
+                    states: List,
+                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+        raise NotImplementedError()
+
+
+class SingleModelInference(Inference):
+
+    def __init__(self, model: SockeyeModel, skip_softmax: bool = False) -> None:
+        self._model = model
+        self._skip_softmax = skip_softmax
+
+    def encode_and_initialize(self,
+                              inputs: mx.nd.NDArray,
+                              valid_length: Optional[mx.nd.NDArray] = None,
+                              constant_length_ratio: float = 0.0):
+        states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, constant_length_ratio)
+        predicted_output_length = predicted_output_length.expand_dims(axis=1)
+        return states, predicted_output_length
+
+    def decode_step(self,
+                    step_input: mx.nd.NDArray,
+                    states: List,
+                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+        logits, states, _ = self._model.decode_step(step_input, states, vocab_slice_ids)
+        logits = logits.astype('float32', copy=False)
+        scores = -logits if self._skip_softmax else -logits.log_softmax(axis=-1)
+        return scores, states
+
+
+class EnsembleInference(Inference):
+
+    def __init__(self, models: List[SockeyeModel], ensemble_mode: str = 'linear') -> None:
+        self._models = models
+        if ensemble_mode == 'linear':
+            self._interpolation = self.linear_interpolation
+        elif ensemble_mode == 'log_linear':
+            self._interpolation = self.log_linear_interpolation
+        else:
+            raise ValueError()
+
+    def encode_and_initialize(self,
+                              inputs: mx.nd.NDArray,
+                              valid_length: Optional[mx.nd.NDArray] = None,
+                              constant_length_ratio: float = 0.0):
+        model_states = []  # type: List[List[mx.nd.NDArray]]
+        predicted_output_lengths = []  # type: List[mx.nd.NDArray]
+        for model in self._models:
+            states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, constant_length_ratio)
+            predicted_output_lengths.append(predicted_output_length)
+            model_states.append(states)
+        # average predicted output lengths, (batch, 1)
+        predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=1), axis=1, keepdims=True)
+        return model_states, predicted_output_lengths
+
+    def decode_step(self,
+                    step_input: mx.nd.NDArray,
+                    states: List,
+                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+        outputs, new_states = [], []
+        for model, model_states in zip(self._models, states):
+            logits, model_states, _ = model.decode_step(step_input, model_states, vocab_slice_ids)
+            logits = logits.astype('float32', copy=False)
+            probs = logits.softmax(axis=-1)
+            outputs.append(probs)
+            new_states.append(model_states)
+        scores = self._interpolation(outputs)
+        return scores, new_states
+
+    @staticmethod
+    def linear_interpolation(predictions):
+        return -mx.nd.log(utils.average_arrays(predictions))  # pylint: disable=invalid-unary-operand-type
+
+    @staticmethod
+    def log_linear_interpolation(predictions):
+        log_probs = utils.average_arrays([p.log() for p in predictions])
+        return -log_probs.log_softmax()  # pylint: disable=invalid-unary-operand-type
+
+
+def _repeat_states(states: List, beam_size) -> List:
+    repeated_states = []
+    for state in states:
+        if isinstance(state, List):
+            state = _repeat_states(state, beam_size)
+        elif isinstance(state, mx.nd.NDArray):
+            state = state.repeat(repeats=beam_size, axis=0)
+        else:
+            ValueError("state list can only be nested list or NDArrays")
+        repeated_states.append(state)
+    return repeated_states
+
+
+def _sort_states(states: List, best_hyp_indices: mx.nd.NDArray) -> List:
+    sorted_states = []
+    for state in states:
+        if isinstance(state, List):
+            state = _sort_states(state, best_hyp_indices)
+        elif isinstance(state, mx.nd.NDArray):
+            state = mx.nd.take(state, best_hyp_indices)
+        else:
+            ValueError("state list can only be nested list or NDArrays")
+        sorted_states.append(state)
+    return sorted_states
 
 
 def get_encoder(models: List[SockeyeModel], constant_length_ratio, beam_size) -> Callable:
@@ -41,25 +157,9 @@ def get_encoder(models: List[SockeyeModel], constant_length_ratio, beam_size) ->
         model_states = []  # type: List[ModelState]
         predicted_output_lengths = []  # type: List[mx.nd.NDArray]
         for model in models:  # type: SockeyeModel
-            # Encode input. Shape: (batch, length, num_hidden), (batch,)
-            source_encoded, source_encoded_lengths = model.encode(sources, valid_length=source_length)
-
-            # Length task prediction
-            if model.length_ratio is not None:
-                # (batch,)
-                predicted_length_ratio = model.predict_length_ratio(source_encoded, source_encoded_lengths)
-                predicted_output_length = predicted_length_ratio * source_encoded_lengths
-            elif constant_length_ratio > 0.0:
-                # (batch,)
-                predicted_output_length = source_encoded_lengths * constant_length_ratio
-            else:
-                # (batch,)
-                predicted_output_length = mx.nd.zeros_like(source_encoded_lengths)
+            # TODO states not repeated
+            decoder_init_states, predicted_output_length = model.encode_and_initialize(sources, source_length, constant_length_ratio)
             predicted_output_lengths.append(predicted_output_length)
-
-            # Decoder init states
-            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths,
-                                                                        is_inference=True)
             # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
             decoder_init_states = [s.repeat(repeats=beam_size, axis=0) for s in decoder_init_states]
             model_state = ModelState(decoder_init_states)
@@ -107,6 +207,7 @@ def get_decoder(models: List[SockeyeModel], skip_softmax, interpolation_func: Ca
 
 
 class BeamSearch(mx.gluon.Block):
+    # TODO: misses constraint decoding
 
     def __init__(self,
                  beam_size: int,
@@ -116,19 +217,18 @@ class BeamSearch(mx.gluon.Block):
                  beam_search_stop: str,
                  num_source_factors: int,
                  get_max_output_length: Callable,
-                 encoders: Callable,
-                 decoders: Callable):
+                 inference: Inference):
         super().__init__(prefix='beam_search_')
         self.beam_size = beam_size
         self.start_id = start_id
         self.context = context
         self.vocab_target = vocab_target
         self._get_max_output_length = get_max_output_length
-        self._encoders = encoders
-        self._decoders = decoders
+        self._inference = inference
         self.skip_topk = False
         self.beam_search_stop = beam_search_stop
         self.num_source_factors = num_source_factors
+        self.constant_length_ratio = 0.0  # TODO
 
         with self.name_scope():
             self._sort_by_index = SortByIndex(prefix='sort_by_index_')
@@ -224,7 +324,9 @@ class BeamSearch(mx.gluon.Block):
                                   val=np.inf, ctx=self.context)
 
         # (0) encode source sentence, returns a list
-        model_states, estimated_reference_lengths = self._encoders(source, source_length)
+        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length, self.constant_length_ratio)
+        # repeat states to beam_size
+        model_states = _repeat_states(model_states, self.beam_size)
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
@@ -233,9 +335,7 @@ class BeamSearch(mx.gluon.Block):
         for t in range(1, max_output_length):
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
-            target_dists, model_states = self._decoders(prev_word=best_word_indices,
-                                                           states=model_states,
-                                                           vocab_slice_ids=vocab_slice_ids)
+            target_dists, model_states = self._inference.decode_step(best_word_indices, model_states, vocab_slice_ids)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
@@ -283,8 +383,7 @@ class BeamSearch(mx.gluon.Block):
                     break
 
             # (9) update models' state with winning hypotheses (ascending)
-            for ms in model_states:
-                ms.sort_state(best_hyp_indices)
+            _sort_states(model_states, best_hyp_indices)
 
         logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
 

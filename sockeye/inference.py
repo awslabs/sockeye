@@ -920,6 +920,10 @@ class Translator:
                                             brevity_penalty=self.brevity_penalty)  # type: Callable
 
 
+        if len(self.models) == 1:
+            inference = SingleModelInference(model=self.models[0], skip_softmax=self.skip_softmax)
+        else:
+            inference = EnsembleInference(models=self.models, ensemble_mode=ensemble_mode)
         self._beam_searcher = BeamSearch(
             beam_size=self.beam_size,
             start_id=self.start_id,
@@ -928,8 +932,7 @@ class Translator:
             beam_search_stop=self.beam_search_stop,
             num_source_factors=self.models[0].num_source_factors,
             get_max_output_length=self.get_max_output_length,
-            encoders=get_encoder(models, self.constant_length_ratio, beam_size=self.beam_size),
-            decoders=get_decoder(models, skip_softmax=self.skip_softmax, interpolation_func=self.interpolation_func)
+            inference=inference
         )
         self._beam_searcher.initialize()
         self._beam_searcher.hybridize(static_alloc=True)
