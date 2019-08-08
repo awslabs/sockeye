@@ -26,6 +26,7 @@ from typing import cast, Optional, Dict, List, Tuple, Union
 
 import mxnet as mx
 from mxnet import gluon
+from mxnet.contrib import amp
 
 from . import arguments
 from . import checkpoint_decoder
@@ -33,6 +34,7 @@ from . import constants as C
 from . import data_io
 from . import decoder
 from . import encoder
+from . import horovod_mpi
 from . import layers
 from . import loss
 from . import lr_scheduler
@@ -77,7 +79,15 @@ def check_arg_compatibility(args: argparse.Namespace):
 
     :param args: Arguments as returned by argparse.
     """
-    pass
+
+    # Require at least one stopping criteria
+    check_condition(any((args.max_samples,
+                         args.max_updates,
+                         args.max_checkpoints,
+                         args.max_num_epochs,
+                         args.max_num_checkpoint_not_improved)),
+                    'Please specify at least one stopping criteria: --max-samples --max-updates --max-checkpoints '
+                    '--max-num-epochs --max-num-checkpoint-not-improved')
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -86,11 +96,17 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
 
     :param args: Arguments as returned by argparse.
     :param output_folder: Main output folder for the model.
+
     :return: Flag signaling if we are resuming training and the directory with
         the training status.
     """
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
+        # Horovod secondary workers: wait for primary worker to create the sub-
+        # directory where secondary workers create output directories.
+        primary_worker_dir_check = False
+        horovod_mpi.MPI.COMM_WORLD.bcast(primary_worker_dir_check, root=0)
     if os.path.exists(output_folder):
         if args.overwrite_output:
             logger.info("Removing existing output folder %s.", output_folder)
@@ -119,6 +135,12 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
                         "Will start training from scratch.", output_folder)
     else:
         os.makedirs(output_folder)
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() == 0:
+        # Horovod primary worker: make sure sub-directory for secondary worker
+        # outputs exists and signal secondary workers.
+        os.makedirs(os.path.join(output_folder, C.HOROVOD_SECONDARY_WORKERS_DIRNAME), exist_ok=True)
+        primary_worker_dir_check = True
+        horovod_mpi.MPI.COMM_WORLD.bcast(primary_worker_dir_check, root=0)
 
     return resume_training
 
@@ -219,6 +241,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
     validation_target = str(os.path.abspath(args.validation_target))
 
+    if args.horovod:
+        horovod_data_error_msg = "Horovod training requires prepared training data.  Use `python -m " \
+                                 "sockeye.prepare_data` and specify with %s" % C.TRAINING_ARG_PREPARED_DATA
+        check_condition(args.prepared_data is not None, horovod_data_error_msg)
     either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
                                        "with %s." % (C.TRAINING_ARG_SOURCE,
                                                      C.TRAINING_ARG_TARGET,
@@ -561,7 +587,8 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
-    effective_batch_size = args.batch_size * args.update_interval
+    num_workers = 1 if not args.horovod else horovod_mpi.hvd.size()
+    effective_batch_size = args.batch_size * args.update_interval * num_workers
 
     # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
     # inside the TrainingModel.
@@ -589,15 +616,12 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     else:
         raise ValueError("Invalid weight initialization type: %s" % args.weight_init)
 
-    # TODO: remove lr schedulers entirely and let the early stopping trainer handle learning rates.
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                             args.checkpoint_interval,
-                                             none_if_negative(args.learning_rate_half_life),
+                                             args.learning_rate_t_scale,
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
-                                             args.learning_rate_schedule,
-                                             args.learning_rate_warmup)
-
+                                             args.learning_rate_warmup,
+                                             args.max_updates)
     config = OptimizerConfig(name=args.optimizer,
                              params=optimizer_params,
                              kvstore=args.kvstore,
@@ -608,9 +632,8 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     config.set_lr_scheduler(lr_sched)
     logger.info("Optimizer: %s | kvstore=%s | params=%s | initializer=%s",
                 config.name, config.kvstore, config.params, config.initializer)
-    if args.update_interval > 1:
-        logger.info("Gradient accumulation over %d batches. Effective batch size: %d",
-                    args.update_interval, effective_batch_size)
+    logger.info("Gradient accumulation over %d batch(es) by %d worker(s). Effective batch size: %d",
+                args.update_interval, num_workers, effective_batch_size)
     return config
 
 
@@ -654,8 +677,7 @@ def fixed_param_names_from_stragegy(config: model.ModelConfig,
             # Any decoder layer.
             return not name.startswith(C.DECODER_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
-            # First and last encoder and decoder layers for RNN,
-            # Transformer, and CNN models.
+            # First and last encoder and decoder layers.
             return not (name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, 0)) or
                         name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, num_encoder_layers - 1)) or
                         name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, 0)) or
@@ -689,6 +711,32 @@ def train(args: argparse.Namespace) -> training.TrainState:
         temp_dir = tempfile.TemporaryDirectory()  # Will be automatically removed
         args.output = temp_dir.name
         args.max_updates = 0
+
+    # Automatic mixed precision training
+    using_amp = False
+    if args.amp:
+        using_amp = True
+        amp.init()
+
+    # When using Horovod, multiple workers (instances of sockeye.train) are
+    # launched via OpenMPI.  Each worker has a rank (unique among all workers in
+    # the training run) and a local rank (unique on the current host).  For
+    # example, running on 2 hosts with 4 slots each will assign ranks 0-7 and
+    # local ranks 0-3.
+    if args.horovod:
+        if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
+            raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
+        horovod_mpi.hvd.init()
+        # Each worker uses a separate output directory.  The primary worker
+        # (rank 0) writes files to the root of the output directory (standard
+        # behavior).  Secondary workers write files to rank-named
+        # sub-directories.
+        if horovod_mpi.hvd.rank() > 0:
+            args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_mpi.hvd.rank()))
+            # Do not keep extensive checkpoint histories for secondary workers
+            args.keep_last_params = 1
+        # Use a different random seed for each worker
+        args.seed += horovod_mpi.hvd.rank()
 
     utils.seed_rngs(args.seed)
 
@@ -774,28 +822,29 @@ def train(args: argparse.Namespace) -> training.TrainState:
             check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
                             "Minimum number of epochs must be smaller than maximum number of epochs")
 
-        # Fixed training schedule always runs for a set number of updates
-        if args.learning_rate_schedule:
-            trainer_config.min_updates = None
-            trainer_config.max_updates = sum(num_updates for (_, num_updates) in args.learning_rate_schedule)
-            trainer_config.max_num_checkpoint_not_improved = -1
-            trainer_config.min_samples = None
-            trainer_config.max_samples = None
-            trainer_config.min_epochs = None
-            trainer_config.max_epochs = None
-
         optimizer_config = create_optimizer_config(args)
         training_model.initialize(optimizer_config.initializer, ctx=context)
         if args.params is not None:  # load existing parameters if present
             training_model.load_parameters(filename=args.params,
                                            ctx=context,
-                                           allow_missing=args.allow_missing_params or model_config.lhuc)
+                                           allow_missing=args.allow_missing_params or model_config.lhuc,
+                                           cast_dtype=True,
+                                           dtype_source='current')
         params = training_model.collect_params()
         # set grad_req for fixed params
         params = set_grad_req_for_fixed_params(config=model_config,
                                                params=params,
                                                fixed_param_names=args.fixed_param_names,
                                                fixed_param_strategy=args.fixed_param_strategy)
+
+        # When using Horovod, synchronize the parameter initialization point
+        # across all workers by broadcasting worker 0's values.  This is not
+        # required when resuming training as synchronized training states
+        # already exist.
+        if horovod_mpi.using_horovod() and not resume_training:
+            for ctx in context:
+                with mx.Context(ctx):
+                    horovod_mpi.hvd.broadcast_parameters(params, root_rank=0)
 
         if args.dtype == C.DTYPE_FP16:
             training_model.cast(C.DTYPE_FP16)
@@ -809,11 +858,23 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
         kvstore = mx.kvstore.create(args.kvstore)
 
-        gluon_trainer = gluon.Trainer(params,
-                                      optimizer_config.name,
-                                      optimizer_config.params,
-                                      kvstore=kvstore,
-                                      update_on_kvstore=None)
+        if horovod_mpi.using_horovod():
+            # Horovod provides a trainer that subclasses gluon.Trainer and uses
+            # allreduce to collect averaged gradients across all workers for
+            # each update.
+            gluon_trainer = horovod_mpi.hvd.DistributedTrainer(params,
+                                                               optimizer_config.name,
+                                                               optimizer_config.params)
+        else:
+            gluon_trainer = gluon.Trainer(params,
+                                          optimizer_config.name,
+                                          optimizer_config.params,
+                                          kvstore=kvstore,
+                                          update_on_kvstore=False if using_amp else None)
+
+        if using_amp:
+            amp.init_trainer(gluon_trainer)
+
         losses = create_losses(args)
 
         hybridize = False
@@ -828,7 +889,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
             trainer=gluon_trainer,
             loss_functions=losses,
             context=context,
-            dtype=args.dtype
+            dtype=args.dtype,
+            using_amp=using_amp
         )        
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,

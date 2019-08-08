@@ -35,6 +35,7 @@ import numpy as np
 import portalocker
 
 from . import __version__, constants as C
+from . import horovod_mpi
 from .log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
@@ -357,6 +358,7 @@ def determine_context(device_ids: List[int],
     :param disable_device_locking: Disable Sockeye's device locking feature.
     :param lock_dir: Directory to place device lock files in.
     :param exit_stack: An ExitStack from contextlib.
+
     :return: A list with the context(s) to run on.
     """
     if use_cpu:
@@ -365,11 +367,19 @@ def determine_context(device_ids: List[int],
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
                         "No GPUs found, consider running on the CPU with --use-cpu ")
-        if disable_device_locking:
-            context = expand_requested_device_ids(device_ids)
+        if horovod_mpi.using_horovod():
+            # Running with Horovod/OpenMPI: GPU(s) are determined by local rank
+            check_condition(len(device_ids) == 1 and device_ids[0] < 0,
+                            "When using Horovod, --device-ids should be a negative integer indicating the number of "
+                            "GPUs each worker should use.")
+            n_ids = -device_ids[0]
+            context = [mx.gpu(_id + horovod_mpi.hvd.local_rank() * n_ids) for _id in range(n_ids)]
         else:
-            context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
-        context = [mx.gpu(gpu_id) for gpu_id in context]
+            if disable_device_locking:
+                context = expand_requested_device_ids(device_ids)
+            else:
+                context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
+            context = [mx.gpu(gpu_id) for gpu_id in context]
     return context
 
 
