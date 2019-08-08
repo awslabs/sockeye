@@ -11,15 +11,28 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [2.0.0]
+
 ### Changed
+
 - Update to [MXNet 1.5.0](https://github.com/apache/incubator-mxnet/tree/1.5.0)
 - Moved `SockeyeModel` implementation and all layers to [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html)
 - Removed support for Python 3.4.
+- Removed outdated Autopilot module
+- Removed unused training options: Eve, Nadam, RMSProp, Nag, Adagrad, and Adadelta optimizers, `fixed-step` and `fixed-rate-inv-t` learning rate schedulers
+- Updated and renamed learning rate scheduler `fixed-rate-inv-sqrt-t` -> `inv-sqrt-decay`
+- Added script for plotting metrics files: [sockeye_contrib/plot_metrics.py](sockeye_contrib/plot_metrics.py)
 - /TODO/
+
+### Added
+
+- Added distrbuted training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
+- Added `linear-decay` learning rate scheduler
+- Added training option `--learning-rate-t-scale` for time-based decay schedulers
 
 ## [1.18.103]
 ### Added
-- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine 
+- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine
   translation to the image captioning module.
 
 ## [1.18.102]
@@ -48,7 +61,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.96]
 ### Changed
-- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line. 
+- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line.
 
 ## [1.18.95]
 ### Changed

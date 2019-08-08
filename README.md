@@ -9,15 +9,23 @@
 This package contains the Sockeye project, a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet (Incubating).
 It implements state-of-the-art encoder-decoder architectures, such as:
 
-- Deep Recurrent Neural Networks with Attention [[Bahdanau, '14](https://arxiv.org/abs/1409.0473)]
 - Transformer Models with self-attention [[Vaswani et al, '17](https://arxiv.org/abs/1706.03762)]
-- Fully convolutional sequence-to-sequence models [[Gehring et al, '17](https://arxiv.org/abs/1705.03122)]
 
-In addition, it provides an experimental [image-to-description module](https://github.com/awslabs/sockeye/tree/master/sockeye/image_captioning) that can be used for image captioning.
-Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
+Recent developments and changes are tracked in our [CHANGELOG](CHANGELOG.md).
 
 If you have any questions or discover problems, please [file an issue](https://github.com/awslabs/sockeye/issues/new).
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
+
+## Installation
+
+The easiest way to run Sockeye is with [Docker](https://www.docker.com) or [nvidia-docker](https://github.com/NVIDIA/nvidia-docker).
+To build a Sockeye image with all features enabled, run the build script:
+
+```bash
+python3 sockeye_contrib/docker/build.py
+```
+
+See the [Dockerfile documentation](sockeye_contrib/docker) for more information.
 
 ## Documentation
 

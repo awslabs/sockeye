@@ -25,12 +25,14 @@ from math import sqrt
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
 
 import mxnet as mx
+from mxnet.contrib import amp
 import numpy as np
 
 import sockeye.multiprocessing_utils as mp_utils
 from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
+from . import horovod_mpi
 from . import loss
 from . import lr_scheduler
 from . import utils
@@ -134,7 +136,8 @@ class GluonEarlyStoppingTrainer:
                  trainer: mx.gluon.Trainer,
                  loss_functions: List[loss.Loss],
                  context: List[mx.context.Context],
-                 dtype: str) -> None:
+                 dtype: str,
+                 using_amp: bool = False) -> None:
         self.config = config
         self.model = sockeye_model
         self.trainer = trainer
@@ -143,7 +146,9 @@ class GluonEarlyStoppingTrainer:
         self._parallel = parallel.Parallel(len(context) if len(context) > 1 else 0,
                                            ParallelModel(sockeye_model,
                                                          loss_functions,
-                                                         rescale_factor=self.config.update_interval))
+                                                         trainer,
+                                                         rescale_factor=self.config.update_interval,
+                                                         using_amp=using_amp))
         self.dtype = dtype
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
@@ -241,7 +246,9 @@ class GluonEarlyStoppingTrainer:
                     ", can be continued later" if not self.state.converged else "",
                     self.state.best_checkpoint, self.state.early_stopping_metric, self.state.best_metric)
 
-        self._cleanup(keep_training_state=not self.state.converged and not self.state.diverged)
+        # Always keep the training state to allow continuing training with
+        # different stopping criteria
+        self._cleanup(keep_training_state=True)
         return self.state
 
     def _forward_backward(self, batch: data_io.Batch):
@@ -304,9 +311,9 @@ class GluonEarlyStoppingTrainer:
 
             # repack outputs into a list of loss_values (length = number of shards) for each loss function
             sharded_loss_outputs_per_loss_function = list(zip(*sharded_loss_outputs))
-            # sum loss values and number of samples for each loss function
-            output_per_loss_function = [tuple(mx.nd.add_n(*shard) for shard in zip(*outs)) for outs in
-                                        sharded_loss_outputs_per_loss_function]
+            # sum loss values (on the cpu) and number of samples for each loss function
+            output_per_loss_function = [tuple(mx.nd.add_n(*(s.as_in_context(mx.cpu()) for s in shard))
+                                        for shard in zip(*outs)) for outs in sharded_loss_outputs_per_loss_function]
             # update validation metrics for batch
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, output_per_loss_function):
                 loss_metric.update(loss_value.asscalar(), num_samples.asscalar())
@@ -328,9 +335,28 @@ class GluonEarlyStoppingTrainer:
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
-                if utils.metric_value_is_better(value,
-                                                self.state.best_metric,
-                                                self.config.early_stopping_metric):
+                # When using Horovod, the primary worker makes an authoritative
+                # check of whether metric value has improved and broadcasts the
+                # result to secondary workers.  Non-determinism in the order of
+                # GPU operations can lead to slight numeric variation across
+                # workers, causing potential desync if each worker makes its own
+                # check for key training decisions (reducing learning rate,
+                # early stopping, etc.).
+                if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
+                    # Horovod secondary workers: wait for primary worker to send
+                    # result.
+                    value_is_better = None  # type: Optional[bool]
+                    value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
+                else:
+                    # Horovod primary worker or non-Horovod: make authoritative
+                    # metric check.
+                    value_is_better = utils.metric_value_is_better(value,
+                                                                   self.state.best_metric,
+                                                                   self.config.early_stopping_metric)
+                    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() == 0:
+                        # Horovod primary worker: broadcast result.
+                        horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
+                if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
                     self.state.best_metric = value
@@ -347,7 +373,8 @@ class GluonEarlyStoppingTrainer:
         """
         True if model has converged w.r.t early stopping criteria (patience).
         """
-        if 0 <= self.config.max_num_checkpoint_not_improved <= self.state.num_not_improved:
+        if self.config.max_num_checkpoint_not_improved is not None and \
+                0 <= self.config.max_num_checkpoint_not_improved <= self.state.num_not_improved:
             logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                         self.config.max_num_checkpoint_not_improved, self.state.num_not_improved)
             return True
@@ -580,10 +607,17 @@ class GluonEarlyStoppingTrainer:
 
 class ParallelModel(parallel.Parallelizable):
 
-    def __init__(self, model: Callable, loss_functions: List[loss.Loss], rescale_factor: float) -> None:
+    def __init__(self,
+                 model: Callable,
+                 loss_functions: List[loss.Loss],
+                 trainer: mx.gluon.Trainer,
+                 rescale_factor: float,
+                 using_amp: bool = False) -> None:
         self.model = model
         self.loss_functions = loss_functions
+        self.trainer = trainer
         self.rescale_factor = rescale_factor
+        self.using_amp = using_amp
 
     def forward_backward(self, shard: Tuple) -> List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]:
         """
@@ -597,8 +631,12 @@ class ParallelModel(parallel.Parallelizable):
             sum_losses = mx.nd.add_n(*loss_values) / self.rescale_factor
             # Note: rescaling works for all loss functions except softmax output, which requires grad_scale to be set
             # directly in the op call (see loss function implementation).
-        # backward on the sum of losses, weights are defined in the loss blocks themselves.
-        sum_losses.backward()
+            if self.using_amp:
+                with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
+                    mx.autograd.backward(scaled_loss)
+            else:
+                # backward on the sum of losses, weights are defined in the loss blocks themselves.
+                sum_losses.backward()
         return loss_outputs
 
 

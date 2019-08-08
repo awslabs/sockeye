@@ -15,8 +15,6 @@ import sockeye.constants as C
 import sockeye.decoder
 import sockeye.transformer
 
-step_tests = [(C.GRU_TYPE, True), (C.LSTM_TYPE, False)]
-
 
 def test_get_decoder():
     config = sockeye.transformer.TransformerConfig(

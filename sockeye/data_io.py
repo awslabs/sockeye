@@ -30,6 +30,7 @@ import numpy as np
 
 from . import config
 from . import constants as C
+from . import horovod_mpi
 from . import vocab
 from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
 
@@ -1347,12 +1348,27 @@ class ParallelDataSet(Sized):
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
         """
-        Loads a dataset from a binary .npy file.
+        Loads a dataset from a binary .npy file.  When running Horovod, the data
+        is sliced and each worker loads a different slice based on its rank.
         """
         data = mx.nd.load(fname)
         n = len(data) // 2
         source = data[:n]
         target = data[n:2 * n]
+        if horovod_mpi.using_horovod() and horovod_mpi.hvd.size() > 1:
+            split_index = horovod_mpi.hvd.rank()
+            total_splits = horovod_mpi.hvd.size()
+            i = split_index / total_splits
+            j = (split_index + 1) / total_splits
+            # Load this worker's slice of each bucket.  If the bucket is empty,
+            # there is no need to slice and attempting to do so will raise an
+            # error.
+            source = [s[math.floor(i * s.shape[0]):math.floor(j * s.shape[0])]
+                      if s.shape[0] > 0
+                      else s for s in source]
+            target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])]
+                      if t.shape[0] > 0
+                      else t for t in target]
         assert len(source) == len(target)
         return ParallelDataSet(source, target)
 
@@ -1622,7 +1638,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  bucket_batch_sizes,
                  num_factors: int = 1,
                  permute: bool = True,
-                 dtype='float32') -> None:
+                 dtype = 'float32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          num_factors=num_factors, permute=permute, dtype=dtype)
         assert len(shards_fnames) > 0

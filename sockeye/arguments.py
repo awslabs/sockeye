@@ -24,7 +24,6 @@ import yaml
 
 from . import constants as C
 from . import data_io
-from .lr_scheduler import LearningRateSchedulerFixedStep
 from . import utils
 
 
@@ -168,25 +167,6 @@ def float_greater_or_equal(threshold: float) -> Callable:
         return value_to_check
 
     return check_greater_equal
-
-
-def learning_schedule() -> Callable:
-    """
-    Returns a method that can be used in argument parsing to check that the argument is a valid learning rate schedule
-    string.
-
-    :return: A method that can be used as a type in argparse.
-    """
-
-    def parse(schedule_str):
-        try:
-            schedule = LearningRateSchedulerFixedStep.parse_schedule_str(schedule_str)
-        except ValueError:
-            raise argparse.ArgumentTypeError(
-                "Learning rate schedule string should have form rate1:num_updates1[,rate2:num_updates2,...]")
-        return schedule
-
-    return parse
 
 
 def simple_dict() -> Callable:
@@ -673,6 +653,8 @@ def add_model_parameters(params):
     model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
                               help="Data type.")
 
+    model_params.add_argument('--amp', action='store_true', help='Use MXNet\'s automatic mixed precision (AMP).')
+
 
 def add_batch_args(params, default_batch_size=4096):
     params.add_argument('--batch-size', '-b',
@@ -726,18 +708,16 @@ def add_training_args(params):
                               choices=C.METRICS,
                               help='Metric to optimize with early stopping {%(choices)s}. Default: %(default)s.')
 
-    train_params.add_argument('--min-updates',
-                              type=int,
-                              default=None,
-                              help='Minimum number of updates before training can stop. Default: %(default)s.')
-    train_params.add_argument('--max-updates',
-                              type=int,
-                              default=None,
-                              help='Maximum number of updates. Default: %(default)s.')
     train_params.add_argument('--update-interval',
                               type=int,
                               default=1,
                               help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
+    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
+                              type=int_greater_or_equal(1),
+                              default=4000,
+                              help='Checkpoint and evaluate every x updates (update-interval * batches). '
+                                   'Default: %(default)s.')
+
     train_params.add_argument('--min-samples',
                               type=int,
                               default=None,
@@ -746,23 +726,28 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of samples. Default: %(default)s.')
-    train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
-                              type=int_greater_or_equal(1),
-                              default=4000,
-                              help='Checkpoint and evaluate every x updates (update-interval * batches). '
-                                   'Default: %(default)s.')
-    train_params.add_argument('--max-num-checkpoint-not-improved',
+    train_params.add_argument('--min-updates',
                               type=int,
-                              default=32,
-                              help='Maximum number of checkpoints the model is allowed to not improve in '
-                                   '<optimized-metric> on validation data before training is stopped. '
-                                   'Default: %(default)s.')
+                              default=None,
+                              help='Minimum number of updates before training can stop. Default: %(default)s.')
+    train_params.add_argument('--max-updates',
+                              type=int,
+                              default=None,
+                              help='Maximum number of updates. Default: %(default)s.')
+
     train_params.add_argument('--max-checkpoints',
                               type=int,
                               default=None,
                               help='Maximum number of checkpoints to continue training the model '
                                    'before training is stopped. '
                                    'Default: %(default)s.')
+    train_params.add_argument('--max-num-checkpoint-not-improved',
+                              type=int,
+                              default=None,
+                              help='Maximum number of checkpoints the model is allowed to not improve in '
+                                   '<optimized-metric> on validation data before training is stopped. '
+                                   'Default: %(default)s.')
+
     train_params.add_argument('--min-num-epochs',
                               type=int,
                               default=None,
@@ -799,6 +784,12 @@ def add_training_args(params):
                               type=simple_dict(),
                               default=None,
                               help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
+
+    train_params.add_argument('--horovod',
+                              action='store_true',
+                              help='Use Horovod/OpenMPI for distributed training (Sergeev and Del Balso 2018, '
+                                   'arxiv.org/abs/1802.05799).  When using this option, run Sockeye with `horovodrun '
+                                   '-np ... -H ... python`.')
 
     train_params.add_argument("--kvstore",
                               type=str,
@@ -854,9 +845,14 @@ def add_training_args(params):
                               default=C.LR_SCHEDULER_PLATEAU_REDUCE,
                               choices=C.LR_SCHEDULERS,
                               help='Learning rate scheduler type. Default: %(default)s.')
+    train_params.add_argument('--learning-rate-t-scale',
+                              type=float,
+                              default=1.0,
+                              help="Step number is multiplied by this value when determining learning rate for the "
+                                   "current step. Default: %(default)s.")
     train_params.add_argument('--learning-rate-reduce-factor',
                               type=float,
-                              default=0.7,
+                              default=0.9,
                               help="Factor to multiply learning rate with "
                                    "(for 'plateau-reduce' learning rate scheduler). Default: %(default)s.")
     train_params.add_argument('--learning-rate-reduce-num-not-improved',
@@ -864,17 +860,6 @@ def add_training_args(params):
                               default=8,
                               help="For 'plateau-reduce' learning rate scheduler. Adjust learning rate "
                                    "if <optimized-metric> did not improve for x checkpoints. Default: %(default)s.")
-    train_params.add_argument('--learning-rate-schedule',
-                              type=learning_schedule(),
-                              default=None,
-                              help="For 'fixed-step' scheduler. Fully specified learning schedule in the form"
-                                   " \"rate1:num_updates1[,rate2:num_updates2,...]\". Overrides all other args related"
-                                   " to learning rate and stopping conditions. Default: %(default)s.")
-    train_params.add_argument('--learning-rate-half-life',
-                              type=float,
-                              default=10,
-                              help="Half-life of learning rate in checkpoints. For 'fixed-rate-*' "
-                                   "learning rate schedulers. Default: %(default)s.")
     train_params.add_argument('--learning-rate-warmup',
                               type=int,
                               default=0,
@@ -915,7 +900,7 @@ def add_training_args(params):
 
     train_params.add_argument('--seed',
                               type=int,
-                              default=13,
+                              default=1,
                               help='Random seed. Default: %(default)s.')
 
     train_params.add_argument('--keep-last-params',
