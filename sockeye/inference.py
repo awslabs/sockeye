@@ -33,6 +33,9 @@ from . import utils
 from . import vocab
 from .model import SockeyeModel
 
+
+from .beam_search import *
+
 logger = logging.getLogger(__name__)
 
 
@@ -916,6 +919,22 @@ class Translator:
                                             length_penalty=self.length_penalty,
                                             brevity_penalty=self.brevity_penalty)  # type: Callable
 
+
+        self._beam_searcher = BeamSearch(
+            beam_size=self.beam_size,
+            start_id=self.start_id,
+            context=self.context,
+            vocab_target=self.vocab_target,
+            beam_search_stop=self.beam_search_stop,
+            num_source_factors=self.models[0].num_source_factors,
+            get_max_output_length=self.get_max_output_length,
+            encoders=get_encoder(models, self.constant_length_ratio, beam_size=self.beam_size),
+            decoders=get_decoder(models, skip_softmax=self.skip_softmax, interpolation_func=self.interpolation_func)
+        )
+        self._beam_searcher.initialize()
+        self._beam_searcher.hybridize(static_alloc=True)
+        print(self._beam_searcher)
+
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "nbest_size=%s ensemble_mode=%s max_batch_size=%d avoiding=%d dtype=%s)",
                     len(self.models),
@@ -1212,12 +1231,10 @@ class Translator:
 
         :return: Sequence of translations.
         """
-        return self._get_best_from_beam(*self._beam_search(source,
-                                                           source_length,
-                                                           restrict_lexicon,
-                                                           raw_constraints,
-                                                           raw_avoid_list,
-                                                           max_output_lengths))
+        return self._get_best_from_beam(*self._beam_searcher(source,
+                                                             source_length,
+                                                             restrict_lexicon,
+                                                             max_output_lengths))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: mx.nd.NDArray) -> Tuple[List[ModelState], mx.nd.NDArray]:
         """
@@ -1564,8 +1581,8 @@ class Translator:
                             best_word_indices: np.ndarray,
                             seq_scores: np.ndarray,
                             lengths: np.ndarray,
-                            estimated_reference_lengths: Optional[mx.nd.NDArray],
-                            constraints: List[Optional[constrained.ConstrainedHypothesis]],
+                            estimated_reference_lengths: Optional[mx.nd.NDArray] = None,
+                            constraints: List[Optional[constrained.ConstrainedHypothesis]] = [],
                             beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
         Return the nbest (aka n top) entries from the n-best list.
