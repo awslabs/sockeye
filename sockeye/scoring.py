@@ -155,12 +155,15 @@ class ScoringModel(model.SockeyeModel):
 
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+            target_decoded, pointer_scores = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
                                                           target_embed, target_embed_length, target_embed_seq_len)
 
             # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(mx.sym.reshape(data=target_decoded, shape=(-3, 0)))
+            if self.config.num_pointers:
+                logits = mx.sym.concat(logits, pointer_scores, dim=1)
+            
             # logits after reshape: (batch_size, target_seq_len, target_vocab_size)
             logits = mx.sym.reshape(data=logits, shape=(-4, -1, target_embed_seq_len, 0))
 

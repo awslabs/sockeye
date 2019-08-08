@@ -88,7 +88,11 @@ def run_translate(args: argparse.Namespace):
             override_dtype=args.override_dtype,
             output_scores=output_handler.reports_score(),
             sampling=args.sample)
-
+        
+        if any([model.config.num_pointers for model in models]):
+            check_condition(args.restrict_lexicon is None,
+                            "The pointer mechanism does not currently work with vocabulary restriction.")
+        
         restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
         if args.restrict_lexicon is not None:
             logger.info(str(args.restrict_lexicon))

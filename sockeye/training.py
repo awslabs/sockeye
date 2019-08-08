@@ -148,7 +148,8 @@ class TrainingModel(model.SockeyeModel):
                                                            source_embed_seq_len)
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+            # pointer_scores: (batch-size, target_seq_len, source_seq_len)
+            target_decoded, pointer_scores = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
                                                           target_embed, target_embed_length, target_embed_seq_len)
 
             # target_decoded: (batch_size * target_seq_len, decoder_depth)
@@ -157,7 +158,14 @@ class TrainingModel(model.SockeyeModel):
             # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(target_decoded)
-
+            
+            if self.config.num_pointers:
+                # pointer_scores: (batch-size * target_seq_len, source_seq_len)
+                pointer_scores = mx.sym.reshape(data=pointer_scores, shape=(-3, 0))
+                
+                # Concatenate the output vocabulary logits to the pointer scores
+                logits = mx.sym.concat(logits, pointer_scores, dim=1)
+            
             # 1) standard cross-entropy loss
             net_outputs = [self.model_loss.get_loss(logits, labels)]
             # 2) length task losses
