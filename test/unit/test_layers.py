@@ -68,7 +68,7 @@ def test_positional_embeddings():
     assert np.allclose(out[1], expected_fixed_embedding)
 
     # steps
-    steps = mx.nd.array([2, 3])
+    steps = mx.nd.expand_dims(mx.nd.array([2, 3]), axis=1)
     out = b(data, steps).asnumpy()
     assert np.allclose(out[0], expected_fixed_embedding[2])
     assert np.allclose(out[1], expected_fixed_embedding[3])

@@ -96,10 +96,11 @@ class SockeyeModel(mx.gluon.Block):
     time.
 
     :param config: Model configuration.
+    :param inference_only: Use the model only for inference, enabling optimizations.
     :param prefix: Name prefix for all parameters of this model.
     """
 
-    def __init__(self, config: ModelConfig, prefix: str = '', **kwargs) -> None:
+    def __init__(self, config: ModelConfig, inference_only: bool = False, prefix: str = '', **kwargs) -> None:
         super().__init__(prefix=prefix, **kwargs)
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
@@ -120,7 +121,7 @@ class SockeyeModel(mx.gluon.Block):
 
             # encoder & decoder first (to know the decoder depth)
             self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, prefix=self.prefix)
+            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, prefix=self.prefix)
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
@@ -193,7 +194,7 @@ class SockeyeModel(mx.gluon.Block):
         target_embed, target_embed_length = self.embedding_target(target, target_length)
         source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
 
-        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, is_inference=False)
+        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length)
         target = self.decoder.decode_seq(target_embed, states=states)
 
         output = self.output_layer(target, None)
@@ -371,7 +372,8 @@ def load_model(model_folder: str,
                context: Union[List[mx.context.Context], mx.context.Context] = mx.cpu(),
                dtype: Optional[str] = None,
                checkpoint: Optional[int] = None,
-               hybridize: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
+               hybridize: bool = True,
+               inference_only: bool = False) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
     """
     Load a model from model_folder.
 
@@ -380,6 +382,7 @@ def load_model(model_folder: str,
     :param checkpoint: Checkpoint to use. If none, uses best checkpoint.
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
+    :param inference_only: Use the model only for inference, enabling optimizations.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     :return:
     """
@@ -391,14 +394,15 @@ def load_model(model_folder: str,
     model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
     logger.info("Disabling dropout layers for performance reasons")
-    model_config.disable_dropout()
+    if inference_only:
+        model_config.disable_dropout()
 
     if checkpoint is None:
         params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    model = SockeyeModel(model_config)
+    model = SockeyeModel(model_config, inference_only=inference_only)
     model.initialize(ctx=context)
     model.cast(model_config.dtype)
 
@@ -434,8 +438,9 @@ def load_model(model_folder: str,
 def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
-                dtype: Optional[str] = None,
-                hybridize: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
+                dtype: Optional[str] = C.DTYPE_FP32,
+                hybridize: bool = True,
+                inference_only: bool = False) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -444,6 +449,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
+    :param inference_only: Use the model only for inference, enabling optimizations.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -462,7 +468,8 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                                               context=context,
                                               dtype=dtype,
                                               checkpoint=checkpoint,
-                                              hybridize=hybridize)
+                                              hybridize=hybridize,
+                                              inference_only=inference_only)
         models.append(model)
         source_vocabs.append(src_vcbs)
         target_vocabs.append(trg_vcb)

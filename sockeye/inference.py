@@ -781,12 +781,12 @@ class Translator:
                  ensemble_mode: str,
                  length_penalty: LengthPenalty,
                  batch_size: int,
-                 beam_size: int,
                  beam_prune: float,
                  beam_search_stop: str,
                  models: List[SockeyeModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
+                 beam_size: int = 5,
                  nbest_size: int = 1,
                  restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
                  avoid_list: Optional[str] = None,
@@ -1247,8 +1247,7 @@ class Translator:
             predicted_output_lengths.append(predicted_output_length)
 
             # Decoder init states
-            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths,
-                                                                        is_inference=True)
+            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
             # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
             decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
             model_state = ModelState(decoder_init_states)
@@ -1687,7 +1686,6 @@ class Translator:
                 [self.vocab_target_inv[x] for x in word_ids if x != 0])
             logger.info('%d %d %d %d %.2f %s', i + 1, finished[i].asscalar(), inactive[i].asscalar(), unmet, score,
                         hypothesis)
-
 
 class PruneHypotheses(mx.gluon.HybridBlock):
     """

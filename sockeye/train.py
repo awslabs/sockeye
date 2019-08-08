@@ -15,12 +15,6 @@
 Simple Training CLI.
 """
 
-# Start the forkserver. It is important that this is done before any other imports so that the forkserver is in a clean
-# state.
-import sockeye.multiprocessing_utils as mp
-mp.initialize()
-
-
 import argparse
 import logging
 import os
@@ -151,15 +145,23 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     return resume_training
 
 
-def create_checkpoint_decoder(args: argparse.Namespace,
-                              exit_stack: ExitStack,
-                              train_context: List[mx.Context]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
+def create_checkpoint_decoder(
+        args: argparse.Namespace,
+        exit_stack: ExitStack,
+        train_context: List[mx.Context],
+        sockeye_model: model.SockeyeModel,
+        source_vocabs: List[vocab.Vocab], target_vocab: vocab.Vocab,
+        hybridize: bool = True) -> Optional[checkpoint_decoder.CheckpointDecoder]:
     """
     Returns a checkpoint decoder or None.
 
     :param args: Arguments as returned by argparse.
-    :param exit_stack: An ExitStack from contextlib.
-    :param train_context: Context for training.
+    :param exit_stack: The exit stack potentially used to aquire GPUs with.
+    :param train_context: The training contexts.
+    :param sockeye_model: The Sockeye model instance.
+    :param source_vocabs: The source vocabs.
+    :param target_vocabs: The target vocab.
+    :param hybridize: Turn hybridization of the Translator on/off (the model is already hybridized or not).
     :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
     sample_size = args.decode_and_evaluate
@@ -172,9 +174,7 @@ def create_checkpoint_decoder(args: argparse.Namespace,
     if sample_size == 0:
         return None
 
-    if args.use_cpu or args.decode_and_evaluate_use_cpu:
-        context = mx.cpu()
-    elif args.decode_and_evaluate_device_id is not None:
+    if args.decode_and_evaluate_device_id is not None:
         context = utils.determine_context(device_ids=[args.decode_and_evaluate_device_id],
                                           use_cpu=False,
                                           disable_device_locking=args.disable_device_locking,
@@ -184,11 +184,15 @@ def create_checkpoint_decoder(args: argparse.Namespace,
         # default decode context is the last training device
         context = train_context[-1]
 
-    return checkpoint_decoder.CheckpointDecoder(context=context,
+    return checkpoint_decoder.CheckpointDecoder(model_folder=args.output,
                                                 inputs=[args.validation_source] + args.validation_source_factors,
                                                 references=args.validation_target,
-                                                model=args.output,
-                                                sample_size=sample_size)
+                                                sample_size=sample_size,
+                                                model=sockeye_model,
+                                                source_vocabs=source_vocabs,
+                                                target_vocab=target_vocab,
+                                                context=context,
+                                                hybridize=hybridize)
 
 
 def use_shared_vocab(args: argparse.Namespace) -> bool:
@@ -876,7 +880,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
 
         losses = create_losses(args)
 
-        hybridize = True
+        hybridize = not args.no_hybridization
         if hybridize:
             training_model.hybridize(static_alloc=True)
             for lf in losses:
@@ -890,9 +894,12 @@ def train(args: argparse.Namespace) -> training.TrainState:
             context=context,
             dtype=args.dtype,
             using_amp=using_amp
-        )
+        )        
 
-        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter)
+        cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
+                                               training_model, source_vocabs, target_vocab, hybridize=hybridize)
+
+        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
         return training_state
 
 

@@ -25,12 +25,13 @@ import mxnet as mx
 
 import sockeye.output_handler
 import sockeye.translate
-from sockeye.model import load_model
+import sockeye.model
 from . import constants as C
 from . import data_io
 from . import evaluate
 from . import inference
 from . import utils
+from . import vocab
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +40,17 @@ class CheckpointDecoder:
     """
     Decodes a (random sample of a) dataset using parameters at given checkpoint and computes BLEU against references.
 
-    :param context: MXNet context to bind the model to.
+    :param model_folder: The model folder where checkpoint decoder outputs will be written to.
     :param inputs: Path(s) to file containing input sentences (and their factors).
     :param references: Path to file containing references.
-    :param model: Model to load.
+    :param source_vocabs: The source vocabularies.
+    :param target_vocab: The target vocabulary.
+    :param context: The devices to use for decoding.
+    :param model: The translation model.
     :param max_input_len: Maximum input length.
     :param batch_size: Batch size.
     :param beam_size: Size of the beam.
     :param nbest_size: Size of nbest lists.
-    :param bucket_width_source: Source bucket width.
     :param length_penalty_alpha: Alpha factor for the length penalty
     :param length_penalty_beta: Beta factor for the length penalty
     :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
@@ -55,13 +58,17 @@ class CheckpointDecoder:
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param sample_size: Maximum number of sentences to sample and decode. If <=0, all sentences are used.
     :param random_seed: Random seed for sampling. Default: 42.
+    :param hybridize: Turn on hybridization of the translator.
     """
 
     def __init__(self,
-                 context: mx.context.Context,
+                 model_folder: str,
                  inputs: List[str],
                  references: str,
-                 model: str,
+                 source_vocabs: List[vocab.Vocab],
+                 target_vocab: vocab.Vocab,
+                 model: sockeye.model.SockeyeModel,
+                 context: mx.Context,
                  max_input_len: Optional[int] = None,
                  batch_size: int = 16,
                  beam_size: int = C.DEFAULT_BEAM_SIZE,
@@ -73,8 +80,8 @@ class CheckpointDecoder:
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  ensemble_mode: str = 'linear',
                  sample_size: int = -1,
-                 random_seed: int = 42) -> None:
-        self.context = context
+                 random_seed: int = 42,
+                 hybridize: bool = True) -> None:
         self.max_input_len = max_input_len
         self.max_output_length_num_stds = max_output_length_num_stds
         self.ensemble_mode = ensemble_mode
@@ -109,44 +116,41 @@ class CheckpointDecoder:
                 self.batch_size = sample_size
 
         for i, factor in enumerate(self.inputs_sentences):
-            write_to_file(factor, os.path.join(self.model, C.DECODE_IN_NAME % i))
-        write_to_file(self.target_sentences, os.path.join(self.model, C.DECODE_REF_NAME))
+            write_to_file(factor, os.path.join(model_folder, C.DECODE_IN_NAME % i))
+        write_to_file(self.target_sentences, os.path.join(model_folder, C.DECODE_REF_NAME))
 
         self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
 
-        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d, context=%s)",
-                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.target_sentences),
-                    context)
+        # TODO: possibly support decoding on multiple GPUs
+        self.translator = inference.Translator(
+            batch_size=self.batch_size,
+            context=context,
+            ensemble_mode=self.ensemble_mode,
+            length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+            brevity_penalty=inference.BrevityPenalty(weight=0.0),
+            beam_prune=0.0,
+            beam_search_stop='all',
+            nbest_size=self.nbest_size,
+            models=[self.model],
+            source_vocabs=source_vocabs,
+            target_vocab=target_vocab,
+            restrict_lexicon=None,
+            store_beam=False,
+            hybridize=hybridize)
+        
+        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
+                    max_input_len if max_input_len is not None else -1, beam_size, model, len(self.target_sentences))
 
     def decode_and_evaluate(self,
-                            checkpoint: Optional[int] = None,
                             output_name: str = os.devnull) -> Dict[str, float]:
         """
         Decodes data set and evaluates given a checkpoint.
 
-        :param checkpoint: Checkpoint to load parameters from.
         :param output_name: Filename to write translations to. Defaults to /dev/null.
         :return: Mapping of metric names to scores.
         """
-        model, source_vocabs, target_vocab = load_model(model_folder=self.model,
-                                                        context=self.context,
-                                                        dtype=None,
-                                                        checkpoint=checkpoint,
-                                                        hybridize=True)
-        translator = inference.Translator(context=self.context,
-                                          ensemble_mode=self.ensemble_mode,
-                                          length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
-                                          brevity_penalty=inference.BrevityPenalty(weight=0.0),
-                                          beam_size=self.beam_size,
-                                          batch_size=self.batch_size,
-                                          beam_prune=0.0,
-                                          beam_search_stop='all',
-                                          nbest_size=self.nbest_size,
-                                          models=[model],
-                                          source_vocabs=source_vocabs,
-                                          target_vocab=target_vocab,
-                                          restrict_lexicon=None,
-                                          store_beam=False)
+
+        # 1. Translate
         trans_wall_time = 0.0
         translations = []
         with data_io.smart_open(output_name, 'w') as output:
@@ -155,26 +159,26 @@ class CheckpointDecoder:
             trans_inputs = []  # type: List[inference.TranslatorInput]
             for i, inputs in enumerate(self.inputs_sentences):
                 trans_inputs.append(sockeye.inference.make_input_from_multiple_strings(i, inputs))
-            trans_outputs = translator.translate(trans_inputs)
+            trans_outputs = self.translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
                 handler.handle(trans_input, trans_output)
                 translations.append(trans_output.translation)
         avg_time = trans_wall_time / len(self.target_sentences)
 
-        # TODO(fhieber): eventually add more metrics (METEOR etc.)
-        return {C.BLEU_VAL: evaluate.raw_corpus_bleu(hypotheses=translations,
+        # 2. Evaluate
+        return {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations,
                                                      references=self.target_sentences,
                                                      offset=0.01),
-                C.CHRF_VAL: evaluate.raw_corpus_chrf(hypotheses=translations,
+                C.CHRF: evaluate.raw_corpus_chrf(hypotheses=translations,
                                                      references=self.target_sentences),
-                C.ROUGE_1_VAL: evaluate.raw_corpus_rouge1(hypotheses=translations,
+                C.ROUGE1: evaluate.raw_corpus_rouge1(hypotheses=translations,
                                                           references=self.target_sentences),
-                C.ROUGE_2_VAL: evaluate.raw_corpus_rouge2(hypotheses=translations,
+                C.ROUGE2: evaluate.raw_corpus_rouge2(hypotheses=translations,
                                                           references=self.target_sentences),
-                C.ROUGE_L_VAL: evaluate.raw_corpus_rougel(hypotheses=translations,
+                C.ROUGEL: evaluate.raw_corpus_rougel(hypotheses=translations,
                                                           references=self.target_sentences),
-                C.LENRATIO_VAL: evaluate.raw_corpus_length_ratio(hypotheses=translations,
+                C.LENRATIO: evaluate.raw_corpus_length_ratio(hypotheses=translations,
                                                                  references=self.target_sentences),
                 C.AVG_TIME: avg_time,
                 C.DECODING_TIME: trans_wall_time}

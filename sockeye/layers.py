@@ -659,7 +659,7 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
         Applies positional embeddings to input data.
 
         :param data: Input data. Shape: (batch, length or 1, num_embed)
-        :param steps: Optional steps input. If given, shape is (batch,)
+        :param steps: Optional steps input. If given, shape is (batch_size or 1, seq_len,)
         :param weight: Positional embedding constant.
         :return: Data with positional embeddings added
         """
@@ -668,8 +668,8 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
             # (batch, length, num_embed)
             pos_embedding = F.slice_like(F.expand_dims(weight, axis=0), data, axes=(1,))
         else:
-            # (batch, 1, num_embed)
-            pos_embedding = F.expand_dims(F.Embedding(steps, weight, self.max_seq_len, self.num_embed), axis=1)
+            # (batch_size or 1, seq_len, num_embed)
+            pos_embedding = F.Embedding(steps, weight, self.max_seq_len, self.num_embed)
 
         if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
             pos_embedding = F.BlockGrad(pos_embedding)
