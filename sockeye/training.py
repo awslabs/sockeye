@@ -21,7 +21,7 @@ import random
 import shutil
 import time
 from functools import reduce
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 
 import mxnet as mx
 import numpy as np
@@ -483,6 +483,23 @@ def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     return sqrt(sum(norm.asscalar() for norm in norms))
 
 
+def safe_custom_metrics_logger(logging_function, attribute_value_mapping, global_step=None):
+    """
+    A thin wrapper for calling a custom metrics logging function, if supplied. As it uses an external function,
+    it should never throw an exception. If there is no logging_function supplied, the function does nothing.
+
+    :param logging_function: The function supplied by a caller of sockeye.train
+    :param attribute_value_mapping: A list or a dictionary of (metric name, metric value) pairs.
+    :param global_step: Optional argument, which can be used e.g. by Tensorboard.
+    """
+    if logging_function is None:
+        return
+    try:
+        logging_function(attribute_value_mapping, global_step)
+    except Exception as e:
+        logger.warning("Didn't use custom metrics logger, exception '{}' occured".format(str(e)))
+
+
 class TrainState:
     """
     Stores the state an EarlyStoppingTrainer instance.
@@ -546,7 +563,8 @@ class EarlyStoppingTrainer:
                  keep_initializations: bool,
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
-                 stop_training_on_decoder_failure: bool = False) -> None:
+                 stop_training_on_decoder_failure: bool = False,
+                 custom_metrics_logger: Optional[Callable] = None) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
@@ -558,6 +576,7 @@ class EarlyStoppingTrainer:
         self.target_vocab = target_vocab
         self.state = None  # type: Optional[TrainState]
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
+        self.custom_metrics_logger = custom_metrics_logger
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
@@ -708,9 +727,13 @@ class EarlyStoppingTrainer:
                             self.state.samples, time_cost, checkpoint_interval / time_cost)
                 for name, val in metric_train.get_name_value():
                     logger.info('Checkpoint [%d]\tTrain-%s=%f', self.state.checkpoint, name, val)
+                safe_custom_metrics_logger(self.custom_metrics_logger, metric_train.get_name_value(),
+                                           global_step=self.state.checkpoint)
                 self._evaluate(validation_iter, metric_val)
                 for name, val in metric_val.get_name_value():
                     logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
+                safe_custom_metrics_logger(self.custom_metrics_logger, metric_val.get_name_value(),
+                                           global_step=self.state.checkpoint)
 
                 # (2) wait for checkpoint decoder results and fill self.state.metrics
                 if process_manager is not None:
@@ -722,6 +745,8 @@ class EarlyStoppingTrainer:
                             self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                             self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
                             utils.write_metrics_file(self.state.metrics, self.metrics_fname)
+                            safe_custom_metrics_logger(self.custom_metrics_logger, decoder_metrics,
+                                                       global_step=decoded_checkpoint)
                     # Start the decoder for the next checkpoint
                     process_manager.start_decoder(self.state.checkpoint)
 

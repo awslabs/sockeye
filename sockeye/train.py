@@ -28,7 +28,7 @@ import sys
 import tempfile
 import logging
 from contextlib import ExitStack
-from typing import Any, cast, Optional, Dict, List, Tuple
+from typing import Any, cast, Optional, Dict, List, Tuple, Callable
 
 import mxnet as mx
 
@@ -838,7 +838,12 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace) -> training.TrainState:
+def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None) -> training.TrainState:
+    """
+    :param custom_metrics_logger: Optional custom metrics logging function. If supplied, takes care of metrics produced
+                                  during training in a custom way. It should accept a list or a dictionary of
+                                  (metric name, metric value) pairs, and an optional global_step/checkpoint parameter.
+    """
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -944,7 +949,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
                                                 keep_initializations=args.keep_initializations,
                                                 source_vocabs=source_vocabs,
                                                 target_vocab=target_vocab,
-                                                stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
+                                                stop_training_on_decoder_failure=args.stop_training_on_decoder_failure,
+                                                custom_metrics_logger=custom_metrics_logger)
 
         training_state = trainer.fit(train_iter=train_iter,
                                      validation_iter=eval_iter,
