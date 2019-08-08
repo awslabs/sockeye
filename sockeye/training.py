@@ -135,7 +135,8 @@ class GluonEarlyStoppingTrainer:
                  loss_functions: List[loss.Loss],
                  context: List[mx.context.Context],
                  dtype: str,
-                 using_amp: bool = False) -> None:
+                 using_amp: bool = False,
+                 custom_metrics_logger: Optional[Callable] = None) -> None:
         self.config = config
         self.model = sockeye_model
         self.trainer = trainer
@@ -150,6 +151,7 @@ class GluonEarlyStoppingTrainer:
         self.dtype = dtype
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
+        self._custom_metrics_logger = custom_metrics_logger
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
@@ -214,8 +216,11 @@ class GluonEarlyStoppingTrainer:
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                             self.state.checkpoint, self.state.updates, self.state.epoch,
                             self.state.samples, time_cost, self.config.checkpoint_interval / time_cost)
-                logger.info('Checkpoint [%d]\t%s',
-                            self.state.checkpoint, "\t".join("Train-%s" % str(lf.metric) for lf in self.loss_functions))
+                logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
+                            "\t".join("Train-%s" % str(lf.metric) for lf in self.loss_functions))
+                safe_custom_metrics_logger(logging_function=self._custom_metrics_logger,
+                                           metrics=(lf.metric for lf in self.loss_functions),
+                                           global_step=self.state.checkpoint)
 
                 val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
 
@@ -327,6 +332,9 @@ class GluonEarlyStoppingTrainer:
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
+        safe_custom_metrics_logger(logging_function=self._custom_metrics_logger,
+                                   metrics=val_metrics,
+                                   global_step=self.state.checkpoint)
 
         return val_metrics
 
@@ -756,3 +764,21 @@ class Speedometer:
         else:
             self.init = True
             self.tic = time.time()
+
+
+def safe_custom_metrics_logger(logging_function: Callable,
+                               metrics: Iterable[loss.LossMetric],
+                               global_step: int = None):
+    """
+    A thin wrapper for calling a custom metrics logging function, if supplied. As it uses an external function,
+    it should never throw an exception. If there is no logging_function supplied, the function does nothing.
+    :param logging_function: The function supplied by a caller of sockeye.train
+    :param metrics: A list of LossMetrics.
+    :param global_step: Optional argument, which can be used e.g. by Tensorboard.
+    """
+    if logging_function is None:
+        return
+    try:
+        logging_function({m.name: m.get() for m in metrics}, global_step)
+    except Exception as e:
+        logging.warning("Didn't use custom metrics logger, exception '{}' occured".format(str(e)))
