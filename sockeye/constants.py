@@ -269,6 +269,7 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
                    "align_plot_prefix", "sure_align_threshold",
                    "keep_last_params", "seed",
                    "max_updates", "min_updates",
+                   "max_seconds",
                    "max_num_epochs", "min_num_epochs",
                    "max_samples", "min_samples", "max_checkpoints"]
 

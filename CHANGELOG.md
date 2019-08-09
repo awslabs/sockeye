@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.106]
+### Added
+- Added an optional time limit for stopping training. The training will stop at the next checkpoint after reaching the time limit.
+
 ## [1.18.105]
 ### Added
 - Added support for a possibility to have a custom metrics logger - a function passed as an extra parameter. If supplied, the logger is called during training.
