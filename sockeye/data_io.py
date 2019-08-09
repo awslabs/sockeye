@@ -228,13 +228,7 @@ def calculate_length_statistics(source_iterables: Sequence[Iterable[Any]],
         length_ratio = target_len / source_len
         mean_and_variance.update(length_ratio)
 
-    num_sents = mean_and_variance.count
-    mean = mean_and_variance.mean
-    if not math.isnan(mean_and_variance.variance):
-        std = math.sqrt(mean_and_variance.variance)
-    else:
-        std = 0.0
-    return LengthStatistics(num_sents, mean, std)
+    return LengthStatistics(mean_and_variance.count, mean_and_variance.mean, mean_and_variance.std)
 
 
 def analyze_sequence_lengths(sources: List[str],
@@ -305,6 +299,7 @@ class DataStatisticsAccumulator:
         self.max_observed_len_source = 0
         self.max_observed_len_target = 0
         self._mean_len_target_per_bucket = [OnlineMeanAndVariance() for _ in range(num_buckets)]
+        self._length_ratio_per_bucket = [OnlineMeanAndVariance() for _ in range(num_buckets)]
 
     def sequence_pair(self,
                       source: List[int],
@@ -316,8 +311,10 @@ class DataStatisticsAccumulator:
 
         source_len = len(source)
         target_len = len(target)
+        length_ratio = target_len / (source_len if source_len else 1.)
 
         self._mean_len_target_per_bucket[bucket_idx].update(target_len)
+        self._length_ratio_per_bucket[bucket_idx].update(length_ratio)
 
         self.num_sents += 1
         self.num_tokens_source += source_len
@@ -333,6 +330,11 @@ class DataStatisticsAccumulator:
     def mean_len_target_per_bucket(self) -> List[Optional[float]]:
         return [mean_and_variance.mean if mean_and_variance.count > 0 else None
                 for mean_and_variance in self._mean_len_target_per_bucket]
+
+    @property
+    def length_ratio_stats_per_bucket(self) -> List[Tuple[Optional[float], Optional[float]]]:
+        return [(mean_and_variance.mean, mean_and_variance.std) if mean_and_variance.count > 0 else (None, None)
+                for mean_and_variance in self._length_ratio_per_bucket]
 
     @property
     def statistics(self):
@@ -351,7 +353,8 @@ class DataStatisticsAccumulator:
                               length_ratio_std=self.length_ratio_std,
                               buckets=self.buckets,
                               num_sents_per_bucket=num_sents_per_bucket,
-                              mean_len_target_per_bucket=self.mean_len_target_per_bucket)
+                              mean_len_target_per_bucket=self.mean_len_target_per_bucket,
+                              length_ratio_stats_per_bucket=self.length_ratio_stats_per_bucket)
 
 
 def shard_data(source_fnames: List[str],
@@ -973,7 +976,8 @@ class DataStatistics(config.Config):
                  length_ratio_std,
                  buckets: List[Tuple[int, int]],
                  num_sents_per_bucket: List[int],
-                 mean_len_target_per_bucket: List[Optional[float]]) -> None:
+                 mean_len_target_per_bucket: List[Optional[float]],
+                 length_ratio_stats_per_bucket: Optional[List[Tuple[Optional[float], Optional[float]]]] = None) -> None:
         super().__init__()
         self.num_sents = num_sents
         self.num_discarded = num_discarded
@@ -987,6 +991,7 @@ class DataStatistics(config.Config):
         self.size_vocab_target = size_vocab_target
         self.length_ratio_mean = length_ratio_mean
         self.length_ratio_std = length_ratio_std
+        self.length_ratio_stats_per_bucket = length_ratio_stats_per_bucket
         self.buckets = buckets
         self.num_sents_per_bucket = num_sents_per_bucket
         self.average_len_target_per_bucket = mean_len_target_per_bucket
@@ -1010,14 +1015,29 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
     check_condition(len(bucket_batch_sizes) == len(data_statistics.buckets),
                     "Number of bucket batch sizes (%d) does not match number of buckets in statistics (%d)."
                     % (len(bucket_batch_sizes), len(data_statistics.buckets)))
-    for bucket_batch_size, num_seq in zip(bucket_batch_sizes, data_statistics.num_sents_per_bucket):
-        if num_seq > 0:
-            logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch.",
-                        bucket_batch_size.bucket,
-                        num_seq,
-                        math.ceil(num_seq / bucket_batch_size.batch_size),
-                        bucket_batch_size.batch_size,
-                        bucket_batch_size.average_words_per_batch)
+    if data_statistics.length_ratio_stats_per_bucket:
+        for bucket_batch_size, num_seq, (lr_mean, lr_std) in zip(bucket_batch_sizes,
+                                                                data_statistics.num_sents_per_bucket,
+                                                                data_statistics.length_ratio_stats_per_bucket):
+            if num_seq > 0:
+                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, "
+                            "trg/src length ratio: %.2f (+-%.2f)",
+                            bucket_batch_size.bucket,
+                            num_seq,
+                            math.ceil(num_seq / bucket_batch_size.batch_size),
+                            bucket_batch_size.batch_size,
+                            bucket_batch_size.average_words_per_batch,
+                            lr_mean, lr_std)
+    else:
+        # TODO: remove with next bump of C.PREPARED_DATA_VERSION
+        for bucket_batch_size, num_seq in zip(bucket_batch_sizes, data_statistics.num_sents_per_bucket):
+            if num_seq > 0:
+                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, ",
+                            bucket_batch_size.bucket,
+                            num_seq,
+                            math.ceil(num_seq / bucket_batch_size.batch_size),
+                            bucket_batch_size.batch_size,
+                            bucket_batch_size.average_words_per_batch)
 
 
 class DataInfo(config.Config):

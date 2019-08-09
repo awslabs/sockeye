@@ -25,6 +25,7 @@ from . import utils as utils_image
 from .. import constants as C
 from .. import data_io
 from .. import lexical_constraints as constrained
+from .. import lexicon
 from .. import model
 from .. import utils
 from .. import vocab
@@ -70,6 +71,7 @@ class ImageCaptioner(Translator):
     :param context: MXNet context to bind modules to.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param length_penalty: Length penalty instance.
+    :param brevity_penalty: Brevity penalty instance.
     :param beam_prune: Beam pruning difference threshold.
     :param beam_search_stop: The stopping criterium.
     :param models: List of models.
@@ -78,6 +80,8 @@ class ImageCaptioner(Translator):
     :param source_image_size: Shape of the image, input of the net
     :param source_root: Root where the images are stored
     :param use_feature_loader: Use precomputed features
+    :param features_in_memory: The features are already loaded in the TranslatorInput object. The option
+            use_feature_loader is ignored in this case, thus overridden.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     """
@@ -86,16 +90,30 @@ class ImageCaptioner(Translator):
                  source_image_size: tuple,
                  source_root: str,
                  use_feature_loader: bool,
+                 features_in_memory=False,
                  **kwargs) -> None:
         super().__init__(**kwargs)
         self.source_image_size = source_image_size
         self.source_root = source_root
         self.use_feature_loader = use_feature_loader
+        self.features_in_memory = features_in_memory
         if self.use_feature_loader:
             self.data_loader = utils_image.load_features
         else:
             self.data_loader = functools.partial(utils_image.load_preprocess_images,
                                                  image_size=self.source_image_size)
+        if self.features_in_memory:
+            self.data_loader = lambda x: x  # Assume that the features are already in memory
+
+    @staticmethod
+    def make_input(sentence_id: int, sentence: str) -> TranslatorInput:
+        """
+        Returns TranslatorInput from input_string
+        :param sentence_id: Input image id.
+        :param sentence: Input image path.
+        :return: Input for translate method.
+        """
+        return TranslatorInput(sentence_id=sentence_id, tokens=[sentence], factors=None)
 
     def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
         """
@@ -105,7 +123,7 @@ class ImageCaptioner(Translator):
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :return: List of translation results.
         """
-        batch_size = len(trans_inputs)
+        batch_size = self.max_batch_size
         # translate in batch-sized blocks over input chunks
         translations = []
         for batch_id, batch in enumerate(utils.grouper(trans_inputs, batch_size)):
@@ -113,7 +131,7 @@ class ImageCaptioner(Translator):
             # underfilled batch will be filled to a full batch size with copies of the 1st input
             rest = batch_size - len(batch)
             if rest > 0:
-                logger.debug("Extending the last batch to the full batch size (%d)", self.batch_size)
+                logger.debug("Extending the last batch to the full batch size (%d)", batch_size)
                 batch = batch + [batch[0]] * rest
             batch_translations = self._translate_nd(*self._get_inference_input(batch))
             # truncate to remove filler translations
@@ -130,6 +148,7 @@ class ImageCaptioner(Translator):
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
+                                                                           Optional[lexicon.TopKLexicon],
                                                                            List[
                                                                                Optional[constrained.RawConstraintList]],
                                                                            List[
@@ -146,16 +165,17 @@ class ImageCaptioner(Translator):
         """
         batch_size = len(trans_inputs)
         image_paths = [None for _ in range(batch_size)]  # type: List[Optional[str]]
+        restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         raw_avoid_list = [None for _ in range(batch_size)]  # type: List[Optional[constrained.RawConstraintList]]
         for j, trans_input in enumerate(trans_inputs):
             # Join relative path with absolute
             path = trans_input.tokens[0]
-            if self.source_root is not None:
+            if self.source_root is not None and not(self.features_in_memory):
                 path = os.path.join(self.source_root, path)
             image_paths[j] = path
             # Preprocess constraints
-            if trans_input.constraints is not None:
+            if trans_input.constraints is not None and not(self.features_in_memory):
                 raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                       trans_input.constraints]
 
@@ -165,9 +185,8 @@ class ImageCaptioner(Translator):
 
         max_input_length = 0
         max_output_lengths = [self.models[0].get_max_output_length(max_input_length)] * len(image_paths)
-        return mx.nd.array(images), max_input_length, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths,
-                                                                                                   ctx=self.context,
-                                                                                                   dtype='int32')
+        return mx.nd.array(images), max_input_length, restrict_lexicon, raw_constraints, raw_avoid_list, \
+                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
 
 def load_models(context: mx.context.Context,

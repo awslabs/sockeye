@@ -42,7 +42,7 @@ TEST_CONFIGS = [
      " --rnn-attention-num-hidden 8 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
      " --decode-and-evaluate 0",
-     "--batch-size 2 --beam-size 10"),
+     "--batch-size 3 --beam-size 10 --beam-prune 1"),
     # Full transformer
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"

@@ -140,6 +140,7 @@ class CheckpointDecoder:
                                           ensemble_mode=self.ensemble_mode,
                                           bucket_source_width=self.bucket_width_source,
                                           length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+                                          brevity_penalty=inference.BrevityPenalty(weight=0.0),
                                           beam_prune=0.0,
                                           beam_search_stop='all',
                                           nbest_size=self.nbest_size,
@@ -175,6 +176,8 @@ class CheckpointDecoder:
                                                           references=self.target_sentences),
                 C.ROUGE_L_VAL: evaluate.raw_corpus_rougel(hypotheses=translations,
                                                           references=self.target_sentences),
+                C.LENRATIO_VAL: evaluate.raw_corpus_length_ratio(hypotheses=translations,
+                                                                 references=self.target_sentences),
                 C.AVG_TIME: avg_time,
                 C.DECODING_TIME: trans_wall_time}
 

@@ -21,8 +21,8 @@ import logging
 from typing import Any, Dict, List
 
 import numpy as np
+import sacrebleu
 
-from sockeye_contrib import sacrebleu
 from . import arguments
 from . import constants as C
 from . import log

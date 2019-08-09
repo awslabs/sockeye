@@ -119,7 +119,29 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
      "--beam-size 1",
      True,
      1.04,
-     0.98)
+     0.98),
+    ("Copy:transformer:transformer:length_task_learned",
+     "--encoder transformer --decoder transformer"
+     " --max-updates 4000"
+     " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64 --num-embed 32"
+     " --length-task length --length-task-weight 1.5 --length-task-layers 3 --metrics perplexity length-ratio-mse"
+     " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
+     "--beam-size 5 --batch-size 2 --brevity-penalty-type learned --brevity-penalty-weight 0.9 --max-input-len %s" % _TEST_MAX_LENGTH,
+     True,
+     1.02,
+     0.96),
+    ("Copy:transformer:transformer:length_task_constant",
+     "--encoder transformer --decoder transformer"
+     " --max-updates 4000"
+     " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64 --num-embed 32"
+     " --length-task ratio --length-task-weight 0.1 --length-task-layers 1 --metrics perplexity length-ratio-mse"
+     " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
+     "--beam-size 5 --batch-size 2 --brevity-penalty-type constant --brevity-penalty-weight 1.0 --brevity-penalty-constant-length-ratio 1 --max-input-len %s" % _TEST_MAX_LENGTH,
+     False,
+     1.02,
+     0.94)
 ])
 def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
@@ -139,6 +161,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                                      data=data,
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     compare_output=True,
                                      seed=seed)
 
         # get best validation perplexity
@@ -207,7 +230,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      0.97),
     ("Sort:transformer:transformer",
      "--encoder transformer --decoder transformer"
-     " --batch-size 16 --batch-type sentence"
+     " --batch-size 16 --update-interval 1 --batch-type sentence"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
@@ -218,7 +241,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      0.97),
     ("Sort:transformer_with_source_factor",
      "--encoder transformer --decoder transformer"
-     " --batch-size 16 --batch-type sentence"
+     " --batch-size 8 --update-interval 2 --batch-type sentence"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
@@ -250,6 +273,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                      data=data,
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     compare_output=True,
                                      seed=seed)
 
         # get best validation perplexity

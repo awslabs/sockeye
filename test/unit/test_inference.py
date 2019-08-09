@@ -18,12 +18,14 @@ from unittest.mock import patch, Mock
 
 import mxnet as mx
 import numpy as np
+import itertools
 import pytest
 
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 import sockeye.lexical_constraints
+import sockeye.lexicon
 import sockeye.utils
 
 _BOS = 0
@@ -44,6 +46,7 @@ def mock_translator(batch_size: int = 1,
                                                   ensemble_mode=None,
                                                   bucket_source_width=None,
                                                   length_penalty=None,
+                                                  brevity_penalty=None,
                                                   beam_prune=None,
                                                   beam_search_stop=None,
                                                   nbest_size=None,
@@ -69,10 +72,16 @@ def mock_translator(batch_size: int = 1,
         translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
         translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
         translator.inf_array = mx.nd.slice(translator.inf_array, begin=(0), end=(beam_size))
+        translator.restrict_lexicon = None
         return translator
 
 
-def test_concat_translations():
+@pytest.mark.parametrize("lp_alpha, lp_beta, bp_weight",
+                         [(1.0, 0.0, 0.0),  # no LP and no BP (default)
+                          (1.0, 2.0, 0.0),  # LP and no BP
+                          (1.0, 2.0, 4.0),  # LP and BP
+                          (1.0, 0.0, 5.0)]) # no LP and BP
+def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     beam_history1 = {"id": [1]}
     beam_history2 = {"id": [2]}
     beam_history3 = {"id": [3]}
@@ -80,18 +89,32 @@ def test_concat_translations():
     expected_target_ids = [0, 1, 2, 0, 8, 9, 0, 3, 4, 5, -1]
     num_src = 7
 
-    length_penalty = sockeye.inference.LengthPenalty()
+    length_penalty = sockeye.inference.LengthPenalty(lp_alpha, lp_beta)
+    brevity_penalty = sockeye.inference.BrevityPenalty(bp_weight)
 
-    expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids))
-
-    translations = [sockeye.inference.Translation([0, 1, 2, -1], np.zeros((4, num_src)), 1.0 / length_penalty.get(4),
-                                                  [beam_history1]),
+    expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids)) - \
+                     brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
+    translations = [sockeye.inference.Translation([0, 1, 2, -1],
+                                                  np.zeros((4, num_src)),
+                                                  1.0 / length_penalty.get(4) - brevity_penalty.get(4, 10),
+                                                  [beam_history1],
+                                                  None,
+                                                  10),
                     # Translation without EOS
-                    sockeye.inference.Translation([0, 8, 9], np.zeros((3, num_src)), 2.0 / length_penalty.get(3),
-                                                  [beam_history2]),
-                    sockeye.inference.Translation([0, 3, 4, 5, -1], np.zeros((5, num_src)), 3.0 / length_penalty.get(5),
-                                                  [beam_history3])]
-    combined = sockeye.inference._concat_translations(translations, stop_ids={_EOS}, length_penalty=length_penalty)
+                    sockeye.inference.Translation([0, 8, 9],
+                                                  np.zeros((3, num_src)),
+                                                  2.0 / length_penalty.get(3) - brevity_penalty.get(3, 11),
+                                                  [beam_history2],
+                                                  None,
+                                                  11),
+                    sockeye.inference.Translation([0, 3, 4, 5, -1],
+                                                  np.zeros((5, num_src)),
+                                                  3.0 / length_penalty.get(5) - brevity_penalty.get(5, 12),
+                                                  [beam_history3],
+                                                  None,
+                                                  12)]
+    combined = sockeye.inference._concat_translations(translations, stop_ids={_EOS},
+                                                      length_penalty=length_penalty, brevity_penalty=brevity_penalty)
 
     assert combined.target_ids == expected_target_ids
     assert combined.attention_matrix.shape == (len(expected_target_ids), len(translations) * num_src)
@@ -128,6 +151,47 @@ def test_length_penalty_int_input():
 
     assert np.isclose(np.asarray([length_penalty.get(length)]), np.asarray(expected_lp)).all()
 
+
+def test_brevity_penalty_default():
+    hyp_lengths = mx.nd.array([[1], [2], [3]])
+    ref_lengths = mx.nd.array([[2], [3], [2]])
+    brevity_penalty = sockeye.inference.BrevityPenalty(0.0)
+    expected_bp = 0.0
+    expected_bp_np = np.array([0.0, 0.0, 0.0])
+
+    assert np.isclose(brevity_penalty.get(hyp_lengths, ref_lengths), expected_bp)
+    assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp_np).all()
+    brevity_penalty.hybridize()
+    assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
+
+
+def test_brevity_penalty():
+    hyp_lengths = mx.nd.array([[1], [2], [3]])
+    ref_lengths = mx.nd.array([[7], [2], [91]])
+    brevity_penalty = sockeye.inference.BrevityPenalty(3.5)
+    expected_bp = np.array([[3.5 * (1 - 7 / 1)], [0.0], [3.5 * (1 - 91 / 3)]])
+
+    assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
+    brevity_penalty.hybridize()
+    assert np.isclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp).all()
+
+
+def test_brevity_penalty_int_input():
+    hyp_length = 3
+    ref_length = 5
+    brevity_penalty = sockeye.inference.BrevityPenalty(2.0)
+    expected_bp = [2.0 * (1 - 5 / 3)]
+
+    assert np.isclose(np.asarray([brevity_penalty.get(hyp_length, ref_length)]), np.asarray(expected_bp)).all()
+
+
+def test_brevity_penalty_empty_ref():
+    hyp_length = 3
+    ref_length = None
+    brevity_penalty = sockeye.inference.BrevityPenalty(2.0)
+    expected_bp = 0.0
+
+    assert np.isclose(np.asarray([brevity_penalty.get(hyp_length, ref_length)]), np.asarray(expected_bp)).all()
 
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
                          [(1, "a test", None, 4),
@@ -290,9 +354,12 @@ def test_make_input_whitespace_delimiter(delimiter):
                           ("a", [])])
 def test_make_input_from_valid_json_string(text, factors):
     sentence_id = 1
+    translator = mock_translator()
     expected_tokens = list(sockeye.data_io.get_tokens(text))
-    inp = sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({C.JSON_TEXT_KEY: text,
-                                                                                 C.JSON_FACTORS_KEY: factors}))
+    inp = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                        json.dumps({C.JSON_TEXT_KEY: text,
+                                                                    C.JSON_FACTORS_KEY: factors}),
+                                                        translator)
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     if factors is not None:
@@ -301,10 +368,40 @@ def test_make_input_from_valid_json_string(text, factors):
         assert inp.factors is None
 
 
+def test_make_input_from_valid_json_string_restrict_lexicon():
+    sentence_id = 1
+    text = 'this is a test'
+    translator = mock_translator()
+
+    lexicon1 = Mock(sockeye.lexicon.TopKLexicon)
+    lexicon2 = Mock(sockeye.lexicon.TopKLexicon)
+    translator.restrict_lexicon = {'lexicon1': lexicon1, 'lexicon2': lexicon2}
+    assert translator.restrict_lexicon['lexicon1'] is not translator.restrict_lexicon['lexicon2']
+
+    restrict_lexicon1 = 'lexicon1'
+    inp1 = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                         json.dumps({C.JSON_TEXT_KEY: text,
+                                                                     C.JSON_RESTRICT_LEXICON_KEY: restrict_lexicon1}),
+                                                         translator)
+    assert inp1.restrict_lexicon is lexicon1
+
+    restrict_lexicon2 = 'lexicon2'
+    inp2 = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                         json.dumps({C.JSON_TEXT_KEY: text,
+                                                                     C.JSON_RESTRICT_LEXICON_KEY: restrict_lexicon2}),
+                                                         translator)
+    assert inp2.restrict_lexicon is lexicon2
+
+    assert inp1.restrict_lexicon is not inp2.restrict_lexicon
+
+
 @pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
 def test_failed_make_input_from_valid_json_string(text, text_key, factors, factors_key):
     sentence_id = 1
-    inp = sockeye.inference.make_input_from_json_string(sentence_id, json.dumps({text_key: text, factors_key: factors}))
+    translator = mock_translator()
+    inp = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                        json.dumps({text_key: text, factors_key: factors}),
+                                                        translator)
     assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
@@ -316,9 +413,10 @@ def test_failed_make_input_from_valid_json_string(text, text_key, factors, facto
                           ("a", [])])
 def test_make_input_from_valid_dict(text, factors):
     sentence_id = 1
+    translator = mock_translator()
     expected_tokens = list(sockeye.data_io.get_tokens(text))
     inp = sockeye.inference.make_input_from_dict(sentence_id, {C.JSON_TEXT_KEY: text,
-                                                               C.JSON_FACTORS_KEY: factors})
+                                                               C.JSON_FACTORS_KEY: factors}, translator)
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     if factors is not None:
@@ -330,7 +428,8 @@ def test_make_input_from_valid_dict(text, factors):
 @pytest.mark.parametrize("text, text_key, factors, factors_key", [("a", "blub", None, "")])
 def test_failed_make_input_from_valid_dict(text, text_key, factors, factors_key):
     sentence_id = 1
-    inp = sockeye.inference.make_input_from_dict(sentence_id, {text_key: text, factors_key: factors})
+    translator = mock_translator()
+    inp = sockeye.inference.make_input_from_dict(sentence_id, {text_key: text, factors_key: factors}, translator)
     assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
@@ -591,7 +690,8 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
                             lengths[expected_best_ids],
                             attentions[expected_best_ids],
                             seq_scores[expected_best_ids],
-                            beam_histories)]
+                            beam_histories,
+                            itertools.repeat(None))]
 
     constraints = [sockeye.lexical_constraints.ConstrainedHypothesis(rc, _EOS) for rc in raw_constraints]
 
@@ -601,6 +701,7 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
                                                                      attentions,
                                                                      seq_scores,
                                                                      lengths,
+                                                                     None,
                                                                      constraints,
                                                                      beam_histories)
 

@@ -121,7 +121,8 @@ def test_get_transformer_encoder():
     assert encoder.encoders[1].__dict__.items() >= dict(num_embed=6, prefix='test_encoder_char_', dtype='float32').items()
 
     assert type(encoder.encoders[2]) == sockeye.encoder.TransformerEncoder
-    assert encoder.encoders[2].__dict__.items() >= dict(prefix='test_encoder_transformer_', dtype='float16').items()
+    assert encoder.encoders[2].prefix == "test_encoder_transformer_"
+    assert encoder.encoders[2].dtype == 'float16'
 
 
 def test_get_convolutional_encoder():

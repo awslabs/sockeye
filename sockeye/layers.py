@@ -13,20 +13,32 @@
 
 import logging
 import math
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Union
 
 import mxnet as mx
-import numpy as np
 
+from . import config
 from . import constants as C
 from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-def activation(data: mx.sym.Symbol, act_type: str) -> mx.sym.Symbol:
+class GeLU(mx.gluon.HybridBlock):
+
+    def __init__(self, prefix=''):
+        super().__init__(prefix=prefix)
+        with self.name_scope():
+            self.act = mx.gluon.nn.Activation(activation="tanh")
+
+    def hybrid_forward(self, F, x):
+        # Approximation of x * gaussian_cdf(x) used by Hendrycks and Gimpel
+        return 0.5 * x * (1 + self.act((math.sqrt(2 / math.pi) * (x + (0.044715 * (x ** 3))))))
+
+
+def get_activation(act_type: str) -> mx.gluon.Block:
     """
-    Apply custom or standard activation.
+    Returns Gluon Block for given activation type.
 
     Custom activation types include:
      - Swish-1, also called Sigmoid-Weighted Linear Unit (SiLU): Ramachandran et
@@ -35,24 +47,27 @@ def activation(data: mx.sym.Symbol, act_type: str) -> mx.sym.Symbol:
      - Gaussian Error Linear Unit (GELU): Hendrycks and Gimpel
        (https://arxiv.org/pdf/1606.08415.pdf)
 
-    :param data: input Symbol of any shape.
     :param act_type: Type of activation.
     :return: output Symbol with same shape as input.
     """
-    # TODO: Contribute these to MXNet?  For now it appears that registered activation types must be implemented in C++.
     if act_type == C.SWISH1:
-        return data * mx.sym.Activation(data, act_type="sigmoid")
+        return mx.gluon.nn.Swish()
     elif act_type == C.GELU:
-        # Approximation of x * gaussian_cdf(x) used by Hendrycks and Gimpel
-        return 0.5 * data * (1 + mx.sym.Activation((math.sqrt(2 / math.pi) * (data + (0.044715 * (data**3)))),
-                                                   act_type="tanh"))
+        return GeLU()
     else:
-        return mx.sym.Activation(data, act_type=act_type)
+        return mx.gluon.nn.Activation(activation=act_type)
 
 
-class LayerNormalization:
+# TODO: remove with next major version update to use mx.gluon.nn.LayerNorm (which uses different parameter naming).
+class LayerNormalization(mx.gluon.nn.HybridBlock):
     """
     Implements Ba et al, Layer Normalization (https://arxiv.org/abs/1607.06450).
+
+    Normalizes hidden units of data as follows:
+
+    data = scale * (data - mean) / sqrt(var + eps) + shift
+
+    Normalization is performed over the last dimension of the input data.
 
     :param prefix: Optional prefix of layer name.
     :param scale: Optional variable for scaling of shape (num_hidden,). Will be created if None.
@@ -65,30 +80,36 @@ class LayerNormalization:
                  scale: Optional[mx.sym.Symbol] = None,
                  shift: Optional[mx.sym.Symbol] = None,
                  scale_init: float = 1.0,
-                 shift_init: float = 0.0) -> None:
-        self.prefix = prefix
-        self.scale = scale if scale is not None else mx.sym.Variable('%s_gamma' % prefix,
-                                                                     init=mx.init.Constant(value=scale_init))
-        self.shift = shift if shift is not None else mx.sym.Variable('%s_beta' % prefix,
-                                                                     init=mx.init.Constant(value=shift_init))
+                 shift_init: float = 0.0,
+                 eps: float = 1e-06) -> None:
+        super().__init__(prefix=prefix)
+        self.eps = eps
+        self.scale = scale
+        if self.scale is None:
+            with self.name_scope():
+                self.scale = self.params.get('_gamma',
+                                             init=mx.init.Constant(value=scale_init),
+                                             allow_deferred_init=True)
+        self.shift = shift
+        if self.shift is None:
+            with self.name_scope():
+                self.shift = self.params.get('_beta',
+                                             init=mx.init.Constant(value=shift_init),
+                                             allow_deferred_init=True)
 
-    def __call__(self, data: mx.sym.Symbol, eps: float = 1e-06) -> mx.sym.Symbol:
-        """
-        Normalizes hidden units of data as follows:
-
-        data = scale * (data - mean) / sqrt(var + eps) + shift
-
-        Normalization is performed over the last dimension of the input data.
-
-        :param data: Data to normalize. Shape: (d0, ..., dn, num_hidden).
-        :param eps: Variance epsilon.
-        :return: inputs_norm: Normalized inputs. Shape: (d0, ..., dn, num_hidden).
-        """
-        return mx.sym.LayerNorm(data=data, gamma=self.scale, beta=self.shift, axis=-1,
-                                eps=eps, output_mean_var=False, name=self.prefix)
+    def hybrid_forward(self, F, data, **params):
+        if isinstance(self.scale, mx.sym.Symbol):
+            scale = self.scale
+        else:
+            scale = params['scale']
+        if isinstance(self.shift, mx.sym.Symbol):
+            shift = self.shift
+        else:
+            shift = params['shift']
+        return F.LayerNorm(data=data, gamma=scale, beta=shift, axis=-1, eps=self.eps, output_mean_var=False)
 
 
-class LHUC:
+class LHUC(mx.gluon.HybridBlock):
     """
     Learning Hidden Unit Contribution
 
@@ -103,25 +124,24 @@ class LHUC:
                  num_hidden: int,
                  weight: Optional[mx.sym.Symbol] = None,
                  prefix: str = "") -> None:
+        super().__init__(prefix=prefix)
         self.num_hidden = num_hidden
-        self.prefix = prefix
-        if weight is None:
-            self.params = mx.sym.Variable(self.prefix + C.LHUC_NAME,
-                                          shape=(self.num_hidden,),
-                                          init=mx.init.Uniform(0.1),
-                                          dtype="float32")
-        else:
-            self.params = weight
+        self.weight = weight
+        if self.weight is None:
+            with self.name_scope():
+                self.lhuc = self.params.get(C.LHUC_NAME, shape=(num_hidden,), init=mx.init.Uniform(0.1))
 
-    def __call__(self,
-                 inputs: mx.sym.Symbol,
-                 name: Optional[str] = None) -> mx.sym.Symbol:
+    def hybrid_forward(self, F, inputs: mx.sym.Symbol, **params) -> mx.sym.Symbol:
+        if isinstance(self.weight, mx.sym.Symbol):
+            weight = self.weight
+        else:
+            weight = params[C.LHUC_NAME]
 
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
         # activation is dampened when the value of the sigmoid is close to 0, and
         # strengthened when it's close to 2 (see also original paper)
-        weight_vector = 2 * mx.sym.Activation(data=self.params, act_type="sigmoid")
-        out = mx.sym.broadcast_mul(weight_vector, inputs, name=name)
+        weight_vector = 2 * F.Activation(data=weight, act_type="sigmoid")
+        out = F.broadcast_mul(weight_vector, inputs)
 
         return out
 
@@ -175,12 +195,14 @@ class OutputLayer:
                  vocab_size: int,
                  weight: Optional[mx.sym.Symbol],
                  weight_normalization: bool,
-                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
+                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX,
+                 name: str = C.LOGITS_NAME) -> None:
         self.vocab_size = vocab_size
         self.prefix = prefix
+        self.name = name
 
         if weight is None:
-            self.w = mx.sym.Variable("%sweight" % self.prefix, shape=(vocab_size, hidden_size))
+            self.w = mx.sym.Variable("%sweight" % self.prefix, shape=(vocab_size, hidden_size), dtype='float32')
         else:
             self.w = weight
 
@@ -212,7 +234,7 @@ class OutputLayer:
                                          weight=self.w,
                                          bias=self.b,
                                          flatten=False,
-                                         name=C.LOGITS_NAME)
+                                         name=self.name)
 
         # Equivalent NDArray implementation (requires passed weights/biases)
         assert isinstance(hidden, mx.nd.NDArray)
@@ -226,7 +248,85 @@ class OutputLayer:
                                     flatten=False)
 
 
-def split_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
+class LengthRatioConfig(config.Config):
+    """
+    Configuration of the length ratio predictor.
+
+    :param layers: Number of layers.
+    :param weight: Weight of this loss.
+    """
+
+    def __init__(self, num_layers: int, weight: float) -> None:
+        super().__init__()
+        self.num_layers = num_layers
+        # TODO: keeping weight here is redundant because it is also stored
+        # in the loss config, but it's used to test if we need length prediction
+        self.weight = weight
+
+
+class LengthRatio:
+    """
+    Defines the length-ratio prediction layer of Sockeye.
+
+    :param hidden_size: Encoder hidden size.
+    :param num_layers: Number of layers.
+    :param prefix: Prefix used for naming.
+    """
+
+    def __init__(self,
+                 hidden_size: int,
+                 num_layers: int,
+                 prefix: str = C.LENRATIOS_OUTPUT_LAYER_PREFIX) -> None:
+        utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
+        self.prefix = prefix
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+
+        self.layers = [mx.gluon.nn.Dense(units=hidden_size, activation='tanh', flatten=False, prefix=prefix + 'dense%d_' % l) \
+                        for l in range(num_layers - 1)]
+        # SoftReLU activation to ensure positiveness of the predicted length ratio
+        self.layers.append(mx.gluon.nn.Dense(units=1, activation='softrelu', flatten=False, prefix=prefix + 'dense%d_' % (num_layers - 1)))
+
+    def __call__(self,
+                 source_encoded: mx.sym.Symbol,
+                 source_encoded_length: mx.sym.Symbol) -> mx.sym.Symbol:
+        """
+        Transformation to the length ratio. Returns a vector.
+
+        :param source_encoded: Encoder representation for n elements. Shape: (n, source_encoded_length, hidden_size).
+        :param source_encoded_length: A vector of encoded sequence lengths. Shape: (n,).
+        :return: Predictions of the ratio length(hypothesis)/length(reference). Shape(n, 1).
+        """
+        # data: (n, hidden_size)
+        data = LengthRatio.average_sources(source_encoded, source_encoded_length)
+        # MLP
+        for layer in self.layers:
+            data = layer(data)
+        # data: (n, 1)
+        return data
+
+    @staticmethod
+    def average_sources(source_encoded: mx.sym.Symbol, source_encoded_length: mx.sym.Symbol) -> mx.nd.NDArray:
+        """
+        Calculate the average of encoded sources taking into account their lengths.
+
+        :param source_encoded: Encoder representation for n elements. Shape: (n, source_encoded_length, hidden_size).
+        :param source_encoded_length: A vector of encoded sequence lengths. Shape: (n,).
+        :return: Average vectors. Shape(n, hidden_size).
+        """
+        # source_masked: (n, source_encoded_length, hidden_size)
+        source_masked = mx.sym.SequenceMask(data=source_encoded,
+                                            axis=1,
+                                            sequence_length=source_encoded_length,
+                                            use_sequence_length=True,
+                                            value=0.)
+        # calculate the proper means of encoded sources
+        averaged = mx.sym.broadcast_div(mx.sym.sum(source_masked, axis=1, keepdims=False),
+                                                   mx.sym.reshape(source_encoded_length, shape=(-1, 1)))
+        return averaged
+
+
+def split_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
     """
     Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
 
@@ -236,14 +336,14 @@ def split_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Sym
     :return: Symbol of shape (batch * heads, length, depth_per_heads).
     """
     # (batch, length, heads, depth_per_head)
-    x = mx.sym.reshape(data=x, shape=(0, -1, heads, depth_per_head))
+    x = F.reshape(x, shape=(0, -1, heads, depth_per_head))
     # (batch, heads, length, depth/heads)
-    x = mx.sym.transpose(data=x, axes=(0, 2, 1, 3))
+    x = F.transpose(x, axes=(0, 2, 1, 3))
     # (batch * heads, length, depth/heads)
-    return mx.sym.reshape(data=x, shape=(-3, -1, depth_per_head))
+    return F.reshape(x, shape=(-3, -1, depth_per_head))
 
 
-def combine_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
+def combine_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
     """
     Returns a symbol with both batch & length, and head & depth dimensions combined.
 
@@ -253,14 +353,14 @@ def combine_heads(x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.S
     :return: Symbol of shape (batch, length, depth).
     """
     # (batch, heads, length, depth_per_head)
-    x = mx.sym.reshape(data=x, shape=(-4, -1, heads, 0, depth_per_head))
+    x = F.reshape(x, shape=(-4, -1, heads, 0, depth_per_head))
     # (batch, length, heads, depth_per_head)
-    x = mx.sym.transpose(x, axes=(0, 2, 1, 3))
+    x = F.transpose(x, axes=(0, 2, 1, 3))
     # (batch, length, depth)
-    return mx.sym.reshape(x, shape=(-1, 0, depth_per_head * heads))
+    return F.reshape(x, shape=(-1, 0, depth_per_head * heads))
 
 
-def broadcast_to_heads(x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
+def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
     """
     Broadcasts batch-major input of shape (batch, d1 ... dn-1) to (batch*heads, d1 ... dn-1).
 
@@ -273,64 +373,51 @@ def broadcast_to_heads(x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: 
     """
     dims = [0] * (ndim - 1)
     # x: (batch, 1)
-    x = mx.sym.expand_dims(x, axis=1)
+    x = F.expand_dims(x, axis=1)
     # x: (batch, heads, dims...)
-    x = mx.sym.broadcast_to(x, shape=[0, num_heads] + dims)
+    x = F.broadcast_to(x, shape=[0, num_heads] + dims)
     if fold_heads:
         # (batch * heads, dims...)
-        return mx.sym.reshape(x, shape=[-3] + dims)
+        return F.reshape(x, shape=[-3] + dims)
     else:
         # x: (batch, heads, dims...)
         return x
 
 
-def dot_attention(queries: mx.sym.Symbol,
-                  keys: mx.sym.Symbol,
-                  values: mx.sym.Symbol,
-                  lengths: Optional[mx.sym.Symbol] = None,
-                  dropout: float = 0.0,
-                  bias: Optional[mx.sym.Symbol] = None,
-                  prefix: Optional[str] = ''):
-    """
-    Computes dot attention for a set of queries, keys, and values.
+class DotAttentionCell(mx.gluon.HybridBlock):
 
-    :param queries: Attention queries. Shape: (n, lq, d).
-    :param keys: Attention keys. Shape: (n, lk, d).
-    :param values: Attention values. Shape: (n, lk, dv).
-    :param lengths: Optional sequence lengths of the keys. Shape: (n,).
-    :param dropout: Dropout probability.
-    :param bias: Optional 3d bias tensor.
-    :param prefix: Optional prefix
-    :return: 'Context' vectors for each query. Shape: (n, lq, dv).
-    """
-    utils.check_condition(lengths is not None or bias is not None,
-                          "Must provide either length or bias argument for masking")
+    def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
+        super().__init__(prefix=prefix)
+        self.dropout = dropout
 
-    # (n, lq, lk)
-    logits = mx.sym.batch_dot(lhs=queries, rhs=keys, transpose_b=True, name='%sdot' % prefix)
-
-    if lengths is not None:
-        # mask lk dimension
-        # (lk, n, lq)
-        logits = mx.sym.transpose(data=logits, axes=(2, 0, 1))
-        logits = mx.sym.SequenceMask(data=logits,
-                                     use_sequence_length=True,
-                                     sequence_length=lengths,
-                                     value=C.LARGE_NEGATIVE_VALUE)
+    def hybrid_forward(self, F, queries, keys, values, lengths=None, bias=None):
+        utils.check_condition(lengths is not None or bias is not None,
+                              "Must provide either length or bias argument for masking")
         # (n, lq, lk)
-        logits = mx.sym.transpose(data=logits, axes=(1, 2, 0))
+        logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
 
-    if bias is not None:
-        logits = mx.sym.broadcast_add(logits, bias, name='%sbias_add' % prefix)
+        if lengths is not None:
+            # mask lk dimension
+            # (lk, n, lq)
+            logits = F.transpose(logits, axes=(2, 0, 1))
+            logits = F.SequenceMask(logits,
+                                    use_sequence_length=True,
+                                    sequence_length=lengths,
+                                    value=C.LARGE_NEGATIVE_VALUE)
+            # (n, lq, lk)
+            logits = F.transpose(data=logits, axes=(1, 2, 0))
 
-    probs = mx.sym.softmax(logits, axis=-1)
-    probs = mx.sym.Dropout(probs, p=dropout) if dropout > 0.0 else probs
+        if bias is not None:
+            logits = F.broadcast_add(logits, bias)
 
-    # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-    return mx.sym.batch_dot(lhs=probs, rhs=values, name='%scontexts' % prefix)
+        probs = F.softmax(logits, axis=-1)
+        probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
+
+        # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
+        return F.batch_dot(lhs=probs, rhs=values)
 
 
-class MultiHeadAttentionBase:
+class MultiHeadAttentionBase(mx.gluon.HybridBlock):
     """
     Base class for Multi-head attention.
 
@@ -346,18 +433,20 @@ class MultiHeadAttentionBase:
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0) -> None:
-        self.prefix = prefix
+        super().__init__(prefix=prefix)
         utils.check_condition(depth_att % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
         self.depth = depth_att
         self.heads = heads
         self.depth_out = depth_out
-        self.dropout = dropout
         self.depth_per_head = self.depth // self.heads
 
-        self.w_h2o = mx.sym.Variable("%sh2o_weight" % prefix)
+        with self.name_scope():
+            self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
+            self.ff_out = mx.gluon.nn.Dense(units=depth_out, flatten=False, use_bias=False, prefix='h2o_')
 
     def _attend(self,
+                F,
                 queries: mx.sym.Symbol,
                 keys: mx.sym.Symbol,
                 values: mx.sym.Symbol,
@@ -377,24 +466,19 @@ class MultiHeadAttentionBase:
         queries = queries * (self.depth_per_head ** -0.5)
 
         # (batch*heads, length, depth/heads)
-        queries = split_heads(queries, self.depth_per_head, self.heads)
-        keys = split_heads(keys, self.depth_per_head, self.heads)
-        values = split_heads(values, self.depth_per_head, self.heads)
-        lengths = broadcast_to_heads(lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
+        queries = split_heads(F, queries, self.depth_per_head, self.heads)
+        keys = split_heads(F, keys, self.depth_per_head, self.heads)
+        values = split_heads(F, values, self.depth_per_head, self.heads)
+        lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
 
         # (batch*heads, query_max_length, depth_per_head)
-        contexts = dot_attention(queries, keys, values,
-                                 lengths=lengths, dropout=self.dropout, bias=bias, prefix=self.prefix)
+        contexts = self.dot_att(queries, keys, values, lengths, bias)
 
         # (batch, query_max_length, depth)
-        contexts = combine_heads(contexts, self.depth_per_head, self.heads)
+        contexts = combine_heads(F, contexts, self.depth_per_head, self.heads)
 
         # contexts: (batch, query_max_length, output_depth)
-        contexts = mx.sym.FullyConnected(data=contexts,
-                                         weight=self.w_h2o,
-                                         no_bias=True,
-                                         num_hidden=self.depth_out,
-                                         flatten=False)
+        contexts = self.ff_out(contexts)
 
         return contexts
 
@@ -417,13 +501,16 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  depth_out: int = 512,
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
-        self.w_i2h = mx.sym.Variable("%si2h_weight" % prefix)
 
-    def __call__(self,
-                 inputs: mx.sym.Symbol,
-                 input_lengths: Optional[mx.sym.Symbol] = None,
-                 bias: Optional[mx.sym.Symbol] = None,
-                 cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:
+        with self.name_scope():
+            self.ff_in = mx.gluon.nn.Dense(units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_')
+
+    # TODO: input types will be problematic when using full Gluon, no Dict allowed. Need to think about cache unpacking.
+    def hybrid_forward(self, F,
+                       inputs: mx.sym.Symbol,
+                       input_lengths: Optional[mx.sym.Symbol] = None,
+                       bias: Optional[mx.sym.Symbol] = None,
+                       cache: Optional[Dict[str, Optional[mx.sym.Symbol]]] = None) -> mx.sym.Symbol:  # mypy: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -438,27 +525,18 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         :return: Symbol of shape (batch, max_length, output_depth).
         """
         # combined: (batch, max_length, depth * 3)
-        combined = mx.sym.FullyConnected(data=inputs,
-                                         weight=self.w_i2h,
-                                         no_bias=True,
-                                         num_hidden=self.depth * 3,
-                                         flatten=False,
-                                         name="%sqkv_transform" % self.prefix)
+        combined = self.ff_in(inputs)
         # split into query, keys and values
         # (batch, max_length, depth)
         # pylint: disable=unbalanced-tuple-unpacking
-        queries, keys, values = mx.sym.split(data=combined, num_outputs=3, axis=2)
+        queries, keys, values = F.split(combined, num_outputs=3, axis=2)
 
         if cache is not None:
             # append new keys & values to cache, update the cache
-            keys = cache['k'] = keys if cache['k'] is None else mx.sym.concat(cache['k'], keys, dim=1)
-            values = cache['v'] = values if cache['v'] is None else mx.sym.concat(cache['v'], values, dim=1)
+            keys = cache['k'] = keys if cache['k'] is None else F.concat(cache['k'], keys, dim=1)
+            values = cache['v'] = values if cache['v'] is None else F.concat(cache['v'], values, dim=1)
 
-        return self._attend(queries,
-                            keys,
-                            values,
-                            lengths=input_lengths,
-                            bias=bias)
+        return self._attend(F, queries, keys, values, lengths=input_lengths, bias=bias)
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
@@ -479,15 +557,17 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  depth_out: int = 512,
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
-        self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
-        self.w_k2h = mx.sym.Variable("%sk2h_weight" % prefix)
-        self.w_v2h = mx.sym.Variable("%sv2h_weight" % prefix)
 
-    def __call__(self,
-                 queries: mx.sym.Symbol,
-                 memory: mx.sym.Symbol,
-                 memory_lengths: Optional[mx.sym.Symbol] = None,
-                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+        with self.name_scope():
+            self.ff_q = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
+            self.ff_k = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='k2h_')
+            self.ff_v = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='v2h_')
+
+    def hybrid_forward(self, F,
+                       queries: mx.sym.Symbol,
+                       memory: mx.sym.Symbol,
+                       memory_lengths: Optional[mx.sym.Symbol] = None,
+                       bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:  # mypy: ignore
         """
         Computes multi-head attention for queries given a memory tensor.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -501,37 +581,39 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :return: Symbol of shape (batch, query_seq_len, output_depth).
         """
         # (batch, query_max_length, depth)
-        queries = mx.sym.FullyConnected(data=queries,
-                                        weight=self.w_q2h,
-                                        no_bias=True,
-                                        num_hidden=self.depth,
-                                        flatten=False,
-                                        name="%sq_transform" % self.prefix)
-
+        queries = self.ff_q(queries)
         # (batch, memory_max_length, depth)
-        keys = mx.sym.FullyConnected(data=memory,
-                                     weight=self.w_k2h,
-                                     no_bias=True,
-                                     num_hidden=self.depth,
-                                     flatten=False,
-                                     name="%sk_transform" % self.prefix)
-
+        keys = self.ff_k(memory)
         # (batch, memory_max_length, depth)
-        values = mx.sym.FullyConnected(data=memory,
-                                       weight=self.w_v2h,
-                                       no_bias=True,
-                                       num_hidden=self.depth,
-                                       flatten=False,
-                                       name="%sv_transform" % self.prefix)
+        values = self.ff_v(memory)
 
-        return self._attend(queries,
-                            keys,
-                            values,
-                            bias=bias,
-                            lengths=memory_lengths)
+        return self._attend(F, queries, keys, values, bias=bias, lengths=memory_lengths)
 
 
-class ProjectedDotAttention:
+class PlainDotAttention(mx.gluon.HybridBlock):
+    """
+    Dot attention layer for queries independent from keys/values.
+    """
+    def __init__(self, prefix=''):
+        super().__init__(prefix=prefix)
+        with self.name_scope():
+            self.dot_att = DotAttentionCell()
+
+    def hybrid_forward(self, F, queries, memory, memory_lengths):
+        """
+        Returns a symbol of shape (batch, max_length, output_depth).
+
+        :param queries: Symbol of shape (batch, queries_max_length, input_depth).
+        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
+        :param memory_lengths: Symbol of shape (batch, 1).
+        :return: Symbol of shape (batch, queries_max_length, output_depth).
+       """
+
+        # (batch*heads, queries_max_length, depth_per_head)
+        return self.dot_att(queries, memory, memory, memory_lengths, None)
+
+
+class ProjectedDotAttention(mx.gluon.HybridBlock):
     """
     Dot attention layer for queries independent from keys/values.
 
@@ -541,18 +623,18 @@ class ProjectedDotAttention:
 
     def __init__(self,
                  prefix: str,
-                 num_hidden) -> None:
-        self.prefix = prefix
+                 num_hidden: int) -> None:
+        super().__init__(prefix=prefix)
         self.num_hidden = num_hidden
-        self.w_q2h = mx.sym.Variable("%sq2h_weight" % prefix)
-        self.b_q2h = mx.sym.Variable("%sq2h_bias" % prefix)
-        self.w_kv2h = mx.sym.Variable("%skv2h_weight" % prefix)
-        self.b_kv2h = mx.sym.Variable("%skv2h_bias" % prefix)
+        with self.name_scope():
+            self.q2h = mx.gluon.nn.Dense(units=num_hidden, flatten=False, use_bias=True)
+            self.kv2h = mx.gluon.nn.Dense(units=num_hidden * 2, flatten=False, use_bias=True)
+            self.dot_att = DotAttentionCell()
 
-    def __call__(self,
-                 queries: mx.sym.Symbol,
-                 memory: mx.sym.Symbol,
-                 memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+    def hybrid_forward(self, F,
+                       queries: mx.sym.Symbol,
+                       memory: mx.sym.Symbol,
+                       memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
         """
         Apply project, apply dot attention and return new context vectors.
 
@@ -562,114 +644,19 @@ class ProjectedDotAttention:
         :return: Symbol of shape (batch, queries_max_length, num_hidden).
         """
         # (batch, memory_max_length, num_hidden * 2)
-        combined = mx.sym.FullyConnected(data=memory,
-                                         weight=self.w_kv2h,
-                                         bias=self.b_kv2h,
-                                         num_hidden=self.num_hidden * 2,
-                                         flatten=False,
-                                         name="%skv_transform" % self.prefix)
+        combined = self.kv2h(memory)
 
         # split into keys and values
         # pylint: disable=unbalanced-tuple-unpacking
-        keys, values = mx.sym.split(data=combined, num_outputs=2, axis=2)
+        keys, values = F.split(data=combined, num_outputs=2, axis=2)
 
         # (batch, queries_max_length, num_hidden)
-        queries = mx.sym.FullyConnected(data=queries,
-                                        weight=self.w_q2h,
-                                        bias=self.b_q2h,
-                                        num_hidden=self.num_hidden,
-                                        flatten=False,
-                                        name="%sq_transform" % self.prefix)
+        queries = self.q2h(queries)
+
         # scale by sqrt(num_hidden)
         queries = queries * (self.num_hidden ** -0.5)
 
         # (batch, queries_max_length, num_hidden)
-        contexts = dot_attention(queries, keys, values, memory_lengths)
+        contexts = self.dot_att(queries, keys, values, memory_lengths, None)
 
         return contexts
-
-
-class PlainDotAttention:
-    """
-    Dot attention layer for queries independent from keys/values.
-    """
-
-    def __call__(self,
-                 queries: mx.sym.Symbol,
-                 memory: mx.sym.Symbol,
-                 memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Returns a symbol of shape (batch, max_length, output_depth).
-
-        :param queries: Symbol of shape (batch, queries_max_length, input_depth).
-        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
-        :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (batch, queries_max_length, output_depth).
-        """
-
-        # (batch*heads, queries_max_length, depth_per_head)
-        contexts = dot_attention(queries, memory, memory, memory_lengths)
-
-        return contexts
-
-
-class PositionalEncodings(mx.operator.CustomOp):
-    """
-    Returns a symbol of shape (1, max_seq_len, num_embed)
-    with positional encodings as in Vaswani et al, 2017.
-
-    :param length: Maximum sequence length.
-    :param depth: Embedding size.
-    """
-
-    def __init__(self, length: int, depth: int) -> None:
-        super().__init__()
-        self.encodings = self.get_encodings(length, depth)
-
-    @staticmethod
-    def get_encodings(length, depth) -> np.ndarray:
-        utils.check_condition(depth % 2 == 0, "Positional embeddings require an even embedding size it "
-                                              "is however %d." % depth)
-        # (1, depth)
-        channels = np.arange(depth // 2).reshape((1, -1))
-
-        # (length, 1)
-        positions = np.arange(0, length).reshape((-1, 1))
-        scaled_positions = positions / np.power(10000, (2 * channels) / depth)
-        # sinusoids:
-        sin = np.sin(scaled_positions)
-        # cosines:
-        cos = np.cos(scaled_positions)
-        # interleave: (1, length, num_embed)
-        encodings = np.hstack([sin, cos]).reshape(1, length, depth)
-        return encodings
-
-    def forward(self, is_train, req, in_data, out_data, aux):
-        self.assign(out_data[0], req[0], self.encodings)
-
-    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
-        pass
-
-
-@mx.operator.register("positional_encodings")
-class PositionalEncodingsProp(mx.operator.CustomOpProp):
-
-    def __init__(self, length: str, depth: str) -> None:
-        super().__init__()
-        self.length = int(length)
-        self.depth = int(depth)
-
-    def list_arguments(self):
-        return []
-
-    def list_outputs(self):
-        return ['output']
-
-    def infer_shape(self, in_shape):
-        return [], [(1, self.length, self.depth)], []
-
-    def infer_type(self, in_type):
-        return [], [np.float32], []
-
-    def create_operator(self, ctx, shapes, dtypes):
-        return PositionalEncodings(length=self.length, depth=self.depth)

@@ -10,6 +10,124 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.105]
+### Added
+- Added support for a possibility to have a custom metrics logger - a function passed as an extra parameter. If supplied, the logger is called during training.
+
+## [1.18.104]
+### Changed
+- Implemented an attention-based copy mechanism as described in [Jia, Robin, and Percy Liang. "Data recombination for neural semantic parsing." (2016)](https://arxiv.org/abs/1606.03622).
+- Added a <ptr\d+> special symbol to explicitly point at an input token in the target sequence
+- Changed the decoder interface to pass both the decoder data and the pointer data.
+- Changed the AttentionState named tuple to add the raw attention scores.
+
+## [1.18.103]
+### Added
+- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine 
+  translation to the image captioning module.
+
+## [1.18.102]
+### Fixed
+- Fixed loading of more than 10 source vocabulary files to be in the right, numerical order.
+
+## [1.18.101]
+### Changed
+- Update to Sacrebleu 1.3.6
+
+## [1.18.100]
+### Fixed
+- Always initializing the multiprocessing context. This should fix issues observed when running `sockeye-train`.
+
+## [1.18.99]
+### Changed
+- Updated to [MXNet 1.4.1](https://github.com/apache/incubator-mxnet/tree/1.4.1)
+
+## [1.18.98]
+### Changed
+- Converted several transformer-related layer implementations to Gluon HybridBlocks. No functional change.
+
+## [1.18.97]
+### Changed
+- Updated to PyYAML 5.1
+
+## [1.18.96]
+### Changed
+- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line. 
+
+## [1.18.95]
+### Changed
+- Removed custom operators from transformer models and replaced them with symbolic operators.
+  Improves Performance.
+
+## [1.18.94]
+### Added
+- Added ability to accumulate gradients over multiple batches (--update-interval). This allows simulation of large
+  batch sizes on environments with limited memory. For example: training with `--batch-size 4096 --update-interval 2`
+  should be close to training with `--batch-size 8192` at smaller memory footprint.
+
+## [1.18.93]
+### Fixed
+- Made `brevity_penalty` argument in `Translator` class optional to ensure backwards compatibility.
+
+## [1.18.92]
+### Added
+- Added sentence length (and length ratio) prediction to be able to discourage hypotheses that are too short at inference time. Can be enabled for training with `--length-task` and with `--brevity-penalty-type` during inference.
+
+## [1.18.91]
+### Changed
+- Multiple lexicons can now be specified with the `--restrict-lexicon` option:
+  - For a single lexicon: `--restrict-lexicon /path/to/lexicon`.
+  - For multiple lexicons: `--restrict-lexicon key1:/path/to/lexicon1 key2:/path/to/lexicon2 ...`.
+  - Use `--json-input` to specify the lexicon to use for each input, ex: `{"text": "some input string", "restrict_lexicon": "key1"}`.
+
+## [1.18.90]
+### Changed
+- Updated to [MXNet 1.4.0](https://github.com/apache/incubator-mxnet/tree/1.4.0)
+- Integration tests no longer check for equivalence of outputs with batch size 2
+
+## [1.18.89]
+### Fixed
+- Made the length ratios per bucket change backwards compatible.
+
+## [1.18.88]
+### Changed
+- Made sacrebleu a pip dependency and removed it from `sockeye_contrib`.
+
+## [1.18.87]
+### Added
+- Data statistics at training time now compute mean and standard deviation of length ratios per bucket.
+  This information is stored in the model's config, but not used at the moment.
+
+## [1.18.86]
+### Added
+- Added the `--fixed-param-strategy` option that allows fixing various model parameters during training via named strategies.
+  These include some of the simpler combinations from [Wuebker et al. (2018)](https://arxiv.org/abs/1811.01990) such as fixing everything except the first and last layers of the encoder and decoder (`all_except_outer_layers`).  See the help message for a full list of strategies.
+
+## [1.18.85]
+### Changed
+- Disabled dynamic batching for `Translator.translate()` by default due to increased memory usage. The default is to
+  fill-up batches to `Translator.max_batch_size`.
+  Dynamic batching can still be enabled if `fill_up_batches` is set to False.
+### Added
+- Added parameter to force training to stop after a given number of checkpoints. Useful when forced to share limited GPU resources.
+
+## [1.18.84]
+### Fixed
+- Fixed lexical constraints bugs that broke batching and caused large drop in BLEU.
+  These were introduced with sampling (1.18.64).
+
+## [1.18.83]
+### Changed
+ - The embedding size is automatically adjusted to the Transformer model size in case it is not specified on the command line.
+
+## [1.18.82]
+### Fixed
+- Fixed type conversion in metrics file reading introduced in 1.18.79.
+
+## [1.18.81]
+### Fixed
+- Making sure the training pickled training state contains the checkpoint decoder's BLEU score of the last checkpoint.
+
 ## [1.18.80]
 ### Fixed
 - Fixed a bug introduced in 1.18.77 where blank lines in the training data resulted in failure.
@@ -155,7 +273,7 @@ In case this is turned on a checkpoint decoder is launched right when training s
 
 ## [1.18.48]
 ### Changed
-- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added. 
+- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added.
 
 ## [1.18.47]
 ### Changed

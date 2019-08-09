@@ -190,7 +190,14 @@ class InferenceModel(model.SockeyeModel):
 
             data_names = [C.SOURCE_NAME]
             label_names = []  # type: List[str]
-            return mx.sym.Group(decoder_init_states), data_names, label_names
+
+            # predict length ratios
+            predicted_length_ratios = []  # type: List[mx.nd.NDArray]
+            if self.length_ratio is not None:
+                # predicted_length_ratios: List[(n, 1)]
+                predicted_length_ratios = [self.length_ratio(source_encoded, source_encoded_length)]
+
+            return mx.sym.Group(decoder_init_states + predicted_length_ratios), data_names, label_names
 
         default_bucket_key = self.max_input_length
         module = mx.mod.BucketingModule(sym_gen=sym_gen,
@@ -232,7 +239,8 @@ class InferenceModel(model.SockeyeModel):
             # target_decoded: (batch_size, decoder_depth)
             (target_decoded,
              attention_probs,
-             states) = self.decoder.decode_step(decode_step,
+             states,
+             pointer_scores) = self.decoder.decode_step(decode_step,
                                                 target_embed_prev,
                                                 source_encoded_seq_len,
                                                 *states)
@@ -243,6 +251,9 @@ class InferenceModel(model.SockeyeModel):
             else:
                 # logits: (batch_size, target_vocab_size)
                 logits = self.output_layer(target_decoded)
+                if self.config.num_pointers:
+                    logits = mx.sym.concat(logits, pointer_scores, dim=1)
+                
                 if self.softmax_temperature is not None:
                     logits = logits / self.softmax_temperature
                 if self.skip_softmax:
@@ -292,7 +303,7 @@ class InferenceModel(model.SockeyeModel):
 
     def run_encoder(self,
                     source: mx.nd.NDArray,
-                    source_max_length: int) -> 'ModelState':
+                    source_max_length: int) -> Tuple['ModelState', mx.nd.NDArray]:
         """
         Runs forward pass of the encoder.
         Encodes source given source length and bucket key.
@@ -310,11 +321,18 @@ class InferenceModel(model.SockeyeModel):
                                 provide_data=self._get_encoder_data_shapes(source_max_length, batch_size))
 
         self.encoder_module.forward(data_batch=batch, is_train=False)
-        decoder_states = self.encoder_module.get_outputs()
+        decoder_init_states = self.encoder_module.get_outputs()
 
+        if self.length_ratio is not None:
+            estimated_length_ratio = decoder_init_states[-1]
+            estimated_length_ratio = mx.nd.repeat(estimated_length_ratio, repeats=self.beam_size, axis=0)
+            decoder_init_states = decoder_init_states[:-1]
+        else:
+            estimated_length_ratio = None
+            decoder_init_states = decoder_init_states
         # replicate encoder/init module results beam size times
-        decoder_states = [mx.nd.repeat(s, repeats=self.beam_size, axis=0) for s in decoder_states]
-        return ModelState(decoder_states)
+        decoder_init_states = [mx.nd.repeat(s, repeats=self.beam_size, axis=0) for s in decoder_init_states]
+        return ModelState(decoder_init_states), estimated_length_ratio
 
     def run_decoder(self,
                     prev_word: mx.nd.NDArray,
@@ -351,7 +369,11 @@ class InferenceModel(model.SockeyeModel):
     @property
     def max_supported_seq_len_source(self) -> Optional[int]:
         """ If not None this is the maximally supported source length during inference (hard constraint). """
-        return self.encoder.get_max_seq_len()
+        max_src_len = self.encoder.get_max_seq_len()
+        if self.config.num_pointers > 0:
+            # Constraint given by the attention-based pointer mechanism
+            max_src_len = self.config.num_pointers if max_src_len is None else min(max_src_len, self.config.num_pointers)
+        return max_src_len
 
     @property
     def max_supported_seq_len_target(self) -> Optional[int]:
@@ -621,22 +643,31 @@ class TranslatorInput:
     :param sentence_id: Sentence id.
     :param tokens: List of input tokens.
     :param factors: Optional list of additional factor sequences.
+    :param restrict_lexicon: Optional lexicon for vocabulary selection.
     :param constraints: Optional list of target-side constraints.
     :param pass_through_dict: Optional raw dictionary of arbitrary input data.
     """
 
-    __slots__ = ('sentence_id', 'tokens', 'factors', 'constraints', 'avoid_list', 'pass_through_dict')
+    __slots__ = ('sentence_id',
+                 'tokens',
+                 'factors',
+                 'restrict_lexicon',
+                 'constraints',
+                 'avoid_list',
+                 'pass_through_dict')
 
     def __init__(self,
                  sentence_id: SentenceId,
                  tokens: Tokens,
                  factors: Optional[List[Tokens]] = None,
+                 restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  constraints: Optional[List[Tokens]] = None,
                  avoid_list: Optional[List[Tokens]] = None,
                  pass_through_dict: Optional[Dict] = None) -> None:
         self.sentence_id = sentence_id
         self.tokens = tokens
         self.factors = factors
+        self.restrict_lexicon = restrict_lexicon
         self.constraints = constraints
         self.avoid_list = avoid_list
         self.pass_through_dict = pass_through_dict
@@ -679,6 +710,7 @@ class TranslatorInput:
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
+                                  restrict_lexicon=self.restrict_lexicon,
                                   constraints=constraints,
                                   avoid_list=self.avoid_list,
                                   pass_through_dict=pass_through_dict)
@@ -691,6 +723,7 @@ class TranslatorInput:
                                tokens=self.tokens + [C.EOS_SYMBOL],
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
+                               restrict_lexicon=self.restrict_lexicon,
                                constraints=self.constraints,
                                avoid_list=self.avoid_list,
                                pass_through_dict=self.pass_through_dict)
@@ -718,7 +751,9 @@ def make_input_from_plain_string(sentence_id: SentenceId, string: str) -> Transl
     return TranslatorInput(sentence_id, tokens=list(data_io.get_tokens(string)), factors=None)
 
 
-def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> TranslatorInput:
+def make_input_from_json_string(sentence_id: SentenceId,
+                                json_string: str,
+                                translator: 'Translator') -> TranslatorInput:
     """
     Returns a TranslatorInput object from a JSON object, serialized as a string.
 
@@ -727,18 +762,21 @@ def make_input_from_json_string(sentence_id: SentenceId, json_string: str) -> Tr
            and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
            for the input text. Constraints and an avoid list can also be added through the "constraints" and "avoid"
            keys.
+    :param translator: A translator object.
     :return: A TranslatorInput.
     """
     try:
         jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
-        return make_input_from_dict(sentence_id, jobj)
+        return make_input_from_dict(sentence_id, jobj, translator)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
         return _bad_input(sentence_id, reason=json_string)
 
 
-def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> TranslatorInput:
+def make_input_from_dict(sentence_id: SentenceId,
+                         input_dict: Dict,
+                         translator: 'Translator') -> TranslatorInput:
     """
     Returns a TranslatorInput object from a JSON object, serialized as a string.
 
@@ -746,6 +784,7 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
     :param input_dict: A dict that must contain a key "text", mapping to the input text, and optionally a key "factors"
            that maps to a list of strings, each of which representing a factor sequence for the input text.
            Constraints and an avoid list can also be added through the "constraints" and "avoid" keys.
+    :param translator: A translator object.
     :return: A TranslatorInput.
     """
     try:
@@ -757,6 +796,23 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
             lengths = [len(f) for f in factors]
             if not all(length == len(tokens) for length in lengths):
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
+                return _bad_input(sentence_id, reason=str(input_dict))
+
+        # Lexicon for vocabulary selection/restriction:
+        # This is only populated when using multiple lexicons, in which case the
+        # restrict_lexicon key must exist and the value (name) must map to one
+        # of the translator's known lexicons.
+        restrict_lexicon = None
+        restrict_lexicon_name = input_dict.get(C.JSON_RESTRICT_LEXICON_KEY)
+        if isinstance(translator.restrict_lexicon, dict):
+            if restrict_lexicon_name is None:
+                logger.error("Must specify restrict_lexicon when using multiple lexicons. Choices: %s"
+                             % ' '.join(sorted(translator.restrict_lexicon)))
+                return _bad_input(sentence_id, reason=str(input_dict))
+            restrict_lexicon = translator.restrict_lexicon.get(restrict_lexicon_name, None)
+            if restrict_lexicon is None:
+                logger.error("Unknown restrict_lexicon '%s'. Choices: %s"
+                             % (restrict_lexicon_name, ' '.join(sorted(translator.restrict_lexicon))))
                 return _bad_input(sentence_id, reason=str(input_dict))
 
         # List of phrases to prevent from occuring in the output
@@ -781,7 +837,8 @@ def make_input_from_dict(sentence_id: SentenceId, input_dict: Dict) -> Translato
             constraints = [list(data_io.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
-                               constraints=constraints, avoid_list=avoid_list, pass_through_dict=input_dict)
+                               restrict_lexicon=restrict_lexicon, constraints=constraints,
+                               avoid_list=avoid_list, pass_through_dict=input_dict)
 
     except Exception as e:
         logger.exception(e, exc_info=True) if not is_python34() else logger.error(e)  # type: ignore
@@ -952,19 +1009,22 @@ class Translation:
                  'attention_matrix',
                  'score',
                  'beam_histories',
-                 'nbest_translations')
+                 'nbest_translations',
+                 'estimated_reference_length')
 
     def __init__(self,
                  target_ids: TokenIds,
                  attention_matrix: np.ndarray,
                  score: float,
                  beam_histories: List[BeamHistory] = None,
-                 nbest_translations: NBestTranslations = None) -> None:
+                 nbest_translations: NBestTranslations = None,
+                 estimated_reference_length: Optional[float] = None) -> None:
         self.target_ids = target_ids
         self.attention_matrix = attention_matrix
         self.score = score
         self.beam_histories = beam_histories if beam_histories is not None else []
         self.nbest_translations = nbest_translations
+        self.estimated_reference_length = estimated_reference_length
 
 
 def empty_translation(add_nbest: bool = False) -> Translation:
@@ -976,8 +1036,7 @@ def empty_translation(add_nbest: bool = False) -> Translation:
     return Translation(target_ids=[],
                        attention_matrix=np.asarray([[0]]),
                        score=-np.inf,
-                       nbest_translations=NBestTranslations([], [], []) if add_nbest else None
-                       )
+                       nbest_translations=NBestTranslations([], [], []) if add_nbest else None)
 
 
 IndexedTranslatorInput = NamedTuple('IndexedTranslatorInput', [
@@ -1062,14 +1121,61 @@ class LengthPenalty(mx.gluon.HybridBlock):
         return self.hybrid_forward(None, lengths)
 
 
+class BrevityPenalty(mx.gluon.HybridBlock):
+    """
+    Calculates the logarithmic brevity penalty as:
+      weight * log min(1, exp(1 - ref_len / hyp_len)) = weight * min(0, 1 - ref_len / hyp_len).
+
+    :param weight: Linear weight.
+    """
+
+    def __init__(self, weight: float = 0.0, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.weight = weight
+
+    def hybrid_forward(self, F, hyp_lengths, reference_lengths):
+        if self.weight == 0.0:
+            if F is None:
+                return 0.0
+            else:
+                # subtract to avoid MxNet's warning of not using both arguments
+                # this branch should not and is not used during inference
+                return F.zeros_like(hyp_lengths - reference_lengths)
+        else:
+            # log_bp is always <= 0.0
+            if F is None:
+                log_bp = min(0.0, 1.0 - reference_lengths / hyp_lengths)
+            else:
+                log_bp = F.minimum(F.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
+            return self.weight * log_bp
+
+    def get(self,
+            hyp_lengths: Union[mx.nd.NDArray, int, float],
+            reference_lengths: Optional[Union[mx.nd.NDArray, int, float]]) -> Union[mx.nd.NDArray, float]:
+        """
+        Calculate the length penalty for the given vector of lengths.
+
+        :param hyp_lengths: Hypotheses lengths.
+        :param reference_lengths: Reference lengths.
+        :return: The length penalty. A scalar or a matrix (batch_size, 1) depending on the input.
+        """
+        if reference_lengths is None:
+            return 0.0
+        else:
+            return self.hybrid_forward(None, hyp_lengths, reference_lengths)
+
+
 def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[int],
-                               length_penalty: LengthPenalty) -> Translation:
+                               length_penalty: LengthPenalty,
+                               brevity_penalty: Optional[BrevityPenalty] = None) -> Translation:
     """
     Combines nbest translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol,
         attention_matrix), score and length.
     :param stop_ids: The EOS symbols.
+    :param length_penalty: LengthPenalty.
+    :param brevity_penalty: Optional BrevityPenalty.
     :return: A concatenation of the translations with a score.
     """
     expanded_translations = (_expand_nbest_translation(translation) for translation in translations)
@@ -1079,7 +1185,8 @@ def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[in
     for translations_to_concat in zip(*expanded_translations):
         concatenated_translations.append(_concat_translations(translations=list(translations_to_concat),
                                                               stop_ids=stop_ids,
-                                                              length_penalty=length_penalty))
+                                                              length_penalty=length_penalty,
+                                                              brevity_penalty=brevity_penalty))
 
     return _reduce_nbest_translations(concatenated_translations)
 
@@ -1104,7 +1211,8 @@ def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Tr
                        best_translation.attention_matrix,
                        best_translation.score,
                        best_translation.beam_histories,
-                       nbest_translations)
+                       nbest_translations,
+                       best_translation.estimated_reference_length)
 
 
 def _expand_nbest_translation(translation: Translation) -> List[Translation]:
@@ -1119,24 +1227,30 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
     for target_ids, attention_matrix, score in zip(translation.nbest_translations.target_ids_list,
                                                    translation.nbest_translations.attention_matrices,
                                                    translation.nbest_translations.scores):
-        nbest_list.append(Translation(target_ids, attention_matrix, score, translation.beam_histories))
+        nbest_list.append(Translation(target_ids, attention_matrix, score, translation.beam_histories,
+                                      estimated_reference_length=translation.estimated_reference_length))
 
     return nbest_list
 
 
-def _concat_translations(translations: List[Translation], stop_ids: Set[int],
-                         length_penalty: LengthPenalty) -> Translation:
+def _concat_translations(translations: List[Translation],
+                         stop_ids: Set[int],
+                         length_penalty: LengthPenalty,
+                         brevity_penalty: Optional[BrevityPenalty] = None) -> Translation:
     """
     Combines translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol, attention_matrix), score and length.
     :param stop_ids: The EOS symbols.
+    :param length_penalty: Instance of the LengthPenalty class initialized with alpha and beta.
+    :param brevity_penalty: Optional Instance of the BrevityPenalty class initialized with a brevity weight.
     :return: A concatenation of the translations with a score.
     """
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
     attention_matrices = []
     beam_histories = []  # type: List[BeamHistory]
+    estimated_reference_length = None  # type: float
 
     for idx, translation in enumerate(translations):
         if idx == len(translations) - 1:
@@ -1150,7 +1264,11 @@ def _concat_translations(translations: List[Translation], stop_ids: Set[int],
                 target_ids.extend(translation.target_ids)
                 attention_matrices.append(translation.attention_matrix)
         beam_histories.extend(translation.beam_histories)
-
+        if translation.estimated_reference_length is not None:
+            if estimated_reference_length is None:
+                estimated_reference_length = translation.estimated_reference_length
+            else:
+                estimated_reference_length += translation.estimated_reference_length
     # Combine attention matrices:
     attention_shapes = [attention_matrix.shape for attention_matrix in attention_matrices]
     attention_matrix_combined = np.zeros(np.sum(np.asarray(attention_shapes), axis=0))
@@ -1160,11 +1278,16 @@ def _concat_translations(translations: List[Translation], stop_ids: Set[int],
         pos_t += len_t
         pos_s += len_s
 
+    def _brevity_penalty(hypothesis_length, reference_length):
+        return 0.0 if brevity_penalty is None else brevity_penalty.get(hypothesis_length, reference_length)
+
     # Unnormalize + sum and renormalize the score:
-    score = sum(translation.score * length_penalty.get(len(translation.target_ids))
-                for translation in translations)
-    score = score / length_penalty.get(len(target_ids))
-    return Translation(target_ids, attention_matrix_combined, score, beam_histories)
+    score = sum((translation.score + _brevity_penalty(len(translation.target_ids), translation.estimated_reference_length)) \
+                    * length_penalty.get(len(translation.target_ids))
+                 for translation in translations)
+    score = score / length_penalty.get(len(target_ids)) - _brevity_penalty(len(target_ids), estimated_reference_length)
+    return Translation(target_ids, attention_matrix_combined, score, beam_histories,
+                       estimated_reference_length=estimated_reference_length)
 
 
 class Translator:
@@ -1182,12 +1305,15 @@ class Translator:
     :param source_vocabs: Source vocabularies.
     :param target_vocab: Target vocabulary.
     :param nbest_size: Size of nbest list of translations.
-    :param restrict_lexicon: Top-k lexicon to use for target vocabulary restriction.
+    :param restrict_lexicon: Top-k lexicon to use for target vocabulary selection. Can be a dict of
+                             of named lexicons.
     :param avoid_list: Global list of phrases to exclude from the output.
     :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     :param sample: If True, sample from softmax multinomial instead of using topk.
+    :param constant_length_ratio: If > 0, will override models' prediction of the length ratio (if any).
+    :param brevity_penalty: Optional BrevityPenalty.
     """
 
     def __init__(self,
@@ -1201,14 +1327,18 @@ class Translator:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  nbest_size: int = 1,
-                 restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
+                 restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
                  avoid_list: Optional[str] = None,
                  store_beam: bool = False,
                  strip_unknown_words: bool = False,
                  skip_topk: bool = False,
-                 sample: int = None) -> None:
+                 sample: int = None,
+                 constant_length_ratio: float = 0.0,
+                 brevity_penalty: Optional[BrevityPenalty] = None) -> None:
         self.context = context
         self.length_penalty = length_penalty
+        self.brevity_penalty = brevity_penalty
+        self.constant_length_ratio = constant_length_ratio
         self.beam_prune = beam_prune
         self.beam_search_stop = beam_search_stop
         self.source_vocabs = source_vocabs
@@ -1288,10 +1418,12 @@ class Translator:
         self._sort_by_index.initialize(ctx=self.context)
         self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
 
+        brevity_penalty_weight = self.brevity_penalty.weight if self.brevity_penalty is not None else 0.0
         self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
                                                            eos_id=self.vocab_target[C.EOS_SYMBOL],
                                                            length_penalty_alpha=self.length_penalty.alpha,
-                                                           length_penalty_beta=self.length_penalty.beta)
+                                                           length_penalty_beta=self.length_penalty.beta,
+                                                           brevity_penalty_weight=brevity_penalty_weight)
         self._update_finished.initialize(ctx=self.context)
         self._update_finished.hybridize(static_alloc=True, static_shape=True)
 
@@ -1311,7 +1443,8 @@ class Translator:
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,
-                                            length_penalty=self.length_penalty)
+                                            length_penalty=self.length_penalty,
+                                            brevity_penalty=self.brevity_penalty)  # type: Callable
 
         logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
                     "nbest_size=%s ensemble_mode=%s max_batch_size=%d buckets_source=%s avoiding=%d)",
@@ -1369,19 +1502,21 @@ class Translator:
         # pylint: disable=invalid-unary-operand-type
         return -log_probs.log_softmax()
 
-    def translate(self, trans_inputs: List[TranslatorInput]) -> List[TranslatorOutput]:
+    def translate(self, trans_inputs: List[TranslatorInput], fill_up_batches: bool = True) -> List[TranslatorOutput]:
         """
         Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
         Empty or bad inputs are skipped.
         Splits inputs longer than Translator.max_input_length into segments of size max_input_length,
         and then groups segments into batches of at most Translator.max_batch_size.
         Too-long segments that were split are reassembled into a single output after translation.
+        If fill_up_batches is set to True, underfilled batches are padded to Translator.max_batch_size, otherwise
+        dynamic batch sizing is used, which comes at increased memory usage.
 
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
+        :param fill_up_batches: If True, underfilled batches are padded to Translator.max_batch_size.
         :return: List of translation results.
         """
         num_inputs = len(trans_inputs)
-        batch_size = min(num_inputs, self.max_batch_size)
         translated_chunks = []  # type: List[IndexedTranslation]
 
         # split into chunks
@@ -1444,13 +1579,25 @@ class Translator:
 
         # Sort longest to shortest (to rather fill batches of shorter than longer sequences)
         input_chunks = sorted(input_chunks, key=lambda chunk: len(chunk.translator_input.tokens), reverse=True)
-
         # translate in batch-sized blocks over input chunks
+        batch_size = self.max_batch_size if fill_up_batches else min(len(input_chunks), self.max_batch_size)
+
         num_batches = 0
         for batch_id, batch in enumerate(utils.grouper(input_chunks, batch_size)):
             logger.debug("Translating batch %d", batch_id)
+
+            rest = batch_size - len(batch)
+            if fill_up_batches and rest > 0:
+                logger.debug("Padding batch of size %d to full batch size (%d)", len(batch), batch_size)
+                batch = batch + [batch[0]] * rest
+
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
             batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
+
+            # truncate to remove filler translations
+            if fill_up_batches and rest > 0:
+                batch_translations = batch_translations[:-rest]
+
             for chunk, translation in zip(batch, batch_translations):
                 translated_chunks.append(IndexedTranslation(chunk.input_idx, chunk.chunk_idx, translation))
             num_batches += 1
@@ -1482,6 +1629,7 @@ class Translator:
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
                                                                            int,
+                                                                           Optional[lexicon.TopKLexicon],
                                                                            List[Optional[constrained.RawConstraintList]],
                                                                            List[Optional[constrained.RawConstraintList]],
                                                                            mx.nd.NDArray]:
@@ -1493,12 +1641,14 @@ class Translator:
 
         :param trans_inputs: List of TranslatorInputs.
         :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)),
-                bucket key, list of raw constraint lists, and list of phrases to avoid,
-                and an NDArray of maximum output lengths.
+                bucket key, lexicon for vocabulary restriction, list of raw constraint
+                lists, and list of phrases to avoid, and an NDArray of maximum output
+                lengths.
         """
         batch_size = len(trans_inputs)
         bucket_key = data_io.get_bucket(max(len(inp.tokens) for inp in trans_inputs), self.buckets_source)
         source = mx.nd.zeros((batch_size, bucket_key, self.num_source_factors), ctx=self.context)
+        restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
         raw_avoid_list = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
 
@@ -1518,6 +1668,26 @@ class Translator:
 
                 source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
+            # Check if vocabulary selection/restriction is enabled:
+            # - First, see if the translator input provides a lexicon (used for multiple lexicons)
+            # - If not, see if the translator itself provides a lexicon (used for single lexicon)
+            # - The same lexicon must be used for all inputs in the batch.
+            if trans_input.restrict_lexicon is not None:
+                if restrict_lexicon is not None and restrict_lexicon is not trans_input.restrict_lexicon:
+                    logger.warning("Sentence %s: different restrict_lexicon specified, will overrule previous. "
+                                   "All inputs in batch must use same lexicon." % trans_input.sentence_id)
+                restrict_lexicon = trans_input.restrict_lexicon
+            elif self.restrict_lexicon is not None:
+                if isinstance(self.restrict_lexicon, dict):
+                    # This code should not be reachable since the case is checked when creating
+                    # translator inputs. It is included here to guarantee that the translator can
+                    # handle any valid input regardless of whether it was checked at creation time.
+                    logger.warning("Sentence %s: no restrict_lexicon specified for input when using multiple lexicons, "
+                                   "defaulting to first lexicon for entire batch." % trans_input.sentence_id)
+                    restrict_lexicon = list(self.restrict_lexicon.values())[0]
+                else:
+                    restrict_lexicon = self.restrict_lexicon
+
             if trans_input.constraints is not None:
                 raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
                                       trans_input.constraints]
@@ -1529,7 +1699,8 @@ class Translator:
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        return source, bucket_key, raw_constraints, raw_avoid_list, mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+        return source, bucket_key, restrict_lexicon, raw_constraints, raw_avoid_list, \
+                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1585,6 +1756,7 @@ class Translator:
     def _translate_nd(self,
                       source: mx.nd.NDArray,
                       source_length: int,
+                      restrict_lexicon: Optional[lexicon.TopKLexicon],
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
                       raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                       max_output_lengths: mx.nd.NDArray) -> List[Translation]:
@@ -1593,25 +1765,49 @@ class Translator:
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Bucket key.
+        :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param raw_constraints: A list of optional constraint lists.
 
         :return: Sequence of translations.
         """
         return self._get_best_from_beam(*self._beam_search(source,
                                                            source_length,
+                                                           restrict_lexicon,
                                                            raw_constraints,
                                                            raw_avoid_list,
                                                            max_output_lengths))
 
-    def _encode(self, sources: mx.nd.NDArray, source_length: int) -> List[ModelState]:
+    def _encode(self, sources: mx.nd.NDArray, source_length: int) -> Tuple[List[ModelState], mx.nd.NDArray]:
         """
         Returns a ModelState for each model representing the state of the model after encoding the source.
 
         :param sources: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Bucket key.
-        :return: List of ModelStates.
+        :return: List of ModelStates and the estimated reference length based on ratios averaged over models.
         """
-        return [model.run_encoder(sources, source_length) for model in self.models]
+        model_states = []
+        ratios = []
+        for model in self.models:
+            state, ratio = model.run_encoder(sources, source_length)
+            model_states.append(state)
+            if ratio is not None:
+                ratios.append(ratio)
+
+        # num_seq takes batch_size and beam_size into account
+        num_seq = model_states[0].states[0].shape[0]
+        if self.constant_length_ratio > 0.0:
+            # override all ratios with the constant value
+            length_ratios = mx.nd.full(val=self.constant_length_ratio, shape=(num_seq, 1), ctx=self.context)
+        else:
+            if len(ratios) > 0:  # some model predicted a ratio?
+                # average the ratios over the models that actually we able to predict them
+                length_ratios = mx.nd.mean(mx.nd.stack(*ratios, axis=1), axis=1)
+            else:
+                length_ratios = mx.nd.zeros((num_seq, 1), ctx=self.context)
+
+        encoded_source_length=self.models[0].encoder.get_encoded_seq_len(source_length)
+        return model_states, length_ratios * encoded_source_length
+
 
     def _decode_step(self,
                      prev_word: mx.nd.NDArray,
@@ -1639,6 +1835,15 @@ class Translator:
         for model, out_w, out_b, state in itertools.zip_longest(
                 self.models, models_output_layer_w, models_output_layer_b, states):
             decoder_out, attention_probs, state = model.run_decoder(prev_word, bucket_key, state)
+            
+            if model.config.num_pointers:
+                # Fill up the predictions up to the maximum number of pointer elements for shorter source sentences
+                (beam_size, target_vocab_size) = decoder_out.shape
+                diff_size = len(self.vocab_target) - target_vocab_size
+                if diff_size > 0:
+                    decoder_out = mx.nd.concat(decoder_out,
+                                               mx.nd.zeros((beam_size, diff_size), ctx=self.context), dim=1)
+            
             # Compute logits and softmax with restricted vocabulary
             if self.restrict_lexicon:
                 # Apply output layer outside decoder module.
@@ -1686,6 +1891,7 @@ class Translator:
     def _beam_search(self,
                      source: mx.nd.NDArray,
                      source_length: int,
+                     restrict_lexicon: Optional[lexicon.TopKLexicon],
                      raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                      max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
@@ -1693,6 +1899,7 @@ class Translator:
                                                                  np.ndarray,
                                                                  np.ndarray,
                                                                  np.ndarray,
+                                                                 List[Optional[np.ndarray]],
                                                                  List[Optional[constrained.ConstrainedHypothesis]],
                                                                  Optional[List[BeamHistory]]]:
         """
@@ -1700,13 +1907,14 @@ class Translator:
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Max source length.
+        :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must NOT appear in each output.
         :return List of best hypotheses indices, list of best word indices, list of attentions,
-                array of accumulated length-normalized negative log-probs, hypotheses lengths, constraints (if any),
-                beam histories (if any).
+                array of accumulated length-normalized negative log-probs, hypotheses lengths,
+                predicted lengths of references (if any), constraints (if any), beam histories (if any).
         """
         batch_size = source.shape[0]
         logger.debug("_beam_search batch size: %d", batch_size)
@@ -1719,8 +1927,8 @@ class Translator:
         # Maximum output length
         max_output_length = self.models[0].get_max_output_length(source_length)
 
-        # General data structure: each row has batch_size * beam blocks for the 1st sentence, with a full beam,
-        # then the next block for the 2nd sentence and so on
+        # General data structure: batch_size * beam_size blocks in total;
+        # a full beam for each sentence, folloed by the next beam-block for the next sentence and so on
 
         best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
                                        dtype='int32')
@@ -1762,11 +1970,11 @@ class Translator:
         models_output_layer_w = list()
         models_output_layer_b = list()
         vocab_slice_ids = None  # type: mx.nd.NDArray
-        if self.restrict_lexicon:
+        if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
             #       We currently convert source to NumPy and target ids back to NDArray.
-            vocab_slice_ids = self.restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
+            vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
             if any(raw_constraint_list):
                 # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
                 constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
@@ -1795,7 +2003,7 @@ class Translator:
                 models_output_layer_b.append(m.output_layer_b.take(vocab_slice_ids))
 
         # (0) encode source sentence, returns a list
-        model_states = self._encode(source, source_length)
+        model_states, estimated_reference_lengths = self._encode(source, source_length)
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id,
@@ -1862,14 +2070,16 @@ class Translator:
                     scores_accumulated)
 
             # Map from restricted to full vocab ids if needed
-            if self.restrict_lexicon:
+            if restrict_lexicon:
                 best_word_indices = vocab_slice_ids.take(best_word_indices)
 
             # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
-            finished, lengths, attention_scores = self._sort_by_index.forward(best_hyp_indices,
+            finished, lengths, attention_scores, estimated_reference_lengths \
+                                                = self._sort_by_index.forward(best_hyp_indices,
                                                                               finished,
                                                                               lengths,
-                                                                              attention_scores)
+                                                                              attention_scores,
+                                                                              estimated_reference_lengths)
 
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
@@ -1877,7 +2087,8 @@ class Translator:
                                                                                   max_output_lengths,
                                                                                   finished,
                                                                                   scores_accumulated,
-                                                                                  lengths)
+                                                                                  lengths,
+                                                                                  estimated_reference_lengths)
 
             # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
             if self.beam_prune > 0.0:
@@ -1954,6 +2165,7 @@ class Translator:
                all_attentions.asnumpy(), \
                scores_accumulated.asnumpy(), \
                lengths.asnumpy().astype('int32'), \
+               estimated_reference_lengths.asnumpy(), \
                constraints, \
                beam_histories
 
@@ -1963,6 +2175,7 @@ class Translator:
                             attentions: np.ndarray,
                             seq_scores: np.ndarray,
                             lengths: np.ndarray,
+                            estimated_reference_lengths: Optional[mx.nd.NDArray],
                             constraints: List[Optional[constrained.ConstrainedHypothesis]],
                             beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
@@ -1974,14 +2187,16 @@ class Translator:
                            Shape: (batch * beam, num_beam_search_steps, encoded_source_length).
         :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
         :param lengths: The lengths of all items in the beam. Shape: (batch * beam). Dtype: int32.
+        :param estimated_reference_lengths: Predicted reference lengths.
         :param constraints: The constraints for all items in the beam. Shape: (batch * beam).
         :param beam_histories: The beam histories for each sentence in the batch.
         :return: List of Translation objects containing all relevant information.
         """
         batch_size = best_hyp_indices.shape[0] // self.beam_size
         nbest_translations = []  # type: List[List[Translation]]
-        histories = beam_histories if beam_histories is not None else [None] * batch_size  # type: List
-
+        histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
+        reference_lengths = estimated_reference_lengths if estimated_reference_lengths is not None \
+                                                        else np.full(self.batch_size * self.beam_size, None)
         for n in range(0, self.nbest_size):
 
             # Initialize the best_ids to the first item in each batch, plus current nbest index
@@ -1997,12 +2212,12 @@ class Translator:
 
             # Obtain sequences for all best hypotheses in the batch
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
-
             nbest_translations.append([self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
                                                                                    lengths[best_ids],
                                                                                    attentions[best_ids],
                                                                                    seq_scores[best_ids],
-                                                                                   histories)])
+                                                                                   histories,
+                                                                                   reference_lengths[best_ids])])
         # reorder and regroup lists
         reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]
         return reduced_translations
@@ -2037,7 +2252,8 @@ class Translator:
                               length: np.ndarray,
                               attention_lists: np.ndarray,
                               seq_score: np.ndarray,
-                              beam_history: Optional[BeamHistory]) -> Translation:
+                              beam_history: Optional[BeamHistory],
+                              estimated_reference_length: Optional[float]) -> Translation:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
@@ -2046,6 +2262,7 @@ class Translator:
         :param attention_lists: Array of attentions over source words.
                                 Shape: (batch_size * self.beam_size, max_output_length, encoded_source_length).
         :param seq_score: Array of length-normalized negative log-probs.
+        :param estimated_reference_length: Estimated reference length (if any).
         :param beam_history: The optional beam histories for each sentence in the batch.
         :return: A Translation object.
         """
@@ -2053,8 +2270,11 @@ class Translator:
         sequence = sequence[:length].tolist()
         attention_matrix = attention_lists[:length, :]
         score = float(seq_score)
+        estimated_reference_length=float(estimated_reference_length) if estimated_reference_length else None
         beam_history_list = [beam_history] if beam_history is not None else []
-        return Translation(sequence, attention_matrix, score, beam_history_list)
+        return Translation(sequence, attention_matrix, score, beam_history_list,
+                           nbest_translations=None,
+                           estimated_reference_length=estimated_reference_length)
 
     def _print_beam(self,
                     sequences: mx.nd.NDArray,
@@ -2158,7 +2378,9 @@ class TopK(mx.gluon.HybridBlock):
 
         # Project indices back into original shape (which is different for t==1 and t>1)
         indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
-        unraveled = F.unravel_index(indices, shape=(-1, self.vocab_size))
+        # TODO: we currently exploit a bug in the implementation of unravel_index to not require knowing the first shape
+        # value. See https://github.com/apache/incubator-mxnet/issues/13862
+        unraveled = F.unravel_index(indices, shape=(C.LARGEST_INT, self.vocab_size))
 
         best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
         best_hyp_indices = best_hyp_indices + offset
@@ -2253,18 +2475,27 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     def __init__(self, pad_id: int,
                  eos_id: int,
                  length_penalty_alpha: float = 1.0,
-                 length_penalty_beta: float = 0.0) -> None:
+                 length_penalty_beta: float = 0.0,
+                 brevity_penalty_weight: float = 0.0) -> None:
         super().__init__()
         self.pad_id = pad_id
         self.eos_id = eos_id
         with self.name_scope():
             self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
+            self.brevity_penalty = None  # type: Optional[BrevityPenalty]
+            if brevity_penalty_weight > 0.0:
+                self.brevity_penalty = BrevityPenalty(weight=brevity_penalty_weight)
 
-    def hybrid_forward(self, F, best_word_indices, max_output_lengths, finished, scores_accumulated, lengths):
+    def hybrid_forward(self, F, best_word_indices, max_output_lengths,
+                       finished, scores_accumulated, lengths, reference_lengths):
         all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
+        if self.brevity_penalty is not None:
+            brevity_penalty = self.brevity_penalty(lengths, reference_lengths)
+        else:
+            brevity_penalty = F.zeros_like(reference_lengths)
         scores_accumulated = F.where(newly_finished,
-                                     scores_accumulated / self.length_penalty(lengths),
+                                     scores_accumulated / self.length_penalty(lengths) - brevity_penalty,
                                      scores_accumulated)
 
         # Update lengths of all items, except those that were already finished. This updates

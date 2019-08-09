@@ -22,8 +22,9 @@ from functools import partial
 from typing import Callable, Iterable, Dict, List, Tuple, Optional
 
 import numpy as np
+import sacrebleu
 
-from sockeye_contrib import sacrebleu, rouge
+from sockeye_contrib import rouge
 from . import arguments
 from . import constants as C
 from . import data_io
@@ -42,7 +43,7 @@ def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset
     :param offset: Smoothing constant.
     :return: BLEU score as float between 0 and 1.
     """
-    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_floor=offset).score / 100.0
+    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=offset).score / 100.0
 
 
 def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -81,13 +82,25 @@ def raw_corpus_rouge2(hypotheses: Iterable[str], references: Iterable[str]) -> f
 
 def raw_corpus_rougel(hypotheses: Iterable[str], references: Iterable[str]) -> float:
     """
-    Simple wrapper around ROUGE-1 implementation.
+    Simple wrapper around ROUGE-L implementation.
 
     :param hypotheses: Hypotheses stream.
     :param references: Reference stream.
     :return: ROUGE-L score as float between 0 and 1.
     """
     return rouge.rouge_l(hypotheses, references)
+
+
+def raw_corpus_length_ratio(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+    """
+    Simple wrapper around length ratio implementation.
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: Length ratio score as float.
+    """
+    ratios = [len(h.split())/len(r.split()) for h, r in zip(hypotheses, references)]
+    return sum(ratios)/len(ratios) if len(ratios) else 0.0
 
 
 def main():

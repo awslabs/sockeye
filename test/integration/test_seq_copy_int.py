@@ -38,7 +38,6 @@ _TEST_LINE_COUNT_EMPTY = 2
 _LINE_MAX_LENGTH = 9
 _TEST_MAX_LENGTH = 20
 
-
 # tuple format: (train_params, translate_params, use_prepared_data, use_source_factors)
 ENCODER_DECODER_SETTINGS = [
     # "Vanilla" LSTM encoder-decoder with attention
@@ -151,7 +150,34 @@ ENCODER_DECODER_SETTINGS = [
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2 --beam-prune 1",
-     False, False)]
+     False, False),
+    # Full transformer and length ratio prediction, and learned brevity penalty during inference
+    ("--encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01"
+     " --length-task ratio --length-task-weight 1.0 --length-task-layers 1",
+     "--beam-size 2"
+     " --brevity-penalty-type learned --brevity-penalty-weight 1.0",
+     False, False),
+    # Full transformer and absolute length prediction, and constant brevity penalty during inference
+    ("--encoder transformer --decoder transformer"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-frequency 2 --optimizer adam --initial-learning-rate 0.01"
+     " --length-task length --length-task-weight 1.0 --length-task-layers 2",
+     "--beam-size 2"
+     " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
+     False, False),
+    ]
 
 
 @pytest.mark.parametrize("train_params, translate_params, use_prepared_data, use_source_factors",
@@ -183,7 +209,7 @@ def test_seq_copy(train_params: str,
                               data=data,
                               use_prepared_data=use_prepared_data,
                               max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                              compare_translate_vs_scoring_scores=False)
+                              compare_output=False)
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"

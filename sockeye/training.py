@@ -21,7 +21,7 @@ import random
 import shutil
 import time
 from functools import reduce
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Callable
 
 import mxnet as mx
 import numpy as np
@@ -35,6 +35,8 @@ from . import lr_scheduler
 from . import model
 from . import utils
 from . import vocab
+from .encoder import EmptyEncoderConfig, RecurrentEncoderConfig
+from .decoder import RecurrentDecoderConfig
 from .optimizers import BatchState, CheckpointState, SockeyeOptimizer, OptimizerConfig
 import multiprocessing
 import sockeye.multiprocessing_utils as mp_utils
@@ -55,7 +57,9 @@ class TrainingModel(model.SockeyeModel):
     :param bucketing: If True bucketing will be used, if False the computation graph will always be
             unrolled to the full length.
     :param gradient_compression_params: Optional dictionary of gradient compression parameters.
+    :param gradient_accumulation: Whether to accumulate gradients over batches. Default: False.
     :param fixed_param_names: Optional list of params to fix during training (i.e. their values will not be trained).
+    :param fixed_param_strategy: Optional string indicating a named strategy for fixing parameters.
     """
 
     def __init__(self,
@@ -67,13 +71,17 @@ class TrainingModel(model.SockeyeModel):
                  default_bucket_key: Tuple[int, int],
                  bucketing: bool,
                  gradient_compression_params: Optional[Dict[str, Any]] = None,
-                 fixed_param_names: Optional[List[str]] = None) -> None:
+                 gradient_accumulation: bool = False,
+                 fixed_param_names: Optional[List[str]] = None,
+                 fixed_param_strategy: Optional[str] = None) -> None:
         super().__init__(config)
         self.context = context
         self.output_dir = output_dir
         self.fixed_param_names = fixed_param_names
+        self.fixed_param_strategy = fixed_param_strategy
         self._bucketing = bucketing
         self._gradient_compression_params = gradient_compression_params
+        self._gradient_accumulation = gradient_accumulation
         self._initialize(provide_data, provide_label, default_bucket_key)
         self._monitor = None  # type: Optional[mx.monitor.Monitor]
 
@@ -93,9 +101,18 @@ class TrainingModel(model.SockeyeModel):
         labels = mx.sym.reshape(data=mx.sym.Variable(C.TARGET_LABEL_NAME), shape=(-1,))
 
         self.model_loss = loss.get_loss(self.config.config_loss)
+        logger.info("Using model loss: %s", self.model_loss)
+        if self.config.config_length_task_loss is not None:
+            self.length_task_loss = loss.get_length_task_loss(self.config.config_length_task_loss)
+            logger.info("Using length task loss: %s", self.length_task_loss)
+        else:
+            self.length_task_loss = None
 
         data_names = [C.SOURCE_NAME, C.TARGET_NAME]
         label_names = [C.TARGET_LABEL_NAME]
+
+        # length_ratio: (batch_size, ). Will be pruned if not used
+        length_ratio = mx.sym.broadcast_div(target_length, source_length, name=C.LENRATIO_LABEL_NAME)
 
         # check provide_{data,label} names
         provide_data_names = [d[0] for d in provide_data]
@@ -129,10 +146,10 @@ class TrainingModel(model.SockeyeModel):
              source_encoded_seq_len) = self.encoder.encode(source_embed,
                                                            source_embed_length,
                                                            source_embed_seq_len)
-
             # decoder
             # target_decoded: (batch-size, target_len, decoder_depth)
-            target_decoded = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
+            # pointer_scores: (batch-size, target_seq_len, source_seq_len)
+            target_decoded, pointer_scores = self.decoder.decode_sequence(source_encoded, source_encoded_length, source_encoded_seq_len,
                                                           target_embed, target_embed_length, target_embed_seq_len)
 
             # target_decoded: (batch_size * target_seq_len, decoder_depth)
@@ -141,14 +158,42 @@ class TrainingModel(model.SockeyeModel):
             # output layer
             # logits: (batch_size * target_seq_len, target_vocab_size)
             logits = self.output_layer(target_decoded)
+            
+            if self.config.num_pointers:
+                # pointer_scores: (batch-size * target_seq_len, source_seq_len)
+                pointer_scores = mx.sym.reshape(data=pointer_scores, shape=(-3, 0))
+                
+                # Concatenate the output vocabulary logits to the pointer scores
+                logits = mx.sym.concat(logits, pointer_scores, dim=1)
+            
+            # 1) standard cross-entropy loss
+            net_outputs = [self.model_loss.get_loss(logits, labels)]
+            # 2) length task losses
+            if self.length_task_loss is not None:
+                # predicted_length_ratios: (batch_size, 1)
+                predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
+                if isinstance(self.length_task_loss, loss.MSELoss):
+                    loss_symbol = self.length_task_loss.get_loss(predicted_length_ratio, length_ratio)
+                elif isinstance(self.length_task_loss, loss.PoissonLoss):
+                    # convert ratios to (expected) length estimations for the Poisson loss
+                    predicted_reference_length = predicted_length_ratio * source_encoded_length.reshape((-1, 1))
+                    loss_symbol = self.length_task_loss.get_loss(predicted_reference_length, target_length)
+                # return both the loss symbol, prediction and the computed length_ratio to be used in metrics
+                net_outputs.extend([loss_symbol,
+                                    mx.sym.BlockGrad(predicted_length_ratio, name=C.LENRATIO_NAME),
+                                    mx.sym.BlockGrad(length_ratio, name=C.LENRATIO_LABEL_NAME)])
 
-            loss_output = self.model_loss.get_loss(logits, labels)
+            return mx.sym.Group(net_outputs), data_names, label_names
 
-            return mx.sym.Group(loss_output), data_names, label_names
-
+        # Fix model parameters as needed for different training options.
+        utils.check_condition(not self.config.lhuc or self.fixed_param_strategy is None,
+                "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
         if self.config.lhuc:
             arguments = sym_gen(default_bucket_key)[0].list_arguments()
             fixed_param_names = [a for a in arguments if not a.endswith(C.LHUC_NAME)]
+        elif self.fixed_param_strategy is not None:
+            arguments = sym_gen(default_bucket_key)[0].list_arguments()
+            fixed_param_names = self._generate_fixed_param_names(arguments, self.fixed_param_strategy)
         else:
             fixed_param_names = self.fixed_param_names
 
@@ -176,12 +221,63 @@ class TrainingModel(model.SockeyeModel):
                          label_shapes=provide_label,
                          for_training=True,
                          force_rebind=True,
-                         grad_req='write')
+                         grad_req='add' if self._gradient_accumulation else 'write')
 
         self.module.symbol.save(os.path.join(self.output_dir, C.SYMBOL_NAME))
 
         self.save_version(self.output_dir)
         self.save_config(self.output_dir)
+
+    def _generate_fixed_param_names(self, param_names: List[str], strategy: str) -> List[str]:
+        """
+        Generate a fixed parameter list given a list of all parameter names and
+        a strategy.
+        """
+        # Number of encoder/decoder layers in model.
+        if isinstance(self.config.config_encoder, EmptyEncoderConfig):
+            num_encoder_layers = 1
+        elif isinstance(self.config.config_encoder, RecurrentEncoderConfig):
+            num_encoder_layers = self.config.config_encoder.rnn_config.num_layers
+        else:
+            num_encoder_layers = self.config.config_encoder.num_layers
+        if isinstance(self.config.config_decoder, RecurrentDecoderConfig):
+            num_decoder_layers = self.config.config_decoder.rnn_config.num_layers
+        else:
+            num_decoder_layers = self.config.config_decoder.num_layers
+
+        def is_fixed(name: str) -> bool:
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER:
+                # Any decoder layer.
+                return not name.startswith(C.DECODER_PREFIX)
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
+                # First and last encoder and decoder layers for RNN,
+                # Transformer, and CNN models.
+                return not (name.startswith("{}{}l{}".format(C.BIDIRECTIONALRNN_PREFIX, C.FORWARD_PREFIX, 0)) or
+                            name.startswith("{}{}l{}".format(C.BIDIRECTIONALRNN_PREFIX, C.REVERSE_PREFIX, 0)) or
+                            name.startswith("{}l{}".format(C.STACKEDRNN_PREFIX, num_encoder_layers - 2)) or
+                            name.startswith("{}l{}".format(C.RNN_DECODER_PREFIX, 0)) or
+                            name.startswith("{}l{}".format(C.RNN_DECODER_PREFIX, num_decoder_layers - 1)) or
+                            name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, 0)) or
+                            name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, num_encoder_layers - 1)) or
+                            name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, 0)) or
+                            name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, num_decoder_layers - 1)) or
+                            name.startswith("{}{}".format(C.CNN_ENCODER_PREFIX, 0)) or
+                            name.startswith("{}{}".format(C.CNN_ENCODER_PREFIX, num_encoder_layers - 1)) or
+                            name.startswith("{}{}".format(C.CNN_DECODER_PREFIX, 0)) or
+                            name.startswith("{}{}".format(C.CNN_DECODER_PREFIX, num_decoder_layers - 1)))
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
+                # Any type of learned embedding.
+                return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
+                            name.startswith(C.SOURCE_POSITIONAL_EMBEDDING_PREFIX) or
+                            name.startswith(C.TARGET_EMBEDDING_PREFIX) or
+                            name.startswith(C.TARGET_POSITIONAL_EMBEDDING_PREFIX) or
+                            name.startswith(C.SHARED_EMBEDDING_PREFIX))
+            if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
+                # Target output projection.
+                return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)
+            raise ValueError("Unknown fixed parameter strategy: %s" % strategy)
+
+        return [name for name in param_names if is_fixed(name)]
 
     def run_forward_backward(self, batch: mx.io.DataBatch, metric: mx.metric.EvalMetric):
         """
@@ -225,6 +321,12 @@ class TrainingModel(model.SockeyeModel):
                     continue
                 arr *= scale
 
+    def zero_gradients(self):
+        """
+        Sets all gradients to zero.
+        """
+        self.rescale_gradients(0.)
+
     def prepare_batch(self, batch: mx.io.DataBatch):
         """
         Pre-fetches the next mini-batch.
@@ -257,7 +359,7 @@ class TrainingModel(model.SockeyeModel):
 
     @property
     def loss(self):
-        return self.model_loss
+        return [self.model_loss] + [self.length_task_loss] if self.length_task_loss is not None else []
 
     @property
     def optimizer(self) -> Union[mx.optimizer.Optimizer, SockeyeOptimizer]:
@@ -311,13 +413,23 @@ class TrainingModel(model.SockeyeModel):
         """
         arg_params, aux_params = self.module.get_params()
         total_parameters = 0
+        fixed_parameters = 0
+        learned_parameters = 0
         info = []  # type: List[str]
         for name, array in sorted(arg_params.items()):
             info.append("%s: %s" % (name, array.shape))
-            total_parameters += reduce(lambda x, y: x * y, array.shape)
+            num_parameters = reduce(lambda x, y: x * y, array.shape)
+            total_parameters += num_parameters
+            if name in self.module._fixed_param_names:
+                fixed_parameters += num_parameters
+            else:
+                learned_parameters += num_parameters
+        percent_fixed = 100 * (fixed_parameters / max(1, total_parameters))
+        percent_learned = 100 * (learned_parameters / max(1, total_parameters))
         logger.info("Model parameters: %s", ", ".join(info))
-        if self.fixed_param_names:
-            logger.info("Fixed model parameters: %s", ", ".join(self.fixed_param_names))
+        logger.info("Fixed model parameters: %s", ", ".join(self.module._fixed_param_names))
+        logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
+        logger.info("Learning %d parameters (%0.2f%%)", learned_parameters, percent_learned)
         logger.info("Total # of parameters: %d", total_parameters)
 
     def save_params_to_file(self, fname: str):
@@ -371,12 +483,29 @@ def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     return sqrt(sum(norm.asscalar() for norm in norms))
 
 
+def safe_custom_metrics_logger(logging_function, attribute_value_mapping, global_step=None):
+    """
+    A thin wrapper for calling a custom metrics logging function, if supplied. As it uses an external function,
+    it should never throw an exception. If there is no logging_function supplied, the function does nothing.
+
+    :param logging_function: The function supplied by a caller of sockeye.train
+    :param attribute_value_mapping: A list or a dictionary of (metric name, metric value) pairs.
+    :param global_step: Optional argument, which can be used e.g. by Tensorboard.
+    """
+    if logging_function is None:
+        return
+    try:
+        logging_function(attribute_value_mapping, global_step)
+    except Exception as e:
+        logger.warning("Didn't use custom metrics logger, exception '{}' occured".format(str(e)))
+
+
 class TrainState:
     """
     Stores the state an EarlyStoppingTrainer instance.
     """
 
-    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint',
+    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
                  'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic', '_tic_last_time_elapsed',
                  '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged', 'diverged']
 
@@ -385,6 +514,7 @@ class TrainState:
         self.epoch = 0
         self.checkpoint = 0
         self.best_checkpoint = 0
+        self.batches = 0
         self.updates = 0
         self.samples = 0
         self.gradient_norm = None  # type: Optional[float]
@@ -452,17 +582,20 @@ class EarlyStoppingTrainer:
                  keep_initializations: bool,
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
-                 stop_training_on_decoder_failure: bool = False) -> None:
+                 stop_training_on_decoder_failure: bool = False,
+                 custom_metrics_logger: Optional[Callable] = None) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
         self.keep_initializations = keep_initializations
+        self.update_interval = self.optimizer_config.update_interval
         self.tflogger = TensorboardLogger(logdir=os.path.join(model.output_dir, C.TENSORBOARD_NAME),
                                           source_vocab=source_vocabs[0],
                                           target_vocab=target_vocab)
         self.target_vocab = target_vocab
         self.state = None  # type: Optional[TrainState]
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
+        self.custom_metrics_logger = custom_metrics_logger
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
@@ -471,6 +604,7 @@ class EarlyStoppingTrainer:
             metrics: List[str],
             checkpoint_interval: int,
             max_num_not_improved: int,
+            max_checkpoints: Optional[int] = None,
             min_samples: Optional[int] = None,
             max_samples: Optional[int] = None,
             min_updates: Optional[int] = None,
@@ -498,6 +632,9 @@ class EarlyStoppingTrainer:
 
         :param max_num_not_improved: Stop training if early_stopping_metric did not improve for this many checkpoints.
                Use -1 to disable stopping based on early_stopping_metric.
+        :param max_checkpoints: Stop training after this many checkpoints.
+               Use None to disable.
+
         :param min_samples: Optional minimum number of samples.
         :param max_samples: Optional maximum number of samples.
         :param min_updates: Optional minimum number of update steps.
@@ -559,6 +696,11 @@ class EarlyStoppingTrainer:
         speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         tic = time.time()
 
+        if max_checkpoints is not None:
+            max_updates = self.state.updates + max_checkpoints * checkpoint_interval
+            logger.info(("Resetting max_updates to %d + %d * %d = %d in order to implement stopping after (an additional) %d checkpoints."
+                         % (self.state.updates, max_checkpoints, checkpoint_interval, max_updates, max_checkpoints)))
+
         next_data_batch = train_iter.next()
         while True:
 
@@ -578,10 +720,10 @@ class EarlyStoppingTrainer:
             # STEP
             ######
             batch = next_data_batch
+            self.state.batches += 1
             self._step(self.model, batch, checkpoint_interval, metric_train, metric_loss)
             batch_num_samples = batch.data[0].shape[0]
             batch_num_tokens = batch.data[0].shape[1] * batch_num_samples
-            self.state.updates += 1
             self.state.samples += batch_num_samples
 
             if not train_iter.iter_next():
@@ -591,12 +733,13 @@ class EarlyStoppingTrainer:
             next_data_batch = train_iter.next()
             self.model.prepare_batch(next_data_batch)
 
-            speedometer(self.state.epoch, self.state.updates, batch_num_samples, batch_num_tokens, metric_train)
+            speedometer(self.state.epoch, self.state.batches, self.state.updates,
+                        batch_num_samples, batch_num_tokens, metric_train)
 
             ############
             # CHECKPOINT
             ############
-            if self.state.updates > 0 and self.state.updates % checkpoint_interval == 0:
+            if self.state.updates > 0 and self.state.batches % (checkpoint_interval * self.update_interval) == 0:
                 time_cost = time.time() - tic
                 self.state.checkpoint += 1
                 # (1) save parameters and evaluate on validation data
@@ -606,9 +749,13 @@ class EarlyStoppingTrainer:
                             self.state.samples, time_cost, checkpoint_interval / time_cost)
                 for name, val in metric_train.get_name_value():
                     logger.info('Checkpoint [%d]\tTrain-%s=%f', self.state.checkpoint, name, val)
+                safe_custom_metrics_logger(self.custom_metrics_logger, metric_train.get_name_value(),
+                                           global_step=self.state.checkpoint)
                 self._evaluate(validation_iter, metric_val)
                 for name, val in metric_val.get_name_value():
                     logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
+                safe_custom_metrics_logger(self.custom_metrics_logger, metric_val.get_name_value(),
+                                           global_step=self.state.checkpoint)
 
                 # (2) wait for checkpoint decoder results and fill self.state.metrics
                 if process_manager is not None:
@@ -619,13 +766,17 @@ class EarlyStoppingTrainer:
                         if decoded_checkpoint > 0:
                             self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                             self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
+                            utils.write_metrics_file(self.state.metrics, self.metrics_fname)
+                            safe_custom_metrics_logger(self.custom_metrics_logger, decoder_metrics,
+                                                       global_step=decoded_checkpoint)
+                    # Start the decoder for the next checkpoint
                     process_manager.start_decoder(self.state.checkpoint)
 
                 # (3) determine improvement
                 has_improved = False
                 previous_best = self.state.best_metric
                 # at this point state.self.metrics doesn't have perplexity validation results yet
-                current_checkpoint_val_metric = {"%s-val" % name:val for name, val in metric_val.get_name_value()}
+                current_checkpoint_val_metric = {"%s-val" % name: val for name, val in metric_val.get_name_value()}
                 for checkpoint, metric_dict in enumerate(self.state.metrics + [current_checkpoint_val_metric], 1):
                     value = metric_dict.get("%s-val" % early_stopping_metric, self.state.best_metric)
                     if utils.metric_value_is_better(value, self.state.best_metric, early_stopping_metric):
@@ -675,7 +826,7 @@ class EarlyStoppingTrainer:
                         self.state.diverged = True
 
                 # (6) update and write training/validation metrics late to capture converged/diverged status
-                self._update_metrics(metric_train, metric_val, process_manager)
+                self._update_metrics(metric_train, metric_val)
                 metric_train.reset()
 
                 # If using an extended optimizer, provide extra state information about the current checkpoint
@@ -738,24 +889,6 @@ class EarlyStoppingTrainer:
         ####################
         model.run_forward_backward(batch, metric_train)
 
-        ####################
-        # Gradient rescaling
-        ####################
-        gradient_norm = None
-        if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_interval == 0:
-            # compute values for logging to metrics (before rescaling...)
-            gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
-            self.state.gradients = model.get_gradients()
-
-        # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
-        if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-            if gradient_norm is None:
-                gradient_norm = model.get_global_gradient_norm()
-            # clip gradients
-            if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
-                ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
-                model.rescale_gradients(ratio)
-
         # If using an extended optimizer, provide extra state information about the current batch
         optimizer = model.optimizer
         if metric_loss is not None and isinstance(optimizer, SockeyeOptimizer):
@@ -769,7 +902,30 @@ class EarlyStoppingTrainer:
         ########
         # UPDATE
         ########
-        model.update()
+        if self.update_interval == 1 or self.state.batches % self.update_interval == 0:
+
+            # Gradient rescaling
+            gradient_norm = None
+            if self.state.updates > 0 and (self.state.updates + 1) % checkpoint_interval == 0:
+                # compute values for logging to metrics (before rescaling...)
+                gradient_norm = self.state.gradient_norm = model.get_global_gradient_norm()
+                self.state.gradients = model.get_gradients()
+
+            # note: C.GRADIENT_CLIPPING_TYPE_ABS is handled by the mxnet optimizer directly
+            if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
+                if gradient_norm is None:
+                    gradient_norm = model.get_global_gradient_norm()
+                # clip gradients
+                if gradient_norm > self.optimizer_config.gradient_clipping_threshold:
+                    ratio = self.optimizer_config.gradient_clipping_threshold / gradient_norm
+                    model.rescale_gradients(ratio)
+
+            model.update()
+
+            if self.update_interval > 1:
+                model.zero_gradients()
+
+            self.state.updates += 1
 
         if model.monitor is not None:
             results = model.monitor.toc()
@@ -787,8 +943,7 @@ class EarlyStoppingTrainer:
 
     def _update_metrics(self,
                         metric_train: mx.metric.EvalMetric,
-                        metric_val: mx.metric.EvalMetric,
-                        process_manager: Optional['DecoderProcessManager'] = None):
+                        metric_val: mx.metric.EvalMetric):
         """
         Updates metrics for current checkpoint. If a process manager is given, also collects previous decoding results
         and spawns a new decoding process.
@@ -830,7 +985,8 @@ class EarlyStoppingTrainer:
                 decoded_checkpoint, decoder_metrics = result
                 self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
                 self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
-            utils.write_metrics_file(self.state.metrics, self.metrics_fname)
+                utils.write_metrics_file(self.state.metrics, self.metrics_fname)
+                self.state.save(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
         if not keep_training_state:
             final_training_state_dirname = os.path.join(self.model.output_dir, C.TRAINING_STATE_DIRNAME)
@@ -900,9 +1056,12 @@ class EarlyStoppingTrainer:
         """
         # output_names refers to the list of outputs this metric should use to update itself, e.g. the softmax output
         if metric_name == C.ACCURACY:
-            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+            return utils.Accuracy(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME], label_names=[C.TARGET_LABEL_NAME])
         elif metric_name == C.PERPLEXITY:
-            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME])
+            return mx.metric.Perplexity(ignore_label=C.PAD_ID, output_names=[C.SOFTMAX_OUTPUT_NAME], label_names=[C.TARGET_LABEL_NAME], name=C.PERPLEXITY)
+        elif metric_name == C.LENRATIO_MSE:
+            return loss.LengthRatioMSEMetric(name=C.LENRATIO_MSE,
+                                  output_names=[C.LENRATIO_OUTPUT_NAME], label_names=[C.LENRATIO_LABEL_OUTPUT_NAME])
         else:
             raise ValueError("unknown metric name")
 
@@ -1108,7 +1267,7 @@ class TensorboardLogger:
         for name, value in metrics.items():
             if isinstance(value, mx.nd.NDArray):
                 # TODO: switch to mx.ndarray.contrib.isfinite after upgrade to MxNet 1.4.*
-                if utils.isfinite(value).sum() == value.size():
+                if utils.isfinite(value).astype('int32').sum().asscalar() == value.size:
                     self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                 else:
                     logger.warning("Not adding the histogram of %s to tensorboard because some of its values are not finite.")
@@ -1151,8 +1310,9 @@ class Speedometer:
         self.tokens = 0
         self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
 
-    def __call__(self, epoch: int, updates: int, samples: int, tokens: int, metric: Optional[mx.metric.EvalMetric]):
-        count = updates
+    def __call__(self, epoch: int, batches: int, updates: int, samples: int,
+                 tokens: int, metric: Optional[mx.metric.EvalMetric]):
+        count = batches
         if self.last_count > count:
             self.init = False
         self.last_count = count
@@ -1162,7 +1322,8 @@ class Speedometer:
         if self.init:
             if count % self.frequency == 0:
                 toc = (time.time() - self.tic)
-                updates_per_sec = self.frequency / toc
+                update_interval = batches / updates
+                updates_per_sec = self.frequency / update_interval / toc
                 samples_per_sec = self.samples / toc
                 tokens_per_sec = self.tokens / toc
                 self.samples = 0

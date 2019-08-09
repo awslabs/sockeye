@@ -48,6 +48,7 @@ class ModelConfig(Config):
     :param weight_tying: Enables weight tying if True.
     :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
+    :param num_pointers: The number of pointers to the source sequence that can be outputted by the decoder.
     """
 
     def __init__(self,
@@ -59,10 +60,13 @@ class ModelConfig(Config):
                  config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.DecoderConfig,
                  config_loss: loss.LossConfig,
+                 config_length_task_loss: Optional[loss.LossConfig] = None,
+                 config_length_task: layers.LengthRatioConfig = None,
                  weight_tying: bool = False,
                  weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
                  weight_normalization: bool = False,
-                 lhuc: bool = False) -> None:
+                 lhuc: bool = False,
+                 num_pointers: int = 0) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size
@@ -72,12 +76,15 @@ class ModelConfig(Config):
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_loss = config_loss
+        self.config_length_task_loss = config_length_task_loss
+        self.config_length_task = config_length_task
         self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
         self.weight_normalization = weight_normalization
         if weight_tying and weight_tying_type is None:
             raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
         self.lhuc = lhuc
+        self.num_pointers = num_pointers
 
 
 class SockeyeModel:
@@ -123,10 +130,20 @@ class SockeyeModel:
 
         # output layer
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                               vocab_size=self.config.vocab_target_size,
+                                               vocab_size=self.config.vocab_target_size - self.config.num_pointers,
                                                weight=out_weight_target,
                                                weight_normalization=self.config.weight_normalization,
                                                prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+
+        # create length ratio prediction layer(s)
+        self.length_ratio = None
+        if self.config.config_length_task is not None:
+            if self.config.config_length_task.weight > 0.0:
+                self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
+                                                       num_layers=self.config.config_length_task.num_layers,
+                                                       prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
+            else:
+                logger.warning("Auxiliary length task requested, but its loss weight is zero -- this will have no effect.")
 
         self.params = None  # type: Optional[Dict]
         self.aux_params = None  # type: Optional[Dict]
@@ -208,8 +225,8 @@ class SockeyeModel:
                                          shape=(self.config.config_embed_target.vocab_size,
                                                 self.config.config_embed_target.num_embed))
 
-        w_out_target = mx.sym.Variable(prefix + "target_output_weight",
-                                       shape=(self.config.vocab_target_size, self.decoder.get_num_hidden()))
+        w_out_target = mx.sym.Variable(prefix + "target_output_weight", dtype='float32',
+                                       shape=(self.config.vocab_target_size - self.config.num_pointers, self.decoder.get_num_hidden()))
 
         if self.config.weight_tying:
             if C.WEIGHT_TYING_SRC in self.config.weight_tying_type \
@@ -225,7 +242,12 @@ class SockeyeModel:
                                       "Weight tying requires target embedding size and decoder hidden size " +
                                       "to be equal: %d vs. %d" % (self.config.config_embed_target.num_embed,
                                                                   self.decoder.get_num_hidden()))
-                w_out_target = w_embed_target
+                if self.config.num_pointers > 0:
+                    w_out_target = mx.sym.slice(w_embed_target,
+                        begin=(0, None),
+                        end=(self.config.vocab_target_size - self.config.num_pointers, None))
+                else:
+                    w_out_target = w_embed_target
 
         self._embed_weight_source_name = None
         if w_embed_source is not None:

@@ -18,6 +18,7 @@ import binascii
 import errno
 import glob
 import gzip
+import math
 import itertools
 import logging
 import os
@@ -252,6 +253,11 @@ class OnlineMeanAndVariance:
             return float('nan')
         else:
             return self._M2 / self._count
+
+    @property
+    def std(self) -> float:
+        variance = self.variance
+        return math.sqrt(variance) if not math.isnan(variance) else 0.0
 
 
 def top1(scores: mx.nd.NDArray,
@@ -760,6 +766,28 @@ class GpuFileLock:
             os.remove(self.lockfile_path)
 
 
+def parse_metrics_line(line_number: int, line: str) -> Dict[str, Any]:
+    """
+    Parse a line of metrics into a mappings of key and values.
+
+    :param line_number: Line's number for checking if checkpoints are aligned to it.
+    :param line: A line from the Sockeye metrics file.
+    :return: Dictionary of metric names (e.g. perplexity-train) mapping to a list of values.
+    """
+    fields = line.split('\t')
+    checkpoint = int(fields[0])
+    check_condition(line_number == checkpoint,
+                    "Line (%d) and loaded checkpoint (%d) do not align." % (line_number, checkpoint))
+    metric = dict()  # type: Dict[str, Any]
+    for field in fields[1:]:
+        key, value = field.split("=", 1)
+        if value == 'True' or value == 'False':
+            metric[key] = (value == 'True')
+        else:
+            metric[key] = float(value)
+    return metric
+
+
 def read_metrics_file(path: str) -> List[Dict[str, Any]]:
     """
     Reads lines metrics file and returns list of mappings of key and values.
@@ -767,21 +795,8 @@ def read_metrics_file(path: str) -> List[Dict[str, Any]]:
     :param path: File to read metric values from.
     :return: Dictionary of metric names (e.g. perplexity-train) mapping to a list of values.
     """
-    metrics = []
     with open(path) as fin:
-        for i, line in enumerate(fin, 1):
-            fields = line.strip().split('\t')
-            checkpoint = int(fields[0])
-            check_condition(i == checkpoint,
-                            "Line (%d) and loaded checkpoint (%d) do not align." % (i, checkpoint))
-            metric = dict()  # type: Dict[str, Any]
-            for field in fields[1:]:
-                key, value = field.split("=", 1)
-                if value == 'True' or value == 'False':
-                    metric[key] = bool(value)
-                else:
-                    metric[key] = float(value)
-            metrics.append(metric)
+        metrics = [parse_metrics_line(i, line.strip()) for i, line in enumerate(fin, 1)]
     return metrics
 
 
@@ -922,7 +937,7 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
                 os.remove(param_fname_n)
 
 
-def cast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
+def cast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     """
     Workaround until no-op cast will be fixed in MXNet codebase.
     Creates cast symbol only if dtype is different from default one, i.e. float32.
@@ -932,11 +947,11 @@ def cast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     :return: Cast symbol or just data symbol.
     """
     if dtype != C.DTYPE_FP32:
-        return mx.sym.cast(data=data, dtype=dtype)
+        return F.cast(data=data, dtype=dtype)
     return data
 
 
-def uncast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
+def uncast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     """
     Workaround until no-op cast will be fixed in MXNet codebase.
     Creates cast to float32 symbol only if dtype is different from default one, i.e. float32.
@@ -946,7 +961,7 @@ def uncast_conditionally(data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
     :return: Cast symbol or just data symbol.
     """
     if dtype != C.DTYPE_FP32:
-        return mx.sym.cast(data=data, dtype=C.DTYPE_FP32)
+        return F.cast(data=data, dtype=C.DTYPE_FP32)
     return data
 
 

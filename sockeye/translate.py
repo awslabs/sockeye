@@ -19,7 +19,7 @@ import sys
 import time
 import logging
 from contextlib import ExitStack
-from typing import Generator, Optional, List
+from typing import Dict, Generator, List, Optional, Union
 
 from sockeye.lexicon import TopKLexicon
 from sockeye.log import setup_main_logger
@@ -88,11 +88,50 @@ def run_translate(args: argparse.Namespace):
             override_dtype=args.override_dtype,
             output_scores=output_handler.reports_score(),
             sampling=args.sample)
-        restrict_lexicon = None  # type: Optional[TopKLexicon]
-        if args.restrict_lexicon:
-            restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
-            restrict_lexicon.load(args.restrict_lexicon, k=args.restrict_lexicon_topk)
+        
+        if any([model.config.num_pointers for model in models]):
+            check_condition(args.restrict_lexicon is None,
+                            "The pointer mechanism does not currently work with vocabulary restriction.")
+        
+        restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
+        if args.restrict_lexicon is not None:
+            logger.info(str(args.restrict_lexicon))
+            if len(args.restrict_lexicon) == 1:
+                # Single lexicon used for all inputs
+                restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
+                # Handle a single arg of key:path or path (parsed as path:path)
+                restrict_lexicon.load(args.restrict_lexicon[0][1], k=args.restrict_lexicon_topk)
+            else:
+                check_condition(args.json_input, "JSON input is required when using multiple lexicons for vocabulary restriction")
+                # Multiple lexicons with specified names
+                restrict_lexicon = dict()
+                for key, path in args.restrict_lexicon:
+                    lexicon = TopKLexicon(source_vocabs[0], target_vocab)
+                    lexicon.load(path, k=args.restrict_lexicon_topk)
+                    restrict_lexicon[key] = lexicon
+
         store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
+
+        brevity_penalty_weight = args.brevity_penalty_weight
+        if args.brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
+            if args.brevity_penalty_constant_length_ratio > 0.0:
+                constant_length_ratio = args.brevity_penalty_constant_length_ratio
+            else:
+                constant_length_ratio = sum(model.length_ratio_mean for model in models) / len(models)
+                logger.info("Using average of constant length ratios saved in the model configs: %f",
+                            constant_length_ratio)
+        elif args.brevity_penalty_type == C.BREVITY_PENALTY_LEARNED:
+            constant_length_ratio = -1.0
+        elif args.brevity_penalty_type == C.BREVITY_PENALTY_NONE:
+            brevity_penalty_weight = 0.0
+            constant_length_ratio = -1.0
+        else:
+            raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
+
+        brevity_penalty = None  # type: Optional[inference.BrevityPenalty]
+        if brevity_penalty_weight != 0.0:
+            brevity_penalty = inference.BrevityPenalty(brevity_penalty_weight)
+
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
                                           bucket_source_width=args.bucket_width,
@@ -109,7 +148,9 @@ def run_translate(args: argparse.Namespace):
                                           store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
                                           skip_topk=args.skip_topk,
-                                          sample=args.sample)
+                                          sample=args.sample,
+                                          constant_length_ratio=constant_length_ratio,
+                                          brevity_penalty=brevity_penalty)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
@@ -138,7 +179,9 @@ def make_inputs(input_file: Optional[str],
         check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if input_is_json:
-                yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=line)
+                yield inference.make_input_from_json_string(sentence_id=sentence_id,
+                                                            json_string=line,
+                                                            translator=translator)
             else:
                 yield inference.make_input_from_factored_string(sentence_id=sentence_id,
                                                                 factored_string=line,
@@ -154,7 +197,9 @@ def make_inputs(input_file: Optional[str],
             streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
                 if input_is_json:
-                    yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=inputs[0])
+                    yield inference.make_input_from_json_string(sentence_id=sentence_id,
+                                                                json_string=inputs[0],
+                                                                translator=translator)
                 else:
                     yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
 
