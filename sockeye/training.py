@@ -379,24 +379,30 @@ class GluonEarlyStoppingTrainer:
     def _determine_convergence(self) -> bool:
         """
         True if model has converged w.r.t early stopping criteria (patience).
+        Order: first check required minimums (samples, updates, epochs), then
+        check early stopping criteria (checkpoints not improved).
         """
+        if self.config.min_samples is not None and self.state.samples < self.config.min_samples:
+            logger.info("Minimum number of samples (%d) not reached yet: %d",
+                        self.config.min_samples, self.state.samples)
+            return False
+
+        if self.config.min_updates is not None and self.state.updates < self.config.min_updates:
+            logger.info("Minimum number of updates (%d) not reached yet: %d",
+                        self.config.min_updates, self.state.updates)
+            return False
+
+        if self.config.min_epochs is not None and self.state.epoch < self.config.min_epochs:
+            logger.info("Minimum number of epochs (%d) not reached yet: %d",
+                        self.config.min_epochs, self.state.epoch)
+            return False
+
         if self.config.max_num_checkpoint_not_improved is not None and \
                 0 <= self.config.max_num_checkpoint_not_improved <= self.state.num_not_improved:
             logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
                         self.config.max_num_checkpoint_not_improved, self.state.num_not_improved)
             return True
 
-        if self.config.min_epochs is not None and self.state.epoch < self.config.min_epochs:
-            logger.info("Minimum number of epochs (%d) not reached yet: %d",
-                        self.config.min_epochs, self.state.epoch)
-
-        if self.config.min_updates is not None and self.state.updates < self.config.min_updates:
-            logger.info("Minimum number of updates (%d) not reached yet: %d",
-                        self.config.min_updates, self.state.updates)
-
-        if self.config.min_samples is not None and self.state.samples < self.config.min_samples:
-            logger.info("Minimum number of samples (%d) not reached yet: %d",
-                        self.config.min_samples, self.state.samples)
         return False
 
     def _determine_divergence(self, val_metrics: List[loss.LossMetric]) -> bool:
