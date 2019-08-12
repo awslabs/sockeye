@@ -22,7 +22,7 @@ import shutil
 import sys
 import tempfile
 from contextlib import ExitStack
-from typing import cast, Optional, Dict, List, Tuple, Union
+from typing import cast, Callable, Optional, Dict, List, Tuple, Union
 
 import mxnet as mx
 from mxnet import gluon
@@ -710,7 +710,13 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace) -> training.TrainState:
+def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None) -> training.TrainState:
+    """
+    :param custom_metrics_logger: Optional custom metrics logging function. If supplied, takes care of metrics produced
+                                  during training in a custom way. It should accept a list or a dictionary of
+                                  (metric name, metric value) pairs, and an optional global_step/checkpoint parameter.
+    """
+
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -897,7 +903,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
             loss_functions=losses,
             context=context,
             dtype=args.dtype,
-            using_amp=using_amp
+            using_amp=using_amp,
+            custom_metrics_logger=custom_metrics_logger
         )        
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
