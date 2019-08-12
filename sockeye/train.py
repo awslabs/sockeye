@@ -160,7 +160,6 @@ def create_checkpoint_decoder(
     :param train_context: The training contexts.
     :param sockeye_model: The Sockeye model instance.
     :param source_vocabs: The source vocabs.
-    :param target_vocabs: The target vocab.
     :param hybridize: Turn hybridization of the Translator on/off (the model is already hybridized or not).
     :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
@@ -172,6 +171,10 @@ def create_checkpoint_decoder(
         sample_size = -1
 
     if sample_size == 0:
+        return None
+
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
+        logger.info("This is a secondary worker, not creating a checkpoint decoder for this training instance")
         return None
 
     if args.decode_and_evaluate_device_id is not None:
