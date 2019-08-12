@@ -63,6 +63,7 @@ class TrainerConfig(Config):
                  max_updates: Optional[int] = None,
                  min_epochs: Optional[int] = None,
                  max_epochs: Optional[int] = None,
+                 max_seconds: Optional[int] = None,
                  update_interval: int = 1,
                  stop_training_on_decoder_failure: bool = False) -> None:
         super().__init__()
@@ -79,6 +80,7 @@ class TrainerConfig(Config):
         self.max_updates = max_updates
         self.min_epochs = min_epochs
         self.max_epochs = max_epochs
+        self.max_seconds = max_seconds
         self.update_interval = update_interval
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
 
@@ -90,7 +92,8 @@ class TrainState:
 
     __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
                  'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
-                 'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged', 'diverged']
+                 '_tic_last_time_elapsed', '_time_elapsed', 'early_stopping_metric',
+                 'best_metric', 'best_checkpoint', 'converged', 'diverged']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -105,6 +108,8 @@ class TrainState:
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
         self.start_tic = time.time()
+        self._tic_last_time_elapsed = self.start_tic
+        self._time_elapsed = 0.0
         self.early_stopping_metric = early_stopping_metric
         self.best_metric = C.METRIC_WORST[early_stopping_metric]
         self.best_checkpoint = 0
@@ -115,6 +120,7 @@ class TrainState:
         """
         Saves this training state to fname.
         """
+        self.update_time_elapsed()
         with open(fname, "wb") as fp:
             pickle.dump(self, fp)
 
@@ -124,7 +130,18 @@ class TrainState:
         Loads a training state from fname.
         """
         with open(fname, "rb") as fp:
-            return pickle.load(fp)
+            state = pickle.load(fp)
+            state._tic_last_time_elapsed = time.time()
+            return state
+
+    def update_time_elapsed(self):
+        current_time = time.time()
+        self._time_elapsed += current_time - self._tic_last_time_elapsed
+        self._tic_last_time_elapsed = current_time
+
+    @property
+    def time_elapsed(self):
+        return self._time_elapsed
 
 
 class GluonEarlyStoppingTrainer:
@@ -230,12 +247,17 @@ class GluonEarlyStoppingTrainer:
                     self._save_trainer_states(self.best_optimizer_states_fname)
                 self._save_training_state(train_iter)
 
-                if self.state.converged or self.state.diverged:
-                    break
-
                 self._write_metrics_file(train_metrics=[l.metric for l in self.loss_functions], val_metrics=val_metrics)
                 for lf in self.loss_functions:
                     lf.metric.reset()
+
+                if self.config.max_seconds is not None and self.state.time_elapsed >= self.config.max_seconds:
+                    logger.info("Maximum # of seconds (%s) reached. Training ran for %d seconds.",
+                                self.config.max_seconds, self.state.time_elapsed)
+                    break
+
+                if self.state.converged or self.state.diverged:
+                    break
 
                 tic = time.time()
 
@@ -443,7 +465,7 @@ class GluonEarlyStoppingTrainer:
         data = {"epoch": self.state.epoch,
                 "learning-rate": self.trainer.optimizer.lr_scheduler.lr,
                 "gradient-norm": self.state.gradient_norm,
-                "time-elapsed": time.time() - self.state.start_tic}
+                "time-elapsed": self.state.time_elapsed}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.context)
         data['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
         data['converged'] = self.state.converged
