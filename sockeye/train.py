@@ -818,6 +818,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
             max_updates=args.max_updates,
             min_epochs=args.min_num_epochs,
             max_epochs=args.max_num_epochs,
+            max_seconds=args.max_seconds,
             update_interval=args.update_interval,
             stop_training_on_decoder_failure=args.stop_training_on_decoder_failure
         )
