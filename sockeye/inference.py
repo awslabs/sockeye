@@ -1237,6 +1237,8 @@ class Translator:
         return self._get_best_from_beam(*self._beam_searcher(source,
                                                              source_length,
                                                              restrict_lexicon,
+                                                             raw_constraints,
+                                                             raw_avoid_list,
                                                              max_output_lengths))
 
     def _encode(self, sources: mx.nd.NDArray, source_length: mx.nd.NDArray) -> Tuple[List[ModelState], mx.nd.NDArray]:

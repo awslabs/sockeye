@@ -13,7 +13,6 @@
 
 import mxnet as mx
 import numpy as np
-from collections import defaultdict
 from abc import abstractmethod, ABC
 
 from . import lexical_constraints as constrained
@@ -28,6 +27,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# TODO: better name for that class?
 class Inference(ABC):
 
     @abstractmethod
@@ -144,68 +144,6 @@ def _sort_states(states: List, best_hyp_indices: mx.nd.NDArray) -> List:
     return sorted_states
 
 
-def get_encoder(models: List[SockeyeModel], constant_length_ratio, beam_size) -> Callable:
-    # TODO move to model implementation
-    def _encode(sources: mx.nd.NDArray, source_length: mx.nd.NDArray):
-        """
-        Returns a ModelState for each model representing the state of the model after encoding the source.
-
-        :param sources: Source ids. Shape: (batch_size, max_length, num_factors).
-        :param source_length: Valid lengths for each input. Shape: (batch_size,)
-        :return: List of ModelStates and the estimated reference length based on ratios averaged over models.
-        """
-        model_states = []  # type: List[ModelState]
-        predicted_output_lengths = []  # type: List[mx.nd.NDArray]
-        for model in models:  # type: SockeyeModel
-            # TODO states not repeated
-            decoder_init_states, predicted_output_length = model.encode_and_initialize(sources, source_length, constant_length_ratio)
-            predicted_output_lengths.append(predicted_output_length)
-            # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
-            decoder_init_states = [s.repeat(repeats=beam_size, axis=0) for s in decoder_init_states]
-            model_state = ModelState(decoder_init_states)
-            model_states.append(model_state)
-
-        # (batch,)
-        # average the ratios over the models
-        predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=0), axis=0)
-        # (batch, 1)
-        predicted_output_lengths = mx.nd.expand_dims(predicted_output_lengths, axis=1)
-        # (batch*beam, 1)
-        predicted_output_lengths = mx.nd.repeat(predicted_output_lengths, repeats=beam_size, axis=0)
-
-        return model_states, cast(mx.nd.NDArray, predicted_output_lengths).astype('float32', copy=False)
-
-    return _encode
-
-
-def get_decoder(models: List[SockeyeModel], skip_softmax, interpolation_func: Callable) -> Callable:
-    def _decode_step(prev_word: mx.nd.NDArray,
-                     states: List[ModelState],
-                     vocab_slice_ids: Optional[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, List[ModelState]]:
-        """
-        Returns decoder predictions (combined from all models) and updated states.
-
-        :param prev_word: Previous words of hypotheses. Shape: (batch_size * beam_size,).
-        :param states: List of model states.
-        :param vocab_slice_ids: Optional vocab slice ids for vocabulary selection.
-        :return: (scores, list of model states)
-        """
-        model_outs, model_states = [], []
-        for model, state in zip(models, states):
-            logits, state.states, _ = model.decode_step(prev_word, state.states, vocab_slice_ids)
-            logits = logits.astype('float32', copy=False)
-            model_out = logits if skip_softmax else logits.softmax(axis=-1)
-            model_outs.append(model_out)
-            model_states.append(state)
-        if len(models) == 1:
-            scores = -model_outs[0] if skip_softmax else -mx.nd.log(model_outs[0])  # pylint: disable=invalid-unary-operand-type
-        else:
-            scores = interpolation_func(model_outs)
-        return scores, model_states
-
-    return _decode_step
-
-
 class BeamSearch(mx.gluon.Block):
     # TODO: misses constraint decoding
 
@@ -225,26 +163,33 @@ class BeamSearch(mx.gluon.Block):
         self.vocab_target = vocab_target
         self._get_max_output_length = get_max_output_length
         self._inference = inference
-        self.skip_topk = False
+        self.skip_topk = False  # TODO
         self.beam_search_stop = beam_search_stop
         self.num_source_factors = num_source_factors
         self.constant_length_ratio = 0.0  # TODO
+        self.global_avoid_trie = None  # TODO
+        self.length_penalty = LengthPenalty(1.0, 0.0)  # TODO
+        self.brevity_penalty = None #BrevityPenalty(weight=0.0)  # TODO
+        brevity_penalty_weight = self.brevity_penalty.weight if self.brevity_penalty is not None else 0.0
 
         with self.name_scope():
             self._sort_by_index = SortByIndex(prefix='sort_by_index_')
             self._update_scores = UpdateScores(prefix='update_scores_')
             self._norm_and_update_finished = NormalizeAndUpdateFinished(prefix='norm_and_update_finished_',
                                                                         pad_id=C.PAD_ID,
-                                                                        eos_id=vocab_target[C.EOS_SYMBOL])
-                                                                        # TODO other args)
-            self._top = TopK(k=self.beam_size,
-                             vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
+                                                                        eos_id=vocab_target[C.EOS_SYMBOL],
+                                                                        length_penalty_alpha=self.length_penalty.alpha,
+                                                                        length_penalty_beta=self.length_penalty.beta,
+                                                                        brevity_penalty_weight=brevity_penalty_weight)
+            self._top = TopK(self.beam_size)  # type: mx.gluon.HybridBlock
 
     def forward(self,
                 source: mx.nd.NDArray,
                 source_length: mx.nd.NDArray,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
-                max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
+                raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                raw_avoid_list: List[Optional[constrained.RawConstraintList]],
+                 : mx.nd.NDArray) -> Tuple[np.ndarray,
                                                             np.ndarray,
                                                             np.ndarray,
                                                             np.ndarray,
@@ -307,6 +252,13 @@ class BeamSearch(mx.gluon.Block):
             # TODO: See note in method about migrating to pure MXNet when set operations are supported.
             #       We currently convert source to NumPy and target ids back to NDArray.
             vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
+            if any(raw_constraint_list):
+                # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
+                constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
+                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)
+                full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
+                raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
+                                       raw_constraint_list]
             vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
             if vocab_slice_ids.shape[0] < self.beam_size + 1:
@@ -323,8 +275,20 @@ class BeamSearch(mx.gluon.Block):
             pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
                                   val=np.inf, ctx=self.context)
 
+        # Initialize the beam to track constraint sets, where target-side lexical constraints are present
+        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id,
+                                             self.vocab_target[C.EOS_SYMBOL])
+
+        if self.global_avoid_trie or any(raw_avoid_list):
+            avoid_states = constrained.AvoidBatch(batch_size, self.beam_size,
+                                                  avoid_list=raw_avoid_list,
+                                                  global_avoid_trie=self.global_avoid_trie)
+            avoid_states.consume(best_word_indices)
+
         # (0) encode source sentence, returns a list
-        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length, self.constant_length_ratio)
+        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source,
+                                                                                          source_length,
+                                                                                          self.constant_length_ratio)
         # repeat states to beam_size
         model_states = _repeat_states(model_states, self.beam_size)
 
@@ -342,6 +306,14 @@ class BeamSearch(mx.gluon.Block):
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
             scores = self._update_scores(target_dists, finished, inactive, scores_accumulated, pad_dist)
 
+            # Mark entries that should be blocked as having a score of np.inf
+            if self.global_avoid_trie or any(raw_avoid_list):
+                block_indices = avoid_states.avoid()
+                if len(block_indices) > 0:
+                    scores[block_indices] = np.inf
+                    if self.sample is not None:
+                        target_dists[block_indices] = np.inf
+
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
             # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
@@ -350,6 +322,19 @@ class BeamSearch(mx.gluon.Block):
                 scores *= first_step_mask
 
             best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
+
+            # Constraints for constrained decoding are processed sentence by sentence
+            if any(raw_constraint_list):
+                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = constrained.topk(
+                    t,
+                    batch_size,
+                    self.beam_size,
+                    inactive,
+                    scores,
+                    constraints,
+                    best_hyp_indices,
+                    best_word_indices,
+                    scores_accumulated)
 
             # Map from restricted to full vocab ids if needed
             if restrict_lexicon:
@@ -392,18 +377,19 @@ class BeamSearch(mx.gluon.Block):
                                                                 self.beam_size * scores_accumulated.shape[-1]))
         indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
         best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + offset
+        scores_accumulated = scores_accumulated.take(best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
-        scores_accumulated = scores_accumulated.take(best_hyp_indices)
-
         all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
         all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
+        constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
         return all_best_hyp_indices.asnumpy(), \
                all_best_word_indices.asnumpy(), \
                scores_accumulated.asnumpy(), \
                lengths.asnumpy().astype('int32'), \
-               estimated_reference_lengths.asnumpy()
+               estimated_reference_lengths.asnumpy(), \
+               constraints
 
 
 class SortByIndex(mx.gluon.HybridBlock):
@@ -567,36 +553,21 @@ class BrevityPenalty(mx.gluon.HybridBlock):
             return self.hybrid_forward(None, hyp_lengths, reference_lengths)
 
 
-class ModelState:
-    """
-    A ModelState encapsulates information about the decoder states of an InferenceModel.
-    """
-
-    def __init__(self, states: List[mx.nd.NDArray]) -> None:
-        self.states = states
-
-    def sort_state(self, best_hyp_indices: mx.nd.NDArray):
-        """
-        Sorts states according to k-best order from last step in beam search.
-        """
-        self.states = [mx.nd.take(ds, best_hyp_indices) for ds in self.states]
-
-
 class TopK(mx.gluon.HybridBlock):
     """
-    A HybridBlock for a statically-shaped batch-wise topk operation.
+    Batch-wise topk operation.
+    Forward method uses imperative shape inference, since both batch_size and vocab_size are dynamic
+    during translation (due to variable batch size and potential vocabulary selection).
     """
 
-    def __init__(self, k: int, vocab_size: int) -> None:
+    def __init__(self, k: int) -> None:
         """
         :param k: The number of smallest scores to return.
-        :param vocab_size: Vocabulary size.
         """
         super().__init__()
         self.k = k
-        self.vocab_size = vocab_size
 
-    def hybrid_forward(self, F, scores, offset):
+    def forward(self, scores, offset):
         """
         Get the lowest k elements per sentence from a `scores` matrix.
 
@@ -604,18 +575,18 @@ class TopK(mx.gluon.HybridBlock):
         :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices and values of the k smallest items in matrix.
         """
+        vocab_size = scores.shape[1]
+        batch_size = int(offset.shape[-1] / self.k)
         # Shape: (batch size, beam_size * vocab_size)
-        folded_scores = F.reshape(scores, shape=(-1, self.k * self.vocab_size))
-
-        values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
-
-        # Project indices back into original shape (which is different for t==1 and t>1)
-        indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
-        # TODO: we currently exploit a bug in the implementation of unravel_index to not require knowing the first shape
-        # value. See https://github.com/apache/incubator-mxnet/issues/13862
-        unraveled = F.unravel_index(indices, shape=(C.LARGEST_INT, self.vocab_size))
-
-        best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
-        best_hyp_indices = best_hyp_indices + offset
-        values = F.reshape(values, shape=(-1, 1))
+        batchwise_scores = scores.reshape(shape=(batch_size, self.k * vocab_size))
+        indices, values = super().forward(batchwise_scores)
+        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * self.k, vocab_size))
+        if batch_size > 1:
+            # Offsetting the indices to match the shape of the scores matrix
+            best_hyp_indices += offset
         return best_hyp_indices, best_word_indices, values
+
+    def hybrid_forward(self, F, scores):
+        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        # Project indices back into original shape (which is different for t==1 and t>1)
+        return F.reshape(F.cast(indices, 'int32'), shape=(-1,)), F.reshape(values, shape=(-1, 1))

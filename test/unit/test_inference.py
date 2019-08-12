@@ -542,7 +542,8 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     assert all(mx_word == np_word)
     assert all(mx_values == np_values)
 
-    topk = sockeye.inference.TopK(k=beam_size, vocab_size=target_vocab_size)
+    from sockeye.beam_search import TopK
+    topk = TopK(k=beam_size)
     topk.initialize()
 
     mx_hyp, mx_word, mx_values = topk(scores, offset)

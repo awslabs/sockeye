@@ -201,6 +201,7 @@ def top1(scores: mx.nd.NDArray,
     return offset, best_word_indices, values
 
 
+# TODO: remove
 def topk(scores: mx.nd.NDArray,
          offset: mx.nd.NDArray,
          k: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
