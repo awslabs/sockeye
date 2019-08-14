@@ -163,6 +163,7 @@ def test_inference_args(test_params, expected_params):
               max_samples=None,
               min_updates=None,
               max_updates=None,
+              max_seconds=None,
               update_interval=1,
               min_num_epochs=None,
               max_num_epochs=None,
