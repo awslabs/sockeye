@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.107]
+### Changed
+- Updated to [MXNet 1.5.0](https://github.com/apache/incubator-mxnet/tree/1.5.0)
+
 ## [1.18.106]
 ### Added
 - Added an optional time limit for stopping training. The training will stop at the next checkpoint after reaching the time limit.
