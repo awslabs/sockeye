@@ -17,7 +17,8 @@ import mxnet as mx
 
 from . import config
 from .lr_scheduler import LearningRateScheduler
-from sockeye_contrib.optimizers import bert_adam
+from sockeye_contrib.optimizers import bert_adam, lamb
+
 
 class OptimizerConfig(config.Config):
 
