@@ -226,7 +226,7 @@ class CandidateScorer(mx.gluon.HybridBlock):
                  length_penalty_alpha: float = 1.0,
                  length_penalty_beta: float = 0.0,
                  brevity_penalty_weight: float = 0.0,
-                 **kwargs):
+                 **kwargs) -> None:
         super().__init__(**kwargs)
         with self.name_scope():
             self._lp = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
@@ -422,13 +422,13 @@ class BeamSearch(mx.gluon.Block):
                  eos_id: int,
                  context: Union[mx.Context, List[mx.Context]],
                  output_vocab_size: int,
-                 scorer: 'CandidateScorer',
+                 scorer: CandidateScorer,
                  num_source_factors: int,
                  get_max_output_length: Callable,
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
-                 sample: Optional[int] = None):
+                 sample: Optional[int] = None) -> None:
         super().__init__(prefix='beam_search_')
         self.beam_size = beam_size
         self.bos_id = bos_id
@@ -444,7 +444,7 @@ class BeamSearch(mx.gluon.Block):
         with self.name_scope():
             self._sort_by_index = SortByIndex(prefix='sort_by_index_')
             self._update_scores = UpdateScores(prefix='update_scores_')
-            self._scorer = self._scorer = scorer
+            self._scorer = scorer
             self._norm_and_update_finished = NormalizeAndUpdateFinished(prefix='norm_and_update_finished_',
                                                                         pad_id=C.PAD_ID,
                                                                         eos_id=eos_id,
@@ -690,6 +690,7 @@ def get_beam_search(models: List[SockeyeModel],
                     sample: Optional[int] = None,
                     hybridize: bool = True) -> BeamSearch:
 
+    inference = None  # type: Optional[_Inference]
     if len(models) == 1:
         skip_softmax = beam_size == 1 and not output_scores and not sample
         if skip_softmax:
@@ -698,7 +699,8 @@ def get_beam_search(models: List[SockeyeModel],
                                           skip_softmax=skip_softmax, constant_length_ratio=constant_length_ratio)
     else:
         inference = _EnsembleInference(models=models,
-                                       ensemble_mode=ensemble_mode, constant_length_ratio=constant_length_ratio)
+                                       ensemble_mode=ensemble_mode,
+                                       constant_length_ratio=constant_length_ratio)
 
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
     bs = BeamSearch(
