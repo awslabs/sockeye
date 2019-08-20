@@ -407,6 +407,10 @@ class SockeyeModel(mx.gluon.Block):
     def length_ratio_std(self) -> float:
         return self.config.config_data.data_statistics.length_ratio_std
 
+    @property
+    def output_layer_vocab_size(self) -> int:
+        return self.output_layer.vocab_size
+
 
 def load_model(model_folder: str,
                context: Union[List[mx.context.Context], mx.context.Context] = mx.cpu(),

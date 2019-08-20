@@ -51,7 +51,7 @@ ENCODER_DECODER_SETTINGS = [
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2 --nbest-size 2",
      False, False),
-    # Basic transformer w/ prepared data & greedy and skip-topk decoding
+    # Basic transformer w/ prepared data & greedy decoding
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
@@ -60,7 +60,7 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
-     "--beam-size 1 --softmax-temperature 0.01 --skip-topk",
+     "--beam-size 1",
      True, False),
     # Basic transformer with source factor, beam-search-stop first decoding
     ("--encoder transformer --decoder transformer"
@@ -72,7 +72,7 @@ ENCODER_DECODER_SETTINGS = [
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-combine sum",
      "--beam-size 2 --beam-search-stop first",
      True, True),
-    # Basic transformer with LHUC, beam-prune 1 decoding
+    # Basic transformer with LHUC
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
@@ -81,7 +81,7 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
-     "--beam-size 2 --beam-prune 1",
+     "--beam-size 2",
      False, False),
     # Basic transformer and length ratio prediction, and learned brevity penalty during inference
     ("--encoder transformer --decoder transformer"

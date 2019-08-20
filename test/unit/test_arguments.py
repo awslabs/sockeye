@@ -110,7 +110,6 @@ def test_model_parameters(test_params, expected_params):
                       models=['model'],
                       beam_size=5,
                       nbest_size=1,
-                      beam_prune=0,
                       batch_size=1,
                       chunk_size=None,
                       ensemble_mode='linear',
@@ -119,7 +118,6 @@ def test_model_parameters(test_params, expected_params):
                       restrict_lexicon=None,
                       restrict_lexicon_topk=None,
                       avoid_list=None,
-                      softmax_temperature=None,
                       output_type='translation',
                       max_output_length_num_stds=2,
                       max_output_length=None,
@@ -132,8 +130,7 @@ def test_model_parameters(test_params, expected_params):
                       strip_unknown_words=False,
                       dtype=None,
                       sample=None,
-                      seed=None,
-                      skip_topk=False)),
+                      seed=None)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)
@@ -208,7 +205,6 @@ def test_training_arg(test_params, expected_params):
           use_cpu=True),
      # Other parameters mentioned in the WMT tutorial
      ["beam_size",
-      "softmax_temperature",
       "length_penalty_alpha"]),
 ])
 def test_tutorial_translate_args(test_params, expected_params, expected_params_present):

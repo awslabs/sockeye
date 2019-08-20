@@ -82,7 +82,6 @@ def run_translate(args: argparse.Namespace):
                                                           hybridize=hybridize,
                                                           inference_only=True)
 
-
         restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
         if args.restrict_lexicon is not None:
             logger.info(str(args.restrict_lexicon))
@@ -101,8 +100,6 @@ def run_translate(args: argparse.Namespace):
                     lexicon.load(path, k=args.restrict_lexicon_topk)
                     restrict_lexicon[key] = lexicon
 
-        store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
-
         brevity_penalty_weight = args.brevity_penalty_weight
         if args.brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
             if args.brevity_penalty_constant_length_ratio > 0.0:
@@ -119,17 +116,17 @@ def run_translate(args: argparse.Namespace):
         else:
             raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
-        brevity_penalty = None  # type: Optional[inference.BrevityPenalty]
-        if brevity_penalty_weight != 0.0:
-            brevity_penalty = inference.BrevityPenalty(brevity_penalty_weight)
+        scorer = inference.CandidateScorer(
+            length_penalty_alpha=args.length_penalty_alpha,
+            length_penalty_beta=args.length_penalty_beta,
+            brevity_penalty_weight=brevity_penalty_weight,
+            prefix='scorer_')
 
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
-                                          length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
-                                                                                 args.length_penalty_beta),
+                                          scorer=scorer,
                                           batch_size=args.batch_size,
                                           beam_size=args.beam_size,
-                                          beam_prune=args.beam_prune,
                                           beam_search_stop=args.beam_search_stop,
                                           nbest_size=args.nbest_size,
                                           models=models,
@@ -137,13 +134,10 @@ def run_translate(args: argparse.Namespace):
                                           target_vocab=target_vocab,
                                           restrict_lexicon=restrict_lexicon,
                                           avoid_list=args.avoid_list,
-                                          store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
-                                          skip_topk=args.skip_topk,
                                           sample=args.sample,
                                           output_scores=output_handler.reports_score(),
                                           constant_length_ratio=constant_length_ratio,
-                                          brevity_penalty=brevity_penalty,
                                           max_output_length_num_stds=args.max_output_length_num_stds,
                                           max_input_length=args.max_input_length,
                                           max_output_length=args.max_output_length)

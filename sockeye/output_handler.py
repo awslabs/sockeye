@@ -41,8 +41,6 @@ def get_output_handler(output_type: str,
         return StringWithScoreOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_BENCHMARK:
         return BenchmarkOutputHandler(output_stream)
-    elif output_type == C.OUTPUT_HANDLER_BEAM_STORE:
-        return BeamStoringHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_JSON:
         return JSONOutputHandler(output_stream)
     else:

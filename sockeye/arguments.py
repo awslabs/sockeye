@@ -956,12 +956,6 @@ def add_score_cli_args(params):
                         help='Maximum sequence length in tokens.'
                              'Use "x:x" to specify separate values for src&tgt. Default: Read from model.')
 
-    params.add_argument('--softmax-temperature',
-                        type=float,
-                        default=None,
-                        help='Controls peakiness of model predictions. Values < 1.0 produce '
-                        'peaked predictions, values > 1.0 produce smoothed distributions.')
-
     # common params with translate CLI
     add_length_penalty_args(params)
     add_brevity_penalty_args(params)
@@ -1043,12 +1037,6 @@ def add_inference_args(params):
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
 
-    decode_params.add_argument('--beam-prune', '-p',
-                               type=float,
-                               default=0,
-                               help='Pruning threshold for beam search. All hypotheses with scores not within '
-                                    'this amount of the best finished hypothesis are discarded (0 = off). '
-                                    'Default: %(default)s.')
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
                                default=C.BEAM_SEARCH_STOP_ALL,
@@ -1068,11 +1056,6 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
-    decode_params.add_argument('--skip-topk',
-                               default=False,
-                               action='store_true',
-                               help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
-                                    'Default: %(default)s.')
     decode_params.add_argument('--sample',
                                type=int_greater_or_equal(0),
                                default=None,
@@ -1097,11 +1080,6 @@ def add_inference_args(params):
                                type=int,
                                default=None,
                                help='Maximum input sequence length. Default: value from model(s).')
-    decode_params.add_argument('--softmax-temperature',
-                               type=float,
-                               default=None,
-                               help='Controls peakiness of model predictions. Values < 1.0 produce '
-                                    'peaked predictions, values > 1.0 produce smoothed distributions.')
     decode_params.add_argument('--max-output-length-num-stds',
                                type=int,
                                default=C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,

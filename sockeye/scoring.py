@@ -26,8 +26,8 @@ from . import constants as C
 from . import data_io
 from . import inference
 from . import vocab
-from .inference import TranslatorInput, TranslatorOutput
 from .model import SockeyeModel
+from .beam_search import CandidateScorer
 from .output_handler import OutputHandler
 
 logger = logging.getLogger(__name__)
@@ -36,17 +36,13 @@ logger = logging.getLogger(__name__)
 class BatchScorer(mx.gluon.HybridBlock):
 
     def __init__(self,
-                 length_penalty: inference.LengthPenalty,
-                 brevity_penalty: inference.BrevityPenalty,
+                 scorer: CandidateScorer,
                  score_type: str = C.SCORING_TYPE_DEFAULT,
-                 softmax_temperature: Optional[float] = None,
                  constant_length_ratio: Optional[float] = None,
                  prefix='BatchScorer_') -> None:
         super().__init__(prefix=prefix)
         self.score_type = score_type
-        self.softmax_temperature = softmax_temperature
-        self.length_penalty = length_penalty
-        self.brevity_penalty = brevity_penalty
+        self.scorer = scorer
         self.constant_length_ratio = constant_length_ratio
 
     def hybrid_forward(self, F, logits, labels, length_ratio, source_length, target_length):
@@ -60,29 +56,24 @@ class BatchScorer(mx.gluon.HybridBlock):
         :param target_length: Target lengths. Shape: (batch,).
         :return: Sequence scores. Shape: (batch,).
         """
-        if self.softmax_temperature is not None:
-            logits = logits / self.softmax_temperature
-        target_dists = F.softmax(logits, axis=-1)
+        logprobs = F.log_softmax(logits, axis=-1)
 
         # Select the label probability, then take their logs.
         # probs and scores: (batch_size, target_seq_len)
-        probs = F.pick(target_dists, labels, axis=-1)
-        token_scores = F.log(probs)
+        token_scores = F.pick(logprobs, labels, axis=-1)
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
             token_scores = token_scores * -1
 
         # Sum, then apply length penalty. The call to `mx.sym.where` masks out invalid values from scores.
         # zeros and sums: (batch_size,)
-        scores = F.sum(F.where(labels != 0, token_scores, F.zeros_like(token_scores)), axis=1) / (
-                     self.length_penalty(target_length - 1))
+        scores = F.sum(F.where(labels != 0, token_scores, F.zeros_like(token_scores)), axis=1)
 
-        # Deal with the potential presence of brevity penalty
-        # length_ratio: (batch_size,)
-        if self.constant_length_ratio is not None:
-            # override all ratios with the constant value
-            length_ratio = length_ratio + self.constant_length_ratio * F.ones_like(scores)
+        if self.constant_length_ratio is not None and self.constant_length_ratio > 0.0:
+            predicted_output_length = source_length * self.constant_length_ratio
+        else:
+            predicted_output_length = source_length * length_ratio
 
-        scores = scores - self.brevity_penalty(target_length - 1, length_ratio * source_length)
+        scores = self.scorer(scores, target_length - 1, predicted_output_length)
         return scores
 
 
@@ -155,8 +146,8 @@ class Scorer:
                     score = score.asscalar()
 
                 # Output handling routines require us to make use of inference classes.
-                output_handler.handle(TranslatorInput(sentence_no, source_tokens),
-                                      TranslatorOutput(sentence_no, target_string, None, score),
+                output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),
+                                      inference.TranslatorOutput(sentence_no, target_string, None, score),
                                       batch_time)
 
         if sentence_no != 0:

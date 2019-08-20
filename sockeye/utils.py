@@ -179,62 +179,6 @@ class OnlineMeanAndVariance:
         return math.sqrt(variance) if not math.isnan(variance) else 0.0
 
 
-def top1(scores: mx.nd.NDArray,
-         offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
-    """
-    Get the single lowest element per sentence from a `scores` matrix. Expects that
-    beam size is 1, for greedy decoding.
-
-    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
-
-    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
-    :return: The row indices, column indices and values of the smallest items in matrix.
-    """
-    best_word_indices = mx.nd.cast(mx.nd.argmin(scores, axis=1), dtype='int32')
-    values = scores[mx.nd.arange(scores.shape[0], dtype='int32', ctx=scores.context), best_word_indices]
-
-    values = values.reshape((-1, 1))
-
-    # for top1, the best hyp indices are equal to the plain offset
-
-    return offset, best_word_indices, values
-
-
-# TODO: remove
-def topk(scores: mx.nd.NDArray,
-         offset: mx.nd.NDArray,
-         k: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
-    """
-    Get the lowest k elements per sentence from a `scores` matrix.
-    At the first timestep, the shape of scores is (batch, target_vocabulary_size).
-    At subsequent steps, the shape is (batch * k, target_vocabulary_size).
-
-    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-    :param offset: Array (shape: batch_size * k) containing offsets to add to the hypothesis indices in batch decoding.
-    :param k: The number of smallest scores to return.
-    :return: The row indices, column indices and values of the k smallest items in matrix.
-    """
-
-    # Compute the batch size from the offsets and k. We don't know the batch size because it is
-    # either 1 (at timestep 1) or k (at timesteps 2+).
-    # (batch_size, beam_size * target_vocab_size)
-    batch_size = int(offset.shape[-1] / k)
-    folded_scores = scores.reshape((batch_size, -1))
-
-    # pylint: disable=unbalanced-tuple-unpacking
-    values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-    indices = mx.nd.cast(indices, 'int32').reshape((-1,))
-    best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * k, scores.shape[-1]))
-
-    if batch_size > 1:
-        # Offsetting the indices to match the shape of the scores matrix
-        best_hyp_indices += offset
-
-    values = values.reshape((-1, 1))
-    return best_hyp_indices, best_word_indices, values
-
-
 def chunks(some_list: List, n: int) -> Iterable[List]:
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(some_list), n):

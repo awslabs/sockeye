@@ -11,30 +11,29 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import logging
+from abc import abstractmethod, ABC
+from typing import Tuple, Optional, List, Callable, Union
+
 import mxnet as mx
 import numpy as np
-from abc import abstractmethod, ABC
 
+from . import constants as C
 from . import lexical_constraints as constrained
 from . import lexicon
 from . import utils
 from . import vocab
-from . import constants as C
 from .model import SockeyeModel
-from typing import Tuple, Optional, List, Dict, Callable, Union, cast
-import logging
 
 logger = logging.getLogger(__name__)
 
 
-# TODO: better name for that class?
-class Inference(ABC):
+class _Inference(ABC):
 
     @abstractmethod
     def encode_and_initialize(self,
                               inputs: mx.nd.NDArray,
-                              valid_length: Optional[mx.nd.NDArray] = None,
-                              constant_length_ratio: float = 0.0):
+                              valid_length: Optional[mx.nd.NDArray] = None):
         raise NotImplementedError()
 
     @abstractmethod
@@ -45,17 +44,18 @@ class Inference(ABC):
         raise NotImplementedError()
 
 
-class SingleModelInference(Inference):
+class _SingleModelInference(_Inference):
 
-    def __init__(self, model: SockeyeModel, skip_softmax: bool = False) -> None:
+    def __init__(self,
+                 model: SockeyeModel,
+                 skip_softmax: bool = False,
+                 constant_length_ratio: float = 0.0) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
+        self._const_lr = constant_length_ratio
 
-    def encode_and_initialize(self,
-                              inputs: mx.nd.NDArray,
-                              valid_length: Optional[mx.nd.NDArray] = None,
-                              constant_length_ratio: float = 0.0):
-        states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, constant_length_ratio)
+    def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
+        states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
         predicted_output_length = predicted_output_length.expand_dims(axis=1)
         return states, predicted_output_length
 
@@ -69,9 +69,12 @@ class SingleModelInference(Inference):
         return scores, states
 
 
-class EnsembleInference(Inference):
+class _EnsembleInference(_Inference):
 
-    def __init__(self, models: List[SockeyeModel], ensemble_mode: str = 'linear') -> None:
+    def __init__(self,
+                 models: List[SockeyeModel],
+                 ensemble_mode: str = 'linear',
+                 constant_length_ratio: float = 0.0) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -79,15 +82,13 @@ class EnsembleInference(Inference):
             self._interpolation = self.log_linear_interpolation
         else:
             raise ValueError()
+        self._const_lr = constant_length_ratio
 
-    def encode_and_initialize(self,
-                              inputs: mx.nd.NDArray,
-                              valid_length: Optional[mx.nd.NDArray] = None,
-                              constant_length_ratio: float = 0.0):
+    def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
         model_states = []  # type: List[List[mx.nd.NDArray]]
         predicted_output_lengths = []  # type: List[mx.nd.NDArray]
         for model in self._models:
-            states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, constant_length_ratio)
+            states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
             predicted_output_lengths.append(predicted_output_length)
             model_states.append(states)
         # average predicted output lengths, (batch, 1)
@@ -118,6 +119,263 @@ class EnsembleInference(Inference):
         return -log_probs.log_softmax()  # pylint: disable=invalid-unary-operand-type
 
 
+class SortByIndex(mx.gluon.HybridBlock):
+    """
+    A HybridBlock that sorts args by the given indices.
+    """
+    def hybrid_forward(self, F, indices, *args):
+        return [F.take(arg, indices) for arg in args]
+
+
+class UpdateScores(mx.gluon.HybridBlock):
+    """
+    A HybridBlock that updates the scores from the decoder step with accumulated scores.
+    Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
+    All other options are set to infinity.
+    """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
+
+    def hybrid_forward(self, F, target_dists, finished, inactive, scores_accumulated, pad_dist):
+        # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
+        # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
+        # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
+        # infinity otherwise.
+        scores = F.broadcast_add(target_dists, scores_accumulated)
+        # pad_dist. Shape: (batch*beam, vocab_size-1)
+        scores = F.where(F.broadcast_logical_or(finished, inactive), F.concat(scores_accumulated, pad_dist), scores)
+        return scores
+
+
+class LengthPenalty(mx.gluon.HybridBlock):
+    """
+    Calculates the length penalty as:
+    (beta + len(Y))**alpha / (beta + 1)**alpha
+
+    See Wu et al. 2016 (note that in the paper beta has a different meaning,
+    and a fixed value 5 was used for this parameter)
+
+    :param alpha: The alpha factor for the length penalty (see above).
+    :param beta: The beta factor for the length penalty (see above).
+    """
+
+    def __init__(self, alpha: float = 1.0, beta: float = 0.0, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.alpha = alpha
+        self.beta = beta
+        self.denominator = (self.beta + 1.) ** self.alpha
+
+    def forward(self, lengths):
+        if isinstance(lengths, mx.nd.NDArray) or isinstance(lengths, mx.sym.Symbol):
+            return super().forward(lengths)
+        else:
+            return self.hybrid_forward(None, lengths)
+
+    def hybrid_forward(self, F, lengths):
+        if self.alpha == 0.0:
+            if F is None:
+                return 1.0
+            else:
+                return F.ones_like(lengths)
+        else:
+            numerator = self.beta + lengths if self.beta != 0.0 else lengths
+            numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
+            return numerator / self.denominator
+
+
+class BrevityPenalty(mx.gluon.HybridBlock):
+    """
+    Calculates the logarithmic brevity penalty as:
+      weight * log min(1, exp(1 - ref_len / hyp_len)) = weight * min(0, 1 - ref_len / hyp_len).
+
+    :param weight: Linear weight.
+    """
+
+    def __init__(self, weight: float = 0.0, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.weight = weight
+
+    def forward(self, hyp_lengths, reference_lengths):
+        if isinstance(hyp_lengths, mx.nd.NDArray) or isinstance(hyp_lengths, mx.sym.Symbol):
+            return super().forward(hyp_lengths, reference_lengths)
+        else:
+            return self.hybrid_forward(None, hyp_lengths, reference_lengths)
+
+    def hybrid_forward(self, F, hyp_lengths, reference_lengths):
+        if self.weight == 0.0:
+            if F is None:
+                return 0.0
+            else:
+                # subtract to avoid MxNet's warning of not using both arguments
+                # this branch should not and is not used during inference
+                return F.zeros_like(hyp_lengths - reference_lengths)
+        else:
+            # log_bp is always <= 0.0
+            if F is None:
+                log_bp = min(0.0, 1.0 - reference_lengths / hyp_lengths)
+            else:
+                log_bp = F.minimum(F.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
+            return self.weight * log_bp
+
+
+class CandidateScorer(mx.gluon.HybridBlock):
+
+    def __init__(self,
+                 length_penalty_alpha: float = 1.0,
+                 length_penalty_beta: float = 0.0,
+                 brevity_penalty_weight: float = 0.0,
+                 **kwargs):
+        super().__init__(**kwargs)
+        with self.name_scope():
+            self._lp = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
+            self._bp = None  # type: Optional[BrevityPenalty]
+            if brevity_penalty_weight > 0.0:
+                self._bp = BrevityPenalty(weight=brevity_penalty_weight)
+
+    def forward(self, scores, lengths, reference_lengths):
+        if isinstance(scores, mx.nd.NDArray) or isinstance(scores, mx.sym.Symbol):
+            return super().forward(scores, lengths, reference_lengths)
+        else:
+            return self.hybrid_forward(None, scores, lengths, reference_lengths)
+
+    def hybrid_forward(self, F, scores, lengths, reference_lengths):
+        lp = self._lp(lengths)
+        if self._bp is not None:
+            bp = self._bp(lengths, reference_lengths)
+        else:
+            if F is None:
+                bp = 0.0
+            else:
+                # avoid warning for unused input
+                bp = F.zeros_like(reference_lengths) if reference_lengths is not None else 0.0
+        return scores / lp - bp
+
+    def unnormalize(self, scores, lengths, reference_lengths):
+        bp = 0.0 if self._bp is None else self._bp(lengths, reference_lengths)
+        return (scores + bp) * self._lp(lengths)
+
+
+class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
+    """
+
+    def __init__(self,
+                 pad_id: int,
+                 eos_id: int,
+                 scorer: CandidateScorer,
+                 **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.pad_id = pad_id
+        self.eos_id = eos_id
+        self._scorer = scorer
+
+    def hybrid_forward(self, F, best_word_indices, max_output_lengths,
+                       finished, scores_accumulated, lengths, reference_lengths):
+        all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = F.broadcast_logical_xor(all_finished, finished)
+        scores_accumulated = F.where(newly_finished,
+                                     self._scorer(scores_accumulated, lengths, reference_lengths),
+                                     scores_accumulated)
+
+        # Update lengths of all items, except those that were already finished. This updates
+        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
+        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
+
+        # Now, recompute finished. Hypotheses are finished if they are
+        # - extended with <pad>, or
+        # - extended with <eos>, or
+        # - at their maximum length.
+        finished = F.broadcast_logical_or(F.broadcast_logical_or(best_word_indices == self.pad_id,
+                                                                 best_word_indices == self.eos_id),
+                                          (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
+
+        return finished, scores_accumulated, lengths
+
+
+class TopK(mx.gluon.HybridBlock):
+    """
+    Batch-wise topk operation.
+    Forward method uses imperative shape inference, since both batch_size and vocab_size are dynamic
+    during translation (due to variable batch size and potential vocabulary selection).
+    """
+
+    def __init__(self, k: int, **kwargs) -> None:
+        """
+        :param k: The number of smallest scores to return.
+        """
+        super().__init__(**kwargs)
+        self.k = k
+
+    def forward(self, scores, offset):
+        """
+        Get the lowest k elements per sentence from a `scores` matrix.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+        :return: The row indices, column indices and values of the k smallest items in matrix.
+        """
+        vocab_size = scores.shape[1]
+        batch_size = int(offset.shape[-1] / self.k)
+        # Shape: (batch size, beam_size * vocab_size)
+        batchwise_scores = scores.reshape(shape=(batch_size, self.k * vocab_size))
+        indices, values = super().forward(batchwise_scores)
+        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * self.k, vocab_size))
+        if batch_size > 1:
+            # Offsetting the indices to match the shape of the scores matrix
+            best_hyp_indices += offset
+        return best_hyp_indices, best_word_indices, values
+
+    def hybrid_forward(self, F, scores):
+        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        # Project indices back into original shape (which is different for t==1 and t>1)
+        return F.reshape(F.cast(indices, 'int32'), shape=(-1,)), F.reshape(values, shape=(-1, 1))
+
+
+class SampleK(mx.gluon.HybridBlock):
+    """
+    A HybridBlock for selecting a random word from each hypothesis according to its distribution.
+    """
+    def __init__(self, n, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.n = n
+
+    def hybrid_forward(self, F, scores, target_dists, finished, best_hyp_indices):
+        """
+        Choose an extension of each hypothesis from its softmax distribution.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param target_dists: The non-cumulative target distributions (ignored).
+        :param finished: The list of finished hypotheses.
+        :param best_hyp_indices: Best hypothesis indices constant.
+        :return: The row indices, column indices, and values of the sampled words.
+        """
+        # Map the negative logprobs to probabilities so as to have a distribution
+        target_dists = F.exp(-target_dists)
+
+        # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
+        if self.n != 0:
+            # select the top n in each row, via a mask
+            masked_items = F.topk(target_dists, k=self.n, ret_typ='mask', axis=1, is_ascend=False)
+            # set unmasked items to 0
+            masked_items = F.where(masked_items, target_dists, masked_items)
+            # renormalize
+            target_dists = F.broadcast_div(masked_items, F.sum(masked_items, axis=1, keepdims=True))
+
+        # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
+        best_word_indices = F.random.multinomial(target_dists, get_prob=False)
+        # Zeroes for finished hypotheses.
+        best_word_indices = F.where(finished, F.zeros_like(best_word_indices), best_word_indices)
+        values = F.pick(scores, best_word_indices, axis=1, keepdims=True)
+
+        best_hyp_indices = F.slice_like(best_hyp_indices, best_word_indices, axes=(0,))
+
+        return best_hyp_indices, best_word_indices, values
+
+
+
 def _repeat_states(states: List, beam_size) -> List:
     repeated_states = []
     for state in states:
@@ -145,43 +403,59 @@ def _sort_states(states: List, best_hyp_indices: mx.nd.NDArray) -> List:
 
 
 class BeamSearch(mx.gluon.Block):
-    # TODO: misses constraint decoding
+    """
+    Features:
+    - beam search stop
+    - constraints (pos & neg)
+    - ensemble decoding
+    - vocabulary selection
+    - sampling (TODO: check if its working correctly)
+
+    Not supported:
+    - beam pruning
+    - beam history
+    """
 
     def __init__(self,
                  beam_size: int,
-                 start_id: int,
+                 bos_id: int,
+                 eos_id: int,
                  context: Union[mx.Context, List[mx.Context]],
-                 vocab_target: vocab.Vocab,
-                 beam_search_stop: str,
+                 output_vocab_size: int,
+                 scorer: 'CandidateScorer',
                  num_source_factors: int,
                  get_max_output_length: Callable,
-                 inference: Inference):
+                 inference: _Inference,
+                 beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
+                 global_avoid_trie: Optional[constrained.AvoidTrie] = None,
+                 sample: Optional[int] = None):
         super().__init__(prefix='beam_search_')
         self.beam_size = beam_size
-        self.start_id = start_id
+        self.bos_id = bos_id
+        self.eos_id = eos_id
+        self.output_vocab_size = output_vocab_size
         self.context = context
-        self.vocab_target = vocab_target
         self._get_max_output_length = get_max_output_length
         self._inference = inference
-        self.skip_topk = False  # TODO
         self.beam_search_stop = beam_search_stop
         self.num_source_factors = num_source_factors
-        self.constant_length_ratio = 0.0  # TODO
-        self.global_avoid_trie = None  # TODO
-        self.length_penalty = LengthPenalty(1.0, 0.0)  # TODO
-        self.brevity_penalty = None #BrevityPenalty(weight=0.0)  # TODO
-        brevity_penalty_weight = self.brevity_penalty.weight if self.brevity_penalty is not None else 0.0
+        self.global_avoid_trie = global_avoid_trie
 
         with self.name_scope():
             self._sort_by_index = SortByIndex(prefix='sort_by_index_')
             self._update_scores = UpdateScores(prefix='update_scores_')
+            self._scorer = self._scorer = scorer
             self._norm_and_update_finished = NormalizeAndUpdateFinished(prefix='norm_and_update_finished_',
                                                                         pad_id=C.PAD_ID,
-                                                                        eos_id=vocab_target[C.EOS_SYMBOL],
-                                                                        length_penalty_alpha=self.length_penalty.alpha,
-                                                                        length_penalty_beta=self.length_penalty.beta,
-                                                                        brevity_penalty_weight=brevity_penalty_weight)
-            self._top = TopK(self.beam_size)  # type: mx.gluon.HybridBlock
+                                                                        eos_id=eos_id,
+                                                                        scorer=scorer)
+
+            self._sample = None  # type: Optional[mx.gluon.HybridBlock]
+            self._top = None  # type: Optional[mx.gluon.HybridBlock]
+            if sample is not None:
+                self._sample = SampleK(sample)
+            else:
+                self._top = TopK(self.beam_size)
 
     def forward(self,
                 source: mx.nd.NDArray,
@@ -189,11 +463,12 @@ class BeamSearch(mx.gluon.Block):
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
                 raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                 raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                 : mx.nd.NDArray) -> Tuple[np.ndarray,
+                max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
                                                             np.ndarray,
                                                             np.ndarray,
                                                             np.ndarray,
-                                                            List[Optional[np.ndarray]]]:
+                                                            List[Optional[np.ndarray]],
+                                                            List[Optional[constrained.ConstrainedHypothesis]]]:
         """
         Translates multiple sentences using beam search.
 
@@ -204,20 +479,27 @@ class BeamSearch(mx.gluon.Block):
                that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must NOT appear in each output.
+        :param max_output_lengths: NDArray of maximum output lengths per input in source.
         :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
-                predicted lengths of references (if any), constraints (if any), beam histories (if any).
+                predicted lengths of references (if any), constraints (if any).
         """
         batch_size = source.shape[0]
         logger.debug("_beam_search batch size: %d", batch_size)
+
+        sample_best_hyp_indices = None
+        if self._sample is not None:
+            utils.check_condition(restrict_lexicon is None,
+                                  "Sampling is not available when working with a restricted lexicon.")
+            sample_best_hyp_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32')
 
         # Maximum output length
         max_output_length = self._get_max_output_length(source.shape[1])
 
         # General data structure: batch_size * beam_size blocks in total;
-        # a full beam for each sentence, folloed by the next beam-block for the next sentence and so on
+        # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
 
-        best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
+        best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.bos_id, ctx=self.context,
                                        dtype='int32')
 
         # offset for hypothesis indices in batch decoding
@@ -228,7 +510,7 @@ class BeamSearch(mx.gluon.Block):
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
         first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype='float32')
         first_step_mask[batch_indices] = 1.0
-        pad_dist = mx.nd.full((batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
+        pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
                               ctx=self.context, dtype='float32')
 
         # Best word and hypotheses indices across beam search steps from topk operation.
@@ -268,16 +550,14 @@ class BeamSearch(mx.gluon.Block):
                                vocab_slice_ids.shape[0], self.beam_size)
                 n = self.beam_size - vocab_slice_ids.shape[0] + 1
                 vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
-                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL],
-                                                          ctx=self.context, dtype='int32'),
+                                               mx.nd.full((n,), val=self.eos_id, ctx=self.context, dtype='int32'),
                                                dim=0)
 
             pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
                                   val=np.inf, ctx=self.context)
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
-        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id,
-                                             self.vocab_target[C.EOS_SYMBOL])
+        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.bos_id, self.eos_id)
 
         if self.global_avoid_trie or any(raw_avoid_list):
             avoid_states = constrained.AvoidBatch(batch_size, self.beam_size,
@@ -286,9 +566,7 @@ class BeamSearch(mx.gluon.Block):
             avoid_states.consume(best_word_indices)
 
         # (0) encode source sentence, returns a list
-        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source,
-                                                                                          source_length,
-                                                                                          self.constant_length_ratio)
+        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
         # repeat states to beam_size
         model_states = _repeat_states(model_states, self.beam_size)
 
@@ -311,17 +589,23 @@ class BeamSearch(mx.gluon.Block):
                 block_indices = avoid_states.avoid()
                 if len(block_indices) > 0:
                     scores[block_indices] = np.inf
-                    if self.sample is not None:
+                    if self._sample is not None:
                         target_dists[block_indices] = np.inf
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
-            # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
-            # of the first row only by setting all other rows to inf
-            if t == 1 and not self.skip_topk:
-                scores *= first_step_mask
+            if self._sample is not None:
+                best_hyp_indices, best_word_indices, scores_accumulated = self._sample(scores,
+                                                                                       target_dists,
+                                                                                       finished,
+                                                                                       sample_best_hyp_indices)
+            else:
+                # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
+                # of the first row only by setting all other rows to inf
+                if t == 1:
+                    scores *= first_step_mask
 
-            best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
+                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
@@ -392,201 +676,46 @@ class BeamSearch(mx.gluon.Block):
                constraints
 
 
-class SortByIndex(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that sorts args by the given indices.
-    """
-    def hybrid_forward(self, F, indices, *args):
-        return [F.take(arg, indices) for arg in args]
+def get_beam_search(models: List[SockeyeModel],
+                    beam_size: int,
+                    context: Union[mx.Context, List[mx.Context]],
+                    vocab_target: vocab.Vocab,
+                    output_scores: bool,
+                    scorer: CandidateScorer,
+                    get_max_output_length: Callable,
+                    ensemble_mode: str = 'linear',
+                    beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
+                    constant_length_ratio: float = 0.0,
+                    avoid_list: Optional[str] = None,
+                    sample: Optional[int] = None,
+                    hybridize: bool = True) -> BeamSearch:
 
+    if len(models) == 1:
+        skip_softmax = beam_size == 1 and not output_scores and not sample
+        if skip_softmax:
+            logger.info("Enabled skipping softmax for a single model and greedy decoding.")
+        inference = _SingleModelInference(model=models[0],
+                                          skip_softmax=skip_softmax, constant_length_ratio=constant_length_ratio)
+    else:
+        inference = _EnsembleInference(models=models,
+                                       ensemble_mode=ensemble_mode, constant_length_ratio=constant_length_ratio)
 
-class UpdateScores(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that updates the scores from the decoder step with accumulated scores.
-    Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
-    All other options are set to infinity.
-    """
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
-
-    def hybrid_forward(self, F, target_dists, finished, inactive, scores_accumulated, pad_dist):
-        # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
-        # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
-        # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
-        # infinity otherwise.
-        scores = F.broadcast_add(target_dists, scores_accumulated)
-        # pad_dist. Shape: (batch*beam, vocab_size-1)
-        scores = F.where(F.broadcast_logical_or(finished, inactive), F.concat(scores_accumulated, pad_dist), scores)
-        return scores
-
-
-class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
-    """
-    A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
-    """
-
-    def __init__(self,
-                 pad_id: int,
-                 eos_id: int,
-                 length_penalty_alpha: float = 1.0,
-                 length_penalty_beta: float = 0.0,
-                 brevity_penalty_weight: float = 0.0,
-                 **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.pad_id = pad_id
-        self.eos_id = eos_id
-        with self.name_scope():
-            self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
-            self.brevity_penalty = None  # type: Optional[BrevityPenalty]
-            if brevity_penalty_weight > 0.0:
-                self.brevity_penalty = BrevityPenalty(weight=brevity_penalty_weight)
-
-    def hybrid_forward(self, F, best_word_indices, max_output_lengths,
-                       finished, scores_accumulated, lengths, reference_lengths):
-        all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
-        newly_finished = F.broadcast_logical_xor(all_finished, finished)
-        if self.brevity_penalty is not None:
-            brevity_penalty = self.brevity_penalty(lengths, reference_lengths)
-        else:
-            brevity_penalty = F.zeros_like(reference_lengths)
-        scores_accumulated = F.where(newly_finished,
-                                     scores_accumulated / self.length_penalty(lengths) - brevity_penalty,
-                                     scores_accumulated)
-
-        # Update lengths of all items, except those that were already finished. This updates
-        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
-        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
-
-        # Now, recompute finished. Hypotheses are finished if they are
-        # - extended with <pad>, or
-        # - extended with <eos>, or
-        # - at their maximum length.
-        finished = F.broadcast_logical_or(F.broadcast_logical_or(best_word_indices == self.pad_id,
-                                                                 best_word_indices == self.eos_id),
-                                          (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
-
-        return finished, scores_accumulated, lengths
-
-
-class LengthPenalty(mx.gluon.HybridBlock):
-    """
-    Calculates the length penalty as:
-    (beta + len(Y))**alpha / (beta + 1)**alpha
-
-    See Wu et al. 2016 (note that in the paper beta has a different meaning,
-    and a fixed value 5 was used for this parameter)
-
-    :param alpha: The alpha factor for the length penalty (see above).
-    :param beta: The beta factor for the length penalty (see above).
-    """
-
-    def __init__(self, alpha: float = 1.0, beta: float = 0.0, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.alpha = alpha
-        self.beta = beta
-        self.denominator = (self.beta + 1.) ** self.alpha
-
-    def hybrid_forward(self, F, lengths):
-        if self.alpha == 0.0:
-            if F is None:
-                return 1.0
-            else:
-                return F.ones_like(lengths)
-        else:
-            numerator = self.beta + lengths if self.beta != 0.0 else lengths
-            numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
-            return numerator / self.denominator
-
-    def get(self, lengths: Union[mx.nd.NDArray, int, float]) -> Union[mx.nd.NDArray, float]:
-        """
-        Calculate the length penalty for the given vector of lengths.
-
-        :param lengths: A scalar or a matrix of sentence lengths of dimensionality (batch_size, 1).
-        :return: The length penalty. A scalar or a matrix (batch_size, 1) depending on the input.
-        """
-        return self.hybrid_forward(None, lengths)
-
-
-class BrevityPenalty(mx.gluon.HybridBlock):
-    """
-    Calculates the logarithmic brevity penalty as:
-      weight * log min(1, exp(1 - ref_len / hyp_len)) = weight * min(0, 1 - ref_len / hyp_len).
-
-    :param weight: Linear weight.
-    """
-
-    def __init__(self, weight: float = 0.0, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.weight = weight
-
-    def hybrid_forward(self, F, hyp_lengths, reference_lengths):
-        if self.weight == 0.0:
-            if F is None:
-                return 0.0
-            else:
-                # subtract to avoid MxNet's warning of not using both arguments
-                # this branch should not and is not used during inference
-                return F.zeros_like(hyp_lengths - reference_lengths)
-        else:
-            # log_bp is always <= 0.0
-            if F is None:
-                log_bp = min(0.0, 1.0 - reference_lengths / hyp_lengths)
-            else:
-                log_bp = F.minimum(F.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
-            return self.weight * log_bp
-
-    def get(self,
-            hyp_lengths: Union[mx.nd.NDArray, int, float],
-            reference_lengths: Optional[Union[mx.nd.NDArray, int, float]]) -> Union[mx.nd.NDArray, float]:
-        """
-        Calculate the length penalty for the given vector of lengths.
-
-        :param hyp_lengths: Hypotheses lengths.
-        :param reference_lengths: Reference lengths.
-        :return: The length penalty. A scalar or a matrix (batch_size, 1) depending on the input.
-        """
-        if reference_lengths is None:
-            return 0.0
-        else:
-            return self.hybrid_forward(None, hyp_lengths, reference_lengths)
-
-
-class TopK(mx.gluon.HybridBlock):
-    """
-    Batch-wise topk operation.
-    Forward method uses imperative shape inference, since both batch_size and vocab_size are dynamic
-    during translation (due to variable batch size and potential vocabulary selection).
-    """
-
-    def __init__(self, k: int) -> None:
-        """
-        :param k: The number of smallest scores to return.
-        """
-        super().__init__()
-        self.k = k
-
-    def forward(self, scores, offset):
-        """
-        Get the lowest k elements per sentence from a `scores` matrix.
-
-        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
-        :return: The row indices, column indices and values of the k smallest items in matrix.
-        """
-        vocab_size = scores.shape[1]
-        batch_size = int(offset.shape[-1] / self.k)
-        # Shape: (batch size, beam_size * vocab_size)
-        batchwise_scores = scores.reshape(shape=(batch_size, self.k * vocab_size))
-        indices, values = super().forward(batchwise_scores)
-        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * self.k, vocab_size))
-        if batch_size > 1:
-            # Offsetting the indices to match the shape of the scores matrix
-            best_hyp_indices += offset
-        return best_hyp_indices, best_word_indices, values
-
-    def hybrid_forward(self, F, scores):
-        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
-        # Project indices back into original shape (which is different for t==1 and t>1)
-        return F.reshape(F.cast(indices, 'int32'), shape=(-1,)), F.reshape(values, shape=(-1, 1))
+    global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
+    bs = BeamSearch(
+        beam_size=beam_size,
+        bos_id=vocab_target[C.BOS_SYMBOL],
+        eos_id=vocab_target[C.EOS_SYMBOL],
+        context=context,
+        output_vocab_size=models[0].output_layer_vocab_size,
+        beam_search_stop=beam_search_stop,
+        scorer=scorer,
+        sample=sample,
+        num_source_factors=models[0].num_source_factors,
+        get_max_output_length=get_max_output_length,
+        global_avoid_trie=global_avoid_trie,
+        inference=inference
+    )
+    bs.initialize()
+    if hybridize:
+        bs.hybridize(static_alloc=True)
+    return bs

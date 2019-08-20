@@ -24,7 +24,7 @@ from . import constants as C
 from . import data_io
 from . import scoring
 from . import utils
-from .inference import LengthPenalty, BrevityPenalty
+from .beam_search import CandidateScorer
 from .log import setup_main_logger
 from .model import load_model
 from .output_handler import get_output_handler
@@ -93,11 +93,10 @@ def score(args: argparse.Namespace):
         else:
             constant_length_ratio = -1.0
 
-        batch_scorer = scoring.BatchScorer(length_penalty=LengthPenalty(alpha=args.length_penalty_alpha,
-                                                                        beta=args.length_penalty_beta),
-                                           brevity_penalty=BrevityPenalty(weight=args.brevity_penalty_weight),
+        batch_scorer = scoring.BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
+                                                                  length_penalty_beta=args.length_penalty_beta,
+                                                                  brevity_penalty_weight=args.brevity_penalty_weight),
                                            score_type=args.score_type,
-                                           softmax_temperature=args.softmax_temperature,
                                            constant_length_ratio=constant_length_ratio)
         if hybridize:
             batch_scorer.hybridize(static_alloc=True)
