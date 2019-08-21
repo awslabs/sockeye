@@ -448,8 +448,7 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
     Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
     """
     # Translate params that affect the score need to be used for scoring as well.
-    relevant_params = {'--softmax-temperature',
-                       '--brevity-penalty-type',
+    relevant_params = {'--brevity-penalty-type',
                        '--brevity-penalty-weight',
                        '--brevity-penalty-constant-length-ratio',
                        '--length-penalty-alpha',
