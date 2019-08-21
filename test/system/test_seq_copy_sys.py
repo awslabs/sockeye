@@ -113,8 +113,10 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
         bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=data['test_outputs_restricted'],
                                                          references=data['test_targets'])
 
-        logger.info("test: %s", name)
+        logger.info("================")
+        logger.info("test results: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
+        logger.info("================\n")
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
         assert bleu_restrict >= bleu_thresh
