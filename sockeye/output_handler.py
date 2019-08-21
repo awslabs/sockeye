@@ -119,7 +119,7 @@ class StringWithScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        self.stream.write("{:.3f}\t{}\n".format(t_output.score, t_output.translation))
+        self.stream.write("{:.6f}\t{}\n".format(t_output.score, t_output.translation))
         self.stream.flush()
 
     def reports_score(self) -> bool:
@@ -145,7 +145,7 @@ class ScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        self.stream.write("{:.3f}\n".format(t_output.score))
+        self.stream.write("{:.6f}\n".format(t_output.score))
         self.stream.flush()
 
     def reports_score(self) -> bool:
@@ -171,7 +171,7 @@ class PairWithScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        self.stream.write("{:.3f}\t{}\t{}\n".format(t_output.score,
+        self.stream.write("{:.6f}\t{}\t{}\n".format(t_output.score,
                                                     C.TOKEN_SEPARATOR.join(t_input.tokens),
                                                     t_output.translation))
         self.stream.flush()
