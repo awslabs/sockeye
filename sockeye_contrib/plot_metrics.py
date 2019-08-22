@@ -16,6 +16,7 @@ from bisect import insort
 from collections import defaultdict
 from os import path
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -127,6 +128,13 @@ def plot_metrics(args):
     if len(args.skip) == 1:
         args.skip *= len(args.input)
 
+    # Paper scaling
+    linewidth = 1.25 if args.paper else 1.0
+    label_size = 12 if args.paper else None
+    title_size = 16 if args.paper else None
+    legend_size = 12 if args.paper else None
+    tick_size = 12 if args.paper else None
+
     for fname, label, skip in zip(args.input,
                                   args.legend if args.legend is not None
                                   else (path.basename(fname) for fname in args.input),
@@ -166,8 +174,12 @@ def plot_metrics(args):
             y_vals = y_vals[args.y_slope - 1:]
             y_label = '{} (Slope of {} Points)'.format(y_label, args.y_slope)
         # Plot values for this metrics file
-        ax.plot(x_vals, y_vals, linewidth=1, alpha=0.75, label=label)
-        ax.set(xlabel=x_label, ylabel=y_label, title=args.title)
+        ax.plot(x_vals, y_vals, linewidth=linewidth, alpha=0.75, label=label)
+        plt.xlabel(x_label, fontsize=label_size)
+        plt.ylabel(y_label, fontsize=label_size)
+        plt.title(args.title, fontsize=title_size)
+        plt.xticks(fontsize=tick_size)
+        plt.yticks(fontsize=tick_size)
         # Optionally track best point so far
         if args.best:
             best_y = FIND_BEST[args.y](y_vals)
@@ -177,13 +189,13 @@ def plot_metrics(args):
                 overall_best_y = FIND_BEST[args.y](best_y, overall_best_y)
     # Optionally mark best Y point across metrics files
     if args.best:
-        ax.axhline(y=overall_best_y, color='gray', linewidth=1, linestyle='--', zorder=999)
+        ax.axhline(y=overall_best_y, color='gray', linewidth=linewidth, linestyle='--', zorder=999)
     # Optionally draw user specified Y line
     if args.y_line is not None:
-        ax.axhline(y=args.y_line, color='gray', linewidth=1, linestyle='--', zorder=999)
+        ax.axhline(y=args.y_line, color='gray', linewidth=linewidth, linestyle='--', zorder=999)
 
     ax.grid()
-    ax.legend()
+    ax.legend(fontsize=legend_size)
 
     fig.savefig(args.output)
 
@@ -206,6 +218,7 @@ def main():
     params.add_argument('-b', '--best', action='store_true', help='Draw horizontal line at best Y value.')
     params.add_argument('-s', '--skip', type=int, nargs='+', default=(0,),
                         help='Skip the first N points for better readability.  Single value or value per input.')
+    params.add_argument('-p', '--paper', action='store_true', help='Scale plot elements for inclusion in papers.')
     args = params.parse_args()
     plot_metrics(args)
 
