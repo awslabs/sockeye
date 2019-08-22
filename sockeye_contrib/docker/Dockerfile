@@ -64,7 +64,7 @@ RUN pip install mxnet-cu100mkl==${MXNET_VERSION}
 # Install Horovod and the MPI Python library, temporarily using CUDA stubs
 RUN ldconfig /usr/local/cuda/targets/x86_64-linux/lib/stubs && \
     HOROVOD_GPU_ALLREDUCE=NCCL HOROVOD_WITH_MXNET=1 \
-        pip install --no-cache-dir horovod mpi4py && \
+        pip install --no-cache-dir horovod==0.16.4 mpi4py && \
     ldconfig
 
 # Add default users for Ubuntu and Amazon Linux for ease of use
