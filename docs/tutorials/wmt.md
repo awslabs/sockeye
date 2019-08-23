@@ -16,7 +16,7 @@ git clone https://github.com/rsennrich/subword-nmt.git
 export PYTHONPATH=$(pwd)/subword-nmt:$PYTHONPATH
 ```
 
-We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`. 
+We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`.
 Install it using:
 ```bash
 pip install tensorboard mxboard
@@ -95,24 +95,13 @@ We can now kick off the training process:
 python -m sockeye.train -d train_data \
                         -vs newstest2016.tc.BPE.de \
                         -vt newstest2016.tc.BPE.en \
-                        --encoder rnn \
-                        --decoder rnn \
-                        --num-embed 256 \
-                        --rnn-num-hidden 512 \
-                        --rnn-attention-type dot \
                         --max-seq-len 60 \
                         --decode-and-evaluate 500 \
                         --use-cpu \
                         -o wmt_model
 ```
 
-This will train a 1-layer bi-LSTM encoder, 1-layer LSTM decoder with dot attention.
-Sockeye offers a whole variety of different options regarding the model architecture,
-such as stacked RNNs with residual connections (`--num-layers`, `--rnn-residual-connections`),
-[Transformer](https://arxiv.org/abs/1706.03762) encoder and decoder (`--encoder transformer`, `--decoder transformer`),
-[ConvS2S](https://arxiv.org/pdf/1705.03122) (`--encoder cnn`, `--decoder cnn`),
-various RNN (`--rnn-cell-type`) and attention (`--attention-type`) types and more.  
-
+This will train a "base" [Transformer](https://arxiv.org/abs/1706.03762) model.
 There are also several parameters controlling training itself.
 Unless you specify a different optimizer (`--optimizer`) [Adam](https://arxiv.org/abs/1412.6980) will be used.
 Additionally, you can control the batch size (`--batch-size`), the learning rate schedule (`--learning-rate-schedule`) and other parameters relevant for training.

@@ -30,7 +30,9 @@ See the [Dockerfile documentation](sockeye_contrib/docker) for more information.
 ## Documentation
 
 For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
-Developers may be interested in our [developer guidelines](https://awslabs.github.io/sockeye/development.html).
+
+- For a quickstart guide to training a large data WMT model, see the [WMT 2018 German-English tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html).
+- Developers may be interested in our [developer guidelines](https://awslabs.github.io/sockeye/development.html).
 
 ## Citation
 
