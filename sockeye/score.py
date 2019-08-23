@@ -62,13 +62,11 @@ def score(args: argparse.Namespace):
 
         model, source_vocabs, target_vocab = load_model(args.model, context=context, dtype=args.dtype)
 
-        # TODO(fhieber): this will cause trimming of all sentences longer than max training sequence lengths.
-        # TODO(fhieber): ideally, we should allow splitting as in actual translation to compute reasonable scores.
-        if args.max_seq_len is None:
-            max_seq_len_source = model.max_supported_seq_len_source
-            max_seq_len_target = model.max_supported_seq_len_target
-        else:
-            max_seq_len_source, max_seq_len_target = args.max_seq_len
+        max_seq_len_source = model.max_supported_len_source
+        max_seq_len_target = model.max_supported_len_target
+        if args.max_seq_len is not None:
+            max_seq_len_source = min(args.max_seq_len[0] + C.SPACE_FOR_XOS, max_seq_len_source)
+            max_seq_len_target = min(args.max_seq_len[1] + C.SPACE_FOR_XOS, max_seq_len_target)
 
         hybridize = not args.no_hybridization
 

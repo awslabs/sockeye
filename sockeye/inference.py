@@ -49,16 +49,14 @@ def models_max_input_output_length(models: List[SockeyeModel],
     :param models: List of models.
     :param num_stds: Number of standard deviations to add as a safety margin. If -1, returned maximum output lengths
                      will always be 2 * input_length.
-    :param forced_max_input_length: An optional overwrite of the maximum input length.
-    :param forced_max_output_length: An optional overwrite of the maximum output length.
+    :param forced_max_input_length: An optional overwrite of the maximum input length. Does not include eos.
+    :param forced_max_output_length: An optional overwrite of the maximum output length. Does not include bos.
     :return: The maximum input length and a function to get the output length given the input length.
     """
     max_mean = max(model.length_ratio_mean for model in models)
     max_std = max(model.length_ratio_std for model in models)
-
-    supported_max_seq_len_source = min((model.max_supported_seq_len_source for model in models))
-    supported_max_seq_len_target = min((model.max_supported_seq_len_target for model in models))
-
+    supported_max_seq_len_source = min((model.max_supported_len_source for model in models))
+    supported_max_seq_len_target = min((model.max_supported_len_target for model in models))
     return get_max_input_output_length(supported_max_seq_len_source,
                                        supported_max_seq_len_target,
                                        length_ratio_mean=max_mean,
@@ -79,45 +77,39 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
     Returns a function to compute maximum output length given a fixed number of standard deviations as a
     safety margin, and the current input length. It takes into account optional maximum source and target lengths.
 
-    :param supported_max_seq_len_source: The maximum source length supported by the models.
-    :param supported_max_seq_len_target: The maximum target length supported by the models.
-    :param length_ratio_mean: The mean of the length ratio that was calculated on the raw sequences with special
-           symbols such as EOS or BOS.
+    :param supported_max_seq_len_source: The maximum source length supported by the models (includes eos).
+    :param supported_max_seq_len_target: The maximum target length supported by the models (includes bos).
+    :param length_ratio_mean: Length ratio mean computed on the training data (including bos/eos).
     :param length_ratio_std: The standard deviation of the length ratio.
     :param num_stds: The number of standard deviations the target length may exceed the mean target length (as long as
            the supported maximum length allows for this).
-    :param forced_max_input_len: An optional overwrite of the maximum input length.
-    :param forced_max_output_len: An optional overwrite of the maximum output length.
+    :param forced_max_input_len: An optional overwrite of the maximum input length. Does not include eos.
+    :param forced_max_output_len: An optional overwrite of the maximum output length. Does not include bos.
     :return: The maximum input length and a function to get the output length given the input length.
     """
-    space_for_bos = 1
-    space_for_eos = 1
 
     if num_stds < 0:
         factor = C.TARGET_MAX_LENGTH_FACTOR  # type: float
     else:
         factor = length_ratio_mean + (length_ratio_std * num_stds)
 
-    max_output_len = supported_max_seq_len_target - space_for_bos - space_for_eos
-    if np.ceil(factor * supported_max_seq_len_source) > max_output_len:
-        max_input_len = int(np.floor(max_output_len / factor))
+    if np.ceil(factor * supported_max_seq_len_source) > supported_max_seq_len_target:
+        # if heuristically-computed max output length exceeds the supported output length, lower max input length.
+        max_input_len = int(np.floor(supported_max_seq_len_target / factor))
     else:
         max_input_len = supported_max_seq_len_source
 
     if forced_max_input_len is not None:
-        max_input_len = min(max_input_len, forced_max_input_len)
+        max_input_len = min(max_input_len, forced_max_input_len + C.SPACE_FOR_XOS)
 
     def get_max_output_length(input_length: int):
         """
-        Returns the maximum output length for inference given the input length.
-        Explicitly includes space for BOS and EOS sentence symbols in the target sequence, because we assume
-        that the mean length ratio computed on the training data do not include these special symbols.
-        (see data_io.analyze_sequence_lengths)
+        Returns the maximum output length (including bos/eos) for inference given an input length that includes <eos>.
         """
         if forced_max_output_len is not None:
-            return forced_max_output_len
+            return forced_max_output_len + C.SPACE_FOR_XOS
         else:
-            return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
+            return int(np.ceil(factor * input_length))
 
     return max_input_len, get_max_output_length
 
@@ -664,6 +656,15 @@ class Translator:
            log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
            and a single model.
     :param constant_length_ratio: If > 0, will override models' prediction of the length ratio (if any).
+    :param hybridize: Whether to hybridize inference code.
+    :param max_output_length_num_stds: Number of standard deviations to add as a safety margin when computing the
+           maximum output length. If -1, returned maximum output lengths will always be 2 * input_length.
+    :param max_input_length: Maximum input length this Translator should allow. If None, value will be taken from the
+           model(s). Inputs larger than this value will be chunked and translated in sequence.
+           If model(s) do not support given input length it will fall back to what the model(s) support.
+    :param max_output_length: Maximum output length this Translator is allowed to decode. If None, value will be taken
+           from the model(s). Decodings that do not finish within this limit, will be force-stopped.
+           If model(s) do not support given input length it will fall back to what the model(s) support.
     """
 
     def __init__(self,
@@ -707,7 +708,7 @@ class Translator:
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         # set a common max_output length for all models.
-        self._max_input_length, self.get_max_output_length = models_max_input_output_length(
+        self._max_input_length, self._get_max_output_length = models_max_input_output_length(
             models,
             max_output_length_num_stds,
             forced_max_input_length=max_input_length,
@@ -718,7 +719,6 @@ class Translator:
         if self.nbest_size > 1:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
-
 
         self._beam_search = get_beam_search(
             models=self.models,
@@ -731,7 +731,6 @@ class Translator:
             beam_search_stop=beam_search_stop,
             scorer=self._scorer,
             constant_length_ratio=constant_length_ratio,
-            get_max_output_length=self.get_max_output_length,
             avoid_list=avoid_list,
             hybridize=hybridize)
 
@@ -739,11 +738,12 @@ class Translator:
                                             stop_ids=self.stop_ids,
                                             scorer=self._scorer)  # type: Callable
 
-        logger.info("Translator (%d model(s) beam_size=%d beam_search_stop=%s "
+        logger.info("Translator (%d model(s) beam_size=%d beam_search_stop=%s max_input_length=%s "
                     "nbest_size=%s ensemble_mode=%s max_batch_size=%d avoiding=%d dtype=%s)",
                     len(self.models),
                     self.beam_size,
                     self.beam_search_stop,
+                    self.max_input_length,
                     self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.max_batch_size,
@@ -903,9 +903,8 @@ class Translator:
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
-            num_tokens = len(trans_input)
-            # NOTE: no longer using bucket for max output length as in Sockeye 1.0
-            max_output_lengths.append(self.get_max_output_length(num_tokens))
+            num_tokens = len(trans_input)  # includes eos
+            max_output_lengths.append(self._get_max_output_length(num_tokens))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []

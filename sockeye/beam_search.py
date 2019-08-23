@@ -424,7 +424,6 @@ class BeamSearch(mx.gluon.Block):
                  output_vocab_size: int,
                  scorer: CandidateScorer,
                  num_source_factors: int,
-                 get_max_output_length: Callable,
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
@@ -435,7 +434,6 @@ class BeamSearch(mx.gluon.Block):
         self.eos_id = eos_id
         self.output_vocab_size = output_vocab_size
         self.context = context
-        self._get_max_output_length = get_max_output_length
         self._inference = inference
         self.beam_search_stop = beam_search_stop
         self.num_source_factors = num_source_factors
@@ -480,12 +478,17 @@ class BeamSearch(mx.gluon.Block):
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must NOT appear in each output.
         :param max_output_lengths: NDArray of maximum output lengths per input in source.
+                Shape: (batch_size,). Dtype: int32.
         :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
                 predicted lengths of references (if any), constraints (if any).
         """
         batch_size = source.shape[0]
-        logger.debug("_beam_search batch size: %d", batch_size)
+        logger.debug("beam_search batch size: %d", batch_size)
+
+        # Maximum beam search iterations (determined by longest input with eos)
+        max_iterations = max_output_lengths.max().asscalar()
+        logger.debug("max beam search iterations: %d", max_iterations)
 
         sample_best_hyp_indices = None
         if self._sample is not None:
@@ -493,8 +496,7 @@ class BeamSearch(mx.gluon.Block):
                                   "Sampling is not available when working with a restricted lexicon.")
             sample_best_hyp_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32')
 
-        # Maximum output length
-        max_output_length = self._get_max_output_length(source.shape[1])
+
 
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
@@ -574,7 +576,7 @@ class BeamSearch(mx.gluon.Block):
         # item on the beam for each sentence
         inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
-        for t in range(1, max_output_length):
+        for t in range(1, max_iterations + 1):  # TODO: add logic that last iteration FORCES <eos>
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
             target_dists, model_states = self._inference.decode_step(best_word_indices, model_states, vocab_slice_ids)
@@ -643,18 +645,13 @@ class BeamSearch(mx.gluon.Block):
             best_hyp_indices_list.append(best_hyp_indices)
             best_word_indices_list.append(best_word_indices)
 
-            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
-                at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
-                if at_least_one_finished.sum().asscalar() == batch_size:
-                    break
-            else:
-                if finished.sum().asscalar() == batch_size * self.beam_size:  # all finished
-                    break
+            if self._should_stop(finished, batch_size):
+                break
 
             # (9) update models' state with winning hypotheses (ascending)
             _sort_states(model_states, best_hyp_indices)
 
-        logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
+        logger.debug("Finished after %d / %d steps.", t + 1, max_iterations)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
@@ -675,6 +672,13 @@ class BeamSearch(mx.gluon.Block):
                estimated_reference_lengths.asnumpy(), \
                constraints
 
+    def _should_stop(self, finished, batch_size):
+        if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+            at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
+            return at_least_one_finished.sum().asscalar() == batch_size
+        else:
+            return finished.sum().asscalar() == batch_size * self.beam_size  # all finished
+
 
 def get_beam_search(models: List[SockeyeModel],
                     beam_size: int,
@@ -682,7 +686,6 @@ def get_beam_search(models: List[SockeyeModel],
                     vocab_target: vocab.Vocab,
                     output_scores: bool,
                     scorer: CandidateScorer,
-                    get_max_output_length: Callable,
                     ensemble_mode: str = 'linear',
                     beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                     constant_length_ratio: float = 0.0,
@@ -713,7 +716,6 @@ def get_beam_search(models: List[SockeyeModel],
         scorer=scorer,
         sample=sample,
         num_source_factors=models[0].num_source_factors,
-        get_max_output_length=get_max_output_length,
         global_avoid_trie=global_avoid_trie,
         inference=inference
     )

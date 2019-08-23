@@ -73,7 +73,8 @@ class BatchScorer(mx.gluon.HybridBlock):
         else:
             predicted_output_length = source_length * length_ratio
 
-        scores = self.scorer(scores, target_length - 1, predicted_output_length)
+        scores = self.scorer(scores, target_length - 2, predicted_output_length)
+
         return scores
 
 
@@ -105,8 +106,6 @@ class Scorer:
         batch = batch.split_and_load(ctx=self.context)
         batch_scores = []  # type: List[mx.nd.NDArray]
         for inputs, labels in batch.shards():
-            if self.model.dtype == C.DTYPE_FP16:
-                inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)  # type: ignore
             source, source_length, target, target_length = inputs
             outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
             logits = outputs[C.LOGITS_NAME]  # type: mx.nd.NDArray
@@ -129,21 +128,21 @@ class Scorer:
             batch_time = time.time() - batch_tic
             total_time += batch_time
 
-            for sentno, (source, target, score) in enumerate(zip(batch.source, batch.target, scores), 1):
+            for sentno, (source, target, score) in enumerate(zip(batch.source.astype('int32')[:, :, 0].asnumpy(),
+                                                                 batch.target.astype('int32').asnumpy(),
+                                                                 scores.asnumpy()), 1):
                 sentence_no += 1
 
                 # Transform arguments in preparation for printing
-                source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
+                source_ids = source.tolist()
                 source_tokens = list(data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
-                target_ids = [int(x) for x in target.asnumpy().tolist()]
+                target_ids = target.tolist()
                 target_string = C.TOKEN_SEPARATOR.join(
                     data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
 
                 # Report a score of -inf for invalid sentence pairs (empty source and/or target)
-                if source[0][0] == C.PAD_ID or target[0] == C.PAD_ID:
+                if source[0] == C.PAD_ID or target[0] == C.PAD_ID:
                     score = -np.inf
-                else:
-                    score = score.asscalar()
 
                 # Output handling routines require us to make use of inference classes.
                 output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),

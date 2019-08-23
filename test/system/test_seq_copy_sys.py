@@ -27,10 +27,10 @@ logger = logging.getLogger(__name__)
 _TRAIN_LINE_COUNT = 10000
 _TRAIN_LINE_COUNT_EMPTY = 100
 _DEV_LINE_COUNT = 100
-_LINE_MAX_LENGTH = 10
+_LINE_MAX_LENGTH = 9
 _TEST_LINE_COUNT = 110
 _TEST_LINE_COUNT_EMPTY = 10
-_TEST_MAX_LENGTH = 11
+_TEST_MAX_LENGTH = 9
 _SEED_TRAIN_DATA = 13
 _SEED_DEV_DATA = 17
 
@@ -99,7 +99,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                                      translate_params=translate_params,
                                      data=data,
                                      use_prepared_data=use_prepared_data,
-                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     max_seq_len=_LINE_MAX_LENGTH,
                                      compare_output=True,
                                      seed=seed)
 
@@ -159,7 +159,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                      translate_params=translate_params,
                                      data=data,
                                      use_prepared_data=use_prepared_data,
-                                     max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
+                                     max_seq_len=_LINE_MAX_LENGTH,
                                      compare_output=True,
                                      seed=seed)
 

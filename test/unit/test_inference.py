@@ -147,18 +147,21 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
 
 
 @pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, "
-                         "forced_max_input_len, length_ratio_mean, length_ratio_std, "
+                         "forced_max_input_len, forced_max_output_len, length_ratio_mean, length_ratio_std, "
                          "expected_max_input_len, expected_max_output_len",
                          [
-                             (100, 100, None, 0.9, 0.2, 89, 100),
-                             (100, 100, None, 1.1, 0.2, 75, 100),
-                             # Force a maximum input length.
-                             (100, 100, 50, 1.1, 0.2, 50, 67),
+                             (99 + 1, 99 + 1, None, None, 1.0, 0.0, 100, 100),  # copy/sort test cases
+                             (99 + 1, 99 + 1, None, None, 0.9, 0.2, 90, 100),  # target shorter than source
+                             (99 + 1, 99 + 1, None, None, 1.1, 0.2, 76, 99),  # target longer than source
+                             (99 + 1, 99 + 1, 50, None, 1.1, 0.2, 51, 67),  # force a maximum input length
+                             (99 + 1, 99 + 1, 50, None, 1.1, 0.2, 51, 67),  # force a maximum input length
+                             (99 + 1, 99 + 1, 50, 80, 1.1, 0.2, 51, 81),  # force a maximum input length
                          ])
 def test_get_max_input_output_length(
         supported_max_seq_len_source,
         supported_max_seq_len_target,
         forced_max_input_len,
+        forced_max_output_len,
         length_ratio_mean,
         length_ratio_std,
         expected_max_input_len,
@@ -167,16 +170,15 @@ def test_get_max_input_output_length(
         supported_max_seq_len_source=supported_max_seq_len_source,
         supported_max_seq_len_target=supported_max_seq_len_target,
         forced_max_input_len=forced_max_input_len,
+        forced_max_output_len=forced_max_output_len,
         length_ratio_mean=length_ratio_mean,
         length_ratio_std=length_ratio_std,
         num_stds=1)
-    print('max input len', max_input_len)
     max_output_len = get_max_output_len(max_input_len)
-    print('max output len', max_output_len)
 
     assert max_input_len <= supported_max_seq_len_source
-    assert max_output_len <= supported_max_seq_len_target
-
+    for input_len in range(1, max_input_len + 1):
+        assert get_max_output_len(input_len) <= supported_max_seq_len_target
     assert max_input_len == expected_max_input_len
     assert max_output_len == expected_max_output_len
 

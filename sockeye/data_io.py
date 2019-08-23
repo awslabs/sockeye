@@ -606,8 +606,7 @@ def prepare_data(source_fnames: List[str],
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
-                             num_source_factors=len(source_fnames),
-                             source_with_eos=True)
+                             num_source_factors=len(source_fnames))
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
     config_data.save(config_data_fname)
@@ -865,8 +864,7 @@ def get_training_data_iters(sources: List[str],
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
-                             num_source_factors=len(sources),
-                             source_with_eos=True)
+                             num_source_factors=len(sources))
 
     train_iter = ParallelSampleIter(data=training_data,
                                     buckets=buckets,
@@ -1050,14 +1048,12 @@ class DataConfig(config.Config):
                  data_statistics: DataStatistics,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 num_source_factors: int,
-                 source_with_eos: bool = False) -> None:
+                 num_source_factors: int) -> None:
         super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.num_source_factors = num_source_factors
-        self.source_with_eos = source_with_eos
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
@@ -1579,15 +1575,20 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         sources_sentences = [[] for x in self.sources_sentences]  # type: List[List[str]]
         target_sentences = []  # type: List[str]
         num_read = 0
-        for num_read, (sources, target) in enumerate(parallel_iterate(self.sources_iters, self.target_iter, skip_blanks=False), 1):
+        for num_read, (sources, target) in enumerate(
+                parallel_iterate(self.sources_iters, self.target_iter, skip_blanks=False), 1):
             source_len = 0 if sources[0] is None else len(sources[0])
             target_len = 0 if target is None else len(target)
             if source_len > self.max_len_source:
-                logger.info("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read, source_len, self.max_len_source))
-                sources = [source[0:self.max_len_source] for source in sources]
+                logger.info("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read,
+                                                                            source_len,
+                                                                            self.max_len_source))
+                sources = [source[0: self.max_len_source] for source in sources]
             if target_len > self.max_len_target:
-                logger.info("Trimming target sentence {} ({} -> {})".format(self.sentno + num_read, target_len, self.max_len_target))
-                target = target[0:self.max_len_target]
+                logger.info("Trimming target sentence {} ({} -> {})".format(self.sentno + num_read,
+                                                                            target_len,
+                                                                            self.max_len_target))
+                target = target[0: self.max_len_target]
 
             for i, source in enumerate(sources):
                 sources_sentences[i].append(source)

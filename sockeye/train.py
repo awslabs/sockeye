@@ -755,7 +755,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
     max_seq_len_source, max_seq_len_target = args.max_seq_len
-    # The maximum length is the length before we add the BOS/EOS symbols
+    # The maximum length given by the user is the length before we add the BOS/EOS symbols
     max_seq_len_source = max_seq_len_source + C.SPACE_FOR_XOS
     max_seq_len_target = max_seq_len_target + C.SPACE_FOR_XOS
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
@@ -780,8 +780,6 @@ def train(args: argparse.Namespace) -> training.TrainState:
             shared_vocab=use_shared_vocab(args),
             resume_training=resume_training,
             output_folder=output_folder)
-        max_seq_len_source = config_data.max_seq_len_source
-        max_seq_len_target = config_data.max_seq_len_target
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:

@@ -380,24 +380,24 @@ class SockeyeModel(mx.gluon.Block):
         return self.config.config_data.num_source_factors
 
     @property
-    def training_max_seq_len_source(self) -> int:
-        """ The maximum sequence length on the source side during training. """
+    def training_max_observed_len_source(self) -> int:
+        """ The maximum sequence length on the source side observed during training. This includes the <eos> token. """
         return self.config.config_data.data_statistics.max_observed_len_source
 
     @property
-    def training_max_seq_len_target(self) -> int:
-        """ The maximum sequence length on the target side during training. """
+    def training_max_observed_len_target(self) -> int:
+        """ The maximum sequence length on the target side observed during training. This includes the <bos> token. """
         return self.config.config_data.data_statistics.max_observed_len_target
 
     @property
-    def max_supported_seq_len_source(self) -> Optional[int]:
-        """ If not None this is the maximally supported source length during inference (hard constraint). """
-        return self.training_max_seq_len_source
+    def max_supported_len_source(self) -> int:
+        """ The maximum supported source length. This includes the <eos> token. """
+        return self.config.config_data.max_seq_len_source
 
     @property
-    def max_supported_seq_len_target(self) -> Optional[int]:
-        """ If not None this is the maximally supported target length during inference (hard constraint). """
-        return self.training_max_seq_len_target
+    def max_supported_len_target(self) -> int:
+        """ The maximum supported target length. This includes the <bos> token. """
+        return self.config.config_data.max_seq_len_target
 
     @property
     def length_ratio_mean(self) -> float:

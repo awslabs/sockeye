@@ -950,7 +950,7 @@ def add_score_cli_args(params):
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
 
-    params.add_argument('--max-seq-len',
+    params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
                         default=None,
                         help='Maximum sequence length in tokens.'
@@ -977,14 +977,6 @@ def add_score_cli_args(params):
                         help="Data type. Default: %(default)s infers from saved model.")
 
     add_logging_args(params)
-
-
-def add_max_output_cli_args(params):
-    params.add_argument('--max-output-length',
-                        type=int,
-                        default=None,
-                        help='Maximum number of words to generate during translation. '
-                             'If None, it will be computed automatically. Default: %(default)s.')
 
 
 def add_inference_args(params):
@@ -1077,7 +1069,7 @@ def add_inference_args(params):
                                default=10,
                                help='Bucket width for encoder steps. 0 means no bucketing. Default: %(default)s.')
     decode_params.add_argument('--max-input-length',
-                               type=int,
+                               type=int_greater_or_equal(1),
                                default=None,
                                help='Maximum input sequence length. Default: value from model(s).')
     decode_params.add_argument('--max-output-length-num-stds',
@@ -1087,7 +1079,7 @@ def add_inference_args(params):
                                     'to calculate maximum output length for beam search for each sentence. '
                                     'Default: %(default)s.')
     decode_params.add_argument('--max-output-length',
-                               type=int,
+                               type=int_greater_or_equal(1),
                                default=None,
                                help='Maximum number of words to generate during translation. '
                                     'If None, it will be computed automatically. Default: %(default)s.')
