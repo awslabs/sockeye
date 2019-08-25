@@ -145,7 +145,8 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
                               batch_size: int,
                               batch_by_words: bool,
                               batch_num_devices: int,
-                              data_target_average_len: List[Optional[float]]) -> List[BucketBatchSize]:
+                              data_target_average_len: List[Optional[float]],
+                              batch_sentences_multiple_of: int = 1) -> List[BucketBatchSize]:
     """
     Computes bucket-specific batch sizes (sentences, average_words).
 
@@ -161,6 +162,8 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
     :param batch_by_words: Batch by words.
     :param batch_num_devices: Number of devices.
     :param data_target_average_len: Optional average target length for each bucket.
+    :param batch_sentences_multiple_of: Round the number of sentences in each
+        bucket's batch to a multiple of this value (word-based batching only).
     """
     check_condition(len(data_target_average_len) == len(buckets),
                     "Must provide None or average target length for each bucket")
@@ -180,9 +183,15 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
         if batch_by_words:
             check_condition(padded_seq_len <= batch_size, "Word batch size must cover sequence lengths for all"
                                                           " buckets: (%d > %d)" % (padded_seq_len, batch_size))
-            # Multiple of number of devices (int) closest to target number of words, assuming each sentence is of
-            # average length
-            batch_size_seq = batch_num_devices * max(1, round((batch_size / average_seq_len) / batch_num_devices))
+            # The minimum batch step (int) is the least common multiple of the
+            # value that batches must be a multiple of and the number of devices
+            # the batch must be distributed across (ensure correct multiple per
+            # batch per device).
+            min_batch_step = (batch_sentences_multiple_of * batch_num_devices) / math.gcd(batch_sentences_multiple_of,
+                                                                                          batch_num_devices)
+            # Multiple of minimum batch step closest to target number of words,
+            # assuming each sentence is of average length
+            batch_size_seq = min_batch_step * max(1, round((batch_size / average_seq_len) / min_batch_step))
             batch_size_word = batch_size_seq * average_seq_len
         else:
             batch_size_seq = batch_size
@@ -200,8 +209,8 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
         while bucket_batch_sizes[-1].batch_size * padded_seq_len < largest_total_num_words:
             bucket_batch_sizes[-1] = BucketBatchSize(
                 bucket_batch_sizes[-1].bucket,
-                bucket_batch_sizes[-1].batch_size + batch_num_devices,
-                bucket_batch_sizes[-1].average_words_per_batch + batch_num_devices * average_seq_len)
+                bucket_batch_sizes[-1].batch_size + min_batch_step,
+                bucket_batch_sizes[-1].average_words_per_batch + min_batch_step * average_seq_len)
     return bucket_batch_sizes
 
 
@@ -700,6 +709,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_by_words: bool,
                             batch_num_devices: int,
+                            batch_sentences_multiple_of: int = 1,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
                                                            'BaseParallelSampleIter',
                                                            'DataConfig', List[vocab.Vocab], vocab.Vocab]:
@@ -748,7 +758,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                    batch_size,
                                                    batch_by_words,
                                                    batch_num_devices,
-                                                   config_data.data_statistics.average_len_target_per_bucket)
+                                                   config_data.data_statistics.average_len_target_per_bucket,
+                                                   batch_sentences_multiple_of)
 
     config_data.data_statistics.log(bucket_batch_sizes)
 
@@ -794,9 +805,10 @@ def get_training_data_iters(sources: List[str],
                             bucketing: bool,
                             bucket_width: int,
                             bucket_scaling: bool = True,
-                            allow_empty: bool = False) -> Tuple['BaseParallelSampleIter',
-                                                                Optional['BaseParallelSampleIter'],
-                                                                'DataConfig', 'DataInfo']:
+                            allow_empty: bool = False,
+                            batch_sentences_multiple_of: int = 1) -> Tuple['BaseParallelSampleIter',
+                                                                                Optional['BaseParallelSampleIter'],
+                                                                                'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -818,6 +830,9 @@ def get_training_data_iters(sources: List[str],
     :param bucket_width: Size of buckets.
     :param bucket_scaling: Scale bucket sizes based on source/target length ratio.
     :param allow_empty: Unless True if no sentences are below or equal to the maximum length an exception is raised.
+    :param batch_sentences_multiple_of: Round the number of sentences in each
+        bucket's batch to a multiple of this value (word-based batching only).
+
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -850,7 +865,8 @@ def get_training_data_iters(sources: List[str],
                                                    batch_size,
                                                    batch_by_words,
                                                    batch_num_devices,
-                                                   data_statistics.average_len_target_per_bucket)
+                                                   data_statistics.average_len_target_per_bucket,
+                                                   batch_sentences_multiple_of)
 
     data_statistics.log(bucket_batch_sizes)
 

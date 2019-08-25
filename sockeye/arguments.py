@@ -676,6 +676,12 @@ def add_batch_args(params, default_batch_size=4096):
                         help="Sentence: each batch contains X sentences, number of words varies."
                              "Word: each batch contains (approximately) X target words, "
                              "number of sentences varies. Default: %(default)s.")
+    params.add_argument('--round-batch-sizes-to-multiple-of',
+                        type=int,
+                        default=1,
+                        help='For word-based batches, round each bucket\'s batch size (measured in sentences) to a '
+                             'multiple of this integer. Default: %(default)s.')
+
 
 
 def add_hybridization_arg(params):

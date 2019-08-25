@@ -223,23 +223,32 @@ def test_sample_based_define_bucket_batch_sizes():
         assert bbs.average_words_per_batch == bbs.bucket[1] * batch_size
 
 
-@pytest.mark.parametrize("length_ratio", [0.5, 1.5])
-def test_word_based_define_bucket_batch_sizes(length_ratio):
+@pytest.mark.parametrize("length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
+        # Reference batch sizes manually inspected for sanity.  Note that for
+        # very unbalanced lengths, the last batch can be very large.  This is
+        # due to the requirement for any size batch (total elements) to fit into
+        # the same allocated space for MXNet's memory sharing.
+        (0.5, 1, [200.0, 100.0, 67.0, 50.0, 40.0, 33.0, 29.0, 25.0, 22.0, 41.0]),
+        (1.5, 1, [100.0, 50.0, 33.0, 25.0, 20.0, 20.0, 20.0, 20.0]),
+        (1.5, 8, [96.0, 48.0, 32.0, 24.0, 16.0, 16.0, 16.0, 24.0])])
+def test_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
     batch_by_words = True
     batch_num_devices = 1
-    batch_size = 200
-    max_seq_len = 100
+    batch_size = 1000
+    max_seq_len = 50
     buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, length_ratio)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_by_words=batch_by_words,
                                                            batch_num_devices=batch_num_devices,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                           data_target_average_len=[None] * len(buckets),
+                                                           batch_sentences_multiple_of=batch_sentences_multiple_of)
     max_num_words = 0
     # last bucket batch size is different
-    for bbs in bucket_batch_sizes[:-1]:
-        target_padded_seq_len = bbs.bucket[1]
-        expected_batch_size = round((batch_size / target_padded_seq_len) / batch_num_devices)
+    print(list(bbs.bucket for bbs in bucket_batch_sizes))
+    print(list(bbs.batch_size for bbs in bucket_batch_sizes))
+    print(list(bbs.average_words_per_batch for bbs in bucket_batch_sizes))
+    for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
         assert bbs.batch_size == expected_batch_size
         expected_average_words_per_batch = expected_batch_size * bbs.bucket[1]
         assert bbs.average_words_per_batch == expected_average_words_per_batch
