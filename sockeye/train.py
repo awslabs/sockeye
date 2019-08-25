@@ -351,7 +351,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
-            bucket_width=args.bucket_width)
+            bucket_width=args.bucket_width,
+            bucket_scaling=not args.no_bucket_scaling)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
@@ -905,7 +906,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             dtype=args.dtype,
             using_amp=using_amp,
             custom_metrics_logger=custom_metrics_logger
-        )        
+        )
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
                                                training_model, source_vocabs, target_vocab, hybridize=hybridize)

@@ -538,6 +538,7 @@ def prepare_data(source_fnames: List[str],
                  samples_per_shard: int,
                  min_num_shards: int,
                  output_prefix: str,
+                 bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
     # write vocabularies to data folder
@@ -553,9 +554,11 @@ def prepare_data(source_fnames: List[str],
                     "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
 
     # define buckets
-    buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
-                                      length_statistics.length_ratio_mean) if bucketing else [
-        (max_seq_len_source, max_seq_len_target)]
+    length_ratio = length_statistics.length_ratio_mean if bucket_scaling else 1.0
+    buckets = define_parallel_buckets(max_seq_len_source,
+                                      max_seq_len_target,
+                                      bucket_width,
+                                      length_ratio) if bucketing else [(max_seq_len_source, max_seq_len_target)]
     logger.info("Buckets: %s", buckets)
 
     # Pass 2: Randomly assign data to data shards
@@ -790,6 +793,7 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_target: int,
                             bucketing: bool,
                             bucket_width: int,
+                            bucket_scaling: bool = True,
                             allow_empty: bool = False) -> Tuple['BaseParallelSampleIter',
                                                                 Optional['BaseParallelSampleIter'],
                                                                 'DataConfig', 'DataInfo']:
@@ -812,6 +816,7 @@ def get_training_data_iters(sources: List[str],
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
+    :param bucket_scaling: Scale bucket sizes based on source/target length ratio.
     :param allow_empty: Unless True if no sentences are below or equal to the maximum length an exception is raised.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
@@ -828,9 +833,11 @@ def get_training_data_iters(sources: List[str],
                         "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
 
     # define buckets
-    buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width,
-                                      length_statistics.length_ratio_mean) if bucketing else [
-        (max_seq_len_source, max_seq_len_target)]
+    length_ratio = length_statistics.length_ratio_mean if bucket_scaling else 1.0
+    buckets = define_parallel_buckets(max_seq_len_source,
+                                      max_seq_len_target,
+                                      bucket_width,
+                                      length_ratio) if bucketing else [(max_seq_len_source, max_seq_len_target)]
 
     sources_sentences, target_sentences = create_sequence_readers(sources, target, source_vocabs, target_vocab)
 
