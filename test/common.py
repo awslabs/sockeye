@@ -528,10 +528,10 @@ def collect_translate_output_and_scores(out_path: str) -> Tuple[List[str], List[
             translation = ''
             score = -np.inf
             try:
-                output = json.loads(output)
+                json_output = json.loads(output)
                 try:
-                    translation = output['translation']
-                    score = output['score']
+                    translation = json_output['translation']
+                    score = json_output['score']
                 except IndexError:
                     pass
             except:
