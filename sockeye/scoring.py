@@ -73,7 +73,7 @@ class BatchScorer(mx.gluon.HybridBlock):
         else:
             predicted_output_length = source_length * length_ratio
 
-        scores = self.scorer(scores, target_length - 2, predicted_output_length)
+        scores = self.scorer(scores, target_length, predicted_output_length)
 
         return scores
 

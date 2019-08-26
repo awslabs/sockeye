@@ -1606,6 +1606,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
 
         source = dataset.source[0]
         target = dataset.target[0][:, :-1]
+        target = mx.nd.where(target == 3, mx.nd.zeros_like(target), target)  # TODO: this is a hack!
         label = dataset.target[0][:, 1:]
 
         self.next_batch = create_batch_from_parallel_sample(source, target, label)
@@ -1620,10 +1621,10 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         raise StopIteration
 
     def save_state(self, fname: str):
-        raise Exception('Not supported!')
+        raise NotImplementedError('Not supported!')
 
     def load_state(self, fname: str):
-        raise Exception('Not supported!')
+        raise NotImplementedError('Not supported!')
 
 
 class ShardedParallelSampleIter(BaseParallelSampleIter):
@@ -1779,6 +1780,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
         batch_size = self.bucket_batch_sizes[i].batch_size
         source = self.data.source[i][j:j + batch_size]
         target = self.data.target[i][j:j + batch_size, :-1]
+        target = mx.nd.where(target == 3, mx.nd.zeros_like(target), target)  # TODO: this is a hack!
         label = self.data.target[i][j:j + batch_size, 1:]
 
         return create_batch_from_parallel_sample(source, target, label)

@@ -274,15 +274,17 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, best_word_indices, max_output_lengths,
                        finished, scores_accumulated, lengths, reference_lengths):
+        # Update lengths of all items, except those that were already finished. This updates
+        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
+        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
+
         all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
         scores_accumulated = F.where(newly_finished,
                                      self._scorer(scores_accumulated, lengths, reference_lengths),
                                      scores_accumulated)
 
-        # Update lengths of all items, except those that were already finished. This updates
-        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
-        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
+
 
         # Now, recompute finished. Hypotheses are finished if they are
         # - extended with <pad>, or
@@ -576,7 +578,7 @@ class BeamSearch(mx.gluon.Block):
         # item on the beam for each sentence
         inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
-        for t in range(1, max_iterations + 1):  # TODO: add logic that last iteration FORCES <eos>
+        for t in range(1, max_iterations + 1):  # TODO: max_iterations + 1 is the MINIMUM to get correct results right now
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
             target_dists, model_states = self._inference.decode_step(best_word_indices, model_states, vocab_slice_ids)
@@ -651,7 +653,7 @@ class BeamSearch(mx.gluon.Block):
             # (9) update models' state with winning hypotheses (ascending)
             _sort_states(model_states, best_hyp_indices)
 
-        logger.debug("Finished after %d / %d steps.", t + 1, max_iterations)
+        logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
