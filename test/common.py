@@ -491,8 +491,10 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
                                                                        score_scores):
             logger.info("tokens: %s || translate score: %.4f || score score: %.4f",
                         translate_tokens, translate_score, score_score)
-            assert (translate_score == -np.inf and score_score == -np.inf) or np.isclose(translate_score, score_score),\
-                "input: %s || tokens: %s || translate score: %.4f || score score: %.4f" % (inp, translate_tokens,
+            assert (translate_score == -np.inf and score_score == -np.inf) or np.isclose(translate_score,
+                                                                                         score_score,
+                                                                                         atol=1e-06),\
+                "input: %s || tokens: %s || translate score: %.6f || score score: %.6f" % (inp, translate_tokens,
                                                                                            translate_score,
                                                                                            score_score)
 
