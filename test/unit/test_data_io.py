@@ -28,55 +28,47 @@ from test.common import tmp_digits_dataset
 
 seed_rngs(12)
 
-define_bucket_tests = [(50, 10, 1, [10, 20, 30, 40, 50]),
-                       (50, 20, 1, [20, 40, 50]),
-                       (50, 50, 1, [50]),
-                       (5, 10, 1, [5]),
-                       (11, 5, 1, [5, 10, 11]),
-                       (19, 10, 1, [10, 19]),
-                       # Duplicates are fine here.  Values are rounded and we
-                       # preserve the number of buckets required to step to max
-                       # length so parallel bucketing works as expected.
-                       (50, 7, 8, [8, 16, 24, 32, 32, 40, 48, 56]),
-                       (50, 10, 8, [8, 16, 32, 40, 48, 56])]
+define_bucket_tests = [(50, 10, [10, 20, 30, 40, 50]),
+                       (50, 20, [20, 40, 50]),
+                       (50, 50, [50]),
+                       (5, 10, [5]),
+                       (11, 5, [5, 10, 11]),
+                       (19, 10, [10, 19])]
 
 
-@pytest.mark.parametrize("max_seq_len, step, bucket_multiple_of, expected_buckets", define_bucket_tests)
-def test_define_buckets(max_seq_len, step, bucket_multiple_of, expected_buckets):
-    buckets = data_io.define_buckets(max_seq_len, step=step, bucket_multiple_of=bucket_multiple_of)
+@pytest.mark.parametrize("max_seq_len, step, expected_buckets", define_bucket_tests)
+def test_define_buckets(max_seq_len, step, expected_buckets):
+    buckets = data_io.define_buckets(max_seq_len, step=step)
     assert buckets == expected_buckets
 
 
-define_parallel_bucket_tests = [(50, 50, 10, 1, 1.0, [(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]),
-                                (50, 50, 10, 1, 0.5,
+define_parallel_bucket_tests = [(50, 50, 10, True, 1.0, [(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]),
+                                (50, 50, 10, True, 0.5,
                                  [(10, 5), (20, 10), (30, 15), (40, 20), (50, 25), (50, 30), (50, 35), (50, 40),
                                   (50, 45), (50, 50)]),
-                                (10, 10, 10, 1, 0.1,
+                                (10, 10, 10, True, 0.1,
                                  [(10, 2), (10, 3), (10, 4), (10, 5), (10, 6), (10, 7), (10, 8), (10, 9), (10, 10)]),
-                                (10, 5, 10, 1, 0.01, [(10, 2), (10, 3), (10, 4), (10, 5)]),
-                                (50, 50, 10, 1, 2.0,
+                                (10, 5, 10, True, 0.01, [(10, 2), (10, 3), (10, 4), (10, 5)]),
+                                (50, 50, 10, True, 2.0,
                                  [(5, 10), (10, 20), (15, 30), (20, 40), (25, 50), (30, 50), (35, 50), (40, 50),
                                   (45, 50), (50, 50)]),
-                                (5, 10, 10, 1, 10.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
-                                (5, 10, 10, 1, 11.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
-                                (50, 50, 50, 1, 0.5, [(50, 25), (50, 50)]),
-                                (50, 50, 50, 1, 1.5, [(33, 50), (50, 50)]),
-                                (75, 75, 50, 1, 1.5, [(33, 50), (66, 75), (75, 75)]),
-                                (100, 100, 8, 8, 1.5, [(8, 8), (8, 16), (16, 24), (16, 32), (24, 40), (32, 48),
-                                                       (32, 56), (40, 64), (48, 72), (48, 80), (56, 88), (64, 96),
-                                                       (64, 104), (72, 104), (80, 104), (88, 104), (96, 104),
-                                                       (104, 104)]),
-                                (100, 100, 10, 8, 1.5, [(8, 8), (16, 16), (24, 32), (32, 40), (32, 48), (40, 64),
-                                                        (48, 72), (56, 80), (64, 88), (72, 96), (80, 104), (88, 104),
-                                                        (96, 104), (104, 104)])]
+                                (5, 10, 10, True, 10.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
+                                (5, 10, 10, True, 11.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
+                                (50, 50, 50, True, 0.5, [(50, 25), (50, 50)]),
+                                (50, 50, 50, True, 1.5, [(33, 50), (50, 50)]),
+                                (75, 75, 50, True, 1.5, [(33, 50), (66, 75), (75, 75)]),
+                                (50, 50, 8, False, 1.5, [(8, 8), (16, 16), (24, 24), (32, 32), (40, 40), (48, 48),
+                                                         (50, 50)]),
+                                (50, 75, 8, False, 1.5, [(8, 8), (16, 16), (24, 24), (32, 32), (40, 40), (48, 48),
+                                                         (50, 56), (50, 64), (50, 72), (50, 75)])]
 
 
-@pytest.mark.parametrize("max_seq_len_source, max_seq_len_target, bucket_width, bucket_multiple_of, length_ratio, "
+@pytest.mark.parametrize("max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling, length_ratio,"
                          "expected_buckets", define_parallel_bucket_tests)
-def test_define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_multiple_of, length_ratio,
+def test_define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling, length_ratio,
                                  expected_buckets):
     buckets = data_io.define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width=bucket_width,
-                                              bucket_multiple_of=bucket_multiple_of, length_ratio=length_ratio)
+                                              bucket_scaling=bucket_scaling, length_ratio=length_ratio)
     assert buckets == expected_buckets
 
 

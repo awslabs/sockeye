@@ -353,7 +353,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
-            bucket_multiple_of=args.round_buckets_to_multiple_of,
+            bucket_scaling=not args.no_bucket_scaling,
             batch_sentences_multiple_of=args.round_batch_sizes_to_multiple_of)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)

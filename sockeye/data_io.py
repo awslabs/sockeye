@@ -37,35 +37,27 @@ from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVarianc
 logger = logging.getLogger(__name__)
 
 
-def define_buckets(max_seq_len: int, step: int = 10, bucket_multiple_of: int = 1) -> List[int]:
+def define_buckets(max_seq_len: int, step: int = 10) -> List[int]:
     """
     Returns a list of integers defining bucket boundaries.
     Bucket boundaries are created according to the following policy:
     We generate buckets with a step size of step until the final bucket fits max_seq_len.
     We then limit that bucket to max_seq_len (difference between semi-final and final bucket may be less than step).
-    If specified, we round each bucket size to a multiple of the given value.
 
     :param max_seq_len: Maximum bucket size.
     :param step: Distance between buckets.
-    :param bucket_multiple_of: Round each bucket size to a multiple of this
-                               value.
 
     :return: List of bucket sizes.
     """
-    ceil_max_len = bucket_multiple_of * math.ceil(max_seq_len / bucket_multiple_of)
-    if ceil_max_len != max_seq_len:
-        logger.info("Adjusting maximum length to a multiple of %d. New maximum length: %d",
-                    bucket_multiple_of, max_seq_len)
-    buckets = [bucket_multiple_of * round(bucket_len / bucket_multiple_of)
-               for bucket_len in range(step, ceil_max_len + step, step)]
-    buckets[-1] = ceil_max_len
+    buckets = list(range(step, max_seq_len + step, step))
+    buckets[-1] = max_seq_len
     return buckets
 
 
 def define_parallel_buckets(max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucket_width: int = 10,
-                            bucket_multiple_of: int = 1,
+                            bucket_scaling: bool = True,
                             length_ratio: float = 1.0) -> List[Tuple[int, int]]:
     """
     Returns (source, target) buckets up to (max_seq_len_source, max_seq_len_target).  The longer side of the data uses
@@ -75,20 +67,20 @@ def define_parallel_buckets(max_seq_len_source: int,
     :param max_seq_len_source: Maximum source bucket size.
     :param max_seq_len_target: Maximum target bucket size.
     :param bucket_width: Width of buckets on longer side.
-    :param bucket_multiple_of: Round each bucket size to a multiple of this
-                               value.
+    :param bucket_scaling: Scale bucket steps based on length ratio.
     :param length_ratio: Length ratio of data (target/source).
     """
     source_step_size = bucket_width
     target_step_size = bucket_width
-    if length_ratio >= 1.0:
-        # target side is longer -> scale source
-        source_step_size = max(1, int(round(bucket_width / length_ratio)))
-    else:
-        # source side is longer, -> scale target
-        target_step_size = max(1, int(round(bucket_width * length_ratio)))
-    source_buckets = define_buckets(max_seq_len_source, step=source_step_size, bucket_multiple_of=bucket_multiple_of)
-    target_buckets = define_buckets(max_seq_len_target, step=target_step_size, bucket_multiple_of=bucket_multiple_of)
+    if bucket_scaling:
+        if length_ratio >= 1.0:
+            # target side is longer -> scale source
+            source_step_size = max(1, int(round(bucket_width / length_ratio)))
+        else:
+            # source side is longer, -> scale target
+            target_step_size = max(1, int(round(bucket_width * length_ratio)))
+    source_buckets = define_buckets(max_seq_len_source, step=source_step_size)
+    target_buckets = define_buckets(max_seq_len_target, step=target_step_size)
     # Extra buckets
     if len(source_buckets) < len(target_buckets):
         source_buckets += [source_buckets[-1] for _ in range(len(target_buckets) - len(source_buckets))]
@@ -559,7 +551,7 @@ def prepare_data(source_fnames: List[str],
                  samples_per_shard: int,
                  min_num_shards: int,
                  output_prefix: str,
-                 bucket_multiple_of: int = 1,
+                 bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False):
     logger.info("Preparing data.")
     # write vocabularies to data folder
@@ -575,7 +567,7 @@ def prepare_data(source_fnames: List[str],
                     "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
 
     # define buckets
-    buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_multiple_of,
+    buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling,
                                       length_statistics.length_ratio_mean) if bucketing else [(max_seq_len_source,
                                                                                                max_seq_len_target)]
     logger.info("Buckets: %s", buckets)
@@ -814,7 +806,7 @@ def get_training_data_iters(sources: List[str],
                             max_seq_len_target: int,
                             bucketing: bool,
                             bucket_width: int,
-                            bucket_multiple_of: int = 1,
+                            bucket_scaling: bool = True,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1) -> Tuple['BaseParallelSampleIter',
                                                                                 Optional['BaseParallelSampleIter'],
@@ -838,8 +830,7 @@ def get_training_data_iters(sources: List[str],
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
-    :param bucket_multiple_of: Round each bucket size to a multiple of this
-                               value.
+    :param bucket_scaling: Scale bucket steps based on source/target length ratio.
     :param allow_empty: Unless True if no sentences are below or equal to the maximum length an exception is raised.
     :param batch_sentences_multiple_of: Round the number of sentences in each
         bucket's batch to a multiple of this value (word-based batching only).
@@ -859,7 +850,7 @@ def get_training_data_iters(sources: List[str],
                         "Consider increasing %s" % C.TRAINING_ARG_MAX_SEQ_LEN)
 
     # define buckets
-    buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_multiple_of,
+    buckets = define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling,
                                       length_statistics.length_ratio_mean) if bucketing else [(max_seq_len_source,
                                                                                                max_seq_len_target)]
 
