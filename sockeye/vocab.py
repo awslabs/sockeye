@@ -287,7 +287,8 @@ def load_or_create_vocabs(source_paths: List[str],
         # source factor vocabs are always created
         for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
             vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
-                                                             num_words_source, word_min_count_source))
+                                                             num_words_source, word_min_count_source,
+                                                             pad_to_multiple_of=pad_to_multiple_of))
 
     return [vocab_source] + vocab_source_factors, vocab_target
 
