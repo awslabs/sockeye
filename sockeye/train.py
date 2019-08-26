@@ -896,8 +896,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         hybridize = not args.no_hybridization
         if hybridize:
             training_model.hybridize(static_alloc=True)
-            for lf in losses:
-                lf.hybridize(static_alloc=True)
+            if not using_amp:
+                # Do not hybridize losses when using AMP.  Dynamic loss scaling
+                # requires adjusting SoftmaxOutput's grad_rescale value
+                # throughout training, which is not possible when using the
+                # Symbol API.
+                for lf in losses:
+                    lf.hybridize(static_alloc=True)
 
         trainer = training.GluonEarlyStoppingTrainer(
             config=trainer_config,
