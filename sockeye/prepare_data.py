@@ -87,7 +87,7 @@ def prepare_data(args: argparse.Namespace):
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
                          output_prefix=output_folder,
-                         bucket_scaling=not args.no_bucket_scaling)
+                         bucket_multiple_of=args.round_buckets_to_multiple_of)
 
 
 if __name__ == "__main__":

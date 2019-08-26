@@ -438,9 +438,10 @@ def add_bucketing_args(params):
                         default=10,
                         help='Width of buckets in tokens. Default: %(default)s.')
 
-    params.add_argument('--no-bucket-scaling',
-                        action='store_true',
-                        help='Disable scaling bucket sizes based on source/target length ratio. Default: %(default)s.')
+    params.add_argument('--round-buckets-to-multiple-of',
+                        type=int,
+                        default=1,
+                        help='Round each bucket size to a multiple of this integer. Default: %(default)s.')
 
     params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
