@@ -16,7 +16,10 @@ from typing import Tuple
 import mxnet as mx
 import numpy as np
 import pytest
+from unittest.mock import patch, Mock
+from typing import List, Optional
 
+import sockeye.constants as C
 import sockeye.beam_search
 import sockeye.data_io
 import sockeye.inference
@@ -236,3 +239,69 @@ def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
 
         # word index should be zero for all finished hypotheses
         assert mx.nd.sum(mx.nd.where(finished, words, finished))[0].asscalar() == 0
+
+
+class _TestInference(sockeye.beam_search._Inference):
+
+    def encode_and_initialize(self,
+                              inputs: mx.nd.NDArray,
+                              valid_length: Optional[mx.nd.NDArray] = None):
+        batch_size = inputs.shape[0]
+        num_hidden = 32
+        states = [mx.nd.zeros((batch_size, num_hidden))]  # TODO add nested states
+        predicted_output_length = mx.nd.zeros_like(inputs)  # does that work?
+        return states, predicted_output_length
+
+    def decode_step(self,
+                    step_input: mx.nd.NDArray,
+                    states: List,
+                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+        batch_beam_size = step_input.shape[0]
+        print(step_input)
+        print(states)
+        scores = mx.nd.random.uniform(0, 1, (batch_beam_size, 32))
+        states[0] += 1
+        print(scores)
+        return scores, states
+
+
+# TODO: add vocabulary selection test
+def test_mama():
+    context = mx.cpu()
+    dtype='float32'
+    num_source_factors = 1
+    output_vocab_size = 32
+    beam_size = 5
+    bos_id = 2
+    eos_id = 3
+
+    bs = sockeye.beam_search.BeamSearch(
+        beam_size=beam_size,
+        bos_id=bos_id,
+        eos_id=eos_id,
+        context=context,
+        output_vocab_size=output_vocab_size,
+        scorer=sockeye.beam_search.CandidateScorer(),
+        num_source_factors=num_source_factors,
+        inference=_TestInference(),
+        beam_search_stop=C.BEAM_SEARCH_STOP_ALL,
+        global_avoid_trie=None,
+        sample=None)
+
+    # inputs
+    batch_size = 1
+    max_length = 5
+    source = mx.nd.array([[1, 2, 3, 4, 5]], ctx=context, dtype=dtype).reshape((0, -1, 1))
+    source_length = mx.nd.array([max_length], ctx=context, dtype=dtype)
+
+    restrict_lexicon = None
+    raw_constraints = [None] * batch_size
+    raw_avoid_list = [None] * batch_size
+    max_output_lengths = mx.nd.array([max_length], ctx=context, dtype='int32')  # TODO
+
+    bs_out = bs(source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths)
+
+    best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
+
+    assert False
+

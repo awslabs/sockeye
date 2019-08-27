@@ -119,14 +119,6 @@ class _EnsembleInference(_Inference):
         return -log_probs.log_softmax()  # pylint: disable=invalid-unary-operand-type
 
 
-class SortByIndex(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that sorts args by the given indices.
-    """
-    def hybrid_forward(self, F, indices, *args):
-        return [F.take(arg, indices) for arg in args]
-
-
 class UpdateScores(mx.gluon.HybridBlock):
     """
     A HybridBlock that updates the scores from the decoder step with accumulated scores.
@@ -257,6 +249,14 @@ class CandidateScorer(mx.gluon.HybridBlock):
         return (scores + bp) * self._lp(lengths)
 
 
+class SortByIndex(mx.gluon.HybridBlock):
+    """
+    A HybridBlock that sorts args by the given indices.
+    """
+    def hybrid_forward(self, F, indices, *args):
+        return [F.take(arg, indices) for arg in args]
+
+
 class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
@@ -295,6 +295,35 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
                                           (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
 
         return finished, scores_accumulated, lengths
+
+
+class SortNormAndUpdateFinished(mx.gluon.HybridBlock):
+
+    def __init__(self,
+                 pad_id: int,
+                 eos_id: int,
+                 scorer: CandidateScorer,
+                 **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._sort_by_index = SortByIndex(prefix='sort_by_index_')
+        self._norm_and_update_finished = NormalizeAndUpdateFinished(prefix='norm_and_update_finished_',
+                                                                    pad_id=pad_id,
+                                                                    eos_id=eos_id,
+                                                                    scorer=scorer)
+
+    def hybrid_forward(self, F, best_hyp_indices, best_word_indices, max_output_lengths,
+                       finished, scores_accumulated, lengths, reference_lengths):
+        finished, lengths, reference_lengths = self._sort_by_index(best_hyp_indices,
+                            finished,
+                            lengths,
+                            reference_lengths)
+        finished, scores_accumulated, lengths = self._norm_and_update_finished(best_word_indices,
+                                                                               max_output_lengths,
+                                                                               finished,
+                                                                               scores_accumulated,
+                                                                               lengths,
+                                                                               reference_lengths)
+        return finished, scores_accumulated, lengths, reference_lengths
 
 
 class TopK(mx.gluon.HybridBlock):
@@ -377,7 +406,6 @@ class SampleK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
 
-
 def _repeat_states(states: List, beam_size) -> List:
     repeated_states = []
     for state in states:
@@ -404,6 +432,7 @@ def _sort_states(states: List, best_hyp_indices: mx.nd.NDArray) -> List:
     return sorted_states
 
 
+# TODO (fhieber): add full fp16 decoding with mxnet > 1.5
 class BeamSearch(mx.gluon.Block):
     """
     Features:
