@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -23,9 +23,9 @@ from typing import Any, Dict, Optional, List
 
 import mxnet as mx
 
+import sockeye.model
 import sockeye.output_handler
 import sockeye.translate
-import sockeye.model
 from . import constants as C
 from . import data_io
 from . import evaluate
@@ -137,10 +137,9 @@ class CheckpointDecoder:
             target_vocab=target_vocab,
             restrict_lexicon=None,
             hybridize=hybridize)
-        
-        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, model=%s, num_sentences=%d)",
-                    max_input_len if max_input_len is not None else -1,
-                    beam_size, model_folder, len(self.target_sentences))
+
+        logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, num_sentences=%d)",
+                    max_input_len if max_input_len is not None else -1, beam_size, len(self.target_sentences))
 
     def decode_and_evaluate(self,
                             output_name: str = os.devnull) -> Dict[str, float]:
@@ -169,18 +168,18 @@ class CheckpointDecoder:
 
         # 2. Evaluate
         return {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations,
-                                                     references=self.target_sentences,
-                                                     offset=0.01),
+                                                 references=self.target_sentences,
+                                                 offset=0.01),
                 C.CHRF: evaluate.raw_corpus_chrf(hypotheses=translations,
-                                                     references=self.target_sentences),
+                                                 references=self.target_sentences),
                 C.ROUGE1: evaluate.raw_corpus_rouge1(hypotheses=translations,
-                                                          references=self.target_sentences),
+                                                     references=self.target_sentences),
                 C.ROUGE2: evaluate.raw_corpus_rouge2(hypotheses=translations,
-                                                          references=self.target_sentences),
+                                                     references=self.target_sentences),
                 C.ROUGEL: evaluate.raw_corpus_rougel(hypotheses=translations,
-                                                          references=self.target_sentences),
+                                                     references=self.target_sentences),
                 C.LENRATIO: evaluate.raw_corpus_length_ratio(hypotheses=translations,
-                                                                 references=self.target_sentences),
+                                                             references=self.target_sentences),
                 C.AVG_TIME: avg_time,
                 C.DECODING_TIME: trans_wall_time}
 

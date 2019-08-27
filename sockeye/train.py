@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -22,7 +22,7 @@ import shutil
 import sys
 import tempfile
 from contextlib import ExitStack
-from typing import cast, Optional, Dict, List, Tuple, Union
+from typing import cast, Callable, Optional, Dict, List, Tuple, Union
 
 import mxnet as mx
 from mxnet import gluon
@@ -160,7 +160,6 @@ def create_checkpoint_decoder(
     :param train_context: The training contexts.
     :param sockeye_model: The Sockeye model instance.
     :param source_vocabs: The source vocabs.
-    :param target_vocabs: The target vocab.
     :param hybridize: Turn hybridization of the Translator on/off (the model is already hybridized or not).
     :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
@@ -172,6 +171,10 @@ def create_checkpoint_decoder(
         sample_size = -1
 
     if sample_size == 0:
+        return None
+
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
+        logger.info("This is a secondary worker, not creating a checkpoint decoder for this training instance")
         return None
 
     if args.decode_and_evaluate_device_id is not None:
@@ -707,7 +710,13 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace) -> training.TrainState:
+def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None) -> training.TrainState:
+    """
+    :param custom_metrics_logger: Optional custom metrics logging function. If supplied, takes care of metrics produced
+                                  during training in a custom way. It should accept a list or a dictionary of
+                                  (metric name, metric value) pairs, and an optional global_step/checkpoint parameter.
+    """
+
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -816,6 +825,7 @@ def train(args: argparse.Namespace) -> training.TrainState:
             max_updates=args.max_updates,
             min_epochs=args.min_num_epochs,
             max_epochs=args.max_num_epochs,
+            max_seconds=args.max_seconds,
             update_interval=args.update_interval,
             stop_training_on_decoder_failure=args.stop_training_on_decoder_failure
         )
@@ -891,7 +901,8 @@ def train(args: argparse.Namespace) -> training.TrainState:
             loss_functions=losses,
             context=context,
             dtype=args.dtype,
-            using_amp=using_amp
+            using_amp=using_amp,
+            custom_metrics_logger=custom_metrics_logger
         )        
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,

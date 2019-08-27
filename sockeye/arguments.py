@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -741,6 +741,11 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of updates. Default: %(default)s.')
+    train_params.add_argument('--max-seconds',
+                              type=int,
+                              default=None,
+                              help='Training will stop on the next checkpoint after reaching the maximum seconds. '
+                                   'Default: %(default)s.')
 
     train_params.add_argument('--max-checkpoints',
                               type=int,

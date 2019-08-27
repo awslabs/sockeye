@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -160,6 +160,7 @@ def test_inference_args(test_params, expected_params):
               max_samples=None,
               min_updates=None,
               max_updates=None,
+              max_seconds=None,
               update_interval=1,
               min_num_epochs=None,
               max_num_epochs=None,
