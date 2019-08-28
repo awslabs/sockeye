@@ -744,3 +744,18 @@ def test_sharded_and_parallel_iter_same_num_batches():
             num_batches_seen += 1
 
         assert num_batches_seen == num_batches
+
+
+def test_create_target_and_shifted_label_sequences():
+    target_and_label = mx.nd.array([[C.BOS_ID, 4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
+                                    [C.BOS_ID, 15, 23, 23, 77, 55, 22, C.EOS_ID],
+                                    [C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]])
+    expected_lengths = mx.nd.array([5, 7, 2])
+
+    target, label = data_io.create_target_and_shifted_label_sequences(target_and_label)
+
+    assert target.shape[0] == label.shape[0] == target_and_label.shape[0]
+    assert target.shape[1] == label.shape[1] == target_and_label.shape[1] - 1
+    lengths = (target != C.PAD_ID).sum(axis=1)
+    assert np.allclose(lengths.asnumpy(), expected_lengths.asnumpy())
+

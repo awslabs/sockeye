@@ -1602,10 +1602,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         dataset = self.data_loader.load(sources_sentences, target_sentences, [num_read])
 
         source = dataset.source[0]
-        target = dataset.target[0][:, :-1]
-        target = mx.nd.where(target == 3, mx.nd.zeros_like(target), target)  # TODO: this is a hack!
-        label = dataset.target[0][:, 1:]
-
+        target, label = create_target_and_shifted_label_sequences(dataset.target[0])
         self.next_batch = create_batch_from_parallel_sample(source, target, label)
         return True
 
@@ -1776,10 +1773,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
 
         batch_size = self.bucket_batch_sizes[i].batch_size
         source = self.data.source[i][j:j + batch_size]
-        target = self.data.target[i][j:j + batch_size, :-1]
-        target = mx.nd.where(target == 3, mx.nd.zeros_like(target), target)  # TODO: this is a hack!
-        label = self.data.target[i][j:j + batch_size, 1:]
-
+        target, label = create_target_and_shifted_label_sequences(self.data.target[i][j:j + batch_size])
         return create_batch_from_parallel_sample(source, target, label)
 
     def save_state(self, fname: str):
@@ -1855,6 +1849,17 @@ class Batch:
         for i, inputs in enumerate(zip(self.source, self.source_length, self.target, self.target_length)):
             # model inputs, labels
             yield inputs, {name: label[i] for name, label in self.labels.items()}
+
+
+def create_target_and_shifted_label_sequences(target_and_label: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
+    """
+    Returns the target and label sequence from a joint array of varying-length sequences including both <bos> and <eos>.
+    Both ndarrays returned have input size of second dimension - 1.
+    """
+    target = target_and_label[:, :-1]  # skip last column (for longest-possible sequence, this already removes <eos>)
+    target = mx.nd.where(target == C.EOS_ID, mx.nd.zeros_like(target), target)  # replace other <eos>'s with <pad>
+    label = target_and_label[:, 1:]  # label skips <bos>
+    return target, label
 
 
 def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArray, label: mx.nd.NDArray) -> Batch:
