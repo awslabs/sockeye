@@ -575,7 +575,7 @@ def prepare_data(source_fnames: List[str],
     data_statistics.log()
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
+                                           eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
     # 3. convert each shard to serialized ndarrays
@@ -756,7 +756,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            permute=permute)
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
+                                           eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
@@ -848,7 +848,7 @@ def get_training_data_iters(sources: List[str],
 
     # Pass 3: Load the data into memory and return the iterator.
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
+                                           eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
     training_data = data_loader.load(sources_sentences, target_sentences,
@@ -917,7 +917,7 @@ def get_scoring_data_iters(sources: List[str],
 
     # ...One loader to raise them,
     data_loader = RawParallelDatasetLoader(buckets=[bucket],
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
+                                           eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID,
                                            skip_blanks=False)
 
@@ -1141,12 +1141,9 @@ class SequenceReader(Iterable):
         self.bos_id = None
         self.eos_id = None
         if vocabulary is not None:
-            assert C.UNK_SYMBOL in vocabulary
-            assert vocabulary[C.PAD_SYMBOL] == C.PAD_ID
-            assert C.BOS_SYMBOL in vocabulary
-            assert C.EOS_SYMBOL in vocabulary
-            self.bos_id = vocabulary[C.BOS_SYMBOL]
-            self.eos_id = vocabulary[C.EOS_SYMBOL]
+            assert vocab.is_valid_vocab(vocabulary)
+            self.bos_id = C.BOS_ID
+            self.eos_id = C.EOS_ID
         else:
             check_condition(not add_bos and not add_eos, "Adding a BOS or EOS symbol requires a vocabulary")
         self.add_bos = add_bos

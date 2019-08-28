@@ -284,8 +284,6 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
                                      self._scorer(scores_accumulated, lengths, reference_lengths),
                                      scores_accumulated)
 
-
-
         # Now, recompute finished. Hypotheses are finished if they are
         # - extended with <pad>, or
         # - extended with <eos>, or
@@ -527,8 +525,6 @@ class BeamSearch(mx.gluon.Block):
                                   "Sampling is not available when working with a restricted lexicon.")
             sample_best_hyp_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32')
 
-
-
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
 
@@ -739,8 +735,8 @@ def get_beam_search(models: List[SockeyeModel],
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
     bs = BeamSearch(
         beam_size=beam_size,
-        bos_id=vocab_target[C.BOS_SYMBOL],
-        eos_id=vocab_target[C.EOS_SYMBOL],
+        bos_id=C.BOS_ID,
+        eos_id=C.EOS_ID,
         context=context,
         output_vocab_size=models[0].output_layer_vocab_size,
         beam_search_stop=beam_search_stop,

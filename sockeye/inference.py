@@ -699,9 +699,9 @@ class Translator:
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.restrict_lexicon = restrict_lexicon
         assert C.PAD_ID == 0, "pad id should be 0"
-        self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
+        self.stop_ids = {C.EOS_ID, C.PAD_ID}  # type: Set[int]
         self.strip_ids = self.stop_ids.copy()  # ids to strip from the output
-        self.unk_id = self.vocab_target[C.UNK_SYMBOL]
+        self.unk_id = C.UNK_ID
         if strip_unknown_words:
             self.strip_ids.add(self.unk_id)
         self.models = models

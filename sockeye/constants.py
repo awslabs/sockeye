@@ -30,6 +30,9 @@ PAD_ID = 0
 PAD_FORMAT = "<pad%d>"
 TOKEN_SEPARATOR = " "
 VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
+UNK_ID = VOCAB_SYMBOLS.index(UNK_SYMBOL)
+BOS_ID = VOCAB_SYMBOLS.index(BOS_SYMBOL)
+EOS_ID = VOCAB_SYMBOLS.index(EOS_SYMBOL)
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
 SPACE_FOR_XOS = 1
 

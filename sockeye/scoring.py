@@ -100,7 +100,7 @@ class Scorer:
         self.model = model
         self.batch_scorer = batch_scorer
         self.context = context
-        self.exclude_list = {source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID}
+        self.exclude_list = {C.BOS_ID, C.EOS_ID, C.PAD_ID}
 
     def score_batch(self, batch: data_io.Batch) -> mx.nd.NDArray:
         batch = batch.split_and_load(ctx=self.context)
