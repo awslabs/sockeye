@@ -243,38 +243,50 @@ def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
 
 class _TestInference(sockeye.beam_search._Inference):
 
+    def __init__(self, output_vocab_size: int, predictor = dict()):
+        self.output_vocab_size = output_vocab_size
+        self.predictor = predictor
+        self.states = []
+
     def encode_and_initialize(self,
                               inputs: mx.nd.NDArray,
                               valid_length: Optional[mx.nd.NDArray] = None):
         batch_size = inputs.shape[0]
-        num_hidden = 32
-        states = [mx.nd.zeros((batch_size, num_hidden))]  # TODO add nested states
-        predicted_output_length = mx.nd.zeros_like(inputs)  # does that work?
-        return states, predicted_output_length
+        # 'lengths'
+        internal_lengths = mx.nd.zeros((batch_size, 1), dtype='int32')
+        self.states = [internal_lengths]  # TODO add nested states
+        predicted_output_length = mx.nd.ones((batch_size, 1))  # does that work?
+        return self.states, predicted_output_length
 
     def decode_step(self,
                     step_input: mx.nd.NDArray,
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         batch_beam_size = step_input.shape[0]
-        print(step_input)
-        print(states)
-        scores = mx.nd.random.uniform(0, 1, (batch_beam_size, 32))
+        print('step_input', step_input.asnumpy())
+
+        outputs = mx.nd.array([self.predictor.get(inp, C.PAD_ID) for inp in step_input.asnumpy().tolist()], ctx=step_input.context)
+        scores = mx.nd.one_hot(outputs, depth=self.output_vocab_size)
+        print('scores', scores.asnumpy())
+
+        #scores = mx.nd.random.uniform(0, 1, (batch_beam_size, self.output_vocab_size))
         states[0] += 1
-        print(scores)
+        self.states = states
         return scores, states
 
 
+# TODO make this a useful test
 # TODO: add vocabulary selection test
-def test_mama():
+def test_beam_search():
     context = mx.cpu()
     dtype='float32'
     num_source_factors = 1
-    output_vocab_size = 32
+    output_vocab_size = 4
     beam_size = 5
     bos_id = 2
     eos_id = 3
 
+    inference = _TestInference(output_vocab_size=output_vocab_size, predictor={2: 3})
     bs = sockeye.beam_search.BeamSearch(
         beam_size=beam_size,
         bos_id=bos_id,
@@ -283,7 +295,7 @@ def test_mama():
         output_vocab_size=output_vocab_size,
         scorer=sockeye.beam_search.CandidateScorer(),
         num_source_factors=num_source_factors,
-        inference=_TestInference(),
+        inference=inference,
         beam_search_stop=C.BEAM_SEARCH_STOP_ALL,
         global_avoid_trie=None,
         sample=None)
@@ -303,5 +315,12 @@ def test_mama():
 
     best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
 
-    assert False
+    #best_ids = np.arange(0, batch_size * beam_size, beam_size, dtype='int32')
+    #sockeye.inference.Translator._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
+
+    print(lengths)
+    print(inference.states[0].asnumpy())
+    #assert np.allclose(lengths, inference.states[0].asnumpy())
+
+    #assert False
 
