@@ -272,7 +272,7 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
                      for given_count in bucket_counts]
     source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0]), 1))) for count, bucket in
               zip(bucket_counts, buckets)]
-    target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[1])))) for count, bucket in
+    target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(2, bucket[1])))) for count, bucket in
               zip(bucket_counts, buckets)]
     return source, target
 
@@ -686,8 +686,7 @@ def test_sharded_parallel_sample_iter_num_batches():
         dataset2.save(shard2_fname)
         shard_fnames = [shard1_fname, shard2_fname]
 
-        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                               'replicate')
+        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
 
         num_batches_seen = 0
         while it.iter_next():
@@ -718,8 +717,7 @@ def test_sharded_and_parallel_iter_same_num_batches():
         dataset.save(shard_fname)
         shard_fnames = [shard_fname]
 
-        it_sharded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                       'replicate')
+        it_sharded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
 
         it_parallel = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
 
