@@ -137,7 +137,7 @@ nvidia-docker run --rm -i -v $(pwd):/work -w /work -e OMP_NUM_THREADS=4 sockeye:
         --seed 1
 ```
 
-This trains a "base" [Transformer](https://arxiv.org/abs/1706.03762) model using the [Adam](https://arxiv.org/abs/1412.6980) optimizer with a batch size 8192 tokens.
+This trains a "base" [Transformer](https://arxiv.org/abs/1706.03762) model using the [Adam](https://arxiv.org/abs/1412.6980) optimizer with a batch size of 8192 tokens.
 The learning rate will automatically reduce when validation perplexity does not improve for 8 checkpoints (4000 batches per checkpoint) and training will conclude when validation perplexity does not improve for 60 checkpoints.
 At each checkpoint, Sockeye runs a separate decoder process to evaluate metrics such as BLEU on a sample of the validation data (500 sentences).
 Note that these scores are calculated on the tokens provided to Sockeye, e.g. in this tutorial BLEU will be calculated on the sub-words we created above.
