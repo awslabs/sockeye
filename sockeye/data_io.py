@@ -187,12 +187,8 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
         if batch_by_words:
             check_condition(padded_seq_len <= batch_size, "Word batch size must cover sequence lengths for all"
                                                           " buckets: (%d > %d)" % (padded_seq_len, batch_size))
-            # The minimum batch step (int) is the least common multiple of the
-            # value that batches must be a multiple of and the number of devices
-            # the batch must be distributed across (ensure correct multiple per
-            # batch per device).
-            min_batch_step = (batch_sentences_multiple_of * batch_num_devices) // math.gcd(batch_sentences_multiple_of,
-                                                                                           batch_num_devices)
+            # Ensure the correct multiple for each batch per device.
+            min_batch_step = batch_sentences_multiple_of * batch_num_devices
             # Multiple of minimum batch step closest to target number of words,
             # assuming each sentence is of average length
             batch_size_seq = min_batch_step * max(1, round((batch_size / average_seq_len) / min_batch_step))
