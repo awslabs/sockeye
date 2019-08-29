@@ -152,10 +152,10 @@ class UpdateScores(mx.gluon.HybridBlock):
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
         lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
 
-        # Items that are at their maximum length now are forced to produce the <eos> symbol.
-        # (They will be recognized as finished later)
-        at_max_length = (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') == max_lengths)
-        scores = F.where(at_max_length, eos_dist + scores, scores)
+        # Items that are at their maximum length and not finished now are forced to produce the <eos> symbol.
+        # That is, we keep scores for hypotheses below max length or finished, and 'force-eos' the rest.
+        below_max_length = (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') < max_lengths)
+        scores = F.where(F.broadcast_logical_or(below_max_length, finished), scores, eos_dist + scores)
 
         return scores, lengths
 
