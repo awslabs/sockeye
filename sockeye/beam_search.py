@@ -13,7 +13,7 @@
 
 import logging
 from abc import abstractmethod, ABC
-from typing import Tuple, Optional, List, Callable, Union
+from typing import Tuple, Optional, List, Union
 
 import mxnet as mx
 import numpy as np

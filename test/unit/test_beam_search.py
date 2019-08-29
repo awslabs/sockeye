@@ -11,16 +11,15 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+from typing import List, Optional
 from typing import Tuple
 
 import mxnet as mx
 import numpy as np
 import pytest
-from unittest.mock import patch, Mock
-from typing import List, Optional
 
-import sockeye.constants as C
 import sockeye.beam_search
+import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 import sockeye.lexical_constraints
