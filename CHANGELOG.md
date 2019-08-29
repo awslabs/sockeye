@@ -17,6 +17,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Update to [MXNet 1.5.0](https://github.com/apache/incubator-mxnet/tree/1.5.0)
 - Moved `SockeyeModel` implementation and all layers to [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html)
 - Removed support for Python 3.4.
+- Removed image captioning module
 - Removed outdated Autopilot module
 - Removed unused training options: Eve, Nadam, RMSProp, Nag, Adagrad, and Adadelta optimizers, `fixed-step` and `fixed-rate-inv-t` learning rate schedulers
 - Updated and renamed learning rate scheduler `fixed-rate-inv-sqrt-t` -> `inv-sqrt-decay`

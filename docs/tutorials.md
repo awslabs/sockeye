@@ -13,3 +13,4 @@ introduce different concepts and parameters used for training and translation.
 1. [Sequence copy task](tutorials/seqcopy.html)
 1. [WMT German to English news translation](tutorials/wmt.html)
 1. [Domain adaptation of NMT models](tutorials/adapt.html)
+1. [Large data: WMT German-English 2018](tutorials/wmt_large.html)
