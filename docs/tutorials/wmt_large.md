@@ -142,20 +142,27 @@ The learning rate will automatically reduce when validation perplexity does not 
 At each checkpoint, Sockeye runs a separate decoder process to evaluate metrics such as BLEU on a sample of the validation data (500 sentences).
 Note that these scores are calculated on the tokens provided to Sockeye, e.g. in this tutorial BLEU will be calculated on the sub-words we created above.
 
-Training a model with these settings on this amount of data takes around TODO hours on 4 NVIDIA Tesla V100-SXM2-16GB GPUs.
+Training this model takes around 100 hours (25 epochs) on 4 NVIDIA Tesla V100-SXM2-16GB GPUs.
+Training perplexity reaches ~4.45 and validation perplexity reaches ~3.05.
 
 ## Evaluation
 
+Now the model is ready to translate data.
+Input should be preprocessed identically to the training data, including sub-word encoding (BPE).
+Run the following to translate the test set that we've already preprocessed:
+
 ```bash
-nvidia-docker run --rm -i -v $(pwd):/work -w /work -e OMP_NUM_THREADS=TODO sockeye:$TAG \
+nvidia-docker run --rm -i -v $(pwd):/work -w /work sockeye:$TAG \
     python -m sockeye.translate \
         -i newstest2017.tc.de.bpe \
         -o newstest2017.tc.hyp.bpe \
         -m model \
         --beam-size 5 \
-        --batch-size 32 \
+        --batch-size 64 \
         --device-ids -1
 ```
+
+To evaluate the translations, reverse the BPE sub-word encoding and run [sacreBLEU](https://github.com/mjpost/sacreBLEU) to compute the BLEU score:
 
 ```bash
 sed -re 's/(@@ |@@$)//g' <newstest2017.tc.hyp.bpe >newstest2017.tc.hyp
@@ -163,3 +170,7 @@ sed -re 's/(@@ |@@$)//g' <newstest2017.tc.hyp.bpe >newstest2017.tc.hyp
 nvidia-docker run --rm -i -v $(pwd):/work -w /work sockeye:$TAG \
     sacrebleu newstest2017.tc.en -tok none -i newstest2017.tc.hyp
 ```
+
+The result should be near 36 BLEU.
+Note that this is tokenized, normalized, and true-cased data.
+If we were actually participating in WMT, the translations would need to be recased and detokenized for human evaluation.
