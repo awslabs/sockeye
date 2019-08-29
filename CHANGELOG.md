@@ -29,6 +29,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
 - Added `linear-decay` learning rate scheduler
 - Added training option `--learning-rate-t-scale` for time-based decay schedulers
+- Added support for MXNet's [Automatic Mixed Precision](https://mxnet.incubator.apache.org/versions/master/tutorials/amp/amp_tutorial.html).  Activate with the `--amp` training flag.  For best results, make sure as many model dimensions are possible are multiples of 8.
+- Added options for making various model dimensions multiples of a given value.  For example, use `--pad-vocab-to-multiple-of 8`, `--bucket-width 8 --no-bucket-scaling`, and `--round-batch-sizes-to-multiple-of 8` with AMP training.
+- Added [GluonNLP](http://gluon-nlp.mxnet.io/)'s BERTAdam optimizer, an implementation of the Adam variant used by Devlin et al. ([2018](https://arxiv.org/pdf/1810.04805.pdf)).  Use `--optimizer bertadam`.
 
 ## [1.18.103]
 ### Added
