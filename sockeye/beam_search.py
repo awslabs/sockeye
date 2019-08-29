@@ -150,11 +150,11 @@ class UpdateScores(mx.gluon.HybridBlock):
 
         # Update lengths of all items, except those that were already finished. This updates
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
-        lengths = lengths + (1 - F.expand_dims(finished, axis=1))
+        lengths = lengths + (1 - finished)
 
         # Items that are at their maximum length and not finished now are forced to produce the <eos> symbol.
         # That is, we keep scores for hypotheses below max length or finished, and 'force-eos' the rest.
-        below_max_length = F.reshape(lengths, shape=(-1,)) < max_lengths
+        below_max_length = lengths < max_lengths
         scores = F.where(F.broadcast_logical_or(below_max_length, finished), scores, eos_dist + scores)
 
         return scores, lengths
@@ -276,7 +276,7 @@ class SortByIndex(mx.gluon.HybridBlock):
         return [F.take(arg, indices) for arg in args]
 
 
-class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
+class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
     """
@@ -291,19 +291,27 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         self.eos_id = eos_id
         self._scorer = scorer
 
-    def hybrid_forward(self, F, best_word_indices,
+    def hybrid_forward(self, F, best_hyp_indices, best_word_indices,
                        finished, scores_accumulated, lengths, reference_lengths):
+
+        # Reorder fixed-size beam data according to best_hyp_indices (ascending)
+        finished = F.take(finished, best_hyp_indices)
+        lengths = F.take(lengths, best_hyp_indices)
+        reference_lengths = F.take(reference_lengths, best_hyp_indices)
+
+        # Normalize hypotheses that JUST finished
         all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
-        # Normalize hypotheses that JUST finished
         scores_accumulated = F.where(newly_finished,
-                                     self._scorer(scores_accumulated, F.cast(lengths, 'float32'), reference_lengths),
+                                     self._scorer(scores_accumulated,
+                                                  F.cast(F.expand_dims(lengths, axis=1), 'float32'),
+                                                  reference_lengths),
                                      scores_accumulated)
 
-        # Now, recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
+        # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
         finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
 
-        return finished, scores_accumulated, lengths
+        return finished, scores_accumulated, lengths, reference_lengths
 
 
 class TopK(mx.gluon.HybridBlock):
@@ -454,7 +462,7 @@ class BeamSearch(mx.gluon.Block):
             self._sort_by_index = SortByIndex(prefix='sort_by_index_')
             self._update_scores = UpdateScores(prefix='update_scores_')
             self._scorer = scorer
-            self._norm_and_update_finished = NormalizeAndUpdateFinished(prefix='norm_and_update_finished_',
+            self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(prefix='sort_norm_and_update_finished_',
                                                                         pad_id=C.PAD_ID,
                                                                         eos_id=eos_id,
                                                                         scorer=scorer)
@@ -531,7 +539,7 @@ class BeamSearch(mx.gluon.Block):
         best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
         best_word_indices_list = []  # type: List[mx.nd.NDArray]
 
-        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='int32')
+        lengths = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
         finished = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
@@ -648,19 +656,15 @@ class BeamSearch(mx.gluon.Block):
             if restrict_lexicon:
                 best_word_indices = vocab_slice_ids.take(best_word_indices)
 
-            # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
-            finished, lengths, estimated_reference_lengths = self._sort_by_index(best_hyp_indices,
-                                                                                 finished,
-                                                                                 lengths,
-                                                                                 estimated_reference_lengths)
-
-            # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
+            # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
-            finished, scores_accumulated, lengths = self._norm_and_update_finished(best_word_indices,
-                                                                                   finished,
-                                                                                   scores_accumulated,
-                                                                                   lengths,
-                                                                                   estimated_reference_lengths)
+            finished, scores_accumulated, lengths, estimated_reference_lengths = self._sort_norm_and_update_finished(
+                best_hyp_indices,
+                best_word_indices,
+                finished,
+                scores_accumulated,
+                lengths,
+                estimated_reference_lengths)
 
             # Collect best hypotheses, best word indices
             best_hyp_indices_list.append(best_hyp_indices)
@@ -669,7 +673,7 @@ class BeamSearch(mx.gluon.Block):
             if self._should_stop(finished, batch_size):
                 break
 
-            # (9) update models' state with winning hypotheses (ascending)
+            # (5) update models' state with winning hypotheses (ascending)
             _sort_states(model_states, best_hyp_indices)
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)

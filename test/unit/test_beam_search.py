@@ -249,9 +249,7 @@ def test_update_scores():
     eos_dist = mx.nd.full((batch_beam_size, vocab_size), val=np.inf, dtype='float32')
     eos_dist[:, C.EOS_ID] = 0
 
-    lengths = mx.nd.array([[0],
-                           [1],
-                           [0]], dtype='int32')
+    lengths = mx.nd.array([0, 1, 0], dtype='int32')
     max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
     scores_accumulated = mx.nd.ones((3, 1), dtype='float32')
     finished = mx.nd.array([0,   # not finished
@@ -355,7 +353,7 @@ def test_beam_search():
     restrict_lexicon = None
     raw_constraints = [None] * batch_size
     raw_avoid_list = [None] * batch_size
-    max_output_lengths = mx.nd.array([max_length], ctx=context, dtype='int32')  # TODO
+    max_output_lengths = mx.nd.array([max_length], ctx=context, dtype='int32')
 
     bs_out = bs(source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths)
     best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
