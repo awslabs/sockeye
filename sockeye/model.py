@@ -156,8 +156,38 @@ class SockeyeModel(mx.gluon.Block):
         source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
         return source_encoded, source_encoded_length
 
-    def decode_step(self, step_input, states, vocab_slice_ids = None):
-        """One step decoding of the translation model.
+    def encode_and_initialize(self, inputs, valid_length=None, constant_length_ratio=0.0):
+        """
+        Encodes the input sequence and initializes decoder states (and predicted output lengths if available).
+        Used for inference/decoding.
+
+        Parameters
+        ----------
+        inputs : NDArray
+        valid_length : NDArray or None, default None
+        constant_length_ratio : float
+
+        Returns
+        -------
+        states : list
+            Initial states for the decoder.
+        predicted_output_length : NDArray
+            Predicted output length of shape (batch_size,), 0 if not available.
+        """
+        # Encode input. Shape: (batch, length, num_hidden), (batch,)
+        source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
+
+        predicted_output_length = self.predict_output_length(source_encoded,
+                                                             source_encoded_lengths,
+                                                             constant_length_ratio)
+        # Decoder init states
+        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
+
+        return states, predicted_output_length
+
+    def decode_step(self, step_input, states, vocab_slice_ids=None):
+        """
+        One step decoding of the translation model.
 
         Parameters
         ----------
@@ -206,12 +236,22 @@ class SockeyeModel(mx.gluon.Block):
         else:
             return {C.LOGITS_NAME: output}
 
-    def predict_length_ratio(self, source_encoded, source_encoded_length):
-        utils.check_condition(self.length_ratio is not None,
-                              "Cannot predict length ratio, model does not seem to be trained with length task.")
-        # predicted_length_ratios: (batch_size,)
-        predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
-        return predicted_length_ratio
+    def predict_output_length(self,
+                              source_encoded: mx.nd.NDArray,
+                              source_encoded_length: mx.nd.NDArray,
+                              constant_length_ratio: float = 0.0):
+        if self.length_ratio is not None:
+            # predicted_length_ratios: (batch_size,)
+            predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
+            predicted_output_length = predicted_length_ratio * source_encoded_length
+        elif constant_length_ratio > 0.0:
+            # (batch,)
+            predicted_output_length = source_encoded_length * constant_length_ratio
+        else:
+            # (batch,)
+            predicted_output_length = mx.nd.zeros_like(source_encoded_length)
+
+        return predicted_output_length
 
     def save_config(self, folder: str):
         """
@@ -340,24 +380,24 @@ class SockeyeModel(mx.gluon.Block):
         return self.config.config_data.num_source_factors
 
     @property
-    def training_max_seq_len_source(self) -> int:
-        """ The maximum sequence length on the source side during training. """
+    def training_max_observed_len_source(self) -> int:
+        """ The maximum sequence length on the source side observed during training. This includes the <eos> token. """
         return self.config.config_data.data_statistics.max_observed_len_source
 
     @property
-    def training_max_seq_len_target(self) -> int:
-        """ The maximum sequence length on the target side during training. """
+    def training_max_observed_len_target(self) -> int:
+        """ The maximum sequence length on the target side observed during training. This includes the <bos> token. """
         return self.config.config_data.data_statistics.max_observed_len_target
 
     @property
-    def max_supported_seq_len_source(self) -> Optional[int]:
-        """ If not None this is the maximally supported source length during inference (hard constraint). """
-        return self.training_max_seq_len_source
+    def max_supported_len_source(self) -> int:
+        """ The maximum supported source length. This includes the <eos> token. """
+        return self.config.config_data.max_seq_len_source
 
     @property
-    def max_supported_seq_len_target(self) -> Optional[int]:
-        """ If not None this is the maximally supported target length during inference (hard constraint). """
-        return self.training_max_seq_len_target
+    def max_supported_len_target(self) -> int:
+        """ The maximum supported target length. This includes the <bos> token. """
+        return self.config.config_data.max_seq_len_target
 
     @property
     def length_ratio_mean(self) -> float:
@@ -366,6 +406,10 @@ class SockeyeModel(mx.gluon.Block):
     @property
     def length_ratio_std(self) -> float:
         return self.config.config_data.data_statistics.length_ratio_std
+
+    @property
+    def output_layer_vocab_size(self) -> int:
+        return self.output_layer.vocab_size
 
 
 def load_model(model_folder: str,

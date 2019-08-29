@@ -18,9 +18,8 @@ import copy
 import itertools
 import json
 import logging
-from collections import defaultdict
 from functools import partial
-from typing import Callable, cast, Dict, Generator, List, NamedTuple, Optional, Tuple, Union, Set, Any
+from typing import Any, Callable, Dict, Generator, List, Optional, NamedTuple, Set, Tuple, Union
 
 import mxnet as mx
 import numpy as np
@@ -31,6 +30,7 @@ from . import lexical_constraints as constrained
 from . import lexicon
 from . import utils
 from . import vocab
+from .beam_search import get_beam_search, CandidateScorer
 from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
@@ -49,16 +49,14 @@ def models_max_input_output_length(models: List[SockeyeModel],
     :param models: List of models.
     :param num_stds: Number of standard deviations to add as a safety margin. If -1, returned maximum output lengths
                      will always be 2 * input_length.
-    :param forced_max_input_length: An optional overwrite of the maximum input length.
-    :param forced_max_output_length: An optional overwrite of the maximum output length.
+    :param forced_max_input_length: An optional overwrite of the maximum input length. Does not include eos.
+    :param forced_max_output_length: An optional overwrite of the maximum output length. Does not include bos.
     :return: The maximum input length and a function to get the output length given the input length.
     """
     max_mean = max(model.length_ratio_mean for model in models)
     max_std = max(model.length_ratio_std for model in models)
-
-    supported_max_seq_len_source = min((model.max_supported_seq_len_source for model in models))
-    supported_max_seq_len_target = min((model.max_supported_seq_len_target for model in models))
-
+    supported_max_seq_len_source = min((model.max_supported_len_source for model in models))
+    supported_max_seq_len_target = min((model.max_supported_len_target for model in models))
     return get_max_input_output_length(supported_max_seq_len_source,
                                        supported_max_seq_len_target,
                                        length_ratio_mean=max_mean,
@@ -79,51 +77,46 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
     Returns a function to compute maximum output length given a fixed number of standard deviations as a
     safety margin, and the current input length. It takes into account optional maximum source and target lengths.
 
-    :param supported_max_seq_len_source: The maximum source length supported by the models.
-    :param supported_max_seq_len_target: The maximum target length supported by the models.
-    :param length_ratio_mean: The mean of the length ratio that was calculated on the raw sequences with special
-           symbols such as EOS or BOS.
+    :param supported_max_seq_len_source: The maximum source length supported by the models (includes eos).
+    :param supported_max_seq_len_target: The maximum target length supported by the models (includes bos).
+    :param length_ratio_mean: Length ratio mean computed on the training data (including bos/eos).
     :param length_ratio_std: The standard deviation of the length ratio.
     :param num_stds: The number of standard deviations the target length may exceed the mean target length (as long as
            the supported maximum length allows for this).
-    :param forced_max_input_len: An optional overwrite of the maximum input length.
-    :param forced_max_output_len: An optional overwrite of the maximum output length.
+    :param forced_max_input_len: An optional overwrite of the maximum input length. Does not include eos.
+    :param forced_max_output_len: An optional overwrite of the maximum output length. Does not include bos.
     :return: The maximum input length and a function to get the output length given the input length.
     """
-    space_for_bos = 1
-    space_for_eos = 1
 
     if num_stds < 0:
         factor = C.TARGET_MAX_LENGTH_FACTOR  # type: float
     else:
         factor = length_ratio_mean + (length_ratio_std * num_stds)
 
-    max_output_len = supported_max_seq_len_target - space_for_bos - space_for_eos
-    if np.ceil(factor * supported_max_seq_len_source) > max_output_len:
-        max_input_len = int(np.floor(max_output_len / factor))
+    if np.ceil(factor * supported_max_seq_len_source) > supported_max_seq_len_target:
+        # if heuristically-computed max output length exceeds the supported output length, lower max input length.
+        max_input_len = int(np.floor(supported_max_seq_len_target / factor))
     else:
         max_input_len = supported_max_seq_len_source
 
     if forced_max_input_len is not None:
-        max_input_len = min(max_input_len, forced_max_input_len)
+        max_input_len = min(max_input_len, forced_max_input_len + C.SPACE_FOR_XOS)
 
     def get_max_output_length(input_length: int):
         """
-        Returns the maximum output length for inference given the input length.
-        Explicitly includes space for BOS and EOS sentence symbols in the target sequence, because we assume
-        that the mean length ratio computed on the training data do not include these special symbols.
-        (see data_io.analyze_sequence_lengths)
+        Returns the maximum output length (including bos/eos) for inference given an input length that includes <eos>.
         """
         if forced_max_output_len is not None:
-            return forced_max_output_len
+            return forced_max_output_len + C.SPACE_FOR_XOS
         else:
-            return int(np.ceil(factor * input_length)) + space_for_bos + space_for_eos
+            return int(np.ceil(factor * input_length))
 
     return max_input_len, get_max_output_length
 
 
 BeamHistory = Dict[str, List]
 Tokens = List[str]
+TokenIds = List[int]
 SentenceId = Union[int, str]
 
 
@@ -467,9 +460,6 @@ class TranslatorOutput:
         return _d
 
 
-TokenIds = List[int]
-
-
 class NBestTranslations:
     __slots__ = ('target_ids_list',
                  'scores')
@@ -541,114 +531,15 @@ Translation of a chunk of a sentence.
 """
 
 
-class ModelState:
-    """
-    A ModelState encapsulates information about the decoder states of an InferenceModel.
-    """
-
-    def __init__(self, states: List[mx.nd.NDArray]) -> None:
-        self.states = states
-
-    def sort_state(self, best_hyp_indices: mx.nd.NDArray):
-        """
-        Sorts states according to k-best order from last step in beam search.
-        """
-        self.states = [mx.nd.take(ds, best_hyp_indices) for ds in self.states]
-
-
-class LengthPenalty(mx.gluon.HybridBlock):
-    """
-    Calculates the length penalty as:
-    (beta + len(Y))**alpha / (beta + 1)**alpha
-
-    See Wu et al. 2016 (note that in the paper beta has a different meaning,
-    and a fixed value 5 was used for this parameter)
-
-    :param alpha: The alpha factor for the length penalty (see above).
-    :param beta: The beta factor for the length penalty (see above).
-    """
-
-    def __init__(self, alpha: float = 1.0, beta: float = 0.0, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.alpha = alpha
-        self.beta = beta
-        self.denominator = (self.beta + 1.) ** self.alpha
-
-    def hybrid_forward(self, F, lengths):
-        if self.alpha == 0.0:
-            if F is None:
-                return 1.0
-            else:
-                return F.ones_like(lengths)
-        else:
-            numerator = self.beta + lengths if self.beta != 0.0 else lengths
-            numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
-            return numerator / self.denominator
-
-    def get(self, lengths: Union[mx.nd.NDArray, int, float]) -> Union[mx.nd.NDArray, float]:
-        """
-        Calculate the length penalty for the given vector of lengths.
-
-        :param lengths: A scalar or a matrix of sentence lengths of dimensionality (batch_size, 1).
-        :return: The length penalty. A scalar or a matrix (batch_size, 1) depending on the input.
-        """
-        return self.hybrid_forward(None, lengths)
-
-
-class BrevityPenalty(mx.gluon.HybridBlock):
-    """
-    Calculates the logarithmic brevity penalty as:
-      weight * log min(1, exp(1 - ref_len / hyp_len)) = weight * min(0, 1 - ref_len / hyp_len).
-
-    :param weight: Linear weight.
-    """
-
-    def __init__(self, weight: float = 0.0, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.weight = weight
-
-    def hybrid_forward(self, F, hyp_lengths, reference_lengths):
-        if self.weight == 0.0:
-            if F is None:
-                return 0.0
-            else:
-                # subtract to avoid MxNet's warning of not using both arguments
-                # this branch should not and is not used during inference
-                return F.zeros_like(hyp_lengths - reference_lengths)
-        else:
-            # log_bp is always <= 0.0
-            if F is None:
-                log_bp = min(0.0, 1.0 - reference_lengths / hyp_lengths)
-            else:
-                log_bp = F.minimum(F.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
-            return self.weight * log_bp
-
-    def get(self,
-            hyp_lengths: Union[mx.nd.NDArray, int, float],
-            reference_lengths: Optional[Union[mx.nd.NDArray, int, float]]) -> Union[mx.nd.NDArray, float]:
-        """
-        Calculate the length penalty for the given vector of lengths.
-
-        :param hyp_lengths: Hypotheses lengths.
-        :param reference_lengths: Reference lengths.
-        :return: The length penalty. A scalar or a matrix (batch_size, 1) depending on the input.
-        """
-        if reference_lengths is None:
-            return 0.0
-        else:
-            return self.hybrid_forward(None, hyp_lengths, reference_lengths)
-
-
-def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[int],
-                               length_penalty: LengthPenalty,
-                               brevity_penalty: Optional[BrevityPenalty] = None) -> Translation:
+def _concat_nbest_translations(translations: List[Translation],
+                               stop_ids: Set[int],
+                               scorer: CandidateScorer) -> Translation:
     """
     Combines nbest translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol), score and length.
     :param stop_ids: The EOS symbols.
-    :param length_penalty: LengthPenalty.
-    :param brevity_penalty: Optional BrevityPenalty.
+    :param scorer: Candidate scorer for recomputing score of concatenated translations.
     :return: A concatenation of the translations with a score.
     """
     expanded_translations = (_expand_nbest_translation(translation) for translation in translations)
@@ -658,8 +549,7 @@ def _concat_nbest_translations(translations: List[Translation], stop_ids: Set[in
     for translations_to_concat in zip(*expanded_translations):
         concatenated_translations.append(_concat_translations(translations=list(translations_to_concat),
                                                               stop_ids=stop_ids,
-                                                              length_penalty=length_penalty,
-                                                              brevity_penalty=brevity_penalty))
+                                                              scorer=scorer))
 
     return _reduce_nbest_translations(concatenated_translations)
 
@@ -704,17 +594,18 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
 
 def _concat_translations(translations: List[Translation],
                          stop_ids: Set[int],
-                         length_penalty: LengthPenalty,
-                         brevity_penalty: Optional[BrevityPenalty] = None) -> Translation:
+                         scorer: CandidateScorer) -> Translation:
     """
     Combines translations through concatenation.
 
     :param translations: A list of translations (sequence starting with BOS symbol), score and length.
     :param stop_ids: The EOS symbols.
-    :param length_penalty: Instance of the LengthPenalty class initialized with alpha and beta.
-    :param brevity_penalty: Optional Instance of the BrevityPenalty class initialized with a brevity weight.
+    :param scorer: Candidate scorer for recomputing score of concatenated translations.
     :return: A concatenation of the translations with a score.
     """
+    if len(translations) == 1:
+        return translations[0]
+
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
     beam_histories = []  # type: List[BeamHistory]
@@ -735,14 +626,9 @@ def _concat_translations(translations: List[Translation],
             else:
                 estimated_reference_length += translation.estimated_reference_length
 
-    def _brevity_penalty(hypothesis_length, reference_length):
-        return 0.0 if brevity_penalty is None else brevity_penalty.get(hypothesis_length, reference_length)
-
     # Unnormalize + sum and renormalize the score:
-    score = sum((translation.score + _brevity_penalty(len(translation.target_ids), translation.estimated_reference_length)) \
-                    * length_penalty.get(len(translation.target_ids))
-                 for translation in translations)
-    score = score / length_penalty.get(len(target_ids)) - _brevity_penalty(len(target_ids), estimated_reference_length)
+    raw_score = sum(scorer.unnormalize(t.score, len(t.target_ids), t.estimated_reference_length) for t in translations)
+    score = scorer(raw_score, len(target_ids), estimated_reference_length)
     return Translation(target_ids, score, beam_histories,
                        estimated_reference_length=estimated_reference_length)
 
@@ -755,8 +641,7 @@ class Translator:
 
     :param context: MXNet context to bind modules to.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
-    :param length_penalty: Length penalty instance.
-    :param beam_prune: Beam pruning difference threshold.
+    :param scorer: Hypothesis/Candidate scoring instance
     :param beam_search_stop: The stopping criterion.
     :param models: List of models.
     :param source_vocabs: Source vocabularies.
@@ -765,23 +650,28 @@ class Translator:
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary selection. Can be a dict of
                              of named lexicons.
     :param avoid_list: Global list of phrases to exclude from the output.
-    :param store_beam: If True, store the beam search history and return it in the TranslatorOutput.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
-    :param skip_topk: If True, uses argmax instead of topk for greedy decoding.
     :param sample: If True, sample from softmax multinomial instead of using topk.
     :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
            log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
            and a single model.
     :param constant_length_ratio: If > 0, will override models' prediction of the length ratio (if any).
-    :param brevity_penalty: Optional BrevityPenalty.
+    :param hybridize: Whether to hybridize inference code.
+    :param max_output_length_num_stds: Number of standard deviations to add as a safety margin when computing the
+           maximum output length. If -1, returned maximum output lengths will always be 2 * input_length.
+    :param max_input_length: Maximum input length this Translator should allow. If None, value will be taken from the
+           model(s). Inputs larger than this value will be chunked and translated in sequence.
+           If model(s) do not support given input length it will fall back to what the model(s) support.
+    :param max_output_length: Maximum output length this Translator is allowed to decode. If None, value will be taken
+           from the model(s). Decodings that do not finish within this limit, will be force-stopped.
+           If model(s) do not support given input length it will fall back to what the model(s) support.
     """
 
     def __init__(self,
                  context: mx.context.Context,
                  ensemble_mode: str,
-                 length_penalty: LengthPenalty,
+                 scorer: CandidateScorer,
                  batch_size: int,
-                 beam_prune: float,
                  beam_search_stop: str,
                  models: List[SockeyeModel],
                  source_vocabs: List[vocab.Vocab],
@@ -790,142 +680,74 @@ class Translator:
                  nbest_size: int = 1,
                  restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
                  avoid_list: Optional[str] = None,
-                 store_beam: bool = False,
                  strip_unknown_words: bool = False,
-                 skip_topk: bool = False,
                  sample: int = None,
                  output_scores: bool = False,
                  constant_length_ratio: float = 0.0,
-                 brevity_penalty: Optional[BrevityPenalty] = None,
                  hybridize: bool = True,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None) -> None:
         self.context = context
         self.dtype = models[0].dtype
-        self.length_penalty = length_penalty
-        self.brevity_penalty = brevity_penalty
-        self.constant_length_ratio = constant_length_ratio
+        self._scorer = scorer
         self.batch_size = batch_size
         self.beam_size = beam_size
-        self.beam_prune = beam_prune
         self.beam_search_stop = beam_search_stop
         self.source_vocabs = source_vocabs
         self.vocab_target = target_vocab
         self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
         self.restrict_lexicon = restrict_lexicon
-        self.store_beam = store_beam
-        self.start_id = self.vocab_target[C.BOS_SYMBOL]
         assert C.PAD_ID == 0, "pad id should be 0"
-        self.stop_ids = {self.vocab_target[C.EOS_SYMBOL], C.PAD_ID}  # type: Set[int]
+        self.stop_ids = {C.EOS_ID, C.PAD_ID}  # type: Set[int]
         self.strip_ids = self.stop_ids.copy()  # ids to strip from the output
-        self.unk_id = self.vocab_target[C.UNK_SYMBOL]
+        self.unk_id = C.UNK_ID
         if strip_unknown_words:
             self.strip_ids.add(self.unk_id)
         self.models = models
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         # set a common max_output length for all models.
-        self._max_input_length, self.get_max_output_length = models_max_input_output_length(
+        self._max_input_length, self._get_max_output_length = models_max_input_output_length(
             models,
             max_output_length_num_stds,
             forced_max_input_length=max_input_length,
             forced_max_output_length=max_output_length)
 
-        self.interpolation_func = self._get_interpolation_func(ensemble_mode)
         self.nbest_size = nbest_size
         utils.check_condition(self.beam_size >= nbest_size, 'nbest_size must be smaller or equal to beam_size.')
         if self.nbest_size > 1:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
 
-        self.skip_softmax = False
-        if len(self.models) == 1 and self.beam_size == 1 and not output_scores and not sample:
-            self.skip_softmax = True
-            logger.info("Enabled skipping softmax for a single model and greedy decoding.")
-
-        self.skip_topk = skip_topk
-        if self.skip_topk:
-            utils.check_condition(self.beam_size == 1, "skip_topk has no effect if beam size is larger than 1")
-            utils.check_condition(len(self.models) == 1, "skip_topk has no effect for decoding with more than 1 model")
-
-        self.sample = sample
-        utils.check_condition(not self.sample or self.restrict_lexicon is None,
-                              "Sampling is not available when working with a restricted lexicon.")
-
-        self._update_scores = UpdateScores()
-        self._update_scores.initialize(ctx=self.context)
-        if hybridize:
-            self._update_scores.hybridize(static_alloc=True, static_shape=True)
-
-        # Vocabulary selection leads to different vocabulary sizes across requests. Hence, we cannot use a
-        # statically-shaped HybridBlock for the topk operation in this case; resorting to imperative topk
-        # function in this case.
-        if not self.restrict_lexicon:
-            if self.skip_topk:
-                self._top = Top1()  # type: mx.gluon.HybridBlock
-            elif self.sample is not None:
-                self._top = SampleK(k=self.beam_size,
-                                    n=self.sample,
-                                    max_batch_size=self.max_batch_size)  # type: mx.gluon.HybridBlock
-            else:
-                self._top = TopK(k=self.beam_size,
-                                 vocab_size=len(self.vocab_target))  # type: mx.gluon.HybridBlock
-
-            self._top.initialize(ctx=self.context)
-            if hybridize:
-                self._top.hybridize(static_alloc=True, static_shape=True)
-        else:
-            if self.skip_topk:
-                self._top = utils.top1  # type: Callable
-            else:
-                self._top = partial(utils.topk, k=self.beam_size)  # type: Callable
-
-        self._sort_by_index = SortByIndex()
-        self._sort_by_index.initialize(ctx=self.context)
-        if hybridize:
-            self._sort_by_index.hybridize(static_alloc=True, static_shape=True)
-
-        brevity_penalty_weight = self.brevity_penalty.weight if self.brevity_penalty is not None else 0.0
-        self._update_finished = NormalizeAndUpdateFinished(pad_id=C.PAD_ID,
-                                                           eos_id=self.vocab_target[C.EOS_SYMBOL],
-                                                           length_penalty_alpha=self.length_penalty.alpha,
-                                                           length_penalty_beta=self.length_penalty.beta,
-                                                           brevity_penalty_weight=brevity_penalty_weight)
-        self._update_finished.initialize(ctx=self.context)
-        if hybridize:
-            self._update_finished.hybridize(static_alloc=True, static_shape=True)
-
-        self._prune_hyps = PruneHypotheses(threshold=self.beam_prune, beam_size=self.beam_size)
-        self._prune_hyps.initialize(ctx=self.context)
-        if hybridize:
-            self._prune_hyps.hybridize(static_alloc=True, static_shape=True)
-
-        self.global_avoid_trie = None
-        if avoid_list is not None:
-            self.global_avoid_trie = constrained.AvoidTrie()
-            for phrase in data_io.read_content(avoid_list):
-                phrase_ids = data_io.tokens2ids(phrase, self.vocab_target)
-                if self.unk_id in phrase_ids:
-                    logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.",
-                                   ' '.join(phrase), C.UNK_SYMBOL)
-                self.global_avoid_trie.add_phrase(phrase_ids)
+        self._beam_search = get_beam_search(
+            models=self.models,
+            beam_size=self.beam_size,
+            context=self.context,
+            vocab_target=target_vocab,
+            output_scores=output_scores,
+            sample=sample,
+            ensemble_mode=ensemble_mode,
+            beam_search_stop=beam_search_stop,
+            scorer=self._scorer,
+            constant_length_ratio=constant_length_ratio,
+            avoid_list=avoid_list,
+            hybridize=hybridize)
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,
-                                            length_penalty=self.length_penalty,
-                                            brevity_penalty=self.brevity_penalty)  # type: Callable
+                                            scorer=self._scorer)  # type: Callable
 
-        logger.info("Translator (%d model(s) beam_size=%d beam_prune=%s beam_search_stop=%s "
+        logger.info("Translator (%d model(s) beam_size=%d beam_search_stop=%s max_input_length=%s "
                     "nbest_size=%s ensemble_mode=%s max_batch_size=%d avoiding=%d dtype=%s)",
                     len(self.models),
                     self.beam_size,
-                    'off' if not self.beam_prune else "%.2f" % self.beam_prune,
                     self.beam_search_stop,
+                    self.max_input_length,
                     self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.max_batch_size,
-                    0 if self.global_avoid_trie is None else len(self.global_avoid_trie),
+                    0 if self._beam_search.global_avoid_trie is None else len(self._beam_search.global_avoid_trie),
                     self.dtype)
 
     @property
@@ -945,29 +767,6 @@ class Translator:
     @property
     def num_source_factors(self) -> int:
         return self.models[0].num_source_factors
-
-    @staticmethod
-    def _get_interpolation_func(ensemble_mode):
-        if ensemble_mode == 'linear':
-            return Translator._linear_interpolation
-        elif ensemble_mode == 'log_linear':
-            return Translator._log_linear_interpolation
-        else:
-            raise ValueError("unknown interpolation type")
-
-    @staticmethod
-    def _linear_interpolation(predictions):
-        # pylint: disable=invalid-unary-operand-type
-        return -mx.nd.log(utils.average_arrays(predictions))
-
-    @staticmethod
-    def _log_linear_interpolation(predictions):
-        """
-        Returns averaged and re-normalized log probabilities
-        """
-        log_probs = utils.average_arrays([p.log() for p in predictions])
-        # pylint: disable=invalid-unary-operand-type
-        return -log_probs.log_softmax()
 
     def translate(self, trans_inputs: List[TranslatorInput], fill_up_batches: bool = True) -> List[TranslatorOutput]:
         """
@@ -1104,9 +903,8 @@ class Translator:
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
-            num_tokens = len(trans_input)
-            # NOTE: no longer using bucket for max output length as in Sockeye 1.0
-            max_output_lengths.append(self.get_max_output_length(num_tokens))
+            num_tokens = len(trans_input)  # includes eos
+            max_output_lengths.append(self._get_max_output_length(num_tokens))
             source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
@@ -1219,353 +1017,13 @@ class Translator:
                                                            raw_avoid_list,
                                                            max_output_lengths))
 
-    def _encode(self, sources: mx.nd.NDArray, source_length: mx.nd.NDArray) -> Tuple[List[ModelState], mx.nd.NDArray]:
-        """
-        Returns a ModelState for each model representing the state of the model after encoding the source.
-
-        :param sources: Source ids. Shape: (batch_size, max_length, num_factors).
-        :param source_length: Valid lengths for each input. Shape: (batch_size,)
-        :return: List of ModelStates and the estimated reference length based on ratios averaged over models.
-        """
-        model_states = []  # type: List[ModelState]
-        predicted_output_lengths = []  # type: List[mx.nd.NDArray]
-        for model in self.models:  # type: SockeyeModel
-            # Encode input. Shape: (batch, length, num_hidden), (batch,)
-            source_encoded, source_encoded_lengths = model.encode(sources, valid_length=source_length)
-
-            # Length task prediction
-            if model.length_ratio is not None:
-                # (batch,)
-                predicted_length_ratio = model.predict_length_ratio(source_encoded, source_encoded_lengths)
-                predicted_output_length = predicted_length_ratio * source_encoded_lengths
-            elif self.constant_length_ratio > 0.0:
-                # (batch,)
-                predicted_output_length = source_encoded_lengths * self.constant_length_ratio
-            else:
-                # (batch,)
-                predicted_output_length = mx.nd.zeros_like(source_encoded_lengths)
-            predicted_output_lengths.append(predicted_output_length)
-
-            # Decoder init states
-            decoder_init_states = model.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
-            # replicate encoder/init module results beam size times. Shape: (batch*beam, ...)
-            decoder_init_states = [s.repeat(repeats=self.beam_size, axis=0) for s in decoder_init_states]
-            model_state = ModelState(decoder_init_states)
-            model_states.append(model_state)
-
-        # (batch,)
-        # average the ratios over the models
-        predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=0), axis=0)
-        # (batch, 1)
-        predicted_output_lengths = mx.nd.expand_dims(predicted_output_lengths, axis=1)
-        # (batch*beam, 1)
-        predicted_output_lengths = mx.nd.repeat(predicted_output_lengths, repeats=self.beam_size, axis=0)
-
-        return model_states, cast(mx.nd.NDArray, predicted_output_lengths).astype('float32', copy=False)
-
-    def _decode_step(self, prev_word: mx.nd.NDArray,
-                     states: List[ModelState],
-                     vocab_slice_ids: Optional[mx.nd.NDArray]) -> Tuple[mx.nd.NDArray, List[ModelState]]:
-        """
-        Returns decoder predictions (combined from all models) and updated states.
-
-        :param prev_word: Previous words of hypotheses. Shape: (batch_size * beam_size,).
-        :param states: List of model states.
-        :param vocab_slice_ids: Optional vocab slice ids for vocabulary selection.
-        :return: (scores, list of model states)
-        """
-        model_outs, model_states = [], []
-        for model, state in zip(self.models, states):
-            logits, state.states, _ = model.decode_step(prev_word, state.states, vocab_slice_ids)
-            logits = logits.astype('float32', copy=False)
-            model_out = logits if self.skip_softmax else logits.softmax(axis=-1)
-            model_outs.append(model_out)
-            model_states.append(state)
-        scores = self._combine_predictions(model_outs)
-        return scores, model_states
-
-    def _combine_predictions(self, model_outputs: List[mx.nd.NDArray]) -> mx.nd.NDArray:
-        """
-        Returns combined predictions of models.
-        If model_outputs are probabilities, they are converted to negative log probabilities before combination.
-        If model_outputs are logits (and no ensembling is used),
-        no combination is applied and logits are converted to negative logits.
-
-        :param model_outputs: List of Shape(beam_size, target_vocab_size).
-        :return: Combined scores.
-        """
-        # combine model predictions and convert to neg log probs
-        if len(self.models) == 1:
-            scores = -model_outputs[0] if self.skip_softmax else -mx.nd.log(model_outputs[0])  # pylint: disable=invalid-unary-operand-type
-        else:
-            scores = self.interpolation_func(model_outputs)
-        return scores
-
-    def _beam_search(self,
-                     source: mx.nd.NDArray,
-                     source_length: mx.nd.NDArray,
-                     restrict_lexicon: Optional[lexicon.TopKLexicon],
-                     raw_constraint_list: List[Optional[constrained.RawConstraintList]],
-                     raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                     max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
-                                                                 np.ndarray,
-                                                                 np.ndarray,
-                                                                 np.ndarray,
-                                                                 List[Optional[np.ndarray]],
-                                                                 List[Optional[constrained.ConstrainedHypothesis]],
-                                                                 Optional[List[BeamHistory]]]:
-        """
-        Translates multiple sentences using beam search.
-
-        :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
-        :param source_length: Valid source lengths. Shape: (batch_size,).
-        :param restrict_lexicon: Lexicon to use for vocabulary restriction.
-        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
-               that must appear in each output.
-        :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
-               that must NOT appear in each output.
-        :return List of best hypotheses indices, list of best word indices,
-                array of accumulated length-normalized negative log-probs, hypotheses lengths,
-                predicted lengths of references (if any), constraints (if any), beam histories (if any).
-        """
-        batch_size = source.shape[0]
-        logger.debug("_beam_search batch size: %d", batch_size)
-
-        # Maximum output length
-        max_output_length = self.get_max_output_length(source.shape[1])
-
-        # General data structure: batch_size * beam_size blocks in total;
-        # a full beam for each sentence, folloed by the next beam-block for the next sentence and so on
-
-        best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.start_id, ctx=self.context,
-                                       dtype='int32')
-
-        # offset for hypothesis indices in batch decoding
-        offset = mx.nd.repeat(mx.nd.arange(0, batch_size * self.beam_size, self.beam_size,
-                                           dtype='int32', ctx=self.context), self.beam_size)
-
-        # locations of each batch item when first dimension is (batch * beam)
-        batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
-        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype='float32')
-        first_step_mask[batch_indices] = 1.0
-        pad_dist = mx.nd.full((batch_size * self.beam_size, len(self.vocab_target) - 1), val=np.inf,
-                              ctx=self.context, dtype='float32')
-
-        # Best word and hypotheses indices across beam search steps from topk operation.
-        best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
-        best_word_indices_list = []  # type: List[mx.nd.NDArray]
-
-        # Beam history
-        beam_histories = None  # type: Optional[List[BeamHistory]]
-        if self.store_beam:
-            beam_histories = [defaultdict(list) for _ in range(batch_size)]
-
-        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='float32')
-        finished = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
-
-        # Extending max_output_lengths to shape (batch_size * beam_size,)
-        max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
-
-        # scores_accumulated: chosen smallest scores in scores (ascending).
-        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='float32')
-
-        # If using a top-k lexicon, select param rows for logit computation that correspond to the
-        # target vocab for this sentence.
-        vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
-        if restrict_lexicon:
-            source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            # TODO: See note in method about migrating to pure MXNet when set operations are supported.
-            #       We currently convert source to NumPy and target ids back to NDArray.
-            vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
-            if any(raw_constraint_list):
-                # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
-                constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
-                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)
-                full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
-                raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
-                                       raw_constraint_list]
-
-            vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
-
-            if vocab_slice_ids.shape[0] < self.beam_size + 1:
-                # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
-                # smaller than the beam size.
-                logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
-                               vocab_slice_ids.shape[0], self.beam_size)
-                n = self.beam_size - vocab_slice_ids.shape[0] + 1
-                vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
-                                               mx.nd.full((n,), val=self.vocab_target[C.EOS_SYMBOL],
-                                                          ctx=self.context, dtype='int32'),
-                                               dim=0)
-
-            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
-                                  val=np.inf, ctx=self.context)
-
-        # (0) encode source sentence, returns a list
-        model_states, estimated_reference_lengths = self._encode(source, source_length)
-
-        # Initialize the beam to track constraint sets, where target-side lexical constraints are present
-        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.start_id,
-                                             self.vocab_target[C.EOS_SYMBOL])
-
-        if self.global_avoid_trie or any(raw_avoid_list):
-            avoid_states = constrained.AvoidBatch(batch_size, self.beam_size,
-                                                  avoid_list=raw_avoid_list,
-                                                  global_avoid_trie=self.global_avoid_trie)
-            avoid_states.consume(best_word_indices)
-
-        # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
-        # item on the beam for each sentence
-        inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
-        t = 1
-        for t in range(1, max_output_length):
-            # (1) obtain next predictions and advance models' state
-            # target_dists: (batch_size * beam_size, target_vocab_size)
-            target_dists, model_states = self._decode_step(prev_word=best_word_indices,
-                                                           states=model_states,
-                                                           vocab_slice_ids=vocab_slice_ids)
-
-            # (2) Produces the accumulated cost of target words in each row.
-            # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
-            # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores = self._update_scores.forward(target_dists, finished, inactive, scores_accumulated, pad_dist)
-
-            # Mark entries that should be blocked as having a score of np.inf
-            if self.global_avoid_trie or any(raw_avoid_list):
-                block_indices = avoid_states.avoid()
-                if len(block_indices) > 0:
-                    scores[block_indices] = np.inf
-                    if self.sample is not None:
-                        target_dists[block_indices] = np.inf
-
-            # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
-            # far as the active beam size for each sentence.
-
-            if self.sample is not None:
-                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, target_dists, finished)
-            else:
-                # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
-                # of the first row only by setting all other rows to inf
-                if t == 1 and not self.skip_topk:
-                    scores *= first_step_mask
-
-                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
-
-            # Constraints for constrained decoding are processed sentence by sentence
-            if any(raw_constraint_list):
-                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = constrained.topk(
-                    t,
-                    batch_size,
-                    self.beam_size,
-                    inactive,
-                    scores,
-                    constraints,
-                    best_hyp_indices,
-                    best_word_indices,
-                    scores_accumulated)
-
-            # Map from restricted to full vocab ids if needed
-            if restrict_lexicon:
-                best_word_indices = vocab_slice_ids.take(best_word_indices)
-
-            # (4) Reorder fixed-size beam data according to best_hyp_indices (ascending)
-            finished, lengths, estimated_reference_lengths = self._sort_by_index.forward(best_hyp_indices,
-                                                                                         finished,
-                                                                                         lengths,
-                                                                                         estimated_reference_lengths)
-
-            # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
-            # next call to topk(), hypotheses may not be in sorted order.
-            finished, scores_accumulated, lengths = self._update_finished.forward(best_word_indices,
-                                                                                  max_output_lengths,
-                                                                                  finished,
-                                                                                  scores_accumulated,
-                                                                                  lengths,
-                                                                                  estimated_reference_lengths)
-
-            # (6) Prune out low-probability hypotheses. Pruning works by setting entries `inactive`.
-            if self.beam_prune > 0.0:
-                inactive, best_word_indices, scores_accumulated = self._prune_hyps.forward(best_word_indices,
-                                                                                           scores_accumulated,
-                                                                                           finished)
-
-            # (7) update negative constraints
-            if self.global_avoid_trie or any(raw_avoid_list):
-                avoid_states.reorder(best_hyp_indices)
-                avoid_states.consume(best_word_indices)
-
-            # (8) optionally save beam history
-            if self.store_beam:
-                finished_or_inactive = mx.nd.clip(data=finished + inactive, a_min=0, a_max=1)
-                unnormalized_scores = mx.nd.where(finished_or_inactive,
-                                                  scores_accumulated * self.length_penalty(lengths),
-                                                  scores_accumulated)
-                normalized_scores = mx.nd.where(finished_or_inactive,
-                                                scores_accumulated,
-                                                scores_accumulated / self.length_penalty(lengths))
-                for sent in range(batch_size):
-                    rows = slice(sent * self.beam_size, (sent + 1) * self.beam_size)
-
-                    best_word_indices_sent = best_word_indices[rows].asnumpy().tolist()
-                    # avoid adding columns for finished sentences
-                    if any(x for x in best_word_indices_sent if x != C.PAD_ID):
-                        beam_histories[sent]["predicted_ids"].append(best_word_indices_sent)
-                        beam_histories[sent]["predicted_tokens"].append([self.vocab_target_inv[x] for x in
-                                                                         best_word_indices_sent])
-                        # for later sentences in the matrix, shift from e.g. [5, 6, 7, 8, 6] to [0, 1, 3, 4, 1]
-                        shifted_parents = best_hyp_indices[rows] - (sent * self.beam_size)
-                        beam_histories[sent]["parent_ids"].append(shifted_parents.asnumpy().tolist())
-
-                        beam_histories[sent]["scores"].append(unnormalized_scores[rows].asnumpy().flatten().tolist())
-                        beam_histories[sent]["normalized_scores"].append(
-                            normalized_scores[rows].asnumpy().flatten().tolist())
-
-            # Collect best hypotheses, best word indices
-            best_hyp_indices_list.append(best_hyp_indices)
-            best_word_indices_list.append(best_word_indices)
-
-            if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
-                at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
-                if at_least_one_finished.sum().asscalar() == batch_size:
-                    break
-            else:
-                if finished.sum().asscalar() == batch_size * self.beam_size:  # all finished
-                    break
-
-            # (9) update models' state with winning hypotheses (ascending)
-            for ms in model_states:
-                ms.sort_state(best_hyp_indices)
-
-        logger.debug("Finished after %d / %d steps.", t + 1, max_output_length)
-
-        # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
-        folded_accumulated_scores = scores_accumulated.reshape((batch_size,
-                                                                self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
-        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + offset
-        best_hyp_indices_list.append(best_hyp_indices)
-        lengths = lengths.take(best_hyp_indices)
-        scores_accumulated = scores_accumulated.take(best_hyp_indices)
-        constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
-
-        all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
-        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
-
-        return all_best_hyp_indices.asnumpy(), \
-               all_best_word_indices.asnumpy(), \
-               scores_accumulated.asnumpy(), \
-               lengths.asnumpy().astype('int32'), \
-               estimated_reference_lengths.asnumpy(), \
-               constraints, \
-               beam_histories
-
     def _get_best_from_beam(self,
                             best_hyp_indices: np.ndarray,
                             best_word_indices: np.ndarray,
                             seq_scores: np.ndarray,
                             lengths: np.ndarray,
-                            estimated_reference_lengths: Optional[mx.nd.NDArray],
-                            constraints: List[Optional[constrained.ConstrainedHypothesis]],
+                            estimated_reference_lengths: Optional[mx.nd.NDArray] = None,
+                            constraints: List[Optional[constrained.ConstrainedHypothesis]] = [],
                             beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
         Return the nbest (aka n top) entries from the n-best list.
@@ -1660,260 +1118,3 @@ class Translator:
         return Translation(sequence, score, beam_history_list,
                            nbest_translations=None,
                            estimated_reference_length=estimated_reference_length)
-
-    def _print_beam(self,
-                    sequences: mx.nd.NDArray,
-                    accumulated_scores: mx.nd.NDArray,
-                    finished: mx.nd.NDArray,
-                    inactive: mx.nd.NDArray,
-                    constraints: List[Optional[constrained.ConstrainedHypothesis]],
-                    timestep: int) -> None:
-        """
-        Prints the beam for debugging purposes.
-
-        :param sequences: The beam histories (shape: batch_size * beam_size, max_output_len).
-        :param accumulated_scores: The accumulated scores for each item in the beam.
-               Shape: (batch_size * beam_size, target_vocab_size).
-        :param finished: Indicates which items are finished (shape: batch_size * beam_size).
-        :param inactive: Indicates any inactive items (shape: batch_size * beam_size).
-        :param timestep: The current timestep.
-        """
-        logger.info('BEAM AT TIMESTEP %d', timestep)
-        batch_beam_size = sequences.shape[0]
-        for i in range(batch_beam_size):
-            # for each hypothesis, print its entire history
-            score = accumulated_scores[i].asscalar()
-            word_ids = [int(x.asscalar()) for x in sequences[i]]
-            unmet = constraints[i].num_needed() if constraints[i] is not None else -1
-            hypothesis = '----------' if inactive[i] else ' '.join(
-                [self.vocab_target_inv[x] for x in word_ids if x != 0])
-            logger.info('%d %d %d %d %.2f %s', i + 1, finished[i].asscalar(), inactive[i].asscalar(), unmet, score,
-                        hypothesis)
-
-class PruneHypotheses(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that returns an array of shape (batch*beam,) indicating which hypotheses are inactive due to pruning.
-
-    :param threshold: Pruning threshold.
-    :param beam_size: Beam size.
-    """
-
-    def __init__(self, threshold: float, beam_size: int) -> None:
-        super().__init__()
-        self.threshold = threshold
-        self.beam_size = beam_size
-        with self.name_scope():
-            self.inf = self.params.get_constant(name='inf', value=mx.nd.full((1, 1), val=np.inf))
-
-    def hybrid_forward(self, F, best_word_indices, scores, finished, inf):
-        # (batch*beam, 1) -> (batch, beam)
-        scores_2d = F.reshape(scores, shape=(-1, self.beam_size))
-        finished_2d = F.reshape(finished, shape=(-1, self.beam_size))
-        inf_array_2d = F.broadcast_like(inf, scores_2d)
-        inf_array = F.broadcast_like(inf, scores)
-
-        # best finished scores. Shape: (batch, 1)
-        best_finished_scores = F.min(F.where(finished_2d, scores_2d, inf_array_2d), axis=1, keepdims=True)
-        difference = F.broadcast_minus(scores_2d, best_finished_scores)
-        inactive = F.cast(difference > self.threshold, dtype='int32')
-        inactive = F.reshape(inactive, shape=(-1))
-
-        best_word_indices = F.where(inactive, F.zeros_like(best_word_indices), best_word_indices)
-        scores = F.where(inactive, inf_array, scores)
-
-        return inactive, best_word_indices, scores
-
-
-class SortByIndex(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that sorts args by the given indices.
-    """
-
-    def hybrid_forward(self, F, indices, *args):
-        return [F.take(arg, indices) for arg in args]
-
-
-class TopK(mx.gluon.HybridBlock):
-    """
-    A HybridBlock for a statically-shaped batch-wise topk operation.
-    """
-
-    def __init__(self, k: int, vocab_size: int) -> None:
-        """
-        :param k: The number of smallest scores to return.
-        :param vocab_size: Vocabulary size.
-        """
-        super().__init__()
-        self.k = k
-        self.vocab_size = vocab_size
-
-    def hybrid_forward(self, F, scores, offset):
-        """
-        Get the lowest k elements per sentence from a `scores` matrix.
-
-        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
-        :return: The row indices, column indices and values of the k smallest items in matrix.
-        """
-        # Shape: (batch size, beam_size * vocab_size)
-        folded_scores = F.reshape(scores, shape=(-1, self.k * self.vocab_size))
-
-        values, indices = F.topk(folded_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
-
-        # Project indices back into original shape (which is different for t==1 and t>1)
-        indices = F.reshape(F.cast(indices, 'int32'), shape=(-1,))
-        # TODO: we currently exploit a bug in the implementation of unravel_index to not require knowing the first shape
-        # value. See https://github.com/apache/incubator-mxnet/issues/13862
-        unraveled = F.unravel_index(indices, shape=(C.LARGEST_INT, self.vocab_size))
-
-        best_hyp_indices, best_word_indices = F.split(unraveled, axis=0, num_outputs=2, squeeze_axis=True)
-        best_hyp_indices = best_hyp_indices + offset
-        values = F.reshape(values, shape=(-1, 1))
-        return best_hyp_indices, best_word_indices, values
-
-
-class SampleK(mx.gluon.HybridBlock):
-    """
-    A HybridBlock for selecting a random word from each hypothesis according to its distribution.
-    """
-
-    def __init__(self, k: int, n: int, max_batch_size: int) -> None:
-        """
-        :param k: The size of the beam.
-        :param n: Sample from the top-N words in the vocab at each timestep.
-        :param max_batch_size: Number of sentences being decoded at once.
-        """
-        super().__init__()
-        self.n = n
-        with self.name_scope():
-            self.best_hyp_indices = self.params.get_constant(name='best_hyp_indices',
-                                                             value=mx.nd.arange(0, max_batch_size * k, dtype='int32'))
-
-    def hybrid_forward(self, F, scores, target_dists, finished, best_hyp_indices):
-        """
-        Choose an extension of each hypothesis from its softmax distribution.
-
-        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-        :param target_dists: The non-cumulative target distributions (ignored).
-        :param finished: The list of finished hypotheses.
-        :param best_hyp_indices: Best hypothesis indices constant.
-        :return: The row indices, column indices, and values of the sampled words.
-        """
-        # Map the negative logprobs to probabilities so as to have a distribution
-        target_dists = F.exp(-target_dists)
-
-        # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
-        if self.n != 0:
-            # select the top n in each row, via a mask
-            masked_items = F.topk(target_dists, k=self.n, ret_typ='mask', axis=1, is_ascend=False)
-            # set unmasked items to 0
-            masked_items = F.where(masked_items, target_dists, masked_items)
-            # renormalize
-            target_dists = F.broadcast_div(masked_items, F.sum(masked_items, axis=1, keepdims=True))
-
-        # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
-        best_word_indices = F.random.multinomial(target_dists, get_prob=False)
-        # Zeroes for finished hypotheses.
-        best_word_indices = F.where(finished, F.zeros_like(best_word_indices), best_word_indices)
-        values = F.pick(scores, best_word_indices, axis=1, keepdims=True)
-
-        best_hyp_indices = F.slice_like(best_hyp_indices, best_word_indices, axes=(0,))
-
-        return best_hyp_indices, best_word_indices, values
-
-
-class Top1(mx.gluon.HybridBlock):
-    """
-    A HybridBlock for a statically-shaped batch-wise first-best operation.
-
-    Get the single lowest element per sentence from a `scores` matrix. Expects that
-    beam size is 1, for greedy decoding.
-
-    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
-    """
-
-    def hybrid_forward(self, F, scores, offset):
-        """
-        Get the single lowest element per sentence from a `scores` matrix. Expects that
-        beam size is 1, for greedy decoding.
-
-        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
-        :return: The row indices, column indices and values of the smallest items in matrix.
-        """
-        best_word_indices = F.cast(F.argmin(scores, axis=1), dtype='int32')
-        values = F.pick(scores, best_word_indices, axis=1)
-        values = F.reshape(values, shape=(-1, 1))
-
-        # for top1, the best hyp indices are equal to the plain offset
-        best_hyp_indices = offset
-
-        return best_hyp_indices, best_word_indices, values
-
-
-class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
-    """
-    A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
-    """
-
-    def __init__(self, pad_id: int,
-                 eos_id: int,
-                 length_penalty_alpha: float = 1.0,
-                 length_penalty_beta: float = 0.0,
-                 brevity_penalty_weight: float = 0.0) -> None:
-        super().__init__()
-        self.pad_id = pad_id
-        self.eos_id = eos_id
-        with self.name_scope():
-            self.length_penalty = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
-            self.brevity_penalty = None  # type: Optional[BrevityPenalty]
-            if brevity_penalty_weight > 0.0:
-                self.brevity_penalty = BrevityPenalty(weight=brevity_penalty_weight)
-
-    def hybrid_forward(self, F, best_word_indices, max_output_lengths,
-                       finished, scores_accumulated, lengths, reference_lengths):
-        all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
-        newly_finished = F.broadcast_logical_xor(all_finished, finished)
-        if self.brevity_penalty is not None:
-            brevity_penalty = self.brevity_penalty(lengths, reference_lengths)
-        else:
-            brevity_penalty = F.zeros_like(reference_lengths)
-        scores_accumulated = F.where(newly_finished,
-                                     scores_accumulated / self.length_penalty(lengths) - brevity_penalty,
-                                     scores_accumulated)
-
-        # Update lengths of all items, except those that were already finished. This updates
-        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
-        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
-
-        # Now, recompute finished. Hypotheses are finished if they are
-        # - extended with <pad>, or
-        # - extended with <eos>, or
-        # - at their maximum length.
-        finished = F.broadcast_logical_or(F.broadcast_logical_or(best_word_indices == self.pad_id,
-                                                                 best_word_indices == self.eos_id),
-                                          (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
-
-        return finished, scores_accumulated, lengths
-
-
-class UpdateScores(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that updates the scores from the decoder step with accumulated scores.
-    Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
-    All other options are set to infinity.
-    """
-
-    def __init__(self):
-        super().__init__()
-        assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
-
-    def hybrid_forward(self, F, target_dists, finished, inactive, scores_accumulated, pad_dist):
-        # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
-        # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
-        # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
-        # infinity otherwise.
-        scores = F.broadcast_add(target_dists, scores_accumulated)
-        # pad_dist. Shape: (batch*beam, vocab_size-1)
-        scores = F.where(F.broadcast_logical_or(finished, inactive), F.concat(scores_accumulated, pad_dist), scores)
-        return scores
