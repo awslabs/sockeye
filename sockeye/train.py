@@ -268,7 +268,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
-            batch_num_devices=batch_num_devices)
+            batch_num_devices=batch_num_devices,
+            batch_sentences_multiple_of=args.round_batch_sizes_to_multiple_of)
 
         check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
                         or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
@@ -351,7 +352,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
-            bucket_width=args.bucket_width)
+            bucket_width=args.bucket_width,
+            bucket_scaling=not args.no_bucket_scaling,
+            batch_sentences_multiple_of=args.round_batch_sizes_to_multiple_of)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
@@ -891,8 +894,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         hybridize = not args.no_hybridization
         if hybridize:
             training_model.hybridize(static_alloc=True)
-            for lf in losses:
-                lf.hybridize(static_alloc=True)
+            if not using_amp:
+                # Do not hybridize losses when using AMP.  Dynamic loss scaling
+                # requires adjusting SoftmaxOutput's grad_rescale value
+                # throughout training, which is not possible when using the
+                # Symbol API.
+                for lf in losses:
+                    lf.hybridize(static_alloc=True)
 
         trainer = training.GluonEarlyStoppingTrainer(
             config=trainer_config,
@@ -903,7 +911,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             dtype=args.dtype,
             using_amp=using_amp,
             custom_metrics_logger=custom_metrics_logger
-        )        
+        )
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
                                                training_model, source_vocabs, target_vocab, hybridize=hybridize)

@@ -251,8 +251,9 @@ KVSTORE_TYPES = [KVSTORE_DEVICE, KVSTORE_LOCAL, KVSTORE_SYNC,
 
 # Training constants
 OPTIMIZER_ADAM = "adam"
+OPTIMIZER_BERTADAM = "bertadam"
 OPTIMIZER_SGD = "sgd"
-OPTIMIZERS = [OPTIMIZER_ADAM, OPTIMIZER_SGD]
+OPTIMIZERS = [OPTIMIZER_ADAM, OPTIMIZER_BERTADAM, OPTIMIZER_SGD]
 
 LR_SCHEDULER_INV_SQRT_DECAY = 'inv-sqrt-decay'
 LR_SCHEDULER_LINEAR_DECAY = 'linear-decay'
@@ -341,7 +342,7 @@ LARGEST_INT = sys.maxsize
 
 # see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
 # TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutput loss for CE.
-FIXED_GRAD_SCALE_FP16 = 1024.0
+FIXED_GRAD_SCALE_FP16 = 8192.0
 
 LHUC_PREFIX = "lhuc_"
 # lhuc application points

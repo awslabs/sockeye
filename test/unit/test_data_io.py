@@ -42,28 +42,33 @@ def test_define_buckets(max_seq_len, step, expected_buckets):
     assert buckets == expected_buckets
 
 
-define_parallel_bucket_tests = [(50, 50, 10, 1.0, [(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]),
-                                (50, 50, 10, 0.5,
+define_parallel_bucket_tests = [(50, 50, 10, True, 1.0, [(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]),
+                                (50, 50, 10, True, 0.5,
                                  [(10, 5), (20, 10), (30, 15), (40, 20), (50, 25), (50, 30), (50, 35), (50, 40),
                                   (50, 45), (50, 50)]),
-                                (10, 10, 10, 0.1,
+                                (10, 10, 10, True, 0.1,
                                  [(10, 2), (10, 3), (10, 4), (10, 5), (10, 6), (10, 7), (10, 8), (10, 9), (10, 10)]),
-                                (10, 5, 10, 0.01, [(10, 2), (10, 3), (10, 4), (10, 5)]),
-                                (50, 50, 10, 2.0,
+                                (10, 5, 10, True, 0.01, [(10, 2), (10, 3), (10, 4), (10, 5)]),
+                                (50, 50, 10, True, 2.0,
                                  [(5, 10), (10, 20), (15, 30), (20, 40), (25, 50), (30, 50), (35, 50), (40, 50),
                                   (45, 50), (50, 50)]),
-                                (5, 10, 10, 10.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
-                                (5, 10, 10, 11.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
-                                (50, 50, 50, 0.5, [(50, 25), (50, 50)]),
-                                (50, 50, 50, 1.5, [(33, 50), (50, 50)]),
-                                (75, 75, 50, 1.5, [(33, 50), (66, 75), (75, 75)])]
+                                (5, 10, 10, True, 10.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
+                                (5, 10, 10, True, 11.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
+                                (50, 50, 50, True, 0.5, [(50, 25), (50, 50)]),
+                                (50, 50, 50, True, 1.5, [(33, 50), (50, 50)]),
+                                (75, 75, 50, True, 1.5, [(33, 50), (66, 75), (75, 75)]),
+                                (50, 50, 8, False, 1.5, [(8, 8), (16, 16), (24, 24), (32, 32), (40, 40), (48, 48),
+                                                         (50, 50)]),
+                                (50, 75, 8, False, 1.5, [(8, 8), (16, 16), (24, 24), (32, 32), (40, 40), (48, 48),
+                                                         (50, 56), (50, 64), (50, 72), (50, 75)])]
 
 
-@pytest.mark.parametrize("max_seq_len_source, max_seq_len_target, bucket_width, length_ratio, expected_buckets",
-                         define_parallel_bucket_tests)
-def test_define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, length_ratio, expected_buckets):
+@pytest.mark.parametrize("max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling, length_ratio,"
+                         "expected_buckets", define_parallel_bucket_tests)
+def test_define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling, length_ratio,
+                                 expected_buckets):
     buckets = data_io.define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width=bucket_width,
-                                              length_ratio=length_ratio)
+                                              bucket_scaling=bucket_scaling, length_ratio=length_ratio)
     assert buckets == expected_buckets
 
 
@@ -212,7 +217,7 @@ def test_sample_based_define_bucket_batch_sizes():
     batch_by_words = False
     batch_size = 32
     max_seq_len = 100
-    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1.5)
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1, 1.5)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_by_words=batch_by_words,
@@ -223,23 +228,29 @@ def test_sample_based_define_bucket_batch_sizes():
         assert bbs.average_target_words_per_batch == bbs.bucket[1] * batch_size
 
 
-@pytest.mark.parametrize("length_ratio", [0.5, 1.5])
-def test_word_based_define_bucket_batch_sizes(length_ratio):
+@pytest.mark.parametrize("length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
+        # Reference batch sizes manually inspected for sanity.  Note that for
+        # very unbalanced lengths, the last batch can be very large.  This is
+        # due to the requirement for any size batch (total elements) to fit into
+        # the same allocated space for MXNet's memory sharing.
+        (0.5, 1, [200.0, 100.0, 67.0, 50.0, 40.0, 33.0, 29.0, 25.0, 22.0, 41.0]),
+        (1.5, 1, [100.0, 50.0, 33.0, 25.0, 20.0, 20.0, 20.0, 20.0]),
+        (1.5, 8, [96.0, 48.0, 32.0, 24.0, 16.0, 16.0, 16.0, 24.0])])
+def test_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
     batch_by_words = True
     batch_num_devices = 1
-    batch_size = 200
-    max_seq_len = 100
-    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, length_ratio)
+    batch_size = 1000
+    max_seq_len = 50
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1, length_ratio)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_by_words=batch_by_words,
                                                            batch_num_devices=batch_num_devices,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                           data_target_average_len=[None] * len(buckets),
+                                                           batch_sentences_multiple_of=batch_sentences_multiple_of)
     max_num_words = 0
     # last bucket batch size is different
-    for bbs in bucket_batch_sizes[:-1]:
-        target_padded_seq_len = bbs.bucket[1]
-        expected_batch_size = round((batch_size / target_padded_seq_len) / batch_num_devices)
+    for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
         assert bbs.batch_size == expected_batch_size
         expected_average_target_words_per_batch = expected_batch_size * bbs.bucket[1]
         assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
@@ -278,7 +289,7 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
 
 
 def test_parallel_data_set():
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     source, target = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
 
     def check_equal(arrays1, arrays2):
@@ -297,7 +308,7 @@ def test_parallel_data_set():
 
 def test_parallel_data_set_fill_up():
     batch_size = 32
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_by_words=False,
@@ -338,7 +349,7 @@ def test_get_permutations():
 
 def test_parallel_data_set_permute():
     batch_size = 5
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_by_words=False,
@@ -365,7 +376,7 @@ def test_parallel_data_set_permute():
 def test_get_batch_indices():
     max_bucket_size = 50
     batch_size = 10
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_by_words=False,
@@ -535,7 +546,7 @@ def _data_batches_equal(db1: data_io.Batch, db2: data_io.Batch) -> bool:
 
 def test_parallel_sample_iter():
     batch_size = 2
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     # The first bucket is going to be empty:
     bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
@@ -593,7 +604,7 @@ def test_parallel_sample_iter():
 
 def test_sharded_parallel_sample_iter():
     batch_size = 2
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     # The first bucket is going to be empty:
     bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
@@ -665,7 +676,7 @@ def test_sharded_parallel_sample_iter_num_batches():
     num_shards = 2
     batch_size = 2
     num_batches_per_bucket = 10
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
     num_batches_per_shard = num_batches_per_bucket * len(buckets)
     num_batches = num_shards * num_batches_per_shard
@@ -700,7 +711,7 @@ def test_sharded_and_parallel_iter_same_num_batches():
     using the same dataset. """
     batch_size = 2
     num_batches_per_bucket = 10
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
     num_batches = num_batches_per_bucket * len(buckets)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,

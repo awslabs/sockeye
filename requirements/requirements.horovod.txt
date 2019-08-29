@@ -1,2 +1,2 @@
-horovod
+horovod==0.16.4
 mpi4py

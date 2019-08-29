@@ -43,6 +43,7 @@ def prepare_data(args: argparse.Namespace):
     samples_per_shard = args.num_samples_per_shard
     bucketing = not args.no_bucketing
     bucket_width = args.bucket_width
+    bucket_scaling = not args.no_bucket_scaling
 
     source_paths = [args.source] + args.source_factors
     source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
@@ -86,7 +87,8 @@ def prepare_data(args: argparse.Namespace):
                          bucket_width=bucket_width,
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
-                         output_prefix=output_folder)
+                         output_prefix=output_folder,
+                         bucket_scaling=bucket_scaling)
 
 
 if __name__ == "__main__":

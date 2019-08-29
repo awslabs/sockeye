@@ -438,6 +438,10 @@ def add_bucketing_args(params):
                         default=10,
                         help='Width of buckets in tokens. Default: %(default)s.')
 
+    params.add_argument('--no-bucket-scaling',
+                        action='store_true',
+                        help='Disable scaling source/target buckets based on length ratio. Default: %(default)s.')
+
     params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
                         default=(99, 99),
@@ -672,6 +676,12 @@ def add_batch_args(params, default_batch_size=4096):
                         help="Sentence: each batch contains X sentences, number of words varies."
                              "Word: each batch contains (approximately) X target words, "
                              "number of sentences varies. Default: %(default)s.")
+    params.add_argument('--round-batch-sizes-to-multiple-of',
+                        type=int,
+                        default=1,
+                        help='For word-based batches, round each bucket\'s batch size (measured in sentences) to a '
+                             'multiple of this integer. Default: %(default)s.')
+
 
 
 def add_hybridization_arg(params):
