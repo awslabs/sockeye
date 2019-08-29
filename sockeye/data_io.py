@@ -131,13 +131,13 @@ class BucketBatchSize:
     """
     :param bucket: The corresponding bucket.
     :param batch_size: Number of sequences in each batch.
-    :param average_words_per_batch: Approximate number of non-padding tokens in each batch.
+    :param average_target_words_per_batch: Approximate number of target non-padding tokens in each batch.
     """
 
-    def __init__(self, bucket: Tuple[int, int], batch_size: int, average_words_per_batch: float) -> None:
+    def __init__(self, bucket: Tuple[int, int], batch_size: int, average_target_words_per_batch: float) -> None:
         self.bucket = bucket
         self.batch_size = batch_size
-        self.average_words_per_batch = average_words_per_batch
+        self.average_target_words_per_batch = average_target_words_per_batch
 
 
 def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
@@ -200,7 +200,7 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
             bucket_batch_sizes[-1] = BucketBatchSize(
                 bucket_batch_sizes[-1].bucket,
                 bucket_batch_sizes[-1].batch_size + batch_num_devices,
-                bucket_batch_sizes[-1].average_words_per_batch + batch_num_devices * average_seq_len)
+                bucket_batch_sizes[-1].average_target_words_per_batch + batch_num_devices * average_seq_len)
     return bucket_batch_sizes
 
 
@@ -1020,24 +1020,24 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
                                                                 data_statistics.num_sents_per_bucket,
                                                                 data_statistics.length_ratio_stats_per_bucket):
             if num_seq > 0:
-                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, "
+                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f target tokens/batch, "
                             "trg/src length ratio: %.2f (+-%.2f)",
                             bucket_batch_size.bucket,
                             num_seq,
                             math.ceil(num_seq / bucket_batch_size.batch_size),
                             bucket_batch_size.batch_size,
-                            bucket_batch_size.average_words_per_batch,
+                            bucket_batch_size.average_target_words_per_batch,
                             lr_mean, lr_std)
     else:
         # TODO: remove with next bump of C.PREPARED_DATA_VERSION
         for bucket_batch_size, num_seq in zip(bucket_batch_sizes, data_statistics.num_sents_per_bucket):
             if num_seq > 0:
-                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, ",
+                logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f target tokens/batch, ",
                             bucket_batch_size.bucket,
                             num_seq,
                             math.ceil(num_seq / bucket_batch_size.batch_size),
                             bucket_batch_size.batch_size,
-                            bucket_batch_size.average_words_per_batch)
+                            bucket_batch_size.average_target_words_per_batch)
 
 
 class DataInfo(config.Config):
