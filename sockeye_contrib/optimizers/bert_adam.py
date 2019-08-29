@@ -65,6 +65,13 @@ class BERTAdam(Optimizer):
         self.beta2 = beta2
         self.epsilon = epsilon
 
+    def new_update_multi_precision(self, index, weight, grad, state):
+        """
+        AMP/Pickle compatibility: class must have this method or unpickling will
+        will fail with an AttributeError.
+        """
+        return
+
     def create_state_multi_precision(self, index, weight):
         """multi-precision state creation function."""
         weight_master_copy = None
