@@ -123,6 +123,7 @@ class UpdateScores(mx.gluon.HybridBlock):
     """
     A HybridBlock that updates the scores from the decoder step with accumulated scores.
     Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
+    Hypotheses at maximum length are forced to produce C.EOS_ID.
     All other options are set to infinity.
     """
 
@@ -130,15 +131,33 @@ class UpdateScores(mx.gluon.HybridBlock):
         super().__init__(**kwargs)
         assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
 
-    def hybrid_forward(self, F, target_dists, finished, inactive, scores_accumulated, pad_dist):
+    def hybrid_forward(self, F,
+                       target_dists, finished, inactive,
+                       scores_accumulated, lengths, max_lengths,
+                       pad_dist, eos_dist):
+        # broadcast hypothesis score to each prediction.
+        # scores_accumulated. Shape: (batch*beam, 1)
+        # target_dists. Shape: (batch*beam, vocab_size)
+        scores = F.broadcast_add(target_dists, scores_accumulated)
+
         # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
         # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
         # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
-        scores = F.broadcast_add(target_dists, scores_accumulated)
-        # pad_dist. Shape: (batch*beam, vocab_size-1)
-        scores = F.where(F.broadcast_logical_or(finished, inactive), F.concat(scores_accumulated, pad_dist), scores)
-        return scores
+        # pad_dist. Shape: (batch*beam, vocab_size)
+        pad_dist = F.concat(scores_accumulated, pad_dist)
+        scores = F.where(F.broadcast_logical_or(finished, inactive), pad_dist, scores)
+
+        # Update lengths of all items, except those that were already finished. This updates
+        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
+        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
+
+        # Items that are at their maximum length now are forced to produce the <eos> symbol.
+        # (They will be recognized as finished later)
+        at_max_length = (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') == max_lengths)
+        scores = F.where(at_max_length, eos_dist + scores, scores)
+
+        return scores, lengths
 
 
 class LengthPenalty(mx.gluon.HybridBlock):
@@ -272,56 +291,19 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         self.eos_id = eos_id
         self._scorer = scorer
 
-    def hybrid_forward(self, F, best_word_indices, max_output_lengths,
+    def hybrid_forward(self, F, best_word_indices,
                        finished, scores_accumulated, lengths, reference_lengths):
-        # Update lengths of all items, except those that were already finished. This updates
-        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
-        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
-
         all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
+        # Normalize hypotheses that JUST finished
         scores_accumulated = F.where(newly_finished,
                                      self._scorer(scores_accumulated, lengths, reference_lengths),
                                      scores_accumulated)
 
-        # Now, recompute finished. Hypotheses are finished if they are
-        # - extended with <pad>, or
-        # - extended with <eos>, or
-        # - at their maximum length.
-        finished = F.broadcast_logical_or(F.broadcast_logical_or(best_word_indices == self.pad_id,
-                                                                 best_word_indices == self.eos_id),
-                                          (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') >= max_output_lengths))
+        # Now, recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
+        finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
 
         return finished, scores_accumulated, lengths
-
-
-class SortNormAndUpdateFinished(mx.gluon.HybridBlock):
-
-    def __init__(self,
-                 pad_id: int,
-                 eos_id: int,
-                 scorer: CandidateScorer,
-                 **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._sort_by_index = SortByIndex(prefix='sort_by_index_')
-        self._norm_and_update_finished = NormalizeAndUpdateFinished(prefix='norm_and_update_finished_',
-                                                                    pad_id=pad_id,
-                                                                    eos_id=eos_id,
-                                                                    scorer=scorer)
-
-    def hybrid_forward(self, F, best_hyp_indices, best_word_indices, max_output_lengths,
-                       finished, scores_accumulated, lengths, reference_lengths):
-        finished, lengths, reference_lengths = self._sort_by_index(best_hyp_indices,
-                            finished,
-                            lengths,
-                            reference_lengths)
-        finished, scores_accumulated, lengths = self._norm_and_update_finished(best_word_indices,
-                                                                               max_output_lengths,
-                                                                               finished,
-                                                                               scores_accumulated,
-                                                                               lengths,
-                                                                               reference_lengths)
-        return finished, scores_accumulated, lengths, reference_lengths
 
 
 class TopK(mx.gluon.HybridBlock):
@@ -541,6 +523,9 @@ class BeamSearch(mx.gluon.Block):
         first_step_mask[batch_indices] = 1.0
         pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
                               ctx=self.context, dtype='float32')
+        eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
+                              ctx=self.context, dtype='float32')
+        eos_dist[:, C.EOS_ID] = 0
 
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
@@ -584,6 +569,9 @@ class BeamSearch(mx.gluon.Block):
 
             pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
                                   val=np.inf, ctx=self.context)
+            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0]),
+                                  val=np.inf, ctx=self.context)
+            eos_dist[:, C.EOS_ID] = 0
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.bos_id, self.eos_id)
@@ -611,7 +599,14 @@ class BeamSearch(mx.gluon.Block):
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores = self._update_scores(target_dists, finished, inactive, scores_accumulated, pad_dist)
+            scores, lengths = self._update_scores(target_dists,
+                                                  finished,
+                                                  inactive,
+                                                  scores_accumulated,
+                                                  lengths,
+                                                  max_output_lengths,
+                                                  pad_dist,
+                                                  eos_dist)
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
@@ -662,7 +657,6 @@ class BeamSearch(mx.gluon.Block):
             # (5) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
             finished, scores_accumulated, lengths = self._norm_and_update_finished(best_word_indices,
-                                                                                   max_output_lengths,
                                                                                    finished,
                                                                                    scores_accumulated,
                                                                                    lengths,

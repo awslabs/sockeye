@@ -241,11 +241,40 @@ def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
         assert mx.nd.sum(mx.nd.where(finished, words, finished))[0].asscalar() == 0
 
 
+def test_update_scores():
+    vocab_size = 10
+    batch_beam_size = 3
+    us = sockeye.beam_search.UpdateScores()
+    pad_dist = mx.nd.full((batch_beam_size, vocab_size - 1), val=np.inf, dtype='float32')
+    eos_dist = mx.nd.full((batch_beam_size, vocab_size), val=np.inf, dtype='float32')
+    eos_dist[:, C.EOS_ID] = 0
+
+    lengths = mx.nd.array([[0],
+                           [1],
+                           [0]])
+    max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
+    scores_accumulated = mx.nd.ones((3, 1), dtype='float32')
+    finished = mx.nd.array([0,   # not finished
+                            1,   # finished
+                            0],  # not finished
+                           dtype='int32')
+    inactive = mx.nd.zeros_like(finished)
+    target_dists = mx.nd.uniform(0, 1, (3, vocab_size))
+
+    scores, lengths = us(target_dists, finished, inactive, scores_accumulated, lengths, max_lengths, pad_dist, eos_dist)
+    scores = scores.asnumpy()
+    lengths = lengths.asnumpy().reshape((-1,))
+
+    assert (lengths == np.array([[1], [1], [1]])).all()  # all lengths but finished updated + 1
+    assert (scores[0] == (1. + target_dists[0] + eos_dist).asnumpy()).all()  # 1 reached max length, force eos
+    assert (scores[1] == np.array([1.] + pad_dist[1].asnumpy().tolist())).all()  # 2 finished, force pad, keep score
+    assert (scores[2] == (1. + target_dists[2]).asnumpy()).all()  # 3 scores + previous scores
+
+
 class _TestInference(sockeye.beam_search._Inference):
 
-    def __init__(self, output_vocab_size: int, predictor = dict()):
+    def __init__(self, output_vocab_size: int):
         self.output_vocab_size = output_vocab_size
-        self.predictor = predictor
         self.states = []
 
     def encode_and_initialize(self,
@@ -254,7 +283,8 @@ class _TestInference(sockeye.beam_search._Inference):
         batch_size = inputs.shape[0]
         # 'lengths'
         internal_lengths = mx.nd.zeros((batch_size, 1), dtype='int32')
-        self.states = [internal_lengths]  # TODO add nested states
+        num_decode_step_calls = 0
+        self.states = [internal_lengths, num_decode_step_calls]  # TODO add nested states
         predicted_output_length = mx.nd.ones((batch_size, 1))  # does that work?
         return self.states, predicted_output_length
 
@@ -265,13 +295,29 @@ class _TestInference(sockeye.beam_search._Inference):
         batch_beam_size = step_input.shape[0]
         print('step_input', step_input.asnumpy())
 
-        outputs = mx.nd.array([self.predictor.get(inp, C.PAD_ID) for inp in step_input.asnumpy().tolist()], ctx=step_input.context)
-        scores = mx.nd.one_hot(outputs, depth=self.output_vocab_size)
-        print('scores', scores.asnumpy())
+        internal_lengths, num_decode_step_calls = states
+        if num_decode_step_calls == 0:  # first call to decode_step, we expect step input to be all <bos>
+            assert (step_input.asnumpy() == C.BOS_ID).all()
 
-        #scores = mx.nd.random.uniform(0, 1, (batch_beam_size, self.output_vocab_size))
-        states[0] += 1
-        self.states = states
+        if step_input.asscalar() == C.BOS_ID:
+            # predict word id 4 given <bos>
+            scores = mx.nd.array([0, 0, 0, 0, 1])
+        elif step_input.asscalar() == C.EOS_ID:
+            # predict pad given <eos>
+            scores = mx.nd.array([1, 0, 0, 0, 0])
+        else:
+            # otherwise always predict pad
+            scores = mx.nd.array([0, 0, 0, 0, 1])
+
+        # topk is minimizing
+        scores *= -1
+        #outputs = mx.nd.array([self.predictor.get(inp, C.PAD_ID) for inp in step_input.asnumpy().tolist()], ctx=step_input.context)
+        #scores = mx.nd.one_hot(outputs, depth=self.output_vocab_size)
+
+        internal_lengths += 1
+        num_decode_step_calls += 1
+
+        self.states = states = [internal_lengths, num_decode_step_calls]
         return scores, states
 
 
@@ -281,18 +327,18 @@ def test_beam_search():
     context = mx.cpu()
     dtype='float32'
     num_source_factors = 1
-    output_vocab_size = 4
-    beam_size = 5
+    vocab_size = len(C.VOCAB_SYMBOLS) + 1  # 1 actual word: word id 4
+    beam_size = 1
     bos_id = 2
     eos_id = 3
 
-    inference = _TestInference(output_vocab_size=output_vocab_size, predictor={2: 3})
+    inference = _TestInference(output_vocab_size=vocab_size)
     bs = sockeye.beam_search.BeamSearch(
         beam_size=beam_size,
         bos_id=bos_id,
         eos_id=eos_id,
         context=context,
-        output_vocab_size=output_vocab_size,
+        output_vocab_size=vocab_size,
         scorer=sockeye.beam_search.CandidateScorer(),
         num_source_factors=num_source_factors,
         inference=inference,
@@ -302,9 +348,9 @@ def test_beam_search():
 
     # inputs
     batch_size = 1
-    max_length = 5
-    source = mx.nd.array([[1, 2, 3, 4, 5]], ctx=context, dtype=dtype).reshape((0, -1, 1))
-    source_length = mx.nd.array([max_length], ctx=context, dtype=dtype)
+    max_length = 3
+    source = mx.nd.array([[C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID]], ctx=context, dtype=dtype).reshape((0, -1, 1))
+    source_length = (source != C.PAD_ID).sum(axis=1).reshape((-1,))  # (batch_size,)
 
     restrict_lexicon = None
     raw_constraints = [None] * batch_size
@@ -312,15 +358,13 @@ def test_beam_search():
     max_output_lengths = mx.nd.array([max_length], ctx=context, dtype='int32')  # TODO
 
     bs_out = bs(source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths)
-
     best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
 
-    #best_ids = np.arange(0, batch_size * beam_size, beam_size, dtype='int32')
-    #sockeye.inference.Translator._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
+    print('beam search lengths', lengths)
+    print('internal lengths', inference.states[0].asnumpy())
+    assert np.allclose(lengths, inference.states[0].asnumpy())
+    assert inference.states[1] == max_length
 
-    print(lengths)
-    print(inference.states[0].asnumpy())
-    #assert np.allclose(lengths, inference.states[0].asnumpy())
-
-    #assert False
+    print(best_hyp_indices)
+    print(best_word_indices)
 
