@@ -68,7 +68,7 @@ class BERTAdam(Optimizer):
     def new_update_multi_precision(self, index, weight, grad, state):
         """
         AMP/Pickle compatibility: class must have this method or unpickling will
-        will fail with an AttributeError.
+        fail with an AttributeError.
         """
         return
 
