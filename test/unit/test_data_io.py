@@ -220,7 +220,7 @@ def test_sample_based_define_bucket_batch_sizes():
                                                            data_target_average_len=[None] * len(buckets))
     for bbs in bucket_batch_sizes:
         assert bbs.batch_size == batch_size
-        assert bbs.average_words_per_batch == bbs.bucket[1] * batch_size
+        assert bbs.average_target_words_per_batch == bbs.bucket[1] * batch_size
 
 
 @pytest.mark.parametrize("length_ratio", [0.5, 1.5])
@@ -241,8 +241,8 @@ def test_word_based_define_bucket_batch_sizes(length_ratio):
         target_padded_seq_len = bbs.bucket[1]
         expected_batch_size = round((batch_size / target_padded_seq_len) / batch_num_devices)
         assert bbs.batch_size == expected_batch_size
-        expected_average_words_per_batch = expected_batch_size * bbs.bucket[1]
-        assert bbs.average_words_per_batch == expected_average_words_per_batch
+        expected_average_target_words_per_batch = expected_batch_size * bbs.bucket[1]
+        assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
         max_num_words = max(max_num_words, bbs.batch_size * max(*bbs.bucket))
 
     last_bbs = bucket_batch_sizes[-1]
