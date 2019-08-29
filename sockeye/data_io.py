@@ -136,13 +136,13 @@ class BucketBatchSize:
     """
     :param bucket: The corresponding bucket.
     :param batch_size: Number of sequences in each batch.
-    :param average_words_per_batch: Approximate number of non-padding tokens in each batch.
+    :param average_target_words_per_batch: Approximate number of target non-padding tokens in each batch.
     """
 
-    def __init__(self, bucket: Tuple[int, int], batch_size: int, average_words_per_batch: float) -> None:
+    def __init__(self, bucket: Tuple[int, int], batch_size: int, average_target_words_per_batch: float) -> None:
         self.bucket = bucket
         self.batch_size = batch_size
-        self.average_words_per_batch = average_words_per_batch
+        self.average_target_words_per_batch = average_target_words_per_batch
 
 
 def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
@@ -214,7 +214,7 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
             bucket_batch_sizes[-1] = BucketBatchSize(
                 bucket_batch_sizes[-1].bucket,
                 bucket_batch_sizes[-1].batch_size + min_batch_step,
-                bucket_batch_sizes[-1].average_words_per_batch + min_batch_step * average_seq_len)
+                bucket_batch_sizes[-1].average_target_words_per_batch + min_batch_step * average_seq_len)
     return bucket_batch_sizes
 
 
@@ -589,7 +589,7 @@ def prepare_data(source_fnames: List[str],
     data_statistics.log()
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
+                                           eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
     # 3. convert each shard to serialized ndarrays
@@ -620,8 +620,7 @@ def prepare_data(source_fnames: List[str],
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
-                             num_source_factors=len(source_fnames),
-                             source_with_eos=True)
+                             num_source_factors=len(source_fnames))
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
     config_data.save(config_data_fname)
@@ -773,7 +772,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            permute=permute)
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
+                                           eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
     validation_iter = get_validation_data_iter(data_loader=data_loader,
@@ -872,7 +871,7 @@ def get_training_data_iters(sources: List[str],
 
     # Pass 3: Load the data into memory and return the iterator.
     data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
+                                           eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
     training_data = data_loader.load(sources_sentences, target_sentences,
@@ -888,8 +887,7 @@ def get_training_data_iters(sources: List[str],
     config_data = DataConfig(data_statistics=data_statistics,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
-                             num_source_factors=len(sources),
-                             source_with_eos=True)
+                             num_source_factors=len(sources))
 
     train_iter = ParallelSampleIter(data=training_data,
                                     buckets=buckets,
@@ -942,7 +940,7 @@ def get_scoring_data_iters(sources: List[str],
 
     # ...One loader to raise them,
     data_loader = RawParallelDatasetLoader(buckets=[bucket],
-                                           eos_id=target_vocab[C.EOS_SYMBOL],
+                                           eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID,
                                            skip_blanks=False)
 
@@ -1033,13 +1031,13 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
                                                              data_statistics.num_sents_per_bucket,
                                                              data_statistics.length_ratio_stats_per_bucket):
         if num_seq > 0:
-            logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f tokens/batch, "
+            logger.info("Bucket %s: %d samples in %d batches of %d, ~%.1f target tokens/batch, "
                         "trg/src length ratio: %.2f (+-%.2f)",
                         bucket_batch_size.bucket,
                         num_seq,
                         math.ceil(num_seq / bucket_batch_size.batch_size),
                         bucket_batch_size.batch_size,
-                        bucket_batch_size.average_words_per_batch,
+                        bucket_batch_size.average_target_words_per_batch,
                         lr_mean, lr_std)
 
 
@@ -1073,14 +1071,12 @@ class DataConfig(config.Config):
                  data_statistics: DataStatistics,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 num_source_factors: int,
-                 source_with_eos: bool = False) -> None:
+                 num_source_factors: int) -> None:
         super().__init__()
         self.data_statistics = data_statistics
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.num_source_factors = num_source_factors
-        self.source_with_eos = source_with_eos
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
@@ -1168,12 +1164,9 @@ class SequenceReader(Iterable):
         self.bos_id = None
         self.eos_id = None
         if vocabulary is not None:
-            assert C.UNK_SYMBOL in vocabulary
-            assert vocabulary[C.PAD_SYMBOL] == C.PAD_ID
-            assert C.BOS_SYMBOL in vocabulary
-            assert C.EOS_SYMBOL in vocabulary
-            self.bos_id = vocabulary[C.BOS_SYMBOL]
-            self.eos_id = vocabulary[C.EOS_SYMBOL]
+            assert vocab.is_valid_vocab(vocabulary)
+            self.bos_id = C.BOS_ID
+            self.eos_id = C.EOS_ID
         else:
             check_condition(not add_bos and not add_eos, "Adding a BOS or EOS symbol requires a vocabulary")
         self.add_bos = add_bos
@@ -1602,15 +1595,20 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         sources_sentences = [[] for x in self.sources_sentences]  # type: List[List[str]]
         target_sentences = []  # type: List[str]
         num_read = 0
-        for num_read, (sources, target) in enumerate(parallel_iterate(self.sources_iters, self.target_iter, skip_blanks=False), 1):
+        for num_read, (sources, target) in enumerate(
+                parallel_iterate(self.sources_iters, self.target_iter, skip_blanks=False), 1):
             source_len = 0 if sources[0] is None else len(sources[0])
             target_len = 0 if target is None else len(target)
             if source_len > self.max_len_source:
-                logger.info("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read, source_len, self.max_len_source))
-                sources = [source[0:self.max_len_source] for source in sources]
+                logger.info("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read,
+                                                                            source_len,
+                                                                            self.max_len_source))
+                sources = [source[0: self.max_len_source] for source in sources]
             if target_len > self.max_len_target:
-                logger.info("Trimming target sentence {} ({} -> {})".format(self.sentno + num_read, target_len, self.max_len_target))
-                target = target[0:self.max_len_target]
+                logger.info("Trimming target sentence {} ({} -> {})".format(self.sentno + num_read,
+                                                                            target_len,
+                                                                            self.max_len_target))
+                target = target[0: self.max_len_target]
 
             for i, source in enumerate(sources):
                 sources_sentences[i].append(source)
@@ -1627,9 +1625,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         dataset = self.data_loader.load(sources_sentences, target_sentences, [num_read])
 
         source = dataset.source[0]
-        target = dataset.target[0][:, :-1]
-        label = dataset.target[0][:, 1:]
-
+        target, label = create_target_and_shifted_label_sequences(dataset.target[0])
         self.next_batch = create_batch_from_parallel_sample(source, target, label)
         return True
 
@@ -1642,10 +1638,10 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         raise StopIteration
 
     def save_state(self, fname: str):
-        raise Exception('Not supported!')
+        raise NotImplementedError('Not supported!')
 
     def load_state(self, fname: str):
-        raise Exception('Not supported!')
+        raise NotImplementedError('Not supported!')
 
 
 class ShardedParallelSampleIter(BaseParallelSampleIter):
@@ -1800,9 +1796,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
 
         batch_size = self.bucket_batch_sizes[i].batch_size
         source = self.data.source[i][j:j + batch_size]
-        target = self.data.target[i][j:j + batch_size, :-1]
-        label = self.data.target[i][j:j + batch_size, 1:]
-
+        target, label = create_target_and_shifted_label_sequences(self.data.target[i][j:j + batch_size])
         return create_batch_from_parallel_sample(source, target, label)
 
     def save_state(self, fname: str):
@@ -1878,6 +1872,17 @@ class Batch:
         for i, inputs in enumerate(zip(self.source, self.source_length, self.target, self.target_length)):
             # model inputs, labels
             yield inputs, {name: label[i] for name, label in self.labels.items()}
+
+
+def create_target_and_shifted_label_sequences(target_and_label: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
+    """
+    Returns the target and label sequence from a joint array of varying-length sequences including both <bos> and <eos>.
+    Both ndarrays returned have input size of second dimension - 1.
+    """
+    target = target_and_label[:, :-1]  # skip last column (for longest-possible sequence, this already removes <eos>)
+    target = mx.nd.where(target == C.EOS_ID, mx.nd.zeros_like(target), target)  # replace other <eos>'s with <pad>
+    label = target_and_label[:, 1:]  # label skips <bos>
+    return target, label
 
 
 def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArray, label: mx.nd.NDArray) -> Batch:
