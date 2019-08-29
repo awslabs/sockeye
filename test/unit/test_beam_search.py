@@ -251,7 +251,7 @@ def test_update_scores():
 
     lengths = mx.nd.array([[0],
                            [1],
-                           [0]])
+                           [0]], dtype='int32')
     max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
     scores_accumulated = mx.nd.ones((3, 1), dtype='float32')
     finished = mx.nd.array([0,   # not finished

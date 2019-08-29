@@ -150,11 +150,11 @@ class UpdateScores(mx.gluon.HybridBlock):
 
         # Update lengths of all items, except those that were already finished. This updates
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
-        lengths = lengths + F.cast(1 - F.expand_dims(finished, axis=1), dtype='float32')
+        lengths = lengths + (1 - F.expand_dims(finished, axis=1))
 
         # Items that are at their maximum length and not finished now are forced to produce the <eos> symbol.
         # That is, we keep scores for hypotheses below max length or finished, and 'force-eos' the rest.
-        below_max_length = (F.cast(F.reshape(lengths, shape=(-1,)), 'int32') < max_lengths)
+        below_max_length = F.reshape(lengths, shape=(-1,)) < max_lengths
         scores = F.where(F.broadcast_logical_or(below_max_length, finished), scores, eos_dist + scores)
 
         return scores, lengths
@@ -297,7 +297,7 @@ class NormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
         # Normalize hypotheses that JUST finished
         scores_accumulated = F.where(newly_finished,
-                                     self._scorer(scores_accumulated, lengths, reference_lengths),
+                                     self._scorer(scores_accumulated, F.cast(lengths, 'float32'), reference_lengths),
                                      scores_accumulated)
 
         # Now, recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
@@ -531,7 +531,7 @@ class BeamSearch(mx.gluon.Block):
         best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
         best_word_indices_list = []  # type: List[mx.nd.NDArray]
 
-        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='float32')
+        lengths = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='int32')
         finished = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
