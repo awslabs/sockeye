@@ -727,7 +727,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         args.output = temp_dir.name
         args.max_updates = 0
 
-    # Automatic mixed precision training
+    # Automatic Mixed Precision training
     using_amp = False
     if args.amp:
         using_amp = True
@@ -904,6 +904,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         trainer = training.GluonEarlyStoppingTrainer(
             config=trainer_config,
+            optimizer_config=optimizer_config,
             sockeye_model=training_model,
             trainer=gluon_trainer,
             loss_functions=losses,
