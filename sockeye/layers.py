@@ -312,6 +312,9 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         # (n, lq, lk)
         logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
 
+
+        # TODO(fhieber): consider softmax with length argument once available.
+        # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
         if lengths is not None:
             # mask lk dimension
             # (lk, n, lq)
