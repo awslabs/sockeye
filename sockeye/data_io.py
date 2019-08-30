@@ -174,6 +174,9 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
     data_target_average_len = list(data_target_average_len)
     bucket_batch_sizes = []  # type: List[BucketBatchSize]
     largest_total_num_words = 0
+    # Ensure the correct multiple for each batch per device.
+    min_batch_step = batch_sentences_multiple_of * batch_num_devices
+
     for buck_idx, bucket in enumerate(buckets):
         # Target/label length with padding
         padded_seq_len = bucket[1]
@@ -187,8 +190,6 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
         if batch_by_words:
             check_condition(padded_seq_len <= batch_size, "Word batch size must cover sequence lengths for all"
                                                           " buckets: (%d > %d)" % (padded_seq_len, batch_size))
-            # Ensure the correct multiple for each batch per device.
-            min_batch_step = batch_sentences_multiple_of * batch_num_devices
             # Multiple of minimum batch step closest to target number of words,
             # assuming each sentence is of average length
             batch_size_seq = min_batch_step * max(1, round((batch_size / average_seq_len) / min_batch_step))
@@ -510,6 +511,7 @@ class RawParallelDatasetLoader:
             bucket_sample_index[buck_index] += 1
 
         for i in range(len(data_source)):
+            # TODO(fhieber): Consider using pinned memory: mx.cpu_pinned() here
             data_source[i] = mx.nd.from_numpy(data_source[i], zero_copy=True)
             data_target[i] = mx.nd.from_numpy(data_target[i], zero_copy=True)
 
