@@ -730,6 +730,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # Automatic Mixed Precision training
     using_amp = False
     if args.amp:
+        check_condition(args.optimizer in C.OPTIMIZERS_SUPPORT_AMP,
+                        'AMP requires a supported optimizer: %s' % ' '.join(C.OPTIMIZERS_SUPPORT_AMP))
         using_amp = True
         amp.init()
 
