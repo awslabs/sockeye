@@ -38,6 +38,7 @@ from . import vocab
 from . import parallel
 from .config import Config
 from .model import SockeyeModel
+from .optimizers import OptimizerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,7 @@ class TrainState:
 class GluonEarlyStoppingTrainer:
     def __init__(self,
                  config: TrainerConfig,
+                 optimizer_config: OptimizerConfig,
                  sockeye_model: SockeyeModel,
                  trainer: mx.gluon.Trainer,
                  loss_functions: List[loss.Loss],
@@ -155,17 +157,19 @@ class GluonEarlyStoppingTrainer:
                  using_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None) -> None:
         self.config = config
+        self.optimizer_config = optimizer_config
         self.model = sockeye_model
         self.trainer = trainer
         self.loss_functions = loss_functions
         self.context = context
+        self.dtype = dtype
+        self.using_amp = using_amp
         self._parallel = parallel.Parallel(len(context) if len(context) > 1 else 0,
                                            ParallelModel(sockeye_model,
                                                          loss_functions,
                                                          trainer,
                                                          rescale_factor=self.config.update_interval,
                                                          using_amp=using_amp))
-        self.dtype = dtype
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
@@ -467,6 +471,9 @@ class GluonEarlyStoppingTrainer:
                 adjusted_lr = self.trainer.optimizer.lr_scheduler.lr
                 # trainer.load_states also reloads the parameters
                 self._load_trainer_states(self.best_optimizer_states_fname)
+                # Re-initialize the loaded trainer/optimizer state with AMP
+                if self.using_amp:
+                    amp_reinit_trainer(self.trainer, self.optimizer_config)
                 # state loading replaces the lr_scheduler instance which then contains the old learning rate,
                 # overwriting here. TODO: make this better...
                 self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
@@ -559,10 +566,12 @@ class GluonEarlyStoppingTrainer:
         # (5) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
 
-        # trainer.save_states also pickles optimizers and their lr schedulers.
-        # # (6) Learning rate scheduler
-        # with open(os.path.join(training_state_dirname, C.SCHEDULER_STATE_NAME), "wb") as fp:
-        #     pickle.dump(self.trainer.optimizer.lr_scheduler, fp)
+        # (6) AMP loss scaler state
+        if self.using_amp:
+            with open(os.path.join(training_state_dirname, C.AMP_LOSS_SCALER_STATE_NAME), "wb") as fp:
+                pickle.dump([self.trainer._amp_loss_scaler._loss_scale,
+                             self.trainer._amp_loss_scaler._next_loss_scale,
+                             self.trainer._amp_loss_scaler._unskipped], fp)
 
         # First we rename the existing directory to minimize the risk of state
         # loss if the process is aborted during deletion (which will be slower
@@ -601,10 +610,15 @@ class GluonEarlyStoppingTrainer:
         # (5) Training state
         self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
-        # trainer.save_states also pickles optimizers and their lr schedulers. additional loading not required
-        # # (6) Learning rate scheduler
-        # with open(os.path.join(self.training_state_dirname, C.SCHEDULER_STATE_NAME), "rb") as fp:
-        #     self.trainer.optimizer.lr_scheduler = pickle.load(fp)
+        # (6) AMP loss scaler state
+        if self.using_amp:
+            # Re-initialize loaded trainer/optimizer with AMP
+            amp_reinit_trainer(self.trainer, self.optimizer_config)
+            # Load loss scaler state
+            with open(os.path.join(self.training_state_dirname, C.AMP_LOSS_SCALER_STATE_NAME), "rb") as fp:
+                (self.trainer._amp_loss_scaler._loss_scale,
+                 self.trainer._amp_loss_scaler._next_loss_scale,
+                 self.trainer._amp_loss_scaler._unskipped) = pickle.load(fp)
 
     def _cleanup(self, keep_training_state=False):
         """
@@ -810,3 +824,17 @@ def safe_custom_metrics_logger(logging_function: Callable,
         logging_function({m.name: m.get() for m in metrics}, global_step)
     except Exception as e:
         logging.warning("Didn't use custom metrics logger, exception '{}' occured".format(str(e)))
+
+
+def amp_reinit_trainer(trainer: mx.gluon.Trainer, optimizer_config: OptimizerConfig):
+    """
+    Safely re-initialize a Gluon Trainer with AMP
+    """
+    # These attributes are replaced by AMP
+    trainer._scale = trainer._amp_original_scale
+    old_update = trainer._old_update
+    # Create a clean optimizer for AMP to patch
+    trainer._init_optimizer(optimizer_config.name, optimizer_config.params)
+    amp.init_trainer(trainer)
+    # Replace attributes with correct versions
+    trainer._old_update = old_update

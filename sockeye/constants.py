@@ -202,6 +202,7 @@ OPT_STATES_INITIAL = "mx_optimizer_initial.pkl"
 BUCKET_ITER_STATE_NAME = "bucket.pkl"
 RNG_STATE_NAME = "rng.pkl"
 TRAINING_STATE_NAME = "training.pkl"
+AMP_LOSS_SCALER_STATE_NAME = "amp_loss_scaler.pkl"
 SCHEDULER_STATE_NAME = "scheduler.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.yaml"
@@ -254,6 +255,7 @@ OPTIMIZER_ADAM = "adam"
 OPTIMIZER_BERTADAM = "bertadam"
 OPTIMIZER_SGD = "sgd"
 OPTIMIZERS = [OPTIMIZER_ADAM, OPTIMIZER_BERTADAM, OPTIMIZER_SGD]
+OPTIMIZERS_SUPPORT_AMP = [OPTIMIZER_BERTADAM]
 
 LR_SCHEDULER_INV_SQRT_DECAY = 'inv-sqrt-decay'
 LR_SCHEDULER_LINEAR_DECAY = 'linear-decay'
@@ -342,7 +344,7 @@ LARGEST_INT = sys.maxsize
 
 # see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
 # TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutput loss for CE.
-FIXED_GRAD_SCALE_FP16 = 8192.0
+FIXED_GRAD_SCALE_FP16 = 1024.0
 
 LHUC_PREFIX = "lhuc_"
 # lhuc application points

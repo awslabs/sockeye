@@ -17,6 +17,7 @@
 # under the License.
 
 """Weight updating functions."""
+from abc import abstractmethod
 import warnings
 import numpy
 from mxnet.optimizer import Optimizer, register
@@ -65,12 +66,13 @@ class BERTAdam(Optimizer):
         self.beta2 = beta2
         self.epsilon = epsilon
 
-    def new_update_multi_precision(self, index, weight, grad, state):
+    @abstractmethod
+    def new_update_multi_precision(self):
         """
-        AMP/Pickle compatibility: class must have this method or unpickling will
-        fail with an AttributeError.
+        AMP/Pickle compatibility: this method must be present for Gluon Trainer
+        state to be loaded correctly.
         """
-        return
+        raise NotImplementedError
 
     def create_state_multi_precision(self, index, weight):
         """multi-precision state creation function."""
