@@ -606,8 +606,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     if args.momentum is not None:
         optimizer_params["momentum"] = args.momentum
     # We normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
-    # store.num_workers * accumulate ??
-    optimizer_params["rescale_grad"] = 1.0 / args.update_interval
+    optimizer_params["rescale_grad"] = 1.0
     if args.dtype == C.DTYPE_FP16:
         os.environ[C.MXNET_SAFE_ACCUMULATION] = '1'
         optimizer_params["multi_precision"] = True
@@ -730,8 +729,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # Automatic Mixed Precision training
     using_amp = False
     if args.amp:
-        check_condition(args.optimizer in C.OPTIMIZERS_SUPPORT_AMP,
-                        'AMP requires a supported optimizer: %s' % ' '.join(C.OPTIMIZERS_SUPPORT_AMP))
         using_amp = True
         amp.init()
 

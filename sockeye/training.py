@@ -471,9 +471,6 @@ class GluonEarlyStoppingTrainer:
                 adjusted_lr = self.trainer.optimizer.lr_scheduler.lr
                 # trainer.load_states also reloads the parameters
                 self._load_trainer_states(self.best_optimizer_states_fname)
-                # Re-initialize the loaded trainer/optimizer state with AMP
-                if self.using_amp:
-                    amp_reinit_trainer(self.trainer, self.optimizer_config)
                 # state loading replaces the lr_scheduler instance which then contains the old learning rate,
                 # overwriting here. TODO: make this better...
                 self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
@@ -525,7 +522,7 @@ class GluonEarlyStoppingTrainer:
                                    self.state.best_checkpoint, self.config.keep_initializations)
 
     def _save_trainer_states(self, fname):
-        self.trainer.save_states(fname)
+        trainer_save_states_no_dump_optimizer(self.trainer, fname)
         logger.info('Saved optimizer states to "%s"', fname)
 
     def _load_trainer_states(self, fname):
@@ -612,8 +609,6 @@ class GluonEarlyStoppingTrainer:
 
         # (6) AMP loss scaler state
         if self.using_amp:
-            # Re-initialize loaded trainer/optimizer with AMP
-            amp_reinit_trainer(self.trainer, self.optimizer_config)
             # Load loss scaler state
             with open(os.path.join(self.training_state_dirname, C.AMP_LOSS_SCALER_STATE_NAME), "rb") as fp:
                 (self.trainer._amp_loss_scaler._loss_scale,
@@ -826,15 +821,27 @@ def safe_custom_metrics_logger(logging_function: Callable,
         logging.warning("Didn't use custom metrics logger, exception '{}' occured".format(str(e)))
 
 
-def amp_reinit_trainer(trainer: mx.gluon.Trainer, optimizer_config: OptimizerConfig):
+def trainer_save_states_no_dump_optimizer(trainer: mx.gluon.Trainer, fname: str):
     """
-    Safely re-initialize a Gluon Trainer with AMP
+    Otherwise exact copy of `Trainer.save_states` that does not include a
+    pickled optimizer instance as part of the state.  This is compatible with
+    the standard `Trainer.load_states`, which will handle a state file with no
+    optimizer instance (any statements involving `self._optimizer` become
+    no-ops).  This is especially important when using AMP, which patches the
+    optimizer at runtime with references to a specific loss scaler instance.
+    Loading a stale optimizer instance causes errors.
     """
-    # These attributes are replaced by AMP
-    trainer._scale = trainer._amp_original_scale
-    old_update = trainer._old_update
-    # Create a clean optimizer for AMP to patch
-    trainer._init_optimizer(optimizer_config.name, optimizer_config.params)
-    amp.init_trainer(trainer)
-    # Replace attributes with correct versions
-    trainer._old_update = old_update
+    assert trainer._optimizer is not None
+
+    if not trainer._kv_initialized:
+        trainer._init_kvstore()
+    if trainer._params_to_init:
+        trainer._init_params()
+
+    if trainer._update_on_kvstore:
+        assert not trainer._params_to_init, "Cannot save trainer states when some " \
+                                            "parameters are not yet initialized in kvstore."
+        trainer._kvstore.save_optimizer_states(fname, dump_optimizer=False)
+    else:
+        with open(fname, 'wb') as fout:
+            fout.write(trainer._updaters[0].get_states(dump_optimizer=False))
