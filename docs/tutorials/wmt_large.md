@@ -105,7 +105,10 @@ nvidia-docker run --rm -i -v $(pwd):/work -w /work sockeye:$TAG \
         -o prepared_data \
         --shared-vocab \
         --word-min-count 2 \
-        --max-seq-len 99 \
+        --pad-vocab-to-multiple-of 8 \
+        --bucket-width 8 \
+        --no-bucket-scaling \
+        --max-seq-len 95 \
         --num-samples-per-shard 10000000 \
         --seed 1
 ```
@@ -127,8 +130,10 @@ nvidia-docker run --rm -i -v $(pwd):/work -w /work -e OMP_NUM_THREADS=4 sockeye:
         --weight-tying-type src_trg_softmax \
         --optimizer adam \
         --batch-size 8192 \
-        --checkpoint-interval 4000 \
-        --initial-learning-rate 0.0002 \
+        --update-interval 4 \
+        --round-batch-sizes-to-multiple-of 8 \
+        --checkpoint-interval 1000 \
+        --initial-learning-rate 0.0004 \
         --learning-rate-reduce-factor 0.9 \
         --learning-rate-reduce-num-not-improved 8 \
         --max-num-checkpoint-not-improved 60 \
@@ -137,13 +142,15 @@ nvidia-docker run --rm -i -v $(pwd):/work -w /work -e OMP_NUM_THREADS=4 sockeye:
         --seed 1
 ```
 
-This trains a "base" [Transformer](https://arxiv.org/abs/1706.03762) model using the [Adam](https://arxiv.org/abs/1412.6980) optimizer with a batch size of 8192 tokens.
-The learning rate will automatically reduce when validation perplexity does not improve for 8 checkpoints (4000 batches per checkpoint) and training will conclude when validation perplexity does not improve for 60 checkpoints.
+**Faster training**:
+
+- To run FP16 training using a fixed loss scaling factor, add `--dtype float16`.
+- To use MXNet's Automatic Mixed Precision, add `--amp`.
+
+This trains a "base" [Transformer](https://arxiv.org/abs/1706.03762) model using the [Adam](https://arxiv.org/abs/1412.6980) optimizer with a batch size of 32,768 (8192 x 4) tokens.
+The learning rate will automatically reduce when validation perplexity does not improve for 8 checkpoints (1000 updates per checkpoint) and training will conclude when validation perplexity does not improve for 60 checkpoints.
 At each checkpoint, Sockeye runs a separate decoder process to evaluate metrics such as BLEU on a sample of the validation data (500 sentences).
 Note that these scores are calculated on the tokens provided to Sockeye, e.g. in this tutorial BLEU will be calculated on the sub-words we created above.
-
-Training this model takes around 100 hours (25 epochs) on 4 NVIDIA Tesla V100-SXM2-16GB GPUs.
-Training perplexity reaches ~4.45 and validation perplexity reaches ~3.05.
 
 ## Evaluation
 
@@ -171,6 +178,5 @@ nvidia-docker run --rm -i -v $(pwd):/work -w /work sockeye:$TAG \
     sacrebleu newstest2017.tc.en -tok none -i newstest2017.tc.hyp
 ```
 
-The result should be near 36 BLEU.
 Note that this is tokenized, normalized, and true-cased data.
 If we were actually participating in WMT, the translations would need to be recased and detokenized for human evaluation.
