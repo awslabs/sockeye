@@ -168,7 +168,6 @@ class GluonEarlyStoppingTrainer:
                                            ParallelModel(sockeye_model,
                                                          loss_functions,
                                                          trainer,
-                                                         rescale_factor=self.config.update_interval,
                                                          using_amp=using_amp))
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
@@ -310,8 +309,13 @@ class GluonEarlyStoppingTrainer:
         self.state.batches += 1
         loss_outputs = self._forward_backward(batch)
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
-            self.trainer.step(1)  # 1: We already normalized
+            # `step` rescales the gradients for the number of batches in this
+            # update.
+            self.trainer.step(batch_size=self.config.update_interval)
             if self.config.update_interval > 1:
+                # Multi-batch updates sum gradients for each batch instead of
+                # overwriting, so gradients must be manually zeroed after each
+                # update.
                 self.model.collect_params().zero_grad()
             self.state.updates += 1
 
@@ -663,12 +667,10 @@ class ParallelModel(parallel.Parallelizable):
                  model: Callable,
                  loss_functions: List[loss.Loss],
                  trainer: mx.gluon.Trainer,
-                 rescale_factor: float,
                  using_amp: bool = False) -> None:
         self.model = model
         self.loss_functions = loss_functions
         self.trainer = trainer
-        self.rescale_factor = rescale_factor
         self.using_amp = using_amp
 
     def forward_backward(self, shard: Tuple) -> List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]:
@@ -680,10 +682,10 @@ class ParallelModel(parallel.Parallelizable):
             outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
             loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
             loss_values = (v for v, _ in loss_outputs)
-            sum_losses = mx.nd.add_n(*loss_values) / self.rescale_factor
-            # Note: rescaling works for all loss functions except softmax output, which requires grad_scale to be set
-            # directly in the op call (see loss function implementation).
+            sum_losses = mx.nd.add_n(*loss_values)
             if self.using_amp:
+                # AMP applies dynamic loss scaling to the losses (scale up) and
+                # the Trainer (scale down).
                 with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
                     mx.autograd.backward(scaled_loss)
             else:

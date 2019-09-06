@@ -556,7 +556,6 @@ def create_model_config(args: argparse.Namespace,
 
 def create_losses(args: argparse.Namespace) -> List[loss.Loss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
-    softmax_output_grad_scale /= float(args.update_interval)
     losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
                                     weight=softmax_output_grad_scale,
                                     label_smoothing=args.label_smoothing,
