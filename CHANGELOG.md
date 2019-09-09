@@ -11,8 +11,8 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 ## [1.18.109]
-### Changed
-- Restricted the custom logging function to accept only a dictionary and a compulsory global_step parameter. Also fixed its usage by explicitly prefixing training and validation metrics.
+### Fixed
+- Fixed the metric names by prefixing training metrics with 'train-' and validation metrics with 'val-'. Also restricted the custom logging function to accept only a dictionary and a compulsory global_step parameter.
 
 ## [1.18.108]
 ### Changed
