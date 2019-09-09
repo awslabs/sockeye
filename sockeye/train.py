@@ -746,8 +746,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # sub-directories.
         if horovod_mpi.hvd.rank() > 0:
             args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_mpi.hvd.rank()))
-            # Do not keep extensive checkpoint histories for secondary workers
-            args.keep_last_params = 1
+            # Do not keep redundant copies of the checkpoint history
+            args.keep_last_params = 0
         # Use a different random seed for each worker
         args.seed += horovod_mpi.hvd.rank()
 
