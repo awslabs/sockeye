@@ -841,8 +841,8 @@ def main():
 def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None) -> training.TrainState:
     """
     :param custom_metrics_logger: Optional custom metrics logging function. If supplied, takes care of metrics produced
-                                  during training in a custom way. It should accept a list or a dictionary of
-                                  (metric name, metric value) pairs, and an optional global_step/checkpoint parameter.
+                                  during training in a custom way. It should accept a dictionary of
+                                  metric name -> metric value pairs and a global_step/checkpoint parameter.
     """
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
