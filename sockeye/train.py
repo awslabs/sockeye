@@ -739,6 +739,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
+        # Unless explicitly set otherwise, use NCCL for same-host allreduce and
+        # MPI for cross-host allreduce.
+        if C.HOROVOD_HIERARCHICAL_ALLREDUCE not in os.environ:
+            os.environ[C.HOROVOD_HIERARCHICAL_ALLREDUCE] = '1'
         horovod_mpi.hvd.init()
         # Each worker uses a separate output directory.  The primary worker
         # (rank 0) writes files to the root of the output directory (standard

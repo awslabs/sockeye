@@ -22,6 +22,9 @@ import numpy as np
 # MXNet environment variables
 MXNET_SAFE_ACCUMULATION = 'MXNET_SAFE_ACCUMULATION'
 
+# Horovod environment variables
+HOROVOD_HIERARCHICAL_ALLREDUCE = 'HOROVOD_HIERARCHICAL_ALLREDUCE'
+
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
