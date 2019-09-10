@@ -582,7 +582,14 @@ class GluonEarlyStoppingTrainer:
             os.rename(self.training_state_dirname, delete_training_state_dirname)
         os.rename(training_state_dirname, self.training_state_dirname)
         if os.path.exists(delete_training_state_dirname):
-            shutil.rmtree(delete_training_state_dirname)
+            try:
+                shutil.rmtree(delete_training_state_dirname)
+            except FileNotFoundError:
+                # This can be occur on file systems with higher latency, such as
+                # distributed file systems.  While repeated occurrences of this
+                # warning may indicate a problem, seeing one or two warnings
+                # during training is usually fine.
+                logger.warning('Directory has already been removed: %s', delete_training_state_dirname)
 
     def _load_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
