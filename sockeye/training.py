@@ -749,12 +749,14 @@ class EarlyStoppingTrainer:
                             self.state.samples, time_cost, checkpoint_interval / time_cost)
                 for name, val in metric_train.get_name_value():
                     logger.info('Checkpoint [%d]\tTrain-%s=%f', self.state.checkpoint, name, val)
-                safe_custom_metrics_logger(self.custom_metrics_logger, metric_train.get_name_value(),
+                safe_custom_metrics_logger(self.custom_metrics_logger,
+                                           {'train-' + k: v for k, v in metric_train.get_name_value()},
                                            global_step=self.state.checkpoint)
                 self._evaluate(validation_iter, metric_val)
                 for name, val in metric_val.get_name_value():
                     logger.info('Checkpoint [%d]\tValidation-%s=%f', self.state.checkpoint, name, val)
-                safe_custom_metrics_logger(self.custom_metrics_logger, metric_val.get_name_value(),
+                safe_custom_metrics_logger(self.custom_metrics_logger,
+                                           {'val-' + k: v for k, v in metric_val.get_name_value()},
                                            global_step=self.state.checkpoint)
 
                 # (2) wait for checkpoint decoder results and fill self.state.metrics
