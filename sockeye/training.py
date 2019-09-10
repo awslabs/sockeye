@@ -386,20 +386,16 @@ class GluonEarlyStoppingTrainer:
                 # workers, causing potential desync if each worker makes its own
                 # check for key training decisions (reducing learning rate,
                 # early stopping, etc.).
-                if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
-                    # Horovod secondary workers: wait for primary worker to send
-                    # result.
-                    value_is_better = None  # type: Optional[bool]
-                    value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
-                else:
-                    # Horovod primary worker or non-Horovod: make authoritative
-                    # metric check.
+                value_is_better = None  # type: Optional[bool]
+                if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
+                    # Horovod primary worker or not using Horovod: make
+                    # authoritative metric check.
                     value_is_better = utils.metric_value_is_better(value,
                                                                    self.state.best_metric,
                                                                    self.config.early_stopping_metric)
-                    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() == 0:
-                        # Horovod primary worker: broadcast result.
-                        horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
+                if horovod_mpi.using_horovod():
+                    # Broadcast result across workers.
+                    value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
                 if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
