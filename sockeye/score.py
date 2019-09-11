@@ -24,7 +24,7 @@ from . import constants as C
 from . import data_io
 from . import scoring
 from . import utils
-from .beam_search import CandidateScorer
+from .inference import LengthPenalty, BrevityPenalty
 from .log import setup_main_logger
 from .model import load_model
 from .output_handler import get_output_handler
@@ -62,11 +62,13 @@ def score(args: argparse.Namespace):
 
         model, source_vocabs, target_vocab = load_model(args.model, context=context, dtype=args.dtype)
 
-        max_seq_len_source = model.max_supported_len_source
-        max_seq_len_target = model.max_supported_len_target
-        if args.max_seq_len is not None:
-            max_seq_len_source = min(args.max_seq_len[0] + C.SPACE_FOR_XOS, max_seq_len_source)
-            max_seq_len_target = min(args.max_seq_len[1] + C.SPACE_FOR_XOS, max_seq_len_target)
+        # TODO(fhieber): this will cause trimming of all sentences longer than max training sequence lengths.
+        # TODO(fhieber): ideally, we should allow splitting as in actual translation to compute reasonable scores.
+        if args.max_seq_len is None:
+            max_seq_len_source = model.max_supported_seq_len_source
+            max_seq_len_target = model.max_supported_seq_len_target
+        else:
+            max_seq_len_source, max_seq_len_target = args.max_seq_len
 
         hybridize = not args.no_hybridization
 
@@ -91,10 +93,11 @@ def score(args: argparse.Namespace):
         else:
             constant_length_ratio = -1.0
 
-        batch_scorer = scoring.BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
-                                                                  length_penalty_beta=args.length_penalty_beta,
-                                                                  brevity_penalty_weight=args.brevity_penalty_weight),
+        batch_scorer = scoring.BatchScorer(length_penalty=LengthPenalty(alpha=args.length_penalty_alpha,
+                                                                        beta=args.length_penalty_beta),
+                                           brevity_penalty=BrevityPenalty(weight=args.brevity_penalty_weight),
                                            score_type=args.score_type,
+                                           softmax_temperature=args.softmax_temperature,
                                            constant_length_ratio=constant_length_ratio)
         if hybridize:
             batch_scorer.hybridize(static_alloc=True)

@@ -448,7 +448,8 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
     Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
     """
     # Translate params that affect the score need to be used for scoring as well.
-    relevant_params = {'--brevity-penalty-type',
+    relevant_params = {'--softmax-temperature',
+                       '--brevity-penalty-type',
                        '--brevity-penalty-weight',
                        '--brevity-penalty-constant-length-ratio',
                        '--length-penalty-alpha',
@@ -484,19 +485,21 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
     with open(out_path) as score_out:
         score_scores = [float(line.strip()) for line in score_out]
 
+    # Compare scored output to original translation output. Unfortunately, sockeye.translate doesn't enforce
+    # generation of </s> and have had length normalization applied. So, skip all sentences that are as long
+    # as the maximum length, in order to safely exclude them.
     if test_similar_scores:
-        for inp, translate_tokens, translate_score, score_score in zip(data['test_inputs'],
-                                                                       translate_tokens,
-                                                                       data['test_scores'],
-                                                                       score_scores):
-            logger.info("tokens: %s || translate score: %.4f || score score: %.4f",
-                        translate_tokens, translate_score, score_score)
-            assert (translate_score == -np.inf and score_score == -np.inf) or np.isclose(translate_score,
-                                                                                         score_score,
-                                                                                         atol=1e-06),\
-                "input: %s || tokens: %s || translate score: %.6f || score score: %.6f" % (inp, translate_tokens,
-                                                                                           translate_score,
-                                                                                           score_score)
+        model_config = sockeye.model.SockeyeModel.load_config(os.path.join(data['model'], C.CONFIG_NAME))
+        max_len = model_config.config_data.max_seq_len_target
+
+        valid_outputs = list(filter(lambda x: len(x[0]) < max_len - 1,
+                                    zip(translate_tokens, data['test_scores'], score_scores)))
+        for translate_tokens, translate_score, score_score in valid_outputs:
+            # Skip sentences that are close to the maximum length to avoid confusion about whether
+            # the length penalty was applied
+            if len(translate_tokens) >= max_len - 2:
+                continue
+            assert (translate_score == -np.inf and score_score == -np.inf) or abs(translate_score - score_score) < 0.02
 
 
 def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
@@ -520,20 +523,18 @@ def collect_translate_output_and_scores(out_path: str) -> Tuple[List[str], List[
     Collects translation outputs and scores from an output file
     produced with the 'translation_and_score' or nbest output handler.
     """
-    logger.debug("collect_translate_output_and_scores(%s)", out_path)
     translations = []  # type: List[str]
     scores = []  # type: List[float]
     with open(out_path) as out_fh:
         for line in out_fh:
-            logger.debug(" line: %s", line.strip())
             output = line.strip()
             translation = ''
             score = -np.inf
             try:
-                json_output = json.loads(output)
+                output = json.loads(output)
                 try:
-                    translation = json_output['translation']
-                    score = json_output['score']
+                    translation = output['translation']
+                    score = output['score']
                 except IndexError:
                     pass
             except:

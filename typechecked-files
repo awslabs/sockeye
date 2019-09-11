@@ -4,7 +4,6 @@ sockeye/average.py
 sockeye/checkpoint_decoder.py
 sockeye/config.py
 sockeye/constants.py
-sockeye/beam_search.py
 sockeye/data_io.py
 sockeye/decoder.py
 sockeye/embeddings.py
@@ -22,7 +21,6 @@ sockeye/model.py
 sockeye/optimizers.py
 sockeye/output_handler.py
 sockeye/prepare_data.py
-sockeye/rerank.py
 sockeye/score.py
 sockeye/scoring.py
 sockeye/train.py
