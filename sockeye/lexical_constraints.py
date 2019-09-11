@@ -16,10 +16,6 @@ import logging
 from operator import attrgetter
 from typing import Dict, List, Optional, Tuple, Set
 
-from .data_io import read_content, tokens2ids
-from .vocab import Vocab
-from . import constants as C
-
 import mxnet as mx
 import numpy as np
 
@@ -99,18 +95,6 @@ class AvoidTrie:
         :return: The set of word IDs that end a constraint at this state.
         """
         return self.final_ids
-
-
-def get_avoid_trie(avoid_list: str, vocab: Vocab) -> AvoidTrie:
-    trie = AvoidTrie()
-    unk_id = vocab[C.UNK_SYMBOL]
-    for phrase in read_content(avoid_list):
-        phrase_ids = tokens2ids(phrase, vocab)
-        if unk_id in phrase_ids:
-            logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.",
-                           ' '.join(phrase), C.UNK_SYMBOL)
-        trie.add_phrase(phrase_ids)
-    return trie
 
 
 class AvoidState:

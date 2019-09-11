@@ -53,6 +53,7 @@ class CheckpointDecoder:
     :param nbest_size: Size of nbest lists.
     :param length_penalty_alpha: Alpha factor for the length penalty
     :param length_penalty_beta: Beta factor for the length penalty
+    :param softmax_temperature: Optional parameter to control steepness of softmax distribution.
     :param max_output_length_num_stds: Number of standard deviations as safety margin for maximum output length.
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param sample_size: Maximum number of sentences to sample and decode. If <=0, all sentences are used.
@@ -75,6 +76,7 @@ class CheckpointDecoder:
                  bucket_width_source: int = 10,
                  length_penalty_alpha: float = 1.0,
                  length_penalty_beta: float = 0.0,
+                 softmax_temperature: Optional[float] = None,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  ensemble_mode: str = 'linear',
                  sample_size: int = -1,
@@ -89,6 +91,7 @@ class CheckpointDecoder:
         self.bucket_width_source = bucket_width_source
         self.length_penalty_alpha = length_penalty_alpha
         self.length_penalty_beta = length_penalty_beta
+        self.softmax_temperature = softmax_temperature
         self.model = model
 
         with ExitStack() as exit_stack:
@@ -118,26 +121,23 @@ class CheckpointDecoder:
 
         self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
 
-        scorer = inference.CandidateScorer(
-            length_penalty_alpha=length_penalty_alpha,
-            length_penalty_beta=length_penalty_beta,
-            brevity_penalty_weight=0.0,
-            prefix='scorer_')
-
         # TODO: possibly support decoding on multiple GPUs
         self.translator = inference.Translator(
             batch_size=self.batch_size,
             context=context,
             ensemble_mode=self.ensemble_mode,
-            scorer=scorer,
+            length_penalty=inference.LengthPenalty(self.length_penalty_alpha, self.length_penalty_beta),
+            brevity_penalty=inference.BrevityPenalty(weight=0.0),
+            beam_prune=0.0,
             beam_search_stop='all',
             nbest_size=self.nbest_size,
             models=[self.model],
             source_vocabs=source_vocabs,
             target_vocab=target_vocab,
             restrict_lexicon=None,
+            store_beam=False,
             hybridize=hybridize)
-
+        
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, num_sentences=%d)",
                     max_input_len if max_input_len is not None else -1, beam_size, len(self.target_sentences))
 

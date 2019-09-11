@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 import sockeye.scoring
-from sockeye.beam_search import CandidateScorer
+from sockeye.inference import LengthPenalty, BrevityPenalty
 
 import mxnet as mx
 
@@ -27,8 +27,10 @@ def test_batch_scorer():
     length_ratio = mx.nd.ones((batch,))
     source_length = mx.nd.cast(mx.nd.random.randint(0, seq, (batch,)), 'float32')
     target_length = source_length
-    b = sockeye.scoring.BatchScorer(scorer=CandidateScorer(1.0, 0.0, 0.0),
+    b = sockeye.scoring.BatchScorer(length_penalty=LengthPenalty(alpha=1.0, beta=0.0),
+                                    brevity_penalty=BrevityPenalty(weight=0.0),
                                     score_type='neglogprob',
+                                    softmax_temperature=None,
                                     constant_length_ratio=None)
     b.hybridize()
     scores = b(logits, label, length_ratio, source_length, target_length)

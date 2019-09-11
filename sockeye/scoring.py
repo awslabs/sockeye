@@ -26,8 +26,8 @@ from . import constants as C
 from . import data_io
 from . import inference
 from . import vocab
+from .inference import TranslatorInput, TranslatorOutput
 from .model import SockeyeModel
-from .beam_search import CandidateScorer
 from .output_handler import OutputHandler
 
 logger = logging.getLogger(__name__)
@@ -36,13 +36,17 @@ logger = logging.getLogger(__name__)
 class BatchScorer(mx.gluon.HybridBlock):
 
     def __init__(self,
-                 scorer: CandidateScorer,
+                 length_penalty: inference.LengthPenalty,
+                 brevity_penalty: inference.BrevityPenalty,
                  score_type: str = C.SCORING_TYPE_DEFAULT,
+                 softmax_temperature: Optional[float] = None,
                  constant_length_ratio: Optional[float] = None,
                  prefix='BatchScorer_') -> None:
         super().__init__(prefix=prefix)
         self.score_type = score_type
-        self.scorer = scorer
+        self.softmax_temperature = softmax_temperature
+        self.length_penalty = length_penalty
+        self.brevity_penalty = brevity_penalty
         self.constant_length_ratio = constant_length_ratio
 
     def hybrid_forward(self, F, logits, labels, length_ratio, source_length, target_length):
@@ -56,25 +60,29 @@ class BatchScorer(mx.gluon.HybridBlock):
         :param target_length: Target lengths. Shape: (batch,).
         :return: Sequence scores. Shape: (batch,).
         """
-        logprobs = F.log_softmax(logits, axis=-1)
+        if self.softmax_temperature is not None:
+            logits = logits / self.softmax_temperature
+        target_dists = F.softmax(logits, axis=-1)
 
         # Select the label probability, then take their logs.
         # probs and scores: (batch_size, target_seq_len)
-        token_scores = F.pick(logprobs, labels, axis=-1)
+        probs = F.pick(target_dists, labels, axis=-1)
+        token_scores = F.log(probs)
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
             token_scores = token_scores * -1
 
         # Sum, then apply length penalty. The call to `mx.sym.where` masks out invalid values from scores.
         # zeros and sums: (batch_size,)
-        scores = F.sum(F.where(labels != 0, token_scores, F.zeros_like(token_scores)), axis=1)
+        scores = F.sum(F.where(labels != 0, token_scores, F.zeros_like(token_scores)), axis=1) / (
+                     self.length_penalty(target_length - 1))
 
-        if self.constant_length_ratio is not None and self.constant_length_ratio > 0.0:
-            predicted_output_length = source_length * self.constant_length_ratio
-        else:
-            predicted_output_length = source_length * length_ratio
+        # Deal with the potential presence of brevity penalty
+        # length_ratio: (batch_size,)
+        if self.constant_length_ratio is not None:
+            # override all ratios with the constant value
+            length_ratio = length_ratio + self.constant_length_ratio * F.ones_like(scores)
 
-        scores = self.scorer(scores, target_length, predicted_output_length)
-
+        scores = scores - self.brevity_penalty(target_length - 1, length_ratio * source_length)
         return scores
 
 
@@ -100,12 +108,14 @@ class Scorer:
         self.model = model
         self.batch_scorer = batch_scorer
         self.context = context
-        self.exclude_list = {C.BOS_ID, C.EOS_ID, C.PAD_ID}
+        self.exclude_list = {source_vocabs[0][C.BOS_SYMBOL], target_vocab[C.EOS_SYMBOL], C.PAD_ID}
 
     def score_batch(self, batch: data_io.Batch) -> mx.nd.NDArray:
         batch = batch.split_and_load(ctx=self.context)
         batch_scores = []  # type: List[mx.nd.NDArray]
         for inputs, labels in batch.shards():
+            if self.model.dtype == C.DTYPE_FP16:
+                inputs = (i.astype(C.DTYPE_FP16, copy=False) for i in inputs)  # type: ignore
             source, source_length, target, target_length = inputs
             outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
             logits = outputs[C.LOGITS_NAME]  # type: mx.nd.NDArray
@@ -128,25 +138,25 @@ class Scorer:
             batch_time = time.time() - batch_tic
             total_time += batch_time
 
-            for sentno, (source, target, score) in enumerate(zip(batch.source.astype('int32')[:, :, 0].asnumpy(),
-                                                                 batch.target.astype('int32').asnumpy(),
-                                                                 scores.asnumpy()), 1):
+            for sentno, (source, target, score) in enumerate(zip(batch.source, batch.target, scores), 1):
                 sentence_no += 1
 
                 # Transform arguments in preparation for printing
-                source_ids = source.tolist()
+                source_ids = [int(x) for x in source[:, 0].asnumpy().tolist()]
                 source_tokens = list(data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
-                target_ids = target.tolist()
+                target_ids = [int(x) for x in target.asnumpy().tolist()]
                 target_string = C.TOKEN_SEPARATOR.join(
                     data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
 
                 # Report a score of -inf for invalid sentence pairs (empty source and/or target)
-                if source[0] == C.PAD_ID or target[0] == C.PAD_ID:
+                if source[0][0] == C.PAD_ID or target[0] == C.PAD_ID:
                     score = -np.inf
+                else:
+                    score = score.asscalar()
 
                 # Output handling routines require us to make use of inference classes.
-                output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),
-                                      inference.TranslatorOutput(sentence_no, target_string, None, score),
+                output_handler.handle(TranslatorInput(sentence_no, source_tokens),
+                                      TranslatorOutput(sentence_no, target_string, None, score),
                                       batch_time)
 
         if sentence_no != 0:

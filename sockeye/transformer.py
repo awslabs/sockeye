@@ -11,13 +11,17 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import Optional, Tuple
+from typing import Optional, TYPE_CHECKING, Tuple
 
 import mxnet as mx
+from sockeye.utils import NDarrayOrSymbol
 
 from . import config
 from . import constants as C
 from . import layers
+
+if TYPE_CHECKING:
+    from . import encoder
 
 
 class TransformerConfig(config.Config):

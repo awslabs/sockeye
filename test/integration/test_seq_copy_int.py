@@ -26,7 +26,6 @@ import sockeye.checkpoint_decoder
 import sockeye.evaluate
 import sockeye.extract_parameters
 from sockeye import constants as C
-from sockeye.model import load_model
 from test.common import check_train_translate, run_train_translate, tmp_digits_dataset
 
 logger = logging.getLogger(__name__)
@@ -52,7 +51,7 @@ ENCODER_DECODER_SETTINGS = [
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2 --nbest-size 2",
      False, False),
-    # Basic transformer w/ prepared data & greedy decoding
+    # Basic transformer w/ prepared data & greedy and skip-topk decoding
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
@@ -61,7 +60,7 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
-     "--beam-size 1",
+     "--beam-size 1 --softmax-temperature 0.01 --skip-topk",
      True, False),
     # Basic transformer with source factor, beam-search-stop first decoding
     ("--encoder transformer --decoder transformer"
@@ -73,7 +72,7 @@ ENCODER_DECODER_SETTINGS = [
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-combine sum",
      "--beam-size 2 --beam-search-stop first",
      True, True),
-    # Basic transformer with LHUC
+    # Basic transformer with LHUC, beam-prune 1 decoding
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
@@ -82,7 +81,7 @@ ENCODER_DECODER_SETTINGS = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
-     "--beam-size 2",
+     "--beam-size 2 --beam-prune 1",
      False, False),
     # Basic transformer and length ratio prediction, and learned brevity penalty during inference
     ("--encoder transformer --decoder transformer"
@@ -141,7 +140,7 @@ def test_seq_copy(train_params: str,
                               translate_params=translate_params,
                               data=data,
                               use_prepared_data=use_prepared_data,
-                              max_seq_len=_LINE_MAX_LENGTH,
+                              max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
                               compare_output=False)
 
 
@@ -170,7 +169,7 @@ def test_other_clis(train_params: str, translate_params: str):
         data = run_train_translate(train_params=train_params,
                                    translate_params=translate_params,
                                    data=data,
-                                   max_seq_len=_LINE_MAX_LENGTH)
+                                   max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS)
 
         _test_checkpoint_decoder(data['dev_source'], data['dev_target'], data['model'])
         _test_parameter_averaging(data['model'])
@@ -232,7 +231,9 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
         num_dev_sent = sum(1 for _ in dev_fd)
     sample_size = min(1, int(num_dev_sent * 0.1))
 
-    model, source_vocabs, target_vocab = load_model(model_folder=model_path, context=[mx.cpu()])
+    model, source_vocabs, target_vocab = sockeye.model.load_model(
+        model_folder=model_path,
+        context=[mx.cpu()])
 
     cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
                                                               inputs=[dev_source_path],
