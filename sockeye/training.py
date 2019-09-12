@@ -168,7 +168,6 @@ class GluonEarlyStoppingTrainer:
                                            ParallelModel(sockeye_model,
                                                          loss_functions,
                                                          trainer,
-                                                         rescale_factor=self.config.update_interval,
                                                          using_amp=using_amp))
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
@@ -310,8 +309,13 @@ class GluonEarlyStoppingTrainer:
         self.state.batches += 1
         loss_outputs = self._forward_backward(batch)
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
-            self.trainer.step(1)  # 1: We already normalized
+            # `step` rescales the gradients for the number of batches in this
+            # update.
+            self.trainer.step(batch_size=self.config.update_interval)
             if self.config.update_interval > 1:
+                # Multi-batch updates sum gradients for each batch instead of
+                # overwriting, so gradients must be manually zeroed after each
+                # update.
                 self.model.collect_params().zero_grad()
             self.state.updates += 1
 
@@ -382,20 +386,16 @@ class GluonEarlyStoppingTrainer:
                 # workers, causing potential desync if each worker makes its own
                 # check for key training decisions (reducing learning rate,
                 # early stopping, etc.).
-                if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
-                    # Horovod secondary workers: wait for primary worker to send
-                    # result.
-                    value_is_better = None  # type: Optional[bool]
-                    value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
-                else:
-                    # Horovod primary worker or non-Horovod: make authoritative
-                    # metric check.
+                value_is_better = None  # type: Optional[bool]
+                if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
+                    # Horovod primary worker or not using Horovod: make
+                    # authoritative metric check.
                     value_is_better = utils.metric_value_is_better(value,
                                                                    self.state.best_metric,
                                                                    self.config.early_stopping_metric)
-                    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() == 0:
-                        # Horovod primary worker: broadcast result.
-                        horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
+                if horovod_mpi.using_horovod():
+                    # Broadcast result across workers.
+                    value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
                 if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
@@ -578,7 +578,14 @@ class GluonEarlyStoppingTrainer:
             os.rename(self.training_state_dirname, delete_training_state_dirname)
         os.rename(training_state_dirname, self.training_state_dirname)
         if os.path.exists(delete_training_state_dirname):
-            shutil.rmtree(delete_training_state_dirname)
+            try:
+                shutil.rmtree(delete_training_state_dirname)
+            except FileNotFoundError:
+                # This can be occur on file systems with higher latency, such as
+                # distributed file systems.  While repeated occurrences of this
+                # warning may indicate a problem, seeing one or two warnings
+                # during training is usually fine.
+                logger.warning('Directory has already been removed: %s', delete_training_state_dirname)
 
     def _load_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
@@ -663,12 +670,10 @@ class ParallelModel(parallel.Parallelizable):
                  model: Callable,
                  loss_functions: List[loss.Loss],
                  trainer: mx.gluon.Trainer,
-                 rescale_factor: float,
                  using_amp: bool = False) -> None:
         self.model = model
         self.loss_functions = loss_functions
         self.trainer = trainer
-        self.rescale_factor = rescale_factor
         self.using_amp = using_amp
 
     def forward_backward(self, shard: Tuple) -> List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]:
@@ -680,10 +685,10 @@ class ParallelModel(parallel.Parallelizable):
             outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
             loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
             loss_values = (v for v, _ in loss_outputs)
-            sum_losses = mx.nd.add_n(*loss_values) / self.rescale_factor
-            # Note: rescaling works for all loss functions except softmax output, which requires grad_scale to be set
-            # directly in the op call (see loss function implementation).
+            sum_losses = mx.nd.add_n(*loss_values)
             if self.using_amp:
+                # AMP applies dynamic loss scaling to the losses (scale up) and
+                # the Trainer (scale down).
                 with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
                     mx.autograd.backward(scaled_loss)
             else:

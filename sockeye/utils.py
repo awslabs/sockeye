@@ -751,7 +751,14 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
         if n != best_checkpoint:
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
-                os.remove(param_fname_n)
+                try:
+                    os.remove(param_fname_n)
+                except FileNotFoundError:
+                    # This can be occur on file systems with higher latency,
+                    # such as distributed file systems.  While repeated
+                    # occurrences of this warning may indicate a problem, seeing
+                    # one or two warnings during training is usually fine.
+                    logger.warning('File has already been removed: %s', param_fname_n)
 
 
 def cast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:

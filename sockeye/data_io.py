@@ -1414,9 +1414,23 @@ class ParallelDataSet(Sized):
             bucket_target = self.target[bucket_idx]
             num_samples = bucket_source.shape[0]
 
-            # Fill up the last batch by randomly sampling from the extant items.
+            # Determine the target number of samples (current value or minimally
+            # higher value that meets the batch size requirement).
+            target_num_samples = num_samples
             if num_samples % bucket_batch_size != 0:
-                rest = bucket_batch_size - num_samples % bucket_batch_size
+                target_num_samples = num_samples + (bucket_batch_size - (num_samples % bucket_batch_size))
+
+            if horovod_mpi.using_horovod():
+                # Workers load different slices of the data.  When the total
+                # number of samples is not evenly divisible by the number of
+                # workers, each worker may have +/- 1 sample.  Use the largest
+                # target number of samples across all workers to keep the number
+                # of batches in sync and guarantee that all samples are used.
+                target_num_samples = max(horovod_mpi.MPI.COMM_WORLD.allgather(target_num_samples))
+
+            # Fill up the last batch by randomly sampling from the extant items.
+            rest = target_num_samples - num_samples
+            if rest > 0:
                 desired_indices_np = rs.randint(num_samples, size=rest)
                 desired_indices = mx.nd.from_numpy(desired_indices_np, zero_copy=True)
                 source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
@@ -1695,6 +1709,10 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
 
             self.shards_fnames = [next_shard_fname] + remaining_shards
 
+            if horovod_mpi.using_horovod():
+                # Synchronize shard order across workers
+                horovod_mpi.MPI.COMM_WORLD.bcast(self.shards_fnames, root=0)
+
             self.shard_index = 0
             self._load_shard()
         else:
@@ -1770,8 +1788,13 @@ class ParallelSampleIter(BaseParallelSampleIter):
         """
         self.curr_batch_index = 0
         if self.permute:
-            # shuffle batch start indices
-            random.shuffle(self.batch_indices)
+            # Primary worker or not using Horovod: shuffle batch start indices.
+            if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
+                random.shuffle(self.batch_indices)
+            if horovod_mpi.using_horovod():
+                # Synchronize order across workers.  This guarantees that each
+                # worker processes a batch from the same bucket at each step.
+                self.batch_indices = horovod_mpi.MPI.COMM_WORLD.bcast(self.batch_indices, root=0)
 
             # restore the data permutation
             self.data = self.data.permute(self.inverse_data_permutations)

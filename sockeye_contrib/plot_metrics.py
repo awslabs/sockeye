@@ -24,6 +24,7 @@ import numpy as np
 PARSE_ENTRY = defaultdict(lambda: str)
 PARSE_ENTRY.update({
     'bleu-val': float,
+    'bleu-test': float,
     'chrf-val': float,
     'epoch': int,
     'learning-rate': float,
@@ -35,6 +36,7 @@ PARSE_ENTRY.update({
 FIND_BEST = defaultdict(lambda: max)
 FIND_BEST.update({
     'bleu-val': max,
+    'bleu-test': max,
     'chrf-val': max,
     'learning-rate': min,
     'perplexity-train': min,
@@ -43,6 +45,7 @@ FIND_BEST.update({
 
 AX_LABEL = {
     'bleu-val': 'Validation BLEU',
+    'bleu-test': 'Test BLEU',
     'chrf-val': 'Validation chrF',
     'checkpoint': 'Checkpoint',
     'epoch': 'Epoch',
@@ -123,6 +126,9 @@ def slope(points, num_points):
 def plot_metrics(args):
 
     fig, ax = plt.subplots()
+    if args.y2:
+        # Create axis for second Y metric
+        ax2 = ax.twinx()
     overall_best_y = None
 
     if len(args.skip) == 1:
@@ -143,12 +149,19 @@ def plot_metrics(args):
         metrics = read_metrics_file(fname)
         x_vals = metrics[args.x][skip:]
         y_vals = metrics[args.y][skip:]
+        y2_vals = metrics[args.y2][skip:] if args.y2 else None
         x_label=ax_label(args.x)
         y_label=ax_label(args.y)
+        y2_label=ax_label(args.y2)
         # Spread points that collapse into one significant digit (ex: epochs)
         for i_label, i_vals in zip([args.x, args.y], [x_vals, y_vals]):
             if i_label in ['epoch']:
                 i_vals[:] = np.linspace(i_vals[0], i_vals[-1], len(i_vals))
+        # Optionally invert Y values
+        if args.y_invert:
+            y_vals = [val * -1 for val in y_vals]
+        if args.y2_invert:
+            y2_vals = [val * -1 for val in y2_vals]
         # Optionally average best points so far for each Y point
         if args.y_average is not None:
             y_vals = average_points(y_vals, args.y_average, cmp=FIND_BEST[args.y])
@@ -172,14 +185,20 @@ def plot_metrics(args):
             # points used to compute slope)
             x_vals = x_vals[args.y_slope - 1:]
             y_vals = y_vals[args.y_slope - 1:]
+            if y2_vals:
+                y2_vals = y2_vals[args.y_slope - 1:]
             y_label = '{} (Slope of {} Points)'.format(y_label, args.y_slope)
         # Plot values for this metrics file
         ax.plot(x_vals, y_vals, linewidth=linewidth, alpha=0.75, label=label)
-        plt.xlabel(x_label, fontsize=label_size)
-        plt.ylabel(y_label, fontsize=label_size)
+        ax.set_xlabel(x_label, fontsize=label_size)
+        ax.set_ylabel(y_label, fontsize=label_size)
         plt.title(args.title, fontsize=title_size)
         plt.xticks(fontsize=tick_size)
         plt.yticks(fontsize=tick_size)
+        # If present, plot and label second Y axis metric
+        if args.y2:
+            ax2.plot(x_vals, y2_vals, linewidth=linewidth / 2, alpha=0.75, label=label)
+            ax2.set_ylabel(y2_label, fontsize=label_size)
         # Optionally track best point so far
         if args.best:
             best_y = FIND_BEST[args.y](y_vals)
@@ -197,6 +216,7 @@ def plot_metrics(args):
     ax.grid()
     ax.legend(fontsize=legend_size)
 
+    fig.tight_layout()
     fig.savefig(args.output)
 
 
@@ -206,6 +226,10 @@ def main():
     params.add_argument('-o', '--output', required=True, help='Output file to write (ex: plot.pdf).')
     params.add_argument('-x', default='time-elapsed', help='X axis metric.')
     params.add_argument('-y', default='perplexity-train', help='Y axis metric.')
+    params.add_argument('-y2', help='Second Y axis metric.')
+    params.add_argument('-yi', '--y-invert', action='store_true', help='Invert Y metric (multiply values by -1).')
+    params.add_argument('-y2i', '--y2-invert', action='store_true',
+                        help='Invert second Y metric (multiply values by -1).')
     params.add_argument('-ya', '--y-average', type=int, help='Average the N best points so far for each Y value.')
     params.add_argument('-ysb', '--y-since-best', action='store_true',
                         help='Use number of points since improvement for each Y value.')

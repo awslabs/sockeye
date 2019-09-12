@@ -556,7 +556,6 @@ def create_model_config(args: argparse.Namespace,
 
 def create_losses(args: argparse.Namespace) -> List[loss.Loss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
-    softmax_output_grad_scale /= float(args.update_interval)
     losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
                                     weight=softmax_output_grad_scale,
                                     label_smoothing=args.label_smoothing,
@@ -740,6 +739,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
+        # Unless explicitly set otherwise, use NCCL for same-host allreduce and
+        # MPI for cross-host allreduce.
+        if C.HOROVOD_HIERARCHICAL_ALLREDUCE not in os.environ:
+            os.environ[C.HOROVOD_HIERARCHICAL_ALLREDUCE] = '1'
         horovod_mpi.hvd.init()
         # Each worker uses a separate output directory.  The primary worker
         # (rank 0) writes files to the root of the output directory (standard
@@ -747,10 +750,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # sub-directories.
         if horovod_mpi.hvd.rank() > 0:
             args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_mpi.hvd.rank()))
-            # Do not keep extensive checkpoint histories for secondary workers
-            args.keep_last_params = 1
-        # Use a different random seed for each worker
-        args.seed += horovod_mpi.hvd.rank()
+            # Do not keep redundant copies of the checkpoint history
+            args.keep_last_params = 0
 
     utils.seed_rngs(args.seed)
 
