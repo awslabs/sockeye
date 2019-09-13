@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.110]
+### Changed
+- We now guard against failures to run `nvidia-smi` for GPU memory monitoring.
+
 ## [1.18.109]
 ### Fixed
 - Fixed the metric names by prefixing training metrics with 'train-' and validation metrics with 'val-'. Also restricted the custom logging function to accept only a dictionary and a compulsory global_step parameter.
