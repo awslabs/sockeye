@@ -751,7 +751,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         if horovod_mpi.hvd.rank() > 0:
             args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_mpi.hvd.rank()))
             # Do not keep redundant copies of the checkpoint history
-            args.keep_last_params = 0
+            args.keep_last_params = 1
 
     utils.seed_rngs(args.seed)
 
