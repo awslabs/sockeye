@@ -519,18 +519,21 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
     device_ids = [c.device_id for c in ctx]
 
     # Run from clean forkserver process to not leak any CUDA resources
+    try:
+        mp_context = mp_utils.get_context()
+        result_queue = mp_context.Queue()
+        nvidia_smi_process = mp_context.Process(target=query_nvidia_smi, args=(device_ids, result_queue,))
+        nvidia_smi_process.start()
+        nvidia_smi_process.join()
 
-    mp_context = mp_utils.get_context()
-    result_queue = mp_context.Queue()
-    nvidia_smi_process = mp_context.Process(target=query_nvidia_smi, args=(device_ids, result_queue,))
-    nvidia_smi_process.start()
-    nvidia_smi_process.join()
+        memory_data = result_queue.get()
 
-    memory_data = result_queue.get()
+        log_gpu_memory_usage(memory_data)
 
-    log_gpu_memory_usage(memory_data)
-
-    return memory_data
+        return memory_data
+    except:
+        logger.exception("Failed querying the GPU memory using nvidia-smi.")
+        return {}
 
 
 def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
