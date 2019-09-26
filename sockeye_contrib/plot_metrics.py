@@ -16,7 +16,6 @@ from bisect import insort
 from collections import defaultdict
 from os import path
 
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -52,7 +51,7 @@ AX_LABEL = {
     'learning-rate': 'Learning Rate',
     'perplexity-train': 'Training Perplexity',
     'perplexity-val': 'Validation Perplexity',
-    'time-elapsed': 'Training Time (Hours)',
+    'time-elapsed': 'Time (Hours)',
 }
 
 
@@ -134,6 +133,9 @@ def plot_metrics(args):
     if len(args.skip) == 1:
         args.skip *= len(args.input)
 
+    if len(args.every) == 1:
+        args.every *= len(args.input)
+
     # Paper scaling
     linewidth = 1.25 if args.paper else 1.0
     label_size = 12 if args.paper else None
@@ -141,10 +143,11 @@ def plot_metrics(args):
     legend_size = 12 if args.paper else None
     tick_size = 12 if args.paper else None
 
-    for fname, label, skip in zip(args.input,
-                                  args.legend if args.legend is not None
-                                  else (path.basename(fname) for fname in args.input),
-                                  args.skip):
+    for fname, label, skip, every in zip(args.input,
+                                         args.legend if args.legend is not None
+                                         else (path.basename(fname) for fname in args.input),
+                                         args.skip,
+                                         args.every):
         # Read metrics file to dict
         metrics = read_metrics_file(fname)
         x_vals = metrics[args.x][skip:]
@@ -188,6 +191,11 @@ def plot_metrics(args):
             if y2_vals:
                 y2_vals = y2_vals[args.y_slope - 1:]
             y_label = '{} (Slope of {} Points)'.format(y_label, args.y_slope)
+        # Only plot every N values
+        x_vals = x_vals[::every]
+        y_vals = y_vals[::every]
+        if y2_vals:
+            y2_vals = y2_vals[::every]
         # Plot values for this metrics file
         ax.plot(x_vals, y_vals, linewidth=linewidth, alpha=0.75, label=label)
         ax.set_xlabel(x_label, fontsize=label_size)
@@ -242,6 +250,7 @@ def main():
     params.add_argument('-b', '--best', action='store_true', help='Draw horizontal line at best Y value.')
     params.add_argument('-s', '--skip', type=int, nargs='+', default=(0,),
                         help='Skip the first N points for better readability.  Single value or value per input.')
+    params.add_argument('-ev', '--every', type=int, nargs='+', default=(1,), help='Only plot one point every N points.')
     params.add_argument('-p', '--paper', action='store_true', help='Scale plot elements for inclusion in papers.')
     args = params.parse_args()
     plot_metrics(args)
