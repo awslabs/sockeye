@@ -14,6 +14,7 @@
 """
 Code for training
 """
+from collections import deque
 import logging
 import os
 import pickle
@@ -57,6 +58,7 @@ class TrainerConfig(Config):
                  keep_initializations: bool,
                  checkpoint_interval: int,
                  max_num_checkpoint_not_improved: int,
+                 checkpoint_improvement_threshold: float,
                  max_checkpoints: Optional[int] = None,
                  min_samples: Optional[int] = None,
                  max_samples: Optional[int] = None,
@@ -74,6 +76,7 @@ class TrainerConfig(Config):
         self.keep_initializations = keep_initializations
         self.checkpoint_interval = checkpoint_interval
         self.max_num_checkpoint_not_improved = max_num_checkpoint_not_improved
+        self.checkpoint_improvement_threshold = checkpoint_improvement_threshold
         self.max_checkpoints = max_checkpoints
         self.min_samples = min_samples
         self.max_samples = max_samples
@@ -94,7 +97,7 @@ class TrainState:
     __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
                  'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
                  '_tic_last_time_elapsed', '_time_elapsed', 'early_stopping_metric',
-                 'best_metric', 'best_checkpoint', 'converged', 'diverged']
+                 'best_metric', 'best_metric_history', 'best_checkpoint', 'converged', 'diverged']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -113,6 +116,8 @@ class TrainState:
         self._time_elapsed = 0.0
         self.early_stopping_metric = early_stopping_metric
         self.best_metric = C.METRIC_WORST[early_stopping_metric]
+        # List of the last N best metrics, used for threshold-based stopping
+        self.best_metric_history = deque([self.best_metric])
         self.best_checkpoint = 0
         self.converged = False
         self.diverged = False
@@ -376,6 +381,7 @@ class GluonEarlyStoppingTrainer:
         :return: Whether model has improved on held-out data since last checkpoint.
         """
         value = None
+        value_is_better = False
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
@@ -386,7 +392,6 @@ class GluonEarlyStoppingTrainer:
                 # workers, causing potential desync if each worker makes its own
                 # check for key training decisions (reducing learning rate,
                 # early stopping, etc.).
-                value_is_better = None  # type: Optional[bool]
                 if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
                     # Horovod primary worker or not using Horovod: make
                     # authoritative metric check.
@@ -402,13 +407,18 @@ class GluonEarlyStoppingTrainer:
                     self.state.best_metric = value
                     self.state.best_checkpoint = self.state.checkpoint
                     self.state.num_not_improved = 0
-                    return True
         assert value is not None, "Early stopping metric %s not found in validation metrics." % self.config.early_stopping_metric
+        if not value_is_better:
+            self.state.num_not_improved += 1
+            logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
+                        self.config.early_stopping_metric, self.state.num_not_improved, self.state.best_metric)
+        # Update best metric history
+        self.state.best_metric_history.append(self.state.best_metric)
+        if (self.config.max_num_checkpoint_not_improved is not None
+                and len(self.state.best_metric_history) > self.config.max_num_checkpoint_not_improved + 1):
+            self.state.best_metric_history.popleft()
 
-        self.state.num_not_improved += 1
-        logger.info("Validation-%s has not improved for %d checkpoints, best so far: %f",
-                    self.config.early_stopping_metric, self.state.num_not_improved, self.state.best_metric)
-        return False
+        return value_is_better
 
     def _determine_convergence(self) -> bool:
         """
@@ -431,11 +441,26 @@ class GluonEarlyStoppingTrainer:
                         self.config.min_epochs, self.state.epoch)
             return False
 
-        if self.config.max_num_checkpoint_not_improved is not None and \
-                0 <= self.config.max_num_checkpoint_not_improved <= self.state.num_not_improved:
-            logger.info("Maximum number of not improved checkpoints (%d) reached: %d",
-                        self.config.max_num_checkpoint_not_improved, self.state.num_not_improved)
-            return True
+        if (self.config.max_num_checkpoint_not_improved is not None
+                and 0 <= self.config.max_num_checkpoint_not_improved
+                and self.state.checkpoint >= self.config.max_num_checkpoint_not_improved):
+            # When using Horovod, the primary worker makes the authoritative
+            # calculation of improvement over the window for evaluating stopping
+            window_improvement = 0.
+            if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
+                window_improvement = abs(self.state.best_metric - self.state.best_metric_history[0])
+            if horovod_mpi.using_horovod():
+                window_improvement = horovod_mpi.MPI.COMM_WORLD.bcast(window_improvement, root=0)
+
+            # <= to correctly handle threshold == 0
+            if window_improvement <= self.config.checkpoint_improvement_threshold:
+                logger.info("Maximum number of not improved checkpoints reached: "
+                            "improvement %f <= %f over %d checkpoints", window_improvement,
+                            self.config.checkpoint_improvement_threshold, self.config.max_num_checkpoint_not_improved)
+                return True
+            else:
+                logger.info("Sufficient improvement to continue: %f > %f over %d checkpoints", window_improvement,
+                            self.config.checkpoint_improvement_threshold, self.config.max_num_checkpoint_not_improved)
 
         return False
 

@@ -823,6 +823,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             keep_initializations=args.keep_initializations,
             checkpoint_interval=args.checkpoint_interval,
             max_num_checkpoint_not_improved=args.max_num_checkpoint_not_improved,
+            checkpoint_improvement_threshold=args.checkpoint_improvement_threshold,
             max_checkpoints=args.max_checkpoints,
             min_samples=args.min_samples,
             max_samples=args.max_samples,

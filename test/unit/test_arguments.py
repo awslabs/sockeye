@@ -151,6 +151,7 @@ def test_inference_args(test_params, expected_params):
               optimized_metric=C.PERPLEXITY,
               checkpoint_interval=4000,
               max_num_checkpoint_not_improved=None,
+              checkpoint_improvement_threshold=0.,
               max_checkpoints=None,
               embed_dropout=(.0, .0),
               transformer_dropout_attention=0.1,

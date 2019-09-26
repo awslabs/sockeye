@@ -22,7 +22,6 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Removed unused training options: Eve, Nadam, RMSProp, Nag, Adagrad, and Adadelta optimizers, `fixed-step` and `fixed-rate-inv-t` learning rate schedulers
 - Updated and renamed learning rate scheduler `fixed-rate-inv-sqrt-t` -> `inv-sqrt-decay`
 - Added script for plotting metrics files: [sockeye_contrib/plot_metrics.py](sockeye_contrib/plot_metrics.py)
-- /TODO/
 
 ### Added
 
@@ -33,6 +32,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Added support for MXNet's [Automatic Mixed Precision](https://mxnet.incubator.apache.org/versions/master/tutorials/amp/amp_tutorial.html).  Activate with the `--amp` training flag.  For best results, make sure as many model dimensions are possible are multiples of 8.
 - Added options for making various model dimensions multiples of a given value.  For example, use `--pad-vocab-to-multiple-of 8`, `--bucket-width 8 --no-bucket-scaling`, and `--round-batch-sizes-to-multiple-of 8` with AMP training.
 - Added [GluonNLP](http://gluon-nlp.mxnet.io/)'s BERTAdam optimizer, an implementation of the Adam variant used by Devlin et al. ([2018](https://arxiv.org/pdf/1810.04805.pdf)).  Use `--optimizer bertadam`.
+- Added training option `--checkpoint-improvement-threshold` to set the amount of metric improvement required over the window of previous checkpoints to be considered actual model improvement (used with `--max-num-checkpoint-not-improved`).
 
 ## [1.18.103]
 ### Added

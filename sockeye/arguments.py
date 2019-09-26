@@ -769,6 +769,11 @@ def add_training_args(params):
                               help='Maximum number of checkpoints the model is allowed to not improve in '
                                    '<optimized-metric> on validation data before training is stopped. '
                                    'Default: %(default)s.')
+    train_params.add_argument('--checkpoint-improvement-threshold',
+                              type=float,
+                              default=0.,
+                              help='Improvement in <optimized-metric> over specified number of checkpoints must exceed'
+                                   'this value to be considered actual improvement. Default: %(default)s.')
 
     train_params.add_argument('--min-num-epochs',
                               type=int,
