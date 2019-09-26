@@ -303,7 +303,12 @@ def get_num_gpus() -> int:
 
     :return: The number of GPUs on the system.
     """
-    return mx.context.num_gpus()
+    try:
+        return mx.context.num_gpus()
+    except mx.MXNetError:
+        # Some builds of MXNet will raise a CUDA error when CUDA is not
+        # installed on the host.  In this case, zero GPUs are available.
+        return 0
 
 
 def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
