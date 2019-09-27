@@ -808,7 +808,7 @@ class Speedometer:
         if self.init:
             if count % self.frequency == 0:
                 toc = (time.time() - self.tic)
-                update_interval = batches / updates
+                update_interval = batches / max(1, updates)
                 updates_per_sec = self.frequency / update_interval / toc
                 samples_per_sec = self.samples / toc
                 tokens_per_sec = self.tokens / toc
