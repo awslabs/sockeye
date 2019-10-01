@@ -674,7 +674,7 @@ class BeamSearch(mx.gluon.Block):
                 break
 
             # (5) update models' state with winning hypotheses (ascending)
-            _sort_states(model_states, best_hyp_indices)
+            model_states = _sort_states(model_states, best_hyp_indices)
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
