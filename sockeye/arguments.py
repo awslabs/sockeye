@@ -658,6 +658,9 @@ def add_model_parameters(params):
                               help="Data type.")
 
     model_params.add_argument('--amp', action='store_true', help='Use MXNet\'s automatic mixed precision (AMP).')
+    model_params.add_argument('--amp-scale-interval', type=int, default=2000,
+                              help='Attempt to increase loss scale after this many updates without overflow. '
+                                   'Default: %(default)s.')
 
 
 def add_batch_args(params, default_batch_size=4096):
