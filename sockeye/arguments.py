@@ -970,17 +970,11 @@ def add_score_cli_args(params):
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
 
-    params.add_argument('--max-seq-len',
+    params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
                         default=None,
                         help='Maximum sequence length in tokens.'
                              'Use "x:x" to specify separate values for src&tgt. Default: Read from model.')
-
-    params.add_argument('--softmax-temperature',
-                        type=float,
-                        default=None,
-                        help='Controls peakiness of model predictions. Values < 1.0 produce '
-                        'peaked predictions, values > 1.0 produce smoothed distributions.')
 
     # common params with translate CLI
     add_length_penalty_args(params)
@@ -1003,14 +997,6 @@ def add_score_cli_args(params):
                         help="Data type. Default: %(default)s infers from saved model.")
 
     add_logging_args(params)
-
-
-def add_max_output_cli_args(params):
-    params.add_argument('--max-output-length',
-                        type=int,
-                        default=None,
-                        help='Maximum number of words to generate during translation. '
-                             'If None, it will be computed automatically. Default: %(default)s.')
 
 
 def add_inference_args(params):
@@ -1063,12 +1049,6 @@ def add_inference_args(params):
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
 
-    decode_params.add_argument('--beam-prune', '-p',
-                               type=float,
-                               default=0,
-                               help='Pruning threshold for beam search. All hypotheses with scores not within '
-                                    'this amount of the best finished hypothesis are discarded (0 = off). '
-                                    'Default: %(default)s.')
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
                                default=C.BEAM_SEARCH_STOP_ALL,
@@ -1088,11 +1068,6 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
-    decode_params.add_argument('--skip-topk',
-                               default=False,
-                               action='store_true',
-                               help='Use argmax instead of topk for greedy decoding (when --beam-size 1).'
-                                    'Default: %(default)s.')
     decode_params.add_argument('--sample',
                                type=int_greater_or_equal(0),
                                default=None,
@@ -1114,14 +1089,9 @@ def add_inference_args(params):
                                default=10,
                                help='Bucket width for encoder steps. 0 means no bucketing. Default: %(default)s.')
     decode_params.add_argument('--max-input-length',
-                               type=int,
+                               type=int_greater_or_equal(1),
                                default=None,
                                help='Maximum input sequence length. Default: value from model(s).')
-    decode_params.add_argument('--softmax-temperature',
-                               type=float,
-                               default=None,
-                               help='Controls peakiness of model predictions. Values < 1.0 produce '
-                                    'peaked predictions, values > 1.0 produce smoothed distributions.')
     decode_params.add_argument('--max-output-length-num-stds',
                                type=int,
                                default=C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
@@ -1129,7 +1099,7 @@ def add_inference_args(params):
                                     'to calculate maximum output length for beam search for each sentence. '
                                     'Default: %(default)s.')
     decode_params.add_argument('--max-output-length',
-                               type=int,
+                               type=int_greater_or_equal(1),
                                default=None,
                                help='Maximum number of words to generate during translation. '
                                     'If None, it will be computed automatically. Default: %(default)s.')

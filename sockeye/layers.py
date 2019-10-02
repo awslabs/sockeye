@@ -456,7 +456,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
             updated_keys = F.concat(previous_keys, keys, dim=1)
             keys = _remove_first_step(F, updated_keys)
 
-        updated_values = keys
+        updated_values = values
         if previous_values is not None:
             updated_values = F.concat(previous_values, values, dim=1)
             values = _remove_first_step(F, updated_values)
