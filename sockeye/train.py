@@ -204,10 +204,9 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
 
     :param: args: Arguments as returned by argparse.
     """
-    weight_tying = args.weight_tying
     weight_tying_type = args.weight_tying_type
     shared_vocab = args.shared_vocab
-    if weight_tying and C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
+    if C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
         if not shared_vocab:
             logger.info("A shared source/target vocabulary will be used as weight tying source/target weight tying "
                         "is enabled")
@@ -547,8 +546,7 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_length_task=config_length_task,
-                                     weight_tying=args.weight_tying,
-                                     weight_tying_type=args.weight_tying_type if args.weight_tying else None,
+                                     weight_tying_type=args.weight_tying_type,
                                      lhuc=args.lhuc is not None,
                                      dtype=args.dtype)
     return model_config

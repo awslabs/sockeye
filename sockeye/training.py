@@ -506,7 +506,8 @@ class GluonEarlyStoppingTrainer:
         Writes all metrics to the metrics file and optionally logs to tensorboard.
         """
         data = {"epoch": self.state.epoch,
-                "learning-rate": self.trainer.optimizer.lr_scheduler.lr,
+                "learning-rate": (self.trainer.learning_rate if self.trainer.optimizer.lr_scheduler is None
+                                  else self.trainer.optimizer.lr_scheduler.lr),
                 "gradient-norm": self.state.gradient_norm,
                 "time-elapsed": self.state.time_elapsed}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.context)

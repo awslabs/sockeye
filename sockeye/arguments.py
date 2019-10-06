@@ -457,7 +457,7 @@ def add_prepare_data_cli_args(params):
 
     params.add_argument('--num-samples-per-shard',
                         type=int_greater_or_equal(1),
-                        default=1000000,
+                        default=10000000,
                         help='The approximate number of samples per shard. Default: %(default)s.')
 
     params.add_argument('--min-num-shards',
@@ -641,16 +641,9 @@ def add_model_parameters(params):
                               default=C.SOURCE_FACTORS_COMBINE_CONCAT,
                               help='How to combine source factors. Default: %(default)s.')
 
-    model_params.add_argument('--weight-tying',
-                              action='store_true',
-                              help='Turn on weight tying (see arxiv.org/abs/1608.05859). '
-                                   'The type of weight sharing is determined through '
-                                   '--weight-tying-type. Default: %(default)s.')
     model_params.add_argument('--weight-tying-type',
-                              default=C.WEIGHT_TYING_TRG_SOFTMAX,
-                              choices=[C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
-                                       C.WEIGHT_TYING_SRC_TRG,
-                                       C.WEIGHT_TYING_TRG_SOFTMAX],
+                              default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
+                              choices=C.WEIGHT_TYING_TYPES,
                               help='The type of weight tying. source embeddings=src, target embeddings=trg, '
                                    'target softmax weight matrix=softmax. Default: %(default)s.')
 

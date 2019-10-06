@@ -22,11 +22,13 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Removed unused training options: Eve, Nadam, RMSProp, Nag, Adagrad, and Adadelta optimizers, `fixed-step` and `fixed-rate-inv-t` learning rate schedulers
 - Updated and renamed learning rate scheduler `fixed-rate-inv-sqrt-t` -> `inv-sqrt-decay`
 - Added script for plotting metrics files: [sockeye_contrib/plot_metrics.py](sockeye_contrib/plot_metrics.py)
+- Removed option `--weight-tying`.  Weight tying is enabled by default, disable with `--weight-tying-type none`.
 
 ### Added
 
 - Added distrbuted training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
 - Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
+- Added `none` learning rate scheduler (use a fixed rate throughout training)
 - Added `linear-decay` learning rate scheduler
 - Added training option `--learning-rate-t-scale` for time-based decay schedulers
 - Added support for MXNet's [Automatic Mixed Precision](https://mxnet.incubator.apache.org/versions/master/tutorials/amp/amp_tutorial.html).  Activate with the `--amp` training flag.  For best results, make sure as many model dimensions are possible are multiples of 8.

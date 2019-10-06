@@ -82,8 +82,7 @@ def test_device_args(test_params, expected_params):
               num_embed=(None, None),
               source_factors_num_embed=[],
               source_factors_combine=C.SOURCE_FACTORS_COMBINE_CONCAT,
-              weight_tying=False,
-              weight_tying_type="trg_softmax",
+              weight_tying_type="src_trg_softmax",
               transformer_attention_heads=(8, 8),
               transformer_feed_forward_num_hidden=(2048, 2048),
               transformer_activation_type=C.RELU,
@@ -247,7 +246,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           no_bucket_scaling=False,
           max_seq_len=(99, 99),
           min_num_shards=1,
-          num_samples_per_shard=1000000,
+          num_samples_per_shard=10000000,
           seed=13,
           output='train_data'
           ))
@@ -272,7 +271,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           no_bucket_scaling=False,
           max_seq_len=(99, 99),
           min_num_shards=1,
-          num_samples_per_shard=1000000,
+          num_samples_per_shard=10000000,
           seed=13,
           output='prepared_data'
           ))
