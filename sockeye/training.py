@@ -504,10 +504,12 @@ class TrainState:
     """
     Stores the state an EarlyStoppingTrainer instance.
     """
-
-    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
-                 'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic', '_tic_last_time_elapsed',
+    
+    _pickle_slots = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
+                 'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic', '_tic_last_time_elapsed',
                  '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_checkpoint', 'converged', 'diverged']
+
+    __slots__ = _pickle_slots + ['gradients']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -562,6 +564,14 @@ class TrainState:
     def time_elapsed(self):
         return self._time_elapsed
 
+    def __getstate__(self):
+        return {k: getattr(self, k) for k in self._pickle_slots}
+
+    def __setstate__(self, state):
+        for k, v in state.items():
+            setattr(self, k, v)
+        self.gradients = {}
+
 
 class EarlyStoppingTrainer:
     """
@@ -583,7 +593,8 @@ class EarlyStoppingTrainer:
                  source_vocabs: List[vocab.Vocab],
                  target_vocab: vocab.Vocab,
                  stop_training_on_decoder_failure: bool = False,
-                 custom_metrics_logger: Optional[Callable] = None) -> None:
+                 custom_metrics_logger: Optional[Callable] = None,
+                 checkpoint_callback: Optional[Callable] = None) -> None:
         self.model = model
         self.optimizer_config = optimizer_config
         self.max_params_files_to_keep = max_params_files_to_keep
@@ -596,6 +607,7 @@ class EarlyStoppingTrainer:
         self.state = None  # type: Optional[TrainState]
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
         self.custom_metrics_logger = custom_metrics_logger
+        self.checkpoint_callback = checkpoint_callback
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
@@ -773,6 +785,8 @@ class EarlyStoppingTrainer:
                                                        global_step=decoded_checkpoint)
                     # Start the decoder for the next checkpoint
                     process_manager.start_decoder(self.state.checkpoint)
+                
+
 
                 # (3) determine improvement
                 has_improved = False
@@ -857,6 +871,9 @@ class EarlyStoppingTrainer:
                     break
 
                 tic = time.time()
+
+                if self.checkpoint_callback:
+                    self.checkpoint_callback(self.state.checkpoint)
 
             if process_manager is not None:
                 process_manager.update_process_died_status()
