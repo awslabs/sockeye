@@ -888,6 +888,9 @@ def add_training_args(params):
                               default=0,
                               help="Number of warmup steps. If set to x, linearly increases learning rate from 10%% "
                                    "to 100%% of the initial learning rate. Default: %(default)s.")
+    train_params.add_argument('--disable-checkpoint-reload',
+                              action='store_true',
+                              help='Do not reload best checkpoint when reducing learning rate.')
 
     train_params.add_argument('--fixed-param-strategy',
                                default=None,

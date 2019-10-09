@@ -68,6 +68,7 @@ class TrainerConfig(Config):
                  max_epochs: Optional[int] = None,
                  max_seconds: Optional[int] = None,
                  update_interval: int = 1,
+                 reload_checkpoint_when_adjusting_lr: bool = True,
                  stop_training_on_decoder_failure: bool = False) -> None:
         super().__init__()
         self.output_dir = output_dir
@@ -86,6 +87,7 @@ class TrainerConfig(Config):
         self.max_epochs = max_epochs
         self.max_seconds = max_seconds
         self.update_interval = update_interval
+        self.reload_checkpoint_when_adjusting_lr = reload_checkpoint_when_adjusting_lr
         self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
 
 
@@ -490,7 +492,7 @@ class GluonEarlyStoppingTrainer:
                 lr_adjusted = scheduler.new_evaluation_result(has_improved)  # type: ignore
             else:
                 lr_adjusted = False
-            if lr_adjusted and not has_improved:
+            if lr_adjusted and not has_improved and self.config.reload_checkpoint_when_adjusting_lr:
                 logger.info("Loading model parameters and optimizer states from best checkpoint: %d",
                             self.state.best_checkpoint)
                 adjusted_lr = self.trainer.optimizer.lr_scheduler.lr

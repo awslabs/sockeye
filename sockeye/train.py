@@ -833,6 +833,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             max_epochs=args.max_num_epochs,
             max_seconds=args.max_seconds,
             update_interval=args.update_interval,
+            reload_checkpoint_when_adjusting_lr=not args.disable_checkpoint_reload,
             stop_training_on_decoder_failure=args.stop_training_on_decoder_failure
         )
         if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:

@@ -15,7 +15,7 @@ from argparse import ArgumentParser
 import json
 import os
 import pickle
-from typing import List, Optional, Tuple, Union
+from typing import List, Tuple, Union
 from unittest.mock import patch
 import warnings
 
@@ -38,8 +38,8 @@ class OptimizerHistory:
     '''
 
     def __init__(self):
-        self.arguments = None  # type: Optional[List[str]]
-        self.dimensions = None  # type: Optional[List[Union[int, float]]]
+        self.arguments = []  # type: List[str]
+        self.dimensions = []  # type: List[Tuple[Union[int, float], Union[int, float]]]
         self.points = []  # type: List[List[Union[bool, int, float]]]
 
     def save(self, fname: str):
@@ -87,6 +87,22 @@ def convert_np(obj: Union[np.int, np.float]) -> Union[int, float]:
     raise TypeError('Required: np.int or np.float')
 
 
+def format_args(history: OptimizerHistory, values: List[Union[int, float]]) -> str:
+    '''
+    Format arguments for sockeye.train.
+    '''
+    formatted = []
+    for argument, dimension, value in zip(history.arguments, history.dimensions, values):
+        sockeye_arg = '--' + argument.replace('_', '-')
+        if dimension == (0, 1):
+            # Special case for bool
+            if value == 1:
+                formatted.append(sockeye_arg)
+        else:
+            formatted.append('{} {}'.format(sockeye_arg, value))
+    return ' '.join(formatted)
+
+
 def main():
     params = ArgumentParser(description='Explore hyper parameters with Bayesian optimization.')
     params.add_argument('-hp', '--hyper-parameters', nargs='+', metavar='HP_SPEC',
@@ -97,7 +113,9 @@ def main():
                         help='Current optimizer state dir to read.  Scores for history file should be added manually.')
     params.add_argument('-so', '--state-out', required=True, help='New optimizer state dir to write.')
     params.add_argument('-b', '--batch-size', type=int, default=1, help='Number of points to explore in each batch.')
-    params.add_argument('--seed', type=int, default=1234, help='Random seed for optimizer run.')
+    params.add_argument('-ip', '--initial-points', type=int, default=8,
+                        help='Number of initial random points to explore.')
+    params.add_argument('--seed', type=int, default=1, help='Random seed for optimizer run.')
     args = params.parse_args()
 
     if not any((args.hyper_parameters, args.state_in)) or all((args.hyper_parameters, args.state_in)):
@@ -112,7 +130,7 @@ def main():
         # Set random seed
         np.random.seed(args.seed)
         # Create new optimizer
-        optimizer = Optimizer(history.dimensions)
+        optimizer = Optimizer(history.dimensions, n_initial_points=args.initial_points)
 
     # Continue optimizer run
     if args.state_in:
@@ -141,9 +159,9 @@ def main():
     next_points = optimizer.ask(n_points=args.batch_size)
 
     # Print points in Sockeye argument format and add them to the history
-    for i, vals in enumerate(next_points, start=len(history.points)):
-        print('{}: {}'.format(i, ' '.join('--{} {}'.format(a.replace('_', '-'), v) for a, v in zip(history.arguments, vals))))
-        history.points.append([i, False] + [convert_np(val) for val in vals] + [None])
+    for i, values in enumerate(next_points, start=len(history.points)):
+        print('{}: {}'.format(i, format_args(history, values)))
+        history.points.append([i, False] + [convert_np(value) for value in values] + [None])
 
     # Save new state files
     if not os.path.exists(args.state_out):

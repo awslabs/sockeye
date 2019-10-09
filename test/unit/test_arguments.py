@@ -179,6 +179,7 @@ def test_inference_args(test_params, expected_params):
               learning_rate_reduce_factor=0.9,
               learning_rate_reduce_num_not_improved=8,
               learning_rate_warmup=0,
+              disable_checkpoint_reload=False,
               weight_init='xavier',
               weight_init_scale=3.0,
               weight_init_xavier_rand_type='uniform',
