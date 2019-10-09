@@ -10,6 +10,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.111]
+### Added
+- Added an optional checkpoint callback for the train function.
+
+### Changed
+- Excluded gradients from pickled fields of TrainState
+
 ## [1.18.110]
 ### Changed
 - We now guard against failures to run `nvidia-smi` for GPU memory monitoring.
