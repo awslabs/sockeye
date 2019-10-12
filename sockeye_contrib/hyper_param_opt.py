@@ -63,7 +63,7 @@ def parse_hyper_parameter(hp_spec: str) -> Tuple[str, Tuple[Union[int, float], U
     (argument, dimension), where dimension is (min_value, max_value) as integers
     or floats.
     '''
-    parse = lambda s: float(s) if '.' in s else int(s)
+    parse = lambda s: float(s) if '.' in s or 'e' in s else int(s)
     try:
         argument, min_val, max_val = hp_spec.split(':')
         dimension = (parse(min_val), parse(max_val))

@@ -181,11 +181,11 @@ def simple_dict() -> Callable:
     def parse(dict_str: str):
 
         def _parse(value: str):
-            if value == "True":
+            if value.lower() == "true":
                 return True
-            if value == "False":
+            if value.lower() == "false":
                 return False
-            if "." in value:
+            if "." in value or "e" in value:
                 return float(value)
             return int(value)
 

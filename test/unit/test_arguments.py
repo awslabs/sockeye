@@ -16,12 +16,19 @@ import pytest
 import tempfile
 import os
 import re
-import yaml
 
 import sockeye.arguments as arguments
 import sockeye.constants as C
 
 from itertools import zip_longest
+
+
+def test_simple_dict():
+    dict_str = 'beta1:0.9,beta2:0.999,epsilon:1e-8,lazy_update:true'
+    expected = {'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8, 'lazy_update': True}
+    parse = arguments.simple_dict()
+    assert parse(dict_str) == expected
+
 
 # note that while --prepared-data and --source/--target are mutually exclusive this is not the case at the CLI level
 @pytest.mark.parametrize("test_params, expected_params", [
