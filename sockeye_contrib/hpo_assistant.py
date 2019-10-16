@@ -188,6 +188,8 @@ def main():
                              '"python -m sockeye.train -d data -vs src -vt trg -o out --optimizer-params '
                              'beta2:HP:0.98:0.999:,epsilon:HP:1e-9:1e-6: --update-interval HP:1:4: '
                              'HP::--disable-checkpoint-reload:"')
+    params.add_argument('-i', '--initial-points', type=int, default=10,
+                        help='Number of random initial points to explore before starting optimization.')
     params.add_argument('-si', '--state-in',
                         help='Current optimizer state dir to read.  Scores for history file should be added manually.')
     params.add_argument('-so', '--state-out', required=True, help='New optimizer state dir to write.')
@@ -208,7 +210,8 @@ def main():
         state.template, state.dimensions = parse_command(args.command)
         # Create new optimizer, convert optional args to 0/1 integer dimensions
         state.optimizer = Optimizer([(0, 1) if dim[0] is None else dim for dim in state.dimensions],
-                                    n_initial_points=len(state.dimensions))
+                                    n_initial_points=args.initial_points,
+                                    acq_func='EI')
 
     # Continue optimizer run
     if args.state_in:
