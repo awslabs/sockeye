@@ -276,7 +276,10 @@ def run_train_translate(train_params: str,
         if 'train_source_factors' in data:
             prepare_params += _TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
 
-        if '--weight-tying-type src_trg' in train_params or '--weight-tying-type src_trg_softmax' in train_params:
+        # The default weight tying type is "src_trg_softmax"
+        if ('--weight-tying-type' not in train_params
+                or '--weight-tying-type src_trg' in train_params
+                or '--weight-tying-type src_trg_softmax' in train_params):
             prepare_params += ' --shared-vocab'
 
         logger.info("Preparing data with parameters %s.", prepare_params)
