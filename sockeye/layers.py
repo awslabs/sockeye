@@ -450,7 +450,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                        inputs: mx.sym.Symbol,
                        input_lengths: Optional[mx.sym.Symbol] = None,
                        bias: Optional[mx.sym.Symbol] = None,
-                       previous_qkv: Optional[mx.sym.Symbol] = None):  # mypy: ignore
+                       previous_kv: Optional[mx.sym.Symbol] = None):  # mypy: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -466,33 +466,30 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         :return: Symbol of shape (batch, max_length, output_depth).
         """
 
-
         proj = self.ff_in(F.transpose(inputs, axes=(1, 0, 2)))
+        queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
+        kv = F.concat(kv_1, kv_2, dim=2)
 
-        qkv = proj
-        if previous_qkv is not None:
-            previous_qkv = F.transpose(previous_qkv, axes=(1, 0, 2))
-            proj = F.concat(previous_qkv, proj, dim=0)
-            qkv = F.slice(proj, begin=(1, None, None), end=(None, None, None))
+        updated_kv = kv
+        if previous_kv is not None:
+            previous_kv = F.transpose(previous_kv, axes=(1, 0, 2))
+            updated_kv = F.concat(previous_kv, kv, dim=0)
+            kv = F.slice(updated_kv, begin=(1, None, None), end=(None, None, None))
 
-        score = F.interleaved_matmul_selfatt_qk(qkv, heads=self.heads)
+        score = F.interleaved_matmul_encdec_qk(queries, kv, heads=self.heads)
 
         if bias is not None:
             score = F.broadcast_add(score, bias)
 
         probs = F.softmax(score, axis=-1)
 
-        contexts = F.interleaved_matmul_selfatt_valatt(qkv, probs, heads=self.heads)
+        contexts = F.interleaved_matmul_encdec_valatt(kv, probs, heads=self.heads)
 
-        updated_qkv = F.transpose(proj, axes=(1, 0, 2))
-
-        if previous_qkv is not None:
-            contexts = F.slice(contexts, begin=(-1, None, None), end=(None, None, None))
-
+        updated_kv = F.transpose(updated_kv, axes=(1, 0, 2))
         contexts = F.transpose(contexts, axes=(1, 0, 2))
 
         out = self.ff_out(contexts)
-        return out, updated_qkv
+        return out, updated_kv
 
         """
         # combined: (batch, max_length, depth * 3)
