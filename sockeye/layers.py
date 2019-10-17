@@ -501,15 +501,14 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :param batch_size: current batch size
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
-        # shape: (batch, heads, length, depth_per_head)
-        return batch_size, self.heads, 1, self.depth_out // self.heads
+        # shape: (batch, length, key_depth + value_depth)
+        return batch_size, 1, self.depth_out * 2
 
     def hybrid_forward(self, F,
                        inputs: mx.sym.Symbol,
                        previous_states: List[mx.sym.Symbol],
                        input_lengths: Optional[mx.sym.Symbol] = None,
                        bias: Optional[mx.sym.Symbol] = None,
-                       previous_qkv: Optional[mx.sym.Symbol] = None):
                        *args):  # mypy: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
@@ -526,33 +525,30 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :return: Symbol of shape (batch, max_length, output_depth).
         """
 
-
         proj = self.ff_in(F.transpose(inputs, axes=(1, 0, 2)))
+        queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
+        states = F.concat(kv_1, kv_2, dim=2)
 
-        qkv = proj
-        if previous_qkv is not None:
-            previous_qkv = F.transpose(previous_qkv, axes=(1, 0, 2))
-            proj = F.concat(previous_qkv, proj, dim=0)
-            qkv = F.slice(proj, begin=(1, None, None), end=(None, None, None))
+        updated_states = states
+        if previous_states is not None:
+            previous_states = F.transpose(previous_states, axes=(1, 0, 2))
+            updated_states = F.concat(previous_states, states, dim=0)
+            states = F.slice(updated_states, begin=(1, None, None), end=(None, None, None))
 
-        score = F.interleaved_matmul_selfatt_qk(qkv, heads=self.heads)
+        score = F.interleaved_matmul_encdec_qk(queries, states, heads=self.heads)
 
         if bias is not None:
             score = F.broadcast_add(score, bias)
 
         probs = F.softmax(score, axis=-1)
 
-        contexts = F.interleaved_matmul_selfatt_valatt(qkv, probs, heads=self.heads)
+        contexts = F.interleaved_matmul_encdec_valatt(states, probs, heads=self.heads)
 
-        updated_qkv = F.transpose(proj, axes=(1, 0, 2))
-
-        if previous_qkv is not None:
-            contexts = F.slice(contexts, begin=(-1, None, None), end=(None, None, None))
-
+        updated_states = F.transpose(updated_states, axes=(1, 0, 2))
         contexts = F.transpose(contexts, axes=(1, 0, 2))
 
         out = self.ff_out(contexts)
-        return out, updated_qkv
+        return out, updated_states
 
         """
         # combined: (batch, max_length, depth * 3)
