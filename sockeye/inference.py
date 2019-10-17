@@ -709,11 +709,11 @@ class Translator:
                     proj_weight = layer.self_attention.ff_in.weight
                     num_heads = layer.self_attention.heads
                     q_weight, k_weight, v_weight = mx.nd.split(proj_weight.data(), num_outputs=3, axis=0)
-                    q_weight = q_weight.reshape(shape=(num_heads, -1, 0), reverse=True)
                     k_weight = k_weight.reshape(shape=(num_heads, -1, 0), reverse=True)
                     v_weight = v_weight.reshape(shape=(num_heads, -1, 0), reverse=True)
-                    tot_weight = mx.nd.concat(q_weight, k_weight, v_weight, dim=-2)
-                    tot_weight = mx.nd.reshape(tot_weight, shape=(-1, 0), reverse=True)
+                    kv_weight = mx.nd.concat(k_weight, v_weight, dim=-2)
+                    kv_weight = mx.nd.reshape(kv_weight, shape=(-1, 0), reverse=True)
+                    tot_weight = mx.nd.concat(q_weight, kv_weight, dim=0)
                     proj_weight.set_data(tot_weight.astype(proj_weight.dtype))
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
