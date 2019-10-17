@@ -30,7 +30,10 @@ except ImportError:
     raise RuntimeError('Please install Scikit-Optimize: pip install scikit-optimize')
 
 
+# Hyper parameter specification "HP:val1:val2:"
 HP_REGEX = 'HP:([^:]*?:[^:]*?):'
+# Choose next points based on expected improvement
+OPTIMIZER_ACQUISITION_FUNCTION = 'EI'
 
 
 class OptimizerState:
@@ -40,7 +43,7 @@ class OptimizerState:
     - template: format string for commands.
     - dimensions: list of hyper parameter ranges (dimensions).
     - points: list of points recommended by optimizer.
-    - scores: score for each point (entered buy user).
+    - losses: loss for each point (entered by user).
 
     The NumPy random state is also saved/loaded.
     '''
@@ -56,7 +59,7 @@ class OptimizerState:
         self.template = None  # type: Optional[str]
         self.dimensions = None  # type: Optional[List[Union[Tuple[int, int], Tuple[float, float], Tuple[None, str]]]]
         self.points = []  # type: List[List[Union[int, float]]]
-        self.scores = []  # type: List[Union[str, float]]
+        self.losses = []  # type: List[Union[str, float]]
         self.recorded = []  # type: List[bool]
 
 
@@ -88,15 +91,15 @@ class OptimizerState:
         with open(os.path.join(fname, OptimizerState.FNAME_DIMENSIONS), 'wt') as out:
             print(json.dumps(self.dimensions), file=out)
         with open(os.path.join(fname, OptimizerState.FNAME_POINTS), 'wt') as out:
-            for i, (point, score, rec) in enumerate(zip(self.points, self.scores, self.recorded)):
+            for i, (point, loss, rec) in enumerate(zip(self.points, self.losses, self.recorded)):
                 # Index line
                 print('{}:'.format(i), file=out)
                 # Command line
                 print(self.format_command(point), file=out)
                 # HP values line (point X)
                 print(json.dumps([convert_np(val) for val in point]), file=out)
-                # Score (point Y)
-                print(score, file=out)
+                # Loss (point Y)
+                print(loss, file=out)
                 # Is recorded
                 print(rec, file=out)
         with open(os.path.join(fname, OptimizerState.FNAME_RNG), 'wb') as fp:
@@ -123,9 +126,9 @@ class OptimizerState:
                 fin.readline()
                 # HP values line (point X)
                 self.points.append(json.loads(fin.readline().strip()))
-                # Score (point Y)
-                score = fin.readline().strip()
-                self.scores.append(float(score) if score else '')
+                # Loss (point Y)
+                loss = fin.readline().strip()
+                self.losses.append(float(loss) if loss else '')
                 # Is recorded
                 self.recorded.append(fin.readline() == 'True')
         with open(os.path.join(fname, OptimizerState.FNAME_RNG), 'rb') as fp:
@@ -191,7 +194,8 @@ def main():
     params.add_argument('-i', '--initial-points', type=int, default=10,
                         help='Number of random initial points to explore before starting optimization.')
     params.add_argument('-si', '--state-in',
-                        help='Current optimizer state dir to read.  Scores for history file should be added manually.')
+                        help='Current optimizer state dir to read.  Losses for points file should be added manually '
+                             'before calling this script.')
     params.add_argument('-so', '--state-out', required=True, help='New optimizer state dir to write.')
     params.add_argument('-b', '--batch-size', type=int, default=1, help='Number of points to explore in each batch.')
     params.add_argument('--seed', type=int, default=1, help='Random seed for optimizer run.')
@@ -211,11 +215,11 @@ def main():
         # Create new optimizer, convert optional args to 0/1 integer dimensions
         state.optimizer = Optimizer([(0, 1) if dim[0] is None else dim for dim in state.dimensions],
                                     n_initial_points=args.initial_points,
-                                    acq_func='EI')
+                                    acq_func=OPTIMIZER_ACQUISITION_FUNCTION)
 
     # Continue optimizer run
     if args.state_in:
-        # Load existing history from file
+        # State from previous run
         state.load(args.state_in)
 
     # Tell optimizer about any new points
@@ -224,19 +228,19 @@ def main():
         if state.recorded[i]:
             continue
         # Point still being evaluated, not ready to be reported
-        if state.scores[i] == '':
+        if state.losses[i] == '':
             continue
         # Newly evaluated point, ready to report
-        state.optimizer.tell(x=state.points[i], y=state.scores[i])
+        state.optimizer.tell(x=state.points[i], y=state.losses[i])
         state.recorded[i] = True
 
     # Ask optimizer for next points to explore
     next_points = state.optimizer.ask(n_points=args.batch_size)
 
-    # Print points in Sockeye argument format and add them to the history
+    # Add new points and print them as formatted commands
     for point in next_points:
         state.points.append(point)
-        state.scores.append('')
+        state.losses.append('')
         state.recorded.append(False)
         print('{}: {}'.format(len(state.points) - 1, state.format_command(point)))
 
