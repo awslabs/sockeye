@@ -32,6 +32,7 @@ from . import utils
 from . import vocab
 from .beam_search import get_beam_search, CandidateScorer
 from .model import SockeyeModel
+from .transformer import TransformerEncoderBlock, TransformerDecoderBlock
 
 logger = logging.getLogger(__name__)
 
@@ -700,6 +701,20 @@ class Translator:
         if strip_unknown_words:
             self.strip_ids.add(self.unk_id)
         self.models = models
+
+        # interleave qkv with heads for fast attention inference
+        for model in self.models:
+            for layer in [l for l in model.encoder.layers] + [l for l in model.decoder.layers]:
+                if isinstance(layer, TransformerEncoderBlock) or isinstance(layer, TransformerDecoderBlock):
+                    proj_weight = layer.self_attention.ff_in.weight
+                    num_heads = layer.self_attention.heads
+                    q_weight, k_weight, v_weight = mx.nd.split(proj_weight.data(), num_outputs=3, axis=0)
+                    q_weight = q_weight.reshape(shape=(num_heads, -1, 0), reverse=True)
+                    k_weight = k_weight.reshape(shape=(num_heads, -1, 0), reverse=True)
+                    v_weight = v_weight.reshape(shape=(num_heads, -1, 0), reverse=True)
+                    tot_weight = mx.nd.concat(q_weight, k_weight, v_weight, dim=-2)
+                    tot_weight = mx.nd.reshape(tot_weight, shape=(-1, 0), reverse=True)
+                    proj_weight.set_data(tot_weight.astype(proj_weight.dtype))
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         # set a common max_output length for all models.
