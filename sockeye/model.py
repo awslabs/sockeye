@@ -535,6 +535,7 @@ def load_model(model_folder: str,
         cast_dtype = True
         dtype_source = 'current'
 
+    # TODO: change allow_missing back to false when fast attention is implemented for training
     model.load_parameters(filename=params_fname,
                           ctx=context,
                           allow_missing=allow_missing,

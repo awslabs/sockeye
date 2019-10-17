@@ -488,36 +488,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         updated_kv = F.transpose(updated_kv, axes=(1, 0, 2))
         contexts = F.transpose(contexts, axes=(1, 0, 2))
 
-        out = self.ff_out(contexts)
-        return out, updated_kv
-
-        """
-        # combined: (batch, max_length, depth * 3)
-        combined = self.ff_in(inputs)
-        # split into query, keys and values
-        # (batch, max_length, depth)
-        # pylint: disable=unbalanced-tuple-unpacking
-        queries, keys, values = F.split(combined, num_outputs=3, axis=2)
-
-        # scale by sqrt(depth_per_head)
-        queries = queries * (self.depth_per_head ** -0.5)
-        # (batch, heads, length, depth/heads)
-        queries = split_heads(F, queries, self.depth_per_head, self.heads)
-        keys = split_heads(F, keys, self.depth_per_head, self.heads)
-        values = split_heads(F, values, self.depth_per_head, self.heads)
-
-        updated_keys = keys
-        if previous_keys is not None:
-            updated_keys = F.concat(previous_keys, keys, dim=2)
-            keys = _remove_first_step(F, updated_keys)
-
-        updated_values = values
-        if previous_values is not None:
-            updated_values = F.concat(previous_values, values, dim=2)
-            values = _remove_first_step(F, updated_values)
-
-        return self._attend(F, queries, keys, values, lengths=input_lengths, bias=bias), updated_keys, updated_values
-        """
+        return self.ff_out(contexts), updated_kv
 
 
 def _remove_first_step(F, data):
@@ -556,6 +527,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
             self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
             self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype=dtype)
             self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype=dtype)
+            self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att, flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
 
     def project_and_isolate_heads(self, F, memory: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
         """
@@ -575,8 +547,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                        memory: mx.sym.Symbol,
                        memory_lengths: Optional[mx.sym.Symbol] = None,
                        bias: Optional[mx.sym.Symbol] = None,
-                       projected_memory_keys: Optional[mx.sym.Symbol] = None,
-                       projected_memory_values: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:  # mypy: ignore
+                       projected_memory_kv: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:  # mypy: ignore
         """
         Computes multi-head attention for queries given a memory tensor.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -591,20 +562,24 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :param projected_memory_values: Optional previously projected memory values.
         :return: Symbol of shape (batch, query_seq_len, output_depth).
         """
-        # (batch, query_max_length, depth)
-        queries = self.ff_q(queries)
-        # scale by sqrt(depth_per_head)
-        queries = queries * (self.depth_per_head ** -0.5)
-        # (batch, heads, length, depth/heads)
-        queries = split_heads(F, queries, self.depth_per_head, self.heads)
 
-        if projected_memory_keys is not None and projected_memory_values is not None:
-            keys, values = projected_memory_keys, projected_memory_values
-        else:
-            keys, values = self.project_and_isolate_heads(F, memory)
+        queries = self.ff_q(F.transpose(queries, axes=(1, 0, 2)))
 
-        return self._attend(F, queries, keys, values, bias=bias, lengths=memory_lengths)
+        # TODO: check whether memory has proper shape/structure for self.ff_kv projection
+        kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(F.transpose(memory, axes=(1, 0, 2)))
+        kv = F.transpose(kv, axes=(1, 0, 2))
 
+        score = F.interleaved_matmul_encdec_qk(queries, kv, heads=self.heads)
+
+        if bias is not None:
+            score = F.broadcast_add(score, bias)
+
+        probs = F.softmax(score, axis=-1)
+
+        contexts = F.interleaved_matmul_encdec_valatt(kv, probs, heads=self.heads)
+        contexts = F.transpose(contexts, axes=(1, 0, 2))
+
+        return self.ff_out(contexts)
 
 class PlainDotAttention(mx.gluon.HybridBlock):
     """
