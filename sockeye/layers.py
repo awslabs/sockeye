@@ -450,8 +450,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                        inputs: mx.sym.Symbol,
                        input_lengths: Optional[mx.sym.Symbol] = None,
                        bias: Optional[mx.sym.Symbol] = None,
-                       previous_keys: Optional[mx.sym.Symbol] = None,
-                       previous_values: Optional[mx.sym.Symbol] = None):  # mypy: ignore
+                       previous_qkv: Optional[mx.sym.Symbol] = None):  # mypy: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -465,6 +464,36 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         :param previous_keys: Optional previous input projections of keys. Shape: (batch, max_length+1, depth_att).
         :param previous_values: Optional previous input projections of values. Shape: (batch, max_length+1, depth_att).
         :return: Symbol of shape (batch, max_length, output_depth).
+        """
+
+
+        proj = self.ff_in(F.transpose(inputs, axes=(1, 0, 2)))
+
+        qkv = proj
+        if previous_qkv is not None:
+            previous_qkv = F.transpose(previous_qkv, axes=(1, 0, 2))
+            proj = F.concat(previous_qkv, proj, dim=0)
+            qkv = F.slice(proj, begin=(1, None, None), end=(None, None, None))
+
+        score = F.interleaved_matmul_selfatt_qk(qkv, heads=self.heads)
+
+        if bias is not None:
+            score = F.broadcast_add(score, bias)
+
+        probs = F.softmax(score, axis=-1)
+
+        contexts = F.interleaved_matmul_selfatt_valatt(qkv, probs, heads=self.heads)
+
+        updated_qkv = F.transpose(proj, axes=(1, 0, 2))
+
+        if previous_qkv is not None:
+            contexts = F.slice(contexts, begin=(-1, None, None), end=(None, None, None))
+
+        contexts = F.transpose(contexts, axes=(1, 0, 2))
+
+        out = self.ff_out(contexts)
+        return out, updated_qkv
+
         """
         # combined: (batch, max_length, depth * 3)
         combined = self.ff_in(inputs)
@@ -491,6 +520,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
             values = _remove_first_step(F, updated_values)
 
         return self._attend(F, queries, keys, values, lengths=input_lengths, bias=bias), updated_keys, updated_values
+        """
 
 
 def _remove_first_step(F, data):
