@@ -12,7 +12,7 @@ If you have any questions or discover problems, please [file an issue](https://g
 
 #### Version 2.0
 
-With version 2.0, we have updated the usage of MXNet by moving to the [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html) and adding support for several state-of-the-art features such as distributed training, low-precision training and decoding, as well as easier debugging of neural network architectures.
+With version 2.0, we have updated the usage of MXNet by moving to the [Gluon API](https://mxnet.incubator.apache.org/api/python/docs/api/gluon/index.html) and adding support for several state-of-the-art features such as distributed training, low-precision training and decoding, as well as easier debugging of neural network architectures.
 In the context of this rewrite, we also trimmed down the large feature set of version 1.18.x to concentrate on the most important types of models and features, to provide a maintainable framework that is suitable for fast prototyping, research, and production.
 We welcome Pull Requests if you would like to help with adding back features when needed.
 
