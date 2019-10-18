@@ -501,8 +501,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :param batch_size: current batch size
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
-        # shape: (batch, length, key_depth + value_depth)
-        return batch_size, 1, self.depth_out * 2
+        # shape: (length, batch, key_depth + value_depth)
+        return 1, batch_size, self.depth_out * 2
 
     def hybrid_forward(self, F,
                        inputs: mx.sym.Symbol,
@@ -525,7 +525,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :return: Symbol of shape (batch, max_length, output_depth).
         """
 
-        proj = self.ff_in(F.transpose(inputs, axes=(1, 0, 2)))
+        proj = self.ff_in(inputs)
         queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
         states = F.concat(kv_1, kv_2, dim=2)
 
@@ -545,7 +545,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         contexts = F.interleaved_matmul_encdec_valatt(states, probs, heads=self.heads)
 
         updated_states = F.transpose(updated_states, axes=(1, 0, 2))
-        contexts = F.transpose(contexts, axes=(1, 0, 2))
 
         return self.ff_out(contexts), updated_states
 
@@ -622,7 +621,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :return: Symbol of shape (batch, query_seq_len, output_depth).
         """
 
-        queries = self.ff_q(F.transpose(queries, axes=(1, 0, 2)))
+        queries = self.ff_q(queries)
 
         # TODO: check whether memory has proper shape/structure for self.ff_kv projection
         kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(F.transpose(memory, axes=(1, 0, 2)))
@@ -636,7 +635,6 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         probs = F.softmax(score, axis=-1)
 
         contexts = F.interleaved_matmul_encdec_valatt(kv, probs, heads=self.heads)
-        contexts = F.transpose(contexts, axes=(1, 0, 2))
 
         return self.ff_out(contexts)
 
@@ -871,7 +869,7 @@ class SSRU(AutoregressiveLayer):
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
         if self.inference_only:
-            return batch_size, 1, self.model_size
+            return 1, batch_size, self.model_size
         else:
             return batch_size, self.model_size
 
@@ -891,8 +889,9 @@ class SSRU(AutoregressiveLayer):
             current_step_state = forget_rate * previous_step_state + step_input
             return current_step_state, current_step_state
 
-        weighted_inputs = F.transpose(weighted_inputs, axes=(1, 0, 2))  # (max_length, batch, input_depth)
-        forget_rates = F.transpose(forget_rates, axes=(1, 0, 2))  # (max_length, batch, input_depth)
+        # TODO: remove if transpose within the SSRU layer is unneeded
+        # weighted_inputs = F.transpose(weighted_inputs, axes=(1, 0, 2))  # (max_length, batch, input_depth)
+        # forget_rates = F.transpose(forget_rates, axes=(1, 0, 2))  # (max_length, batch, input_depth)
 
         # (max_length, batch, input_depth), (batch, input_depth)
         cell_state, last_step_state = F.contrib.foreach(_time_step_update,
