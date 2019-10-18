@@ -327,9 +327,9 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         self._dtype = dtype
         super().cast(dtype)
 
-    def hybrid_forward(self, F, queries, keys, values, lengths=None, bias=None):
-        # (n, lq, lk)
-        logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
+    def hybrid_forward(self, F, queries, key_values, heads, lengths=None, bias=None):
+
+        logits = F.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
         # TODO(fhieber): consider softmax with length argument once available.
         # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
@@ -343,15 +343,13 @@ class DotAttentionCell(mx.gluon.HybridBlock):
                                     value=-C.LARGE_VALUES[self._dtype])
             # (n, lq, lk)
             logits = F.transpose(data=logits, axes=(1, 2, 0))
-
         if bias is not None:
             logits = F.broadcast_add(logits, bias)
 
         probs = F.softmax(logits, axis=-1)
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
 
-        # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-        return F.batch_dot(lhs=probs, rhs=values)
+        return F.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):
@@ -387,8 +385,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
     def _attend(self,
                 F,
                 queries: mx.sym.Symbol,
-                keys: mx.sym.Symbol,
-                values: mx.sym.Symbol,
+                key_values: mx.sym.Symbol,
                 lengths: Optional[mx.sym.Symbol] = None,
                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         """
@@ -401,21 +398,13 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         :param bias: Optional 3d bias.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
-        # fold head dimension into batch dimension
-        # (batch*heads, length, depth/heads)
-        queries = F.reshape(queries, shape=(-3, -1, self.depth_per_head))
-        keys = F.reshape(keys, shape=(-3, -1, self.depth_per_head))
-        values = F.reshape(values, shape=(-3, -1, self.depth_per_head))
         lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1,
                                      fold_heads=True) if lengths is not None else lengths
 
-        # (batch*heads, query_max_length, depth_per_head)
-        contexts = self.dot_att(queries, keys, values, lengths, bias)
+        # (query_max_length, batch, depth)
+        contexts = self.dot_att(queries, key_values, self.heads, lengths, bias)
 
-        # (batch, query_max_length, depth)
-        contexts = combine_heads(F, contexts, self.depth_per_head, self.heads)
-
-        # contexts: (batch, query_max_length, output_depth)
+        # (query_max_length, batch, output_depth)
         contexts = self.ff_out(contexts)
 
         return contexts
@@ -475,19 +464,9 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
             previous_kv = F.transpose(previous_kv, axes=(1, 0, 2))
             updated_kv = F.concat(previous_kv, kv, dim=0)
             kv = F.slice(updated_kv, begin=(1, None, None), end=(None, None, None))
-
-        score = F.interleaved_matmul_encdec_qk(queries, kv, heads=self.heads)
-
-        if bias is not None:
-            score = F.broadcast_add(score, bias)
-
-        probs = F.softmax(score, axis=-1)
-
-        contexts = F.interleaved_matmul_encdec_valatt(kv, probs, heads=self.heads)
-
         updated_kv = F.transpose(updated_kv, axes=(1, 0, 2))
 
-        return self.ff_out(contexts), updated_kv
+        return self._attend(F, queries, kv, lengths=input_lengths, bias=bias), updated_kv
 
 
 def _remove_first_step(F, data):
@@ -566,18 +545,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
         # TODO: check whether memory has proper shape/structure for self.ff_kv projection
         kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(F.transpose(memory, axes=(1, 0, 2)))
-        kv = F.transpose(kv, axes=(1, 0, 2))
 
-        score = F.interleaved_matmul_encdec_qk(queries, kv, heads=self.heads)
+        return self._attend(F, queries, kv, bias=bias, lengths=memory_lengths)
 
-        if bias is not None:
-            score = F.broadcast_add(score, bias)
-
-        probs = F.softmax(score, axis=-1)
-
-        contexts = F.interleaved_matmul_encdec_valatt(kv, probs, heads=self.heads)
-
-        return self.ff_out(contexts)
 
 class PlainDotAttention(mx.gluon.HybridBlock):
     """
