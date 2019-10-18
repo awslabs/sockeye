@@ -466,7 +466,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         :return: Symbol of shape (batch, max_length, output_depth).
         """
 
-        proj = self.ff_in(F.transpose(inputs, axes=(1, 0, 2)))
+        proj = self.ff_in(inputs)
         queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
         kv = F.concat(kv_1, kv_2, dim=2)
 
@@ -486,7 +486,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         contexts = F.interleaved_matmul_encdec_valatt(kv, probs, heads=self.heads)
 
         updated_kv = F.transpose(updated_kv, axes=(1, 0, 2))
-        contexts = F.transpose(contexts, axes=(1, 0, 2))
 
         return self.ff_out(contexts), updated_kv
 
@@ -563,7 +562,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :return: Symbol of shape (batch, query_seq_len, output_depth).
         """
 
-        queries = self.ff_q(F.transpose(queries, axes=(1, 0, 2)))
+        queries = self.ff_q(queries)
 
         # TODO: check whether memory has proper shape/structure for self.ff_kv projection
         kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(F.transpose(memory, axes=(1, 0, 2)))
@@ -577,7 +576,6 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         probs = F.softmax(score, axis=-1)
 
         contexts = F.interleaved_matmul_encdec_valatt(kv, probs, heads=self.heads)
-        contexts = F.transpose(contexts, axes=(1, 0, 2))
 
         return self.ff_out(contexts)
 

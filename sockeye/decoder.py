@@ -298,6 +298,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
+        # (length, batch_size, model_size)
+        target = F.transpose(target, axes=(1, 0, 2))
 
         if self.config.dropout_prepost > 0.0:
             target = F.Dropout(data=target, p=self.config.dropout_prepost)
@@ -312,6 +314,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                                              enc_att_kv)
             new_self_att_kv.append(_new_self_att_kv)
         target = self.final_process(target, None)
+        target = F.transpose(target, axes=(1, 0, 2))
 
         return target, new_self_att_kv
 

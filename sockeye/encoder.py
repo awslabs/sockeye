@@ -330,11 +330,13 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
         # (batch_size * heads, 1, seq_len)
         bias = F.expand_dims(self.valid_length_mask(data, valid_length), axis=1)
+        data = F.transpose(data, axes=(1, 0, 2))
 
         for block in self.layers:
             data = block(data, bias)
 
         data = self.final_process(data, None)
+        data = F.transpose(data, axes=(1, 0, 2))
         return data, valid_length
 
     def get_num_hidden(self) -> int:
