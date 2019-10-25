@@ -396,26 +396,22 @@ class SampleK(mx.gluon.HybridBlock):
 
 def _repeat_states(states: List, beam_size) -> List:
     repeated_states = []
-    for state in states:
-        if isinstance(state, List):
-            state = _repeat_states(state, beam_size)
-        elif isinstance(state, mx.nd.NDArray):
-            state = state.repeat(repeats=beam_size, axis=0)
+    for i in range(len(states)):
+        if i < 2:
+            state = states[i].repeat(repeats=beam_size, axis=0)
         else:
-            ValueError("state list can only be nested list or NDArrays")
+            state = states[i].repeat(repeats=beam_size, axis=1)
         repeated_states.append(state)
     return repeated_states
 
 
 def _sort_states(states: List, best_hyp_indices: mx.nd.NDArray) -> List:
     sorted_states = []
-    for state in states:
-        if isinstance(state, List):
-            state = _sort_states(state, best_hyp_indices)
-        elif isinstance(state, mx.nd.NDArray):
-            state = mx.nd.take(state, best_hyp_indices)
+    for i in range(len(states)):
+        if i < 2:
+            state = mx.nd.take(states[i], best_hyp_indices)
         else:
-            ValueError("state list can only be nested list or NDArrays")
+            state = mx.nd.take(states[i], best_hyp_indices, axis=1)
         sorted_states.append(state)
     return sorted_states
 
