@@ -257,36 +257,29 @@ class LengthRatio(mx.gluon.HybridBlock):
         return F.squeeze(data)
 
 
-def split_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
+def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
     """
-    Returns a symbol with heads as second dimension and channel depth / number of heads as last dimension.
+    Broadcasts batch-major input of shape (batch, d1 ... dn-1) to (batch*heads, d1 ... dn-1).
 
-    :param x: Symbol of shape (batch, length, depth).
-    :param depth_per_head: Depth per head.
-    :param heads: Number of heads.
-    :return: Symbol of shape (batch, heads, length, depth_per_heads).
+    :param x: Batch-major input. Shape: (batch, d1 ... dn-1).
+    :param num_heads: Number of heads.
+    :param ndim: Number of dimensions in x.
+    :param fold_heads: Whether to fold heads dimension into batch dimension.
+    :return: Tensor with each sample repeated heads-many times.
+             Shape: (batch * heads, d1 ... dn-1) if fold_heads == True, (batch, heads, d1 ... dn-1) else.
     """
-    # (batch, length, heads, depth_per_head)
-    x = F.reshape(x, shape=(0, -1, heads, depth_per_head))
-    # (batch, heads, length, depth/heads)
-    return F.transpose(x, axes=(0, 2, 1, 3))
-
-
-def combine_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
-    """
-    Returns a symbol with both batch & length, and head & depth dimensions combined.
-
-    :param x: Symbol of shape (batch * heads, length, depth_per_head).
-    :param depth_per_head: Depth per head.
-    :param heads: Number of heads.
-    :return: Symbol of shape (batch, length, depth).
-    """
-    # (batch, heads, length, depth_per_head)
-    x = F.reshape(x, shape=(-4, -1, heads, 0, depth_per_head))
-    # (batch, length, heads, depth_per_head)
-    x = F.transpose(x, axes=(0, 2, 1, 3))
-    # (batch, length, depth)
-    return F.reshape(x, shape=(-1, 0, depth_per_head * heads))
+    dims = [0] * (ndim - 1)
+    # x: (batch, 1)
+    x = F.expand_dims(x, axis=1)
+    # x: (batch, heads, dims...)
+    #x = F.broadcast_to(x, shape=[0, num_heads] + dims)
+    x = F.repeat(x, repeats=num_heads, axis=1)
+    if fold_heads:
+        # (batch * heads, dims...)
+        return F.reshape(x, shape=[-3] + dims)
+    else:
+        # x: (batch, heads, dims...)
+        return x
 
 
 def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
@@ -526,18 +519,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
             updated_states = F.concat(previous_states, states, dim=0)
             states = F.slice(updated_states, begin=(1, None, None), end=(None, None, None))
 
-        updated_states = F.transpose(updated_states, axes=(1, 0, 2))
-
         return self._attend(F, queries, kv, lengths=input_lengths, bias=bias), updated_kv
-
-
-def _remove_first_step(F, data):
-    """
-    :param F: MXNet namespace.
-    :param data: Input data. Shape: (batch, heads, length, num_hidden).
-    :return: Output data. Shape: (batch, heads, length[1:], num_hidden
-    """
-    return F.slice(data, begin=(None, None, 1, None), end=(None, None, None, None))
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
@@ -606,7 +588,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         queries = self.ff_q(queries)
 
         # TODO: check whether memory has proper shape/structure for self.ff_kv projection
-        kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(F.transpose(memory, axes=(1, 0, 2)))
+        kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(memory)
 
         return self._attend(F, queries, kv, bias=bias, lengths=memory_lengths)
 

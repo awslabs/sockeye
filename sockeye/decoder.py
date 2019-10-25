@@ -198,7 +198,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
             for layer in self.layers:
                 enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs)
-                states.append(enc_att_kv)
+                states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
         else:
             # NO encoder projection caching
             states = [step, encoder_outputs, source_mask]
