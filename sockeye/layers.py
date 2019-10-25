@@ -259,38 +259,6 @@ class LengthRatio(mx.gluon.HybridBlock):
         return F.squeeze(data)
 
 
-def split_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
-    """
-    Returns a symbol with heads as second dimension and channel depth / number of heads as last dimension.
-
-    :param x: Symbol of shape (batch, length, depth).
-    :param depth_per_head: Depth per head.
-    :param heads: Number of heads.
-    :return: Symbol of shape (batch, heads, length, depth_per_heads).
-    """
-    # (batch, length, heads, depth_per_head)
-    x = F.reshape(x, shape=(0, -1, heads, depth_per_head))
-    # (batch, heads, length, depth/heads)
-    return F.transpose(x, axes=(0, 2, 1, 3))
-
-
-def combine_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
-    """
-    Returns a symbol with both batch & length, and head & depth dimensions combined.
-
-    :param x: Symbol of shape (batch * heads, length, depth_per_head).
-    :param depth_per_head: Depth per head.
-    :param heads: Number of heads.
-    :return: Symbol of shape (batch, length, depth).
-    """
-    # (batch, heads, length, depth_per_head)
-    x = F.reshape(x, shape=(-4, -1, heads, 0, depth_per_head))
-    # (batch, length, heads, depth_per_head)
-    x = F.transpose(x, axes=(0, 2, 1, 3))
-    # (batch, length, depth)
-    return F.reshape(x, shape=(-1, 0, depth_per_head * heads))
-
-
 def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
     """
     Broadcasts batch-major input of shape (batch, d1 ... dn-1) to (batch*heads, d1 ... dn-1).
@@ -461,14 +429,14 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 
         updated_kv = kv
         if previous_kv is not None:
-            previous_kv = F.transpose(previous_kv, axes=(1, 0, 2))
             updated_kv = F.concat(previous_kv, kv, dim=0)
+            # TODO: remove slicing and initialize with empty array when available in 1.6
             kv = F.slice(updated_kv, begin=(1, None, None), end=(None, None, None))
-        updated_kv = F.transpose(updated_kv, axes=(1, 0, 2))
 
         return self._attend(F, queries, kv, lengths=input_lengths, bias=bias), updated_kv
 
 
+<<<<<<< HEAD
 def _remove_first_step(F, data):
     """
     :param F: MXNet namespace.
@@ -478,6 +446,8 @@ def _remove_first_step(F, data):
     return F.slice(data, begin=(None, None, 1, None), end=(None, None, None, None))
 
 
+=======
+>>>>>>> Removed transposes for decoder kv states (requires fast take on axis=1)
 class MultiHeadAttention(MultiHeadAttentionBase):
     """
     Multi-head attention layer for queries independent from keys/values.
@@ -544,7 +514,11 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         queries = self.ff_q(queries)
 
         # TODO: check whether memory has proper shape/structure for self.ff_kv projection
+<<<<<<< HEAD
         kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(F.transpose(memory, axes=(1, 0, 2)))
+=======
+        kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(memory)
+>>>>>>> Removed transposes for decoder kv states (requires fast take on axis=1)
 
         return self._attend(F, queries, kv, bias=bias, lengths=memory_lengths)
 

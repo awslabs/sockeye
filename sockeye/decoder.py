@@ -194,13 +194,13 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
             for layer in self.layers:
                 enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs)
-                states.append(enc_att_kv)
+                states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
         else:
             # NO encoder projection caching
             states = [step, encoder_outputs, source_mask]
 
         batch_size = encoder_outputs.shape[0]
-        self_att_key_value_dummies = [mx.nd.zeros((batch_size, 1, 2 * self.config.model_size),
+        self_att_key_value_dummies = [mx.nd.zeros((1, batch_size, 2 * self.config.model_size),
                                                    ctx=encoder_outputs.context,
                                                    dtype=encoder_outputs.dtype)] * self.config.num_layers
         states += self_att_key_value_dummies
@@ -305,13 +305,13 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             target = F.Dropout(data=target, p=self.config.dropout_prepost)
 
         new_self_att_kv = []  # type: List[Tuple]
-        for layer, _self_att_kv, enc_att_kv in zip(self.layers, self_att_kv, enc_att_kv):
+        for layer, _self_att_kv, _enc_att_kv in zip(self.layers, self_att_kv, enc_att_kv):
             target, _new_self_att_kv = layer(target,
                                              mask,
                                              source_encoded,
                                              source_mask,
                                              _self_att_kv,
-                                             enc_att_kv)
+                                             _enc_att_kv)
             new_self_att_kv.append(_new_self_att_kv)
         target = self.final_process(target, None)
         target = F.transpose(target, axes=(1, 0, 2))
