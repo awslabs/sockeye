@@ -554,15 +554,16 @@ class BeamSearch(mx.gluon.Block):
         vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
+            vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words)
             if any(raw_constraint_list):
                 # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
-                constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
-                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)
+                constraint_ids = [word_id for sent in raw_constraint_list for phr in sent for word_id in phr]
+                vocab_slice_ids = mx.nd.numpy.unique(
+                    mx.nd.concat(vocab_slice_ids, mx.nd.array(constraint_ids, ctx=self.context, dtype='int32'),
+                                 dim=0).as_np_ndarray()).as_nd_ndarray()
                 full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
                 raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                        raw_constraint_list]
-            vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
             if vocab_slice_ids.shape[0] < self.beam_size + 1:
                 # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is

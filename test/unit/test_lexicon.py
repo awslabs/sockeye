@@ -14,6 +14,7 @@
 import os
 from tempfile import TemporaryDirectory
 
+import mxnet as mx
 import numpy as np
 
 import sockeye.constants as C
@@ -41,45 +42,53 @@ def test_topk_lexicon():
         lex.create(input_lex_path, k)
 
         # Test against known lexicon
-        expected = np.zeros((len(C.VOCAB_SYMBOLS) + len(vocab_list), k), dtype=np.int)
+        expected = mx.nd.zeros((len(C.VOCAB_SYMBOLS) + len(vocab_list), k), dtype='int32')
         # a -> special + a b
         expected[len(C.VOCAB_SYMBOLS), :2] = [len(C.VOCAB_SYMBOLS), len(C.VOCAB_SYMBOLS) + 1]
         # b -> special + b
         expected[len(C.VOCAB_SYMBOLS) + 1, :1] = [len(C.VOCAB_SYMBOLS) + 1]
-        assert np.all(lex.lex == expected)
+        assert np.all(lex.lex.asnumpy() == expected.asnumpy())
 
         # Test save/load
-        expected_sorted = np.sort(expected, axis=1)
-        json_lex_path = os.path.join(work_dir, "lex.json")
+        expected_sorted = mx.nd.sort(expected, axis=1)
+        json_lex_path = os.path.join(work_dir, "lex.npy")
         lex.save(json_lex_path)
         lex.load(json_lex_path)
-        assert np.all(lex.lex == expected_sorted)
+        assert np.all(lex.lex.asnumpy() == expected_sorted.asnumpy())
 
         # Test lookup
-        trg_ids = lex.get_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int))
-        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype=np.int)
-        assert np.all(trg_ids == expected)
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["a"], vocab["c"]]], dtype='int32'))
+        expected = mx.nd.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype='int32')
+        assert np.all(trg_ids.asnumpy() == expected.asnumpy())
 
-        trg_ids = lex.get_trg_ids(np.array([[vocab["b"]]], dtype=np.int))
-        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["b"]], dtype=np.int)
-        assert np.all(trg_ids == expected)
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["a"], vocab["a"], vocab["c"]]], dtype='int32'))
+        expected = mx.nd.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype='int32')
+        assert np.all(trg_ids.asnumpy() == expected.asnumpy())
 
-        trg_ids = lex.get_trg_ids(np.array([[vocab["c"]]], dtype=np.int))
-        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
-        assert np.all(trg_ids == expected)
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["a"], vocab["a"], vocab["c"]]], dtype='int32'))
+        expected = mx.nd.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype='int32')
+        assert np.all(trg_ids.asnumpy() == expected.asnumpy())
+
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["b"]]], dtype='int32'))
+        expected = mx.nd.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["b"]], dtype='int32')
+        assert np.all(trg_ids.asnumpy() == expected.asnumpy())
+
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["c"]]], dtype='int32'))
+        expected = mx.nd.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32')
+        assert np.all(trg_ids.asnumpy() == expected.asnumpy())
 
         # Test load with smaller k
         small_k = k - 1
         lex.load(json_lex_path, k=small_k)
         assert lex.lex.shape[1] == small_k
-        trg_ids = lex.get_trg_ids(np.array([[vocab["a"]]], dtype=np.int))
-        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a"]], dtype=np.int)
-        assert np.all(trg_ids == expected)
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["a"]]], dtype='int32'))
+        expected = mx.nd.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a"]], dtype='int32')
+        assert np.all(trg_ids.asnumpy() == expected.asnumpy())
 
         # Test load with larger k
         large_k = k + 1
         lex.load(json_lex_path, k=large_k)
         assert lex.lex.shape[1] == k
-        trg_ids = lex.get_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int))
-        expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype=np.int)
-        assert np.all(trg_ids == expected)
+        trg_ids = lex.get_trg_ids(mx.nd.array([[vocab["a"], vocab["c"]]], dtype='int32'))
+        expected = mx.nd.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype='int32')
+        assert np.all(trg_ids.asnumpy() == expected.asnumpy())

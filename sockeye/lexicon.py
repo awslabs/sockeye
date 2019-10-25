@@ -114,13 +114,16 @@ class TopKLexicon:
 
     def __init__(self,
                  vocab_source: Dict[str, int],
-                 vocab_target: Dict[str, int]) -> None:
+                 vocab_target: Dict[str, int],
+                 ctx: mx.Context = mx.cpu()) -> None:
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
+        self.ctx = ctx
+        self.ctx = ctx
         # Shape: (vocab_source_size, k), k determined at create() or load()
-        self.lex = None  # type: np.ndarray
+        self.lex = None  # type: Optional[mx.nd.NDArray]
         # Always allow special vocab symbols in target vocab
-        self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
+        self.always_allow = mx.nd.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32', ctx=ctx)
 
     def create(self, path: str, k: int = 20):
         """
@@ -129,7 +132,7 @@ class TopKLexicon:
         :param path: Path to lexicon file.
         :param k: Number of target entries per source to keep.
         """
-        self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
+        self.lex = mx.nd.zeros((len(self.vocab_source), k), dtype='int32', ctx=self.ctx)
         src_unk_id = self.vocab_source[C.UNK_SYMBOL]
         trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
         num_insufficient = 0  # number of source tokens with insufficient number of translations given k
@@ -157,7 +160,7 @@ class TopKLexicon:
         :param path: Path to Numpy array output file.
         """
         with open(path, 'wb') as out:
-            np.save(out, self.lex)
+            np.save(out, self.lex.asnumpy())
         logger.info("Saved top-k lexicon to \"%s\"", path)
 
     def load(self, path: str, k: Optional[int] = None):
@@ -169,7 +172,7 @@ class TopKLexicon:
         """
         load_time_start = time.time()
         with open(path, 'rb') as inp:
-            _lex = np.load(inp)
+            _lex = mx.nd.from_numpy(np.load(inp), zero_copy=True)
         loaded_k = _lex.shape[1]
         if k is not None:
             top_k = min(k, loaded_k)
@@ -178,22 +181,24 @@ class TopKLexicon:
                                "contains at most %d entries per source.", k, loaded_k)
         else:
             top_k = loaded_k
-        self.lex = np.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
+        self.lex = mx.nd.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype, ctx=self.ctx)
         for src_id, trg_ids in enumerate(_lex):
-            self.lex[src_id, :] = np.sort(trg_ids[:top_k])
+            self.lex[src_id, :] = mx.nd.sort(trg_ids[:top_k])
         load_time = time.time() - load_time_start
         logger.info("Loaded top-%d lexicon from \"%s\" in %.4fs.", top_k, path, load_time)
 
-    def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
+    def get_trg_ids(self, src_ids: mx.nd.NDArray) -> mx.nd.NDArray:
         """
         Lookup possible target ids for input sequence of source ids.
 
         :param src_ids: Sequence(s) of source ids (any shape).
         :return: Possible target ids for source (unique sorted, always includes special symbols).
         """
-        # TODO: When MXNet adds support for set operations, we can migrate to avoid conversions to/from NumPy.
-        unique_src_ids = np.lib.arraysetops.unique(src_ids)
-        trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))
+        trg_ids = self.lex.take(src_ids.as_in_context(self.ctx).reshape((-1,))).reshape((-1,))
+        trg_ids = mx.nd.concat(self.always_allow, trg_ids, dim=0)
+        # numpy MXNet ops currently require 'Numpy NDArrays', a new numpy compatible NDArray class. As long as this
+        # is the case, we need to convert to it and back.
+        trg_ids = mx.nd.numpy.unique(trg_ids.as_np_ndarray()).as_nd_ndarray()
         return trg_ids
 
 
@@ -207,7 +212,7 @@ def create(args):
     vocab_source = vocab.load_source_vocabs(args.model)[0]
     vocab_target = vocab.load_target_vocab(args.model)
     logger.info("Building top-%d lexicon", args.k)
-    lexicon = TopKLexicon(vocab_source, vocab_target)
+    lexicon = TopKLexicon(vocab_source, vocab_target, ctx=mx.cpu())
     lexicon.create(args.input, args.k)
     lexicon.save(args.output)
 
@@ -221,7 +226,7 @@ def inspect(args):
     vocab_source = vocab.load_source_vocabs(args.model)[0]
     vocab_target = vocab.vocab_from_json(os.path.join(args.model, C.VOCAB_TRG_NAME))
     vocab_target_inv = vocab.reverse_vocab(vocab_target)
-    lexicon = TopKLexicon(vocab_source, vocab_target)
+    lexicon = TopKLexicon(vocab_source, vocab_target, ctx=mx.cpu())
     lexicon.load(args.lexicon, args.k)
     logger.info("Reading from STDIN...")
     for line in sys.stdin:
@@ -230,7 +235,7 @@ def inspect(args):
             continue
         ids = tokens2ids(tokens, vocab_source)
         print("Input:  n=%d" % len(tokens), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens, ids)))
-        trg_ids = lexicon.get_trg_ids(np.array(ids))
+        trg_ids = lexicon.get_trg_ids(mx.nd.array(ids))
         tokens_trg = [vocab_target_inv.get(trg_id, C.UNK_SYMBOL) for trg_id in trg_ids]
         print("Output: n=%d" % len(tokens_trg), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens_trg, trg_ids)))
         print()

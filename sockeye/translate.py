@@ -91,7 +91,7 @@ def run_translate(args: argparse.Namespace):
             logger.info(str(args.restrict_lexicon))
             if len(args.restrict_lexicon) == 1:
                 # Single lexicon used for all inputs
-                restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
+                restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab, ctx=context)
                 # Handle a single arg of key:path or path (parsed as path:path)
                 restrict_lexicon.load(args.restrict_lexicon[0][1], k=args.restrict_lexicon_topk)
             else:
@@ -100,7 +100,7 @@ def run_translate(args: argparse.Namespace):
                 # Multiple lexicons with specified names
                 restrict_lexicon = dict()
                 for key, path in args.restrict_lexicon:
-                    lexicon = TopKLexicon(source_vocabs[0], target_vocab)
+                    lexicon = TopKLexicon(source_vocabs[0], target_vocab, ctx=context)
                     lexicon.load(path, k=args.restrict_lexicon_topk)
                     restrict_lexicon[key] = lexicon
 
