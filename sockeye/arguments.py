@@ -567,6 +567,13 @@ def add_model_parameters(params):
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
 
+    model_params.add_argument('--shared-encoder-layer-params',
+                              action='store_true',
+                              help='Share parameters across encoder layers.')
+    model_params.add_argument('--shared-decoder-layer-params',
+                              action='store_true',
+                              help='Share parameters across decoder layers.')
+
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
                               type=multiple_values(num_values=2, greater_or_equal=1),

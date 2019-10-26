@@ -86,6 +86,8 @@ def test_device_args(test_params, expected_params):
     ('', dict(params=None,
               allow_missing_params=False,
               num_layers=(6, 6),
+              shared_encoder_layer_params=False,
+              shared_decoder_layer_params=False,
               num_embed=(None, None),
               source_factors_num_embed=[],
               source_factors_combine=C.SOURCE_FACTORS_COMBINE_CONCAT,

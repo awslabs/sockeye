@@ -274,8 +274,13 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                                                                             name="bias")
 
             self.layers = mx.gluon.nn.HybridSequential()
-            for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
+            if config.shared_layer_params:
+                single_encoder_block = transformer.TransformerEncoderBlock(config, prefix="%d_" % 1)
+                for i in range(config.num_layers):
+                    self.layers.add(single_encoder_block)
+            else:
+                for i in range(config.num_layers):
+                    self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
 
             self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                      dropout=config.dropout_prepost,

@@ -11,12 +11,17 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import pytest
+
 import sockeye.constants as C
 import sockeye.encoder
 import sockeye.transformer
 
-
-def test_get_transformer_encoder():
+@pytest.mark.parametrize('shared_layer_params, lhuc', [
+    (False, False),
+    (True, True)
+])
+def test_get_transformer_encoder(shared_layer_params, lhuc):
     prefix = "test_"
     config = sockeye.transformer.TransformerConfig(model_size=20,
                                                    attention_heads=10,
@@ -30,7 +35,9 @@ def test_get_transformer_encoder():
                                                    preprocess_sequence='test_pre',
                                                    postprocess_sequence='test_post',
                                                    max_seq_len_source=50,
-                                                   max_seq_len_target=60)
+                                                   max_seq_len_target=60,
+                                                   shared_layer_params=shared_layer_params,
+                                                   lhuc=lhuc)
     encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix)
 
     assert type(encoder) == sockeye.encoder.TransformerEncoder
