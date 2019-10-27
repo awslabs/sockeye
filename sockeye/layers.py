@@ -25,18 +25,6 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-class GeLU(mx.gluon.HybridBlock):
-
-    def __init__(self, prefix=''):
-        super().__init__(prefix=prefix)
-        with self.name_scope():
-            self.act = mx.gluon.nn.Activation(activation="tanh")
-
-    def hybrid_forward(self, F, x):
-        # Approximation of x * gaussian_cdf(x) used by Hendrycks and Gimpel
-        return 0.5 * x * (1 + self.act((math.sqrt(2 / math.pi) * (x + (0.044715 * (x ** 3))))))
-
-
 def get_activation(act_type: str) -> mx.gluon.Block:
     """
     Returns Gluon Block for given activation type.
@@ -53,10 +41,9 @@ def get_activation(act_type: str) -> mx.gluon.Block:
     """
     if act_type == C.SWISH1:
         return mx.gluon.nn.Swish()
-    elif act_type == C.GELU:
-        return GeLU()
-    else:
-        return mx.gluon.nn.Activation(activation=act_type)
+    if act_type == C.GELU:
+        return mx.gluon.nn.GELU()
+    return mx.gluon.nn.Activation(activation=act_type)
 
 
 class LHUC(mx.gluon.HybridBlock):
