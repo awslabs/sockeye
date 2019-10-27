@@ -115,17 +115,12 @@ WEIGHT_TYING_TYPES = [WEIGHT_TYING_NONE, WEIGHT_TYING_SRC_TRG_SOFTMAX, WEIGHT_TY
 TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
 
 # Activation types
-# Gaussian Error Linear Unit (https://arxiv.org/pdf/1606.08415.pdf)
-GELU = "gelu"
-# Gated Linear Unit (https://arxiv.org/pdf/1705.03122.pdf)
-GLU = "glu"
 RELU = "relu"
-SIGMOID = "sigmoid"
-SOFT_RELU = "softrelu"
 # Swish-1/SiLU (https://arxiv.org/pdf/1710.05941.pdf, https://arxiv.org/pdf/1702.03118.pdf)
 SWISH1 = "swish1"
-TANH = "tanh"
-TRANSFORMER_ACTIVATION_TYPES = [GELU, RELU, SWISH1]
+# Gaussian Error Linear Unit (https://arxiv.org/pdf/1606.08415.pdf)
+GELU = "gelu"
+TRANSFORMER_ACTIVATION_TYPES = [RELU, SWISH1, GELU]
 
 # default I/O variable names
 SOURCE_NAME = "source"

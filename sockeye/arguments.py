@@ -591,9 +591,11 @@ def add_model_parameters(params):
                               help='Number of hidden units in transformers feed forward layers. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
     model_params.add_argument('--transformer-activation-type',
-                              choices=C.TRANSFORMER_ACTIVATION_TYPES,
-                              default=C.RELU,
-                              help="Type activation to use for each feed forward layer. Default: %(default)s.")
+                              type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
+                              default=(C.RELU, C.RELU),
+                              help='Type of activation to use for each feed forward layer. Use "x:x" to specify '
+                                   'different values for encoder & decoder. Supported: {}. Default: '
+                                   '%(default)s.'.format(' '.join(C.TRANSFORMER_ACTIVATION_TYPES)))
     model_params.add_argument('--transformer-positional-embedding-type',
                               choices=C.POSITIONAL_EMBEDDING_TYPES,
                               default=C.FIXED_POSITIONAL_EMBEDDING,
