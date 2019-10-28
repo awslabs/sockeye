@@ -793,20 +793,23 @@ def add_training_args(params):
     train_params.add_argument('--embed-dropout',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
-                              help='Dropout probability for source & target embeddings. Use "x:x" to specify '
-                                   'separate values. Default: %(default)s.')
+                              help='Dropout probability for source & target embeddings. Use "x:x" to specify separate '
+                                   'values. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
-                              type=float,
-                              default=0.1,
-                              help='Dropout probability for multi-head attention. Default: %(default)s.')
+                              type=multiple_values(2, data_type=float),
+                              default=(0.1, 0.1),
+                              help='Dropout probability for multi-head attention. Use "x:x" to specify separate '
+                                   'values for encoder & decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-act',
-                              type=float,
-                              default=0.1,
-                              help='Dropout probability before activation in feed-forward block. Default: %(default)s.')
+                              type=multiple_values(2, data_type=float),
+                              default=(0.1, 0.1),
+                              help='Dropout probability before activation in feed-forward block. Use "x:x" to specify '
+                                   'separate values for encoder & decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-prepost',
-                              type=float,
-                              default=0.1,
-                              help='Dropout probability for pre/postprocessing blocks. Default: %(default)s.')
+                              type=multiple_values(2, data_type=float),
+                              default=(0.1, 0.1),
+                              help='Dropout probability for pre/postprocessing blocks. Use "x:x" to specify separate '
+                                   'values for encoder & decoder. Default: %(default)s.')
 
     train_params.add_argument('--optimizer',
                               default=C.OPTIMIZER_ADAM,
