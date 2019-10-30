@@ -711,11 +711,14 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None) -> training.TrainState:
+def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None,
+          checkpoint_callback: Optional[Callable] = None) -> training.TrainState:
     """
     :param custom_metrics_logger: Optional custom metrics logging function. If supplied, takes care of metrics produced
                                   during training in a custom way. It should accept a list or a dictionary of
                                   (metric name, metric value) pairs, and an optional global_step/checkpoint parameter.
+    :param checkpoint_callback: An optional callback function (int -> None). The function will be called
++                                each time a checkpoint has been reached 
     """
 
     if args.dry_run:
@@ -912,7 +915,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             context=context,
             dtype=args.dtype,
             using_amp=using_amp,
-            custom_metrics_logger=custom_metrics_logger
+            custom_metrics_logger=custom_metrics_logger,
+            checkpoint_callback=checkpoint_callback
         )
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
