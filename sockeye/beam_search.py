@@ -64,8 +64,10 @@ class _SingleModelInference(_Inference):
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         logits, states, _ = self._model.decode_step(step_input, states, vocab_slice_ids)
-        logits = logits.astype('float32', copy=False)
-        scores = -logits if self._skip_softmax else -logits.log_softmax(axis=-1)
+        # TODO: change back to casting first when fp32 safe accumulation is fixed
+        if not self._skip_softmax:
+            logits = logits.log_softmax(axis=-1)
+        scores = -logits.astype('float32', copy=False)
         return scores, states
 
 
