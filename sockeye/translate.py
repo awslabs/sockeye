@@ -194,7 +194,7 @@ def make_inputs(input_file: Optional[str],
                             "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
                                 translator.num_source_factors, len(inputs)))
         with ExitStack() as exit_stack:
-            streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
+            streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]  # pylint: disable=no-member
             for sentence_id, inputs in enumerate(zip(*streams), 1):
                 if input_is_json:
                     yield inference.make_input_from_json_string(sentence_id=sentence_id,

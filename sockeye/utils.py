@@ -676,6 +676,7 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
                 # This will make sure that we use consecutive device ids whenever possible.
                 if master_lock is not None:
                     for candidates in candidates_to_request:
+                        # pylint: disable=no-member
                         gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
                         if gpu_id is not None:
                             acquired_gpus.append(cast(int, gpu_id))

@@ -393,8 +393,10 @@ def shard_data(source_fnames: List[str],
                                                              length_ratio_std) for shard_idx in range(num_shards)]
 
     with ExitStack() as exit_stack:
+        # pylint: disable=no-member
         sources_shards = [[exit_stack.enter_context(smart_open(f, mode="wt")) for f in sources_shard_fnames[i]] for i in
                           range(len(source_fnames))]
+        # pylint: disable=no-member
         target_shards = [exit_stack.enter_context(smart_open(f, mode="wt")) for f in target_shard_fnames]
 
         source_readers, target_reader = create_sequence_readers(source_fnames, target_fname,
