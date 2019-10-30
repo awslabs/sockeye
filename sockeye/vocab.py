@@ -53,7 +53,7 @@ def build_from_paths(paths: List[str], num_words: Optional[int] = None, min_coun
     """
     with ExitStack() as stack:
         logger.info("Building vocabulary from dataset(s): %s", paths)
-        files = (stack.enter_context(utils.smart_open(path)) for path in paths)
+        files = (stack.enter_context(utils.smart_open(path)) for path in paths)  # pylint: disable=no-member
         return build_vocab(chain(*files), num_words, min_count, pad_to_multiple_of, num_pointers)
 
 
