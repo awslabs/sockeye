@@ -2211,7 +2211,8 @@ class Translator:
                 best_ids += np.argmin(filtered, axis=1).astype('int32')
 
             # Obtain sequences for all best hypotheses in the batch
-            indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
+            indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)  # type: np.ndarray
+            # pylint: disable=unsubscriptable-object
             nbest_translations.append([self._assemble_translation(*x) for x in zip(best_word_indices[indices, np.arange(indices.shape[1])],
                                                                                    lengths[best_ids],
                                                                                    attentions[best_ids],
