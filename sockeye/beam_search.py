@@ -270,14 +270,6 @@ class CandidateScorer(mx.gluon.HybridBlock):
         return (scores + bp) * self._lp(lengths)
 
 
-class SortByIndex(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that sorts args by the given indices.
-    """
-    def hybrid_forward(self, F, indices, *args):
-        return [F.take(arg, indices) for arg in args]
-
-
 class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
@@ -409,17 +401,21 @@ def _repeat_states(states: List, beam_size) -> List:
     return repeated_states
 
 
-def _sort_states(states: List, best_hyp_indices: mx.nd.NDArray) -> List:
-    sorted_states = []
-    for state in states:
-        if isinstance(state, List):
-            state = _sort_states(state, best_hyp_indices)
-        elif isinstance(state, mx.nd.NDArray):
-            state = mx.nd.take(state, best_hyp_indices)
-        else:
-            ValueError("state list can only be nested list or NDArrays")
-        sorted_states.append(state)
-    return sorted_states
+class SortStates(mx.gluon.HybridBlock):
+    def hybrid_forward(self, F, best_hyp_indices, *states):
+        sorted_states = []
+        for i in range(len(states)):
+            if i < 2:
+                # Steps and source_bias have batch dimension on axis 0
+                state = F.take(states[i], best_hyp_indices)
+            elif i >= ((len(states) - 2) // 2) + 2:
+                # Decoder layer states have batch dimension on axis 1
+                state = F.take(states[i], best_hyp_indices, axis=1)
+            else:
+                # No need for takes on encoder layer states
+                state = states[i]
+            sorted_states.append(state)
+        return sorted_states
 
 
 # TODO (fhieber): add full fp16 decoding with mxnet > 1.5
@@ -461,7 +457,7 @@ class BeamSearch(mx.gluon.Block):
         self.global_avoid_trie = global_avoid_trie
 
         with self.name_scope():
-            self._sort_by_index = SortByIndex(prefix='sort_by_index_')
+            self._sort_states = SortStates(prefix='sort_states_')
             self._update_scores = UpdateScores(prefix='update_scores_')
             self._scorer = scorer
             self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
@@ -675,7 +671,7 @@ class BeamSearch(mx.gluon.Block):
                 break
 
             # (5) update models' state with winning hypotheses (ascending)
-            model_states = _sort_states(model_states, best_hyp_indices)
+            model_states = self._sort_states(best_hyp_indices, *model_states)
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
