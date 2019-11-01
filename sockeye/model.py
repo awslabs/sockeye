@@ -47,6 +47,8 @@ class ModelConfig(Config):
     :param config_decoder: Decoder configuration.
     :param config_length_task: Optional length task configuration.
     :param weight_tying_type: Determines which weights get tied.
+    :param project_softmax_to_size: Project final decoder representations to
+            this size before running softmax over target vocabulary.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
     """
@@ -59,7 +61,8 @@ class ModelConfig(Config):
                  config_embed_target: encoder.EmbeddingConfig,
                  config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.DecoderConfig,
-                 config_length_task: layers.LengthRatioConfig = None,
+                 config_length_task: layers.LengthRatioConfig= None,
+                 project_softmax_to_size: Optional[int] = None,
                  weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
                  lhuc: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
@@ -72,6 +75,7 @@ class ModelConfig(Config):
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_length_task = config_length_task
+        self.project_softmax_to_size = project_softmax_to_size
         self.weight_tying_type = weight_tying_type
         self.lhuc = lhuc
         self.dtype = dtype
@@ -126,6 +130,7 @@ class SockeyeModel(mx.gluon.Block):
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
+                                                   project_hidden_to_size=self.config.project_softmax_to_size,
                                                    weight=self.output_weight)
 
             self.length_ratio = None

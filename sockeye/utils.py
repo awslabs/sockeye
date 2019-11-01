@@ -16,6 +16,7 @@ A set of utility methods.
 """
 import binascii
 import errno
+from functools import reduce
 import glob
 import gzip
 import itertools
@@ -768,22 +769,17 @@ def log_parameters(params: mx.gluon.ParameterDict):
     """
     Logs information about model parameters.
     """
-    fixed_parameters = 0
-    learned_parameters = 0
+    total_parameters = 0
     fixed_parameter_names = []
     learned_parameter_names = []
     #info = []  # type: List[str]
     for name, param in sorted(params.items()):
         repr = "%s [%s, %s]" % (name, param.shape, param.dtype)
-        #info.append("%s shape=%s, dtype=%s" % (name, param.shape, param.dtype))
+        total_parameters += reduce(lambda x, y: x * y, param.shape)
         if param.grad_req == 'null':
             fixed_parameter_names.append(repr)
         else:
             learned_parameter_names.append(repr)
-    #percent_fixed = 100 * (fixed_parameters / max(1, total_parameters))
-    #percent_learned = 100 * (learned_parameters / max(1, total_parameters))
     logger.info("Trainable parameters: %s", ", ".join(learned_parameter_names))
     logger.info("Fixed model parameters: %s", ", ".join(fixed_parameter_names))
-    #logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
-    #logger.info("Learning %d parameters (%0.2f%%)", learned_parameters, percent_learned)
-    #logger.info("Total # of parameters: %d", total_parameters)
+    logger.info("Total # of parameters: %d", total_parameters)

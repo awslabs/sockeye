@@ -652,9 +652,14 @@ def add_model_parameters(params):
     model_params.add_argument('--project-embed-to-size',
                               type=multiple_values(num_values=2, greater_or_equal=1),
                               default=(None, None),
-                              help='Project embeddings to this size. Use "x:x" to specify separate values for source & '
+                              help='If specified, project embeddings to this size (usually used to project smaller '
+                                   'embeddings to model size). Use "x:x" to specify separate values for source & '
                                    'target. Default: %(default)s.')
-
+    model_params.add_argument('--project-softmax-to-size',
+                              type=int,
+                              default=None,
+                              help='If specified, project output layer representations to this size prior to running '
+                                   'softmax over target vocabulary. Default: %(default)s.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,

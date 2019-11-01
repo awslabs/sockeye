@@ -102,6 +102,8 @@ class OutputLayer(mx.gluon.HybridBlock):
 
     :param hidden_size: Input hidden size.
     :param vocab_size: Target vocabulary size.
+    :param project_hidden_to_size: If specified, project input representations to
+                                   this size before running softmax.
     :param weight: Optional shared weight Parameter.
     :param weight_initializer: Initializer for weight.
     :param bias_initializer: Initializer for bias.
@@ -113,6 +115,7 @@ class OutputLayer(mx.gluon.HybridBlock):
     def __init__(self,
                  hidden_size: int,
                  vocab_size: int,
+                 project_hidden_to_size: Optional[int] = None,
                  weight: Optional[mx.gluon.Parameter] = None,
                  weight_initializer: Optional[str] = None,
                  bias_initializer: str = 'zeros',
@@ -120,10 +123,25 @@ class OutputLayer(mx.gluon.HybridBlock):
                  prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
         super().__init__(prefix=prefix)
         self.vocab_size = vocab_size
+        self.project_hidden_to_size = project_hidden_to_size
         with self.name_scope():
+            if project_hidden_to_size is not None:
+                self.project_weight = self.params.get('project_weight',
+                                                      shape=(project_hidden_to_size, hidden_size),
+                                                      init=weight_initializer,
+                                                      dtype=dtype,
+                                                      allow_deferred_init=False)
+                self.project_bias = self.params.get('project_bias',
+                                                    shape=(project_hidden_to_size,),
+                                                    init=bias_initializer,
+                                                    dtype=dtype,
+                                                    allow_deferred_init=False)
+
             if weight is None:
                 self.weight = self.params.get("weight",
-                                              shape=(vocab_size, hidden_size),
+                                              shape=(vocab_size, project_hidden_to_size
+                                                                 if project_hidden_to_size is not None
+                                                                 else hidden_size),
                                               init=weight_initializer,
                                               dtype=dtype,
                                               allow_deferred_init=False)
@@ -139,6 +157,12 @@ class OutputLayer(mx.gluon.HybridBlock):
 
     def forward(self, data, vocab_slice_ids):
         if vocab_slice_ids is not None:
+            if self.project_hidden_to_size is not None:
+                data = mx.nd.FullyConnected(data=data,
+                                            num_hidden=self.project_hidden_to_size,
+                                            weight=self.project_weight.data(),
+                                            bias=self.project_bias.data(),
+                                            flatten=False)
             # imperative, reduced matrix multiplication for vocabulary selection
             weight = self.weight.data().take(vocab_slice_ids)
             bias = self.bias.data().take(vocab_slice_ids)
@@ -148,10 +172,15 @@ class OutputLayer(mx.gluon.HybridBlock):
                                         bias=bias,
                                         flatten=False,
                                         name=C.LOGITS_NAME)
-        else:
-            return super().forward(data)
+        return super().forward(data)
 
-    def hybrid_forward(self, F, data, weight, bias):
+    def hybrid_forward(self, F, data, weight, bias, project_weight=None, project_bias=None):
+        if self.project_hidden_to_size is not None:
+            data = F.FullyConnected(data=data,
+                                    num_hidden=self.project_hidden_to_size,
+                                    weight=project_weight,
+                                    bias=project_bias,
+                                    flatten=False)
         return F.FullyConnected(data=data,
                                 num_hidden=self.vocab_size,
                                 weight=weight,

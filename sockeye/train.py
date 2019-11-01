@@ -539,9 +539,9 @@ def create_model_config(args: argparse.Namespace,
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
-                                                  project_to_size=args.project_embed_to_size[0],
                                                   factor_configs=source_factor_configs,
-                                                  source_factors_combine=args.source_factors_combine)
+                                                  source_factors_combine=args.source_factors_combine,
+                                                  project_to_size=args.project_embed_to_size[0])
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
@@ -562,6 +562,7 @@ def create_model_config(args: argparse.Namespace,
                                      config_decoder=config_decoder,
                                      config_length_task=config_length_task,
                                      weight_tying_type=args.weight_tying_type,
+                                     project_softmax_to_size=args.project_softmax_to_size,
                                      lhuc=args.lhuc is not None,
                                      dtype=args.dtype)
     return model_config
