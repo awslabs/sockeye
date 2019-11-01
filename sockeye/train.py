@@ -453,18 +453,24 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
                         "Transformer source model size (%d).", transformer_model_size_source)
             num_embed_source = transformer_model_size_source
         else:
-            check_condition(args.transformer_model_size[0] == num_embed_source,
-                            "Source embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size, num_embed_source))
+            if args.project_embed_to_size[0] is not None:
+                check_condition(args.transformer_model_size[0] == args.project_embed_to_size[0],
+                                "Source embedding projected size must match transformer model size: %s vs. %s"
+                                % (args.transformer_model_size[0], args.project_embed_to_size[0]))
+            else:
+                check_condition(args.transformer_model_size[0] == num_embed_source,
+                                "Source embedding size must match transformer model size: %s vs. %s"
+                                % (args.transformer_model_size[0], num_embed_source))
 
-        total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-            adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
-            check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
-                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
-                            "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
-                            "has to be even and a multiple of encoder attention heads (%d)" % (
-                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
+        if args.project_embed_to_size[0] is None:
+            total_source_factor_size = sum(args.source_factors_num_embed)
+            if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+                adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
+                check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
+                                adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
+                                "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
+                                "has to be even and a multiple of encoder attention heads (%d)" % (
+                                    adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
 
     if args.decoder == C.TRANSFORMER_TYPE:
         transformer_model_size_target = args.transformer_model_size[1]
@@ -473,10 +479,15 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
                         "Transformer target model size (%d).", transformer_model_size_target)
             num_embed_target = transformer_model_size_target
         else:
-            # Make sure that if the user sets num_embed it matches the Transformer model size
-            check_condition(args.transformer_model_size[1] == num_embed_target,
-                            "Target embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size, num_embed_target))
+            if args.project_embed_to_size[1] is not None:
+                check_condition(args.transformer_model_size[1] == args.project_embed_to_size[1],
+                                "Target embedding projected size must match transformer model size: %s vs. %s"
+                                % (args.transformer_model_size[1], args.project_embed_to_size[1]))
+            else:
+                # Make sure that if the user sets num_embed it matches the Transformer model size
+                check_condition(args.transformer_model_size[1] == num_embed_target,
+                                "Target embedding size must match transformer model size: %s vs. %s"
+                                % (args.transformer_model_size[1], num_embed_target))
 
     if not num_embed_source:
         num_embed_source = C.DEFAULT_NUM_EMBED
@@ -528,12 +539,14 @@ def create_model_config(args: argparse.Namespace,
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
+                                                  project_to_size=args.project_embed_to_size[0],
                                                   factor_configs=source_factor_configs,
                                                   source_factors_combine=args.source_factors_combine)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
-                                                  dropout=embed_dropout_target)
+                                                  dropout=embed_dropout_target,
+                                                  project_to_size=args.project_embed_to_size[1])
 
     config_length_task = None
     if args.length_task is not None:

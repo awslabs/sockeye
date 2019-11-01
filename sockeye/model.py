@@ -103,16 +103,22 @@ class SockeyeModel(mx.gluon.Block):
 
         with self.name_scope():
             # source & target embeddings
-            self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
+            self.source_embed_weight, self.source_embed_project_weight, self.source_embed_project_bias, \
+                self.target_embed_weight, self.target_embed_project_weight, self.target_embed_project_bias, \
+                self.output_weight = self._get_embedding_weights()
 
             self.embedding_source = encoder.Embedding(config.config_embed_source,
                                                       prefix=self.prefix,
                                                       is_source=True,
-                                                      embed_weight=self.source_embed_weight)
+                                                      embed_weight=self.source_embed_weight,
+                                                      project_weight=self.source_embed_project_weight,
+                                                      project_bias=self.source_embed_project_bias)
             self.embedding_target = encoder.Embedding(config.config_embed_target,
                                                       prefix=self.prefix,
                                                       is_source=False,
-                                                      embed_weight=self.target_embed_weight)
+                                                      embed_weight=self.target_embed_weight,
+                                                      project_weight=self.target_embed_project_weight,
+                                                      project_bias=self.target_embed_project_bias)
 
             # encoder & decoder first (to know the decoder depth)
             self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
@@ -328,7 +334,9 @@ class SockeyeModel(mx.gluon.Block):
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _get_embedding_weights(self) -> Tuple[mx.gluon.Parameter, mx.gluon.Parameter, mx.gluon.Parameter]:
+    def _get_embedding_weights(self) -> Tuple[mx.gluon.Parameter, mx.gluon.Parameter, mx.gluon.Parameter,
+                                              mx.gluon.Parameter, mx.gluon.Parameter, mx.gluon.Parameter,
+                                              mx.gluon.Parameter,]:
         """
         Returns embeddings for source, target, and output layer.
         When source and target embeddings are shared, they are created here and passed in to each side,
@@ -342,21 +350,47 @@ class SockeyeModel(mx.gluon.Block):
         tie_weights = C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type
 
         source_embed_name = C.SOURCE_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
+        source_embed_project_prefix = C.SOURCE_EMBEDDING_PREFIX + "project_" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "project_"
         target_embed_name = C.TARGET_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
+        target_embed_project_prefix = C.TARGET_EMBEDDING_PREFIX + "project_" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "project_"
         output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
 
         source_embed_weight = self.params.get(source_embed_name,
                                               shape=(self.config.config_embed_source.vocab_size,
                                                      self.config.config_embed_source.num_embed),
                                               allow_deferred_init=True)
+        source_embed_project_weight = None  # type: Optional[mx.gluon.Parameter]
+        source_embed_project_bias = None  # type: Optional[mx.gluon.Parameter]
+        if self.config.config_embed_source.project_to_size is not None:
+            source_embed_project_weight = self.params.get(source_embed_project_prefix + 'weight',
+                                                          shape=(self.config.config_embed_source.project_to_size,
+                                                                 self.config.config_embed_source.num_embed),
+                                                          allow_deferred_init=True)
+            source_embed_project_bias = self.params.get(source_embed_project_prefix + 'bias',
+                                                        shape=(self.config.config_embed_source.project_to_size,),
+                                                        init='zeros',
+                                                        allow_deferred_init=True)
 
+        target_embed_project_weight = None  # type: Optional[mx.gluon.Parameter]
+        target_embed_project_bias = None  # type: Optional[mx.gluon.Parameter]
         if share_embed:
             target_embed_weight = source_embed_weight
+            target_embed_project_weight = source_embed_project_weight
+            target_embed_project_bias = source_embed_project_bias
         else:
             target_embed_weight = self.params.get(target_embed_name,
                                                   shape=(self.config.config_embed_target.vocab_size,
                                                          self.config.config_embed_target.num_embed),
                                                   allow_deferred_init=True)
+            if self.config.config_embed_target.project_to_size is not None:
+                target_embed_project_weight = self.params.get(target_embed_project_prefix + 'weight',
+                                                              shape=(self.config.config_embed_target.project_to_size,
+                                                              self.config.config_embed_target.num_embed),
+                                                              allow_deferred_init=True)
+                target_embed_project_bias = self.params.get(target_embed_project_prefix + 'bias',
+                                                            shape=(self.config.config_embed_target.project_to_size,),
+                                                            init='zeros',
+                                                            allow_deferred_init=True)
 
         if tie_weights:
             output_weight = target_embed_weight
@@ -365,7 +399,8 @@ class SockeyeModel(mx.gluon.Block):
                                             shape=(self.config.config_embed_target.vocab_size, 0),
                                             allow_deferred_init=True)
 
-        return source_embed_weight, target_embed_weight, output_weight
+        return source_embed_weight, source_embed_project_weight, source_embed_project_bias, target_embed_weight, \
+               target_embed_project_weight, target_embed_project_bias, output_weight
 
     @property
     def num_source_factors(self) -> int:

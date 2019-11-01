@@ -17,6 +17,17 @@ import sockeye.constants as C
 import sockeye.encoder
 import sockeye.transformer
 
+
+@pytest.mark.parametrize('dropout, project_to_size, factor_configs, is_source', [
+    (0., None, None, False),
+    (0.1, 20, [sockeye.encoder.FactorConfig(vocab_size=5, num_embed=5)], True),
+])
+def test_embedding_encoder(dropout, project_to_size, factor_configs, is_source):
+    config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, project_to_size=project_to_size, factor_configs=factor_configs)
+    embedding = sockeye.encoder.Embedding(config, prefix='embedding', is_source=is_source)
+    assert type(embedding) == sockeye.encoder.Embedding
+
+
 @pytest.mark.parametrize('shared_layer_params, lhuc', [
     (False, False),
     (True, True)

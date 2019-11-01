@@ -649,6 +649,12 @@ def add_model_parameters(params):
                               choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
                               default=C.SOURCE_FACTORS_COMBINE_CONCAT,
                               help='How to combine source factors. Default: %(default)s.')
+    model_params.add_argument('--project-embed-to-size',
+                              type=multiple_values(num_values=2, greater_or_equal=1),
+                              default=(None, None),
+                              help='Project embeddings to this size. Use "x:x" to specify separate values for source & '
+                                   'target. Default: %(default)s.')
+
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,

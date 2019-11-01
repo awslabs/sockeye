@@ -105,12 +105,14 @@ class EmbeddingConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  dropout: float,
+                 project_to_size: Optional[int] = None,
                  factor_configs: Optional[List[FactorConfig]] = None,
                  source_factors_combine: str = C.SOURCE_FACTORS_COMBINE_CONCAT) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
+        self.project_to_size = project_to_size
         self.factor_configs = factor_configs
         self.num_factors = 1
         if self.factor_configs is not None:
@@ -131,7 +133,9 @@ class Embedding(Encoder):
                  config: EmbeddingConfig,
                  prefix: str,
                  is_source: bool = False,
-                 embed_weight: Optional[mx.gluon.Parameter] = None) -> None:
+                 embed_weight: Optional[mx.gluon.Parameter] = None,
+                 project_weight: Optional[mx.gluon.Parameter] = None,
+                 project_bias: Optional[mx.gluon.Parameter] = None) -> None:
         super().__init__(prefix=prefix)
         self.config = config
         self.is_source = is_source
@@ -143,6 +147,20 @@ class Embedding(Encoder):
                 self.embed_weight = embed_weight  # adds to self._reg_params
                 self.params.update({embed_weight.name: embed_weight})  # adds to self.params
 
+            # If specified, add weights for linear projection to requested size
+            if self.config.project_to_size is not None:
+                if project_weight is None:
+                    self.project_weight = self.params.get('project_weight', shape=(self.config.num_embed,
+                                                                                   self.config.project_to_size))
+                    self.project_bias = self.params.get('project_bias',
+                                                        shape=(self.config.project_to_size,),
+                                                        init='zeros')
+                else:
+                    self.project_weight = project_weight
+                    self.params.update({project_weight.name: project_weight})
+                    self.project_bias = project_bias
+                    self.params.update({project_bias.name: project_bias})
+
             self.factor_embeds = None
             if self.config.factor_configs is not None:
                 self.factor_embeds = mx.gluon.nn.HybridSequential()
@@ -151,7 +169,13 @@ class Embedding(Encoder):
                     self.factor_embeds.add(mx.gluon.nn.Embedding(fc.vocab_size, fc.num_embed,
                                                                  prefix="factor%d_" % i))
 
-    def hybrid_forward(self, F, data, valid_length, embed_weight):  # pylint: disable=arguments-differ
+    def hybrid_forward(self,
+                       F,
+                       data,
+                       valid_length,
+                       embed_weight,
+                       project_weight=None,
+                       project_bias=None):  # pylint: disable=arguments-differ
         factor_embeds = []
         if self.is_source:
             if self.config.num_factors > 1 and self.config.factor_configs is not None:
@@ -171,6 +195,13 @@ class Embedding(Encoder):
             else:
                 embed = F.add_n(embed, *factor_embeds)
 
+        if self.config.project_to_size is not None:
+            embed = F.FullyConnected(data=embed,
+                                     weight=project_weight,
+                                     bias=project_bias,
+                                     num_hidden=self.config.project_to_size,
+                                     flatten=False)
+
         if self.config.dropout > 0:
             embed = F.Dropout(data=embed, p=self.config.dropout)
 
@@ -180,6 +211,8 @@ class Embedding(Encoder):
         """
         Return the representation size of this encoder.
         """
+        if self.config.project_to_size is not None:
+            return self.config.project_to_size
         return self.config.num_embed
 
 
