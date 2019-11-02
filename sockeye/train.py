@@ -382,7 +382,9 @@ def create_encoder_config(args: argparse.Namespace,
     encoder_transformer_model_size = args.transformer_model_size[0]
 
     total_source_factor_size = sum(args.source_factors_num_embed)
-    if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT and total_source_factor_size > 0:
+    if (args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT
+            and total_source_factor_size > 0
+            and args.project_embed_to_size[0] is None):
         logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
             encoder_transformer_model_size, num_embed_source + total_source_factor_size))
         encoder_transformer_model_size = num_embed_source + total_source_factor_size

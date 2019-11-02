@@ -126,17 +126,9 @@ class OutputLayer(mx.gluon.HybridBlock):
         self.project_hidden_to_size = project_hidden_to_size
         with self.name_scope():
             if project_hidden_to_size is not None:
-                self.project_weight = self.params.get('project_weight',
-                                                      shape=(project_hidden_to_size, hidden_size),
-                                                      init=weight_initializer,
-                                                      dtype=dtype,
-                                                      allow_deferred_init=False)
-                self.project_bias = self.params.get('project_bias',
-                                                    shape=(project_hidden_to_size,),
-                                                    init=bias_initializer,
-                                                    dtype=dtype,
-                                                    allow_deferred_init=False)
-
+                self.linear_project = mx.gluon.nn.Dense(in_units=hidden_size,
+                                                        units=project_hidden_to_size,
+                                                        flatten=False)
             if weight is None:
                 self.weight = self.params.get("weight",
                                               shape=(vocab_size, project_hidden_to_size
@@ -158,11 +150,7 @@ class OutputLayer(mx.gluon.HybridBlock):
     def forward(self, data, vocab_slice_ids):
         if vocab_slice_ids is not None:
             if self.project_hidden_to_size is not None:
-                data = mx.nd.FullyConnected(data=data,
-                                            num_hidden=self.project_hidden_to_size,
-                                            weight=self.project_weight.data(),
-                                            bias=self.project_bias.data(),
-                                            flatten=False)
+                data = self.linear_project(data)
             # imperative, reduced matrix multiplication for vocabulary selection
             weight = self.weight.data().take(vocab_slice_ids)
             bias = self.bias.data().take(vocab_slice_ids)
@@ -174,13 +162,9 @@ class OutputLayer(mx.gluon.HybridBlock):
                                         name=C.LOGITS_NAME)
         return super().forward(data)
 
-    def hybrid_forward(self, F, data, weight, bias, project_weight=None, project_bias=None):
+    def hybrid_forward(self, F, data, weight, bias):
         if self.project_hidden_to_size is not None:
-            data = F.FullyConnected(data=data,
-                                    num_hidden=self.project_hidden_to_size,
-                                    weight=project_weight,
-                                    bias=project_bias,
-                                    flatten=False)
+            data = self.linear_project(data)
         return F.FullyConnected(data=data,
                                 num_hidden=self.vocab_size,
                                 weight=weight,

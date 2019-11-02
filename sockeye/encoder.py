@@ -133,9 +133,7 @@ class Embedding(Encoder):
                  config: EmbeddingConfig,
                  prefix: str,
                  is_source: bool = False,
-                 embed_weight: Optional[mx.gluon.Parameter] = None,
-                 project_weight: Optional[mx.gluon.Parameter] = None,
-                 project_bias: Optional[mx.gluon.Parameter] = None) -> None:
+                 embed_weight: Optional[mx.gluon.Parameter] = None) -> None:
         super().__init__(prefix=prefix)
         self.config = config
         self.is_source = is_source
@@ -155,32 +153,22 @@ class Embedding(Encoder):
                     self.factor_embeds.add(mx.gluon.nn.Embedding(fc.vocab_size, fc.num_embed,
                                                                  prefix="factor%d_" % i))
 
-            # If specified, add weights for linear projection to requested size
+            # If specified, add weights for linear projection
             if self.config.project_to_size is not None:
-                if project_weight is None:
-                    # Embeddings are projected after source factor concatenation
-                    total_num_embed = self.config.num_embed
-                    if (self.config.factor_configs is not None
+                # Embeddings are projected after source factor concatenation
+                total_num_embed = self.config.num_embed
+                if (self.config.factor_configs is not None
                         and self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT):
-                        total_num_embed += sum(config.num_embed for config in self.config.factor_configs)
-                    self.project_weight = self.params.get('project_weight', shape=(self.config.project_to_size,
-                                                                                   total_num_embed))
-                    self.project_bias = self.params.get('project_bias',
-                                                        shape=(self.config.project_to_size,),
-                                                        init='zeros')
-                else:
-                    self.project_weight = project_weight
-                    self.params.update({project_weight.name: project_weight})
-                    self.project_bias = project_bias
-                    self.params.update({project_bias.name: project_bias})
+                    total_num_embed += sum(config.num_embed for config in self.config.factor_configs)
+                self.linear_project = mx.gluon.nn.Dense(in_units=total_num_embed,
+                                                        units=self.config.project_to_size,
+                                                        flatten=False)
 
     def hybrid_forward(self,
                        F,
                        data,
                        valid_length,
-                       embed_weight,
-                       project_weight=None,
-                       project_bias=None):  # pylint: disable=arguments-differ
+                       embed_weight):  # pylint: disable=arguments-differ
         factor_embeds = []
         if self.is_source:
             if self.config.num_factors > 1 and self.config.factor_configs is not None:
@@ -201,11 +189,7 @@ class Embedding(Encoder):
                 embed = F.add_n(embed, *factor_embeds)
 
         if self.config.project_to_size is not None:
-            embed = F.FullyConnected(data=embed,
-                                     weight=project_weight,
-                                     bias=project_bias,
-                                     num_hidden=self.config.project_to_size,
-                                     flatten=False)
+            embed = self.linear_project(embed)
 
         if self.config.dropout > 0:
             embed = F.Dropout(data=embed, p=self.config.dropout)
