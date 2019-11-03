@@ -652,14 +652,9 @@ def add_model_parameters(params):
     model_params.add_argument('--project-embed-to-size',
                               type=multiple_values(num_values=2, greater_or_equal=1),
                               default=(None, None),
-                              help='If specified, project embeddings to this size (usually used to project smaller '
-                                   'embeddings to model size). Use "x:x" to specify separate values for source & '
-                                   'target. Default: %(default)s.')
-    model_params.add_argument('--project-softmax-to-size',
-                              type=int,
-                              default=None,
-                              help='If specified, project output layer representations to this size prior to running '
-                                   'softmax over target vocabulary. Default: %(default)s.')
+                              help='If specified, project embeddings to this size (use to project smaller embeddings '
+                                   'to model size, as in Lan et al. 2019, arxiv.org/abs/1909.11942). Use "x:x" to '
+                                   'specify separate values for source & target. Default: %(default)s.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
@@ -911,9 +906,6 @@ def add_training_args(params):
                               default=0,
                               help="Number of warmup steps. If set to x, linearly increases learning rate from 10%% "
                                    "to 100%% of the initial learning rate. Default: %(default)s.")
-    train_params.add_argument('--disable-checkpoint-reload',
-                              action='store_true',
-                              help='Do not reload best checkpoint when reducing learning rate.')
 
     train_params.add_argument('--fixed-param-strategy',
                                default=None,

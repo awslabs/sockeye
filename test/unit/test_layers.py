@@ -11,8 +11,6 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import pytest
-
 import mxnet as mx
 import numpy as np
 
@@ -89,17 +87,13 @@ def test_positional_embeddings():
     assert np.allclose(out[0], expected_learned_embeddings)
 
 
-@pytest.mark.parametrize('project_hidden_to_size', [
-    None,
-    16,
-])
-def test_output_layer(project_hidden_to_size):
+def test_output_layer():
     num_hidden = 32
     vocab_size = 64
     data = mx.nd.ones((2, 10, num_hidden))
     vocab_slice_ids = mx.nd.array([4, 7, 23])
 
-    b = sockeye.layers.OutputLayer(num_hidden, vocab_size, project_hidden_to_size=project_hidden_to_size)
+    b = sockeye.layers.OutputLayer(num_hidden, vocab_size)
     b.initialize()
 
     output = b(data, None)

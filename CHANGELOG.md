@@ -35,6 +35,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Added options for making various model dimensions multiples of a given value.  For example, use `--pad-vocab-to-multiple-of 8`, `--bucket-width 8 --no-bucket-scaling`, and `--round-batch-sizes-to-multiple-of 8` with AMP training.
 - Added [GluonNLP](http://gluon-nlp.mxnet.io/)'s BERTAdam optimizer, an implementation of the Adam variant used by Devlin et al. ([2018](https://arxiv.org/pdf/1810.04805.pdf)).  Use `--optimizer bertadam`.
 - Added training option `--checkpoint-improvement-threshold` to set the amount of metric improvement required over the window of previous checkpoints to be considered actual model improvement (used with `--max-num-checkpoint-not-improved`).
+- Added training options to share parameters across encoder and decoder layers: `--shared-encoder-layer-params`, `--shared-decoder-layer-params`.
+- Added training options to specify multiple values (one for encoder and one for decoder) for `--transformer-activation-type`, `--transformer-dropout-attention`, `--transformer-dropout-act`, and `--transformer-dropout-prepost`.
+- Added training option to factorize embeddings ([Lan et al., 2019](https://arxiv.org/pdf/1909.11942.pdf)).  Specify with `--num-embed X`, `--project-embed-to-size Y`, `--transformer-model-size Y`.
 
 ## [1.18.103]
 ### Added

@@ -153,9 +153,9 @@ class Embedding(Encoder):
                     self.factor_embeds.add(mx.gluon.nn.Embedding(fc.vocab_size, fc.num_embed,
                                                                  prefix="factor%d_" % i))
 
-            # If specified, add weights for linear projection
+            # If specified, add layer for linear projection
             if self.config.project_to_size is not None:
-                # Embeddings are projected after source factor concatenation
+                # Embeddings are projected after factor embedding concatenation
                 total_num_embed = self.config.num_embed
                 if (self.config.factor_configs is not None
                         and self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT):

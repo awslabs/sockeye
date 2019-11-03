@@ -102,8 +102,6 @@ class OutputLayer(mx.gluon.HybridBlock):
 
     :param hidden_size: Input hidden size.
     :param vocab_size: Target vocabulary size.
-    :param project_hidden_to_size: If specified, project input representations to
-                                   this size before running softmax.
     :param weight: Optional shared weight Parameter.
     :param weight_initializer: Initializer for weight.
     :param bias_initializer: Initializer for bias.
@@ -115,7 +113,6 @@ class OutputLayer(mx.gluon.HybridBlock):
     def __init__(self,
                  hidden_size: int,
                  vocab_size: int,
-                 project_hidden_to_size: Optional[int] = None,
                  weight: Optional[mx.gluon.Parameter] = None,
                  weight_initializer: Optional[str] = None,
                  bias_initializer: str = 'zeros',
@@ -123,17 +120,10 @@ class OutputLayer(mx.gluon.HybridBlock):
                  prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
         super().__init__(prefix=prefix)
         self.vocab_size = vocab_size
-        self.project_hidden_to_size = project_hidden_to_size
         with self.name_scope():
-            if project_hidden_to_size is not None:
-                self.linear_project = mx.gluon.nn.Dense(in_units=hidden_size,
-                                                        units=project_hidden_to_size,
-                                                        flatten=False)
             if weight is None:
                 self.weight = self.params.get("weight",
-                                              shape=(vocab_size, project_hidden_to_size
-                                                                 if project_hidden_to_size is not None
-                                                                 else hidden_size),
+                                              shape=(vocab_size, hidden_size),
                                               init=weight_initializer,
                                               dtype=dtype,
                                               allow_deferred_init=False)
@@ -149,8 +139,6 @@ class OutputLayer(mx.gluon.HybridBlock):
 
     def forward(self, data, vocab_slice_ids):
         if vocab_slice_ids is not None:
-            if self.project_hidden_to_size is not None:
-                data = self.linear_project(data)
             # imperative, reduced matrix multiplication for vocabulary selection
             weight = self.weight.data().take(vocab_slice_ids)
             bias = self.bias.data().take(vocab_slice_ids)
@@ -163,8 +151,6 @@ class OutputLayer(mx.gluon.HybridBlock):
         return super().forward(data)
 
     def hybrid_forward(self, F, data, weight, bias):
-        if self.project_hidden_to_size is not None:
-            data = self.linear_project(data)
         return F.FullyConnected(data=data,
                                 num_hidden=self.vocab_size,
                                 weight=weight,

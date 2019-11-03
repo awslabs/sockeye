@@ -89,6 +89,16 @@ def check_arg_compatibility(args: argparse.Namespace):
                     'Please specify at least one stopping criteria: --max-samples --max-updates --max-checkpoints '
                     '--max-num-epochs --max-num-checkpoint-not-improved')
 
+    # Require equal layer sizes for weight tying
+    num_embed_src = args.num_embed[0] if args.num_embed[0] is not None else args.transformer_model_size[0]
+    num_embed_trg = args.num_embed[1] if args.num_embed[1] is not None else args.transformer_model_size[1]
+    if args.weight_tying_type in [C.WEIGHT_TYING_SRC_TRG, C.WEIGHT_TYING_SRC_TRG_SOFTMAX]:
+        check_condition(num_embed_src == num_embed_trg,
+                        'Weight tying requires equal source & target values for --num-embed')
+    if args.weight_tying_type in [C.WEIGHT_TYING_TRG_SOFTMAX, C.WEIGHT_TYING_SRC_TRG_SOFTMAX]:
+        check_condition(num_embed_trg == args.transformer_model_size[1],
+                        'Weight tying requires equal values for target --transformer-model-size and --num-embed')
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -564,7 +574,6 @@ def create_model_config(args: argparse.Namespace,
                                      config_decoder=config_decoder,
                                      config_length_task=config_length_task,
                                      weight_tying_type=args.weight_tying_type,
-                                     project_softmax_to_size=args.project_softmax_to_size,
                                      lhuc=args.lhuc is not None,
                                      dtype=args.dtype)
     return model_config
@@ -849,7 +858,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             max_epochs=args.max_num_epochs,
             max_seconds=args.max_seconds,
             update_interval=args.update_interval,
-            reload_checkpoint_when_adjusting_lr=not args.disable_checkpoint_reload,
             stop_training_on_decoder_failure=args.stop_training_on_decoder_failure
         )
         if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
