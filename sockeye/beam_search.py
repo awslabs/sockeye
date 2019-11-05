@@ -67,7 +67,7 @@ class _SingleModelInference(_Inference):
         # TODO: change back to casting first when fp32 safe accumulation is fixed
         if not self._skip_softmax:
             logits = logits.log_softmax(axis=-1)
-        scores = -logits.astype('float32', copy=False)
+        scores = -logits
         return scores, states
 
 
@@ -104,7 +104,6 @@ class _EnsembleInference(_Inference):
         outputs, new_states = [], []
         for model, model_states in zip(self._models, states):
             logits, model_states, _ = model.decode_step(step_input, model_states, vocab_slice_ids)
-            logits = logits.astype('float32', copy=False)
             probs = logits.softmax(axis=-1)
             outputs.append(probs)
             new_states.append(model_states)
@@ -276,11 +275,13 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
 
     def __init__(self,
+                 dtype: str,
                  pad_id: int,
                  eos_id: int,
                  scorer: CandidateScorer,
                  **kwargs) -> None:
         super().__init__(**kwargs)
+        self.dtype = dtype
         self.pad_id = pad_id
         self.eos_id = eos_id
         self._scorer = scorer
@@ -298,7 +299,7 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
         scores_accumulated = F.where(newly_finished,
                                      self._scorer(scores_accumulated,
-                                                  F.cast(F.expand_dims(lengths, axis=1), 'float32'),
+                                                  F.cast(F.expand_dims(lengths, axis=1), self.dtype),
                                                   reference_lengths),
                                      scores_accumulated)
 
@@ -434,6 +435,7 @@ class BeamSearch(mx.gluon.Block):
 
     def __init__(self,
                  beam_size: int,
+                 dtype: str,
                  bos_id: int,
                  eos_id: int,
                  context: Union[mx.Context, List[mx.Context]],
@@ -446,6 +448,7 @@ class BeamSearch(mx.gluon.Block):
                  sample: Optional[int] = None) -> None:
         super().__init__(prefix='beam_search_')
         self.beam_size = beam_size
+        self.dtype = dtype
         self.bos_id = bos_id
         self.eos_id = eos_id
         self.output_vocab_size = output_vocab_size
@@ -461,6 +464,7 @@ class BeamSearch(mx.gluon.Block):
             self._scorer = scorer
             self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
                 prefix='sort_norm_and_update_finished_',
+                dtype=self.dtype,
                 pad_id=C.PAD_ID,
                 eos_id=eos_id,
                 scorer=scorer)
@@ -525,12 +529,12 @@ class BeamSearch(mx.gluon.Block):
 
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
-        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype='float32')
+        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
         first_step_mask[batch_indices] = 1.0
         pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
-                              ctx=self.context, dtype='float32')
+                              ctx=self.context, dtype=self.dtype)
         eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
-                              ctx=self.context, dtype='float32')
+                              ctx=self.context, dtype=self.dtype)
         eos_dist[:, C.EOS_ID] = 0
 
         # Best word and hypotheses indices across beam search steps from topk operation.
@@ -544,7 +548,7 @@ class BeamSearch(mx.gluon.Block):
         max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
-        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='float32')
+        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype=self.dtype)
 
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
@@ -729,6 +733,7 @@ def get_beam_search(models: List[SockeyeModel],
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
     bs = BeamSearch(
         beam_size=beam_size,
+        dtype=models[0].dtype,
         bos_id=C.BOS_ID,
         eos_id=C.EOS_ID,
         context=context,
