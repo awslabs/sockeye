@@ -888,7 +888,7 @@ class Translator:
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
-        source_length = mx.nd.array(lengths, ctx=self.context, dtype='float32')  # shape: (batch_size,)
+        source_length = mx.nd.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
         max_length = max(len(inp) for inp in trans_inputs)
         source_npy = np.zeros((batch_size, max_length, self.num_source_factors), dtype=np.float32)
 
