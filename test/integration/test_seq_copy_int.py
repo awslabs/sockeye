@@ -27,7 +27,8 @@ import sockeye.evaluate
 import sockeye.extract_parameters
 from sockeye import constants as C
 from sockeye.model import load_model
-from test.common import check_train_translate, run_train_translate, tmp_digits_dataset
+from sockeye.test_utils import run_train_translate, tmp_digits_dataset
+from test.common import check_train_translate
 
 logger = logging.getLogger(__name__)
 
