@@ -20,12 +20,8 @@ import sys
 from typing import Dict, List, Any
 from unittest.mock import patch
 
-import pytest
-
-import sockeye.constants as C
 import sockeye.translate
-from test.common import run_train_translate, tmp_digits_dataset, collect_translate_output_and_scores, \
-    _TRANSLATE_PARAMS_COMMON
+from sockeye.test_utils import collect_translate_output_and_scores, TRANSLATE_PARAMS_COMMON
 
 _TRAIN_LINE_COUNT = 20
 _TRAIN_LINE_COUNT_EMPTY = 1
@@ -89,9 +85,9 @@ def _test_constrained_type(constraint_type: str, data: Dict[str, Any], translate
     out_path_constrained = os.path.join(data['work_dir'], "out_constrained.txt")
     params = "{} {} {} --json-input --output-type translation_with_score".format(
         sockeye.translate.__file__,
-        _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
-                                        input=new_test_source_path,
-                                        output=out_path_constrained),
+        TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                       input=new_test_source_path,
+                                       output=out_path_constrained),
         translate_params)
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()

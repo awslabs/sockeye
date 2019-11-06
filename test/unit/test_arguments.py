@@ -16,7 +16,6 @@ import pytest
 import tempfile
 import os
 import re
-import yaml
 
 import sockeye.arguments as arguments
 import sockeye.constants as C

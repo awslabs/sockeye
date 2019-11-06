@@ -20,7 +20,8 @@ import pytest
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.utils
-from test.common import check_train_translate, tmp_digits_dataset
+from sockeye.test_utils import tmp_digits_dataset
+from test.common import check_train_translate
 
 logger = logging.getLogger(__name__)
 

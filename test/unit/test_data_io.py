@@ -24,7 +24,7 @@ from sockeye import constants as C
 from sockeye import data_io
 from sockeye import vocab
 from sockeye.utils import SockeyeError, get_tokens, seed_rngs
-from test.common import tmp_digits_dataset
+from sockeye.test_utils import tmp_digits_dataset
 
 seed_rngs(12)
 
