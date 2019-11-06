@@ -94,10 +94,12 @@ class TrainState:
     Stores the state an EarlyStoppingTrainer instance.
     """
 
-    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
-                 'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
-                 '_tic_last_time_elapsed', '_time_elapsed', 'early_stopping_metric',
-                 'best_metric', 'best_metric_history', 'best_checkpoint', 'converged', 'diverged']
+    _pickle_slots = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
+                     'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic', '_tic_last_time_elapsed',
+                     '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_metric_history', 
+                     'best_checkpoint', 'converged', 'diverged']
+ 
+    __slots__ = _pickle_slots + ['gradients']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -149,6 +151,15 @@ class TrainState:
     def time_elapsed(self):
         return self._time_elapsed
 
+    def __getstate__(self):
+        return {k: getattr(self, k) for k in self._pickle_slots}
+
+    def __setstate__(self, state):
+        for k, v in state.items():
+            setattr(self, k, v)
+        self.gradients = {}
+
+
 
 class GluonEarlyStoppingTrainer:
     def __init__(self,
@@ -160,7 +171,8 @@ class GluonEarlyStoppingTrainer:
                  context: List[mx.context.Context],
                  dtype: str,
                  using_amp: bool = False,
-                 custom_metrics_logger: Optional[Callable] = None) -> None:
+                 custom_metrics_logger: Optional[Callable] = None,
+                 checkpoint_callback: Optional[Callable] = None) -> None:
         self.config = config
         self.optimizer_config = optimizer_config
         self.model = sockeye_model
@@ -177,6 +189,7 @@ class GluonEarlyStoppingTrainer:
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
+        self.checkpoint_callback = checkpoint_callback
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
@@ -263,6 +276,9 @@ class GluonEarlyStoppingTrainer:
                 self._write_metrics_file(train_metrics=[l.metric for l in self.loss_functions], val_metrics=val_metrics)
                 for lf in self.loss_functions:
                     lf.metric.reset()
+
+                if self.checkpoint_callback:
+                    self.checkpoint_callback(self.state.checkpoint)
 
                 if self.config.max_seconds is not None and self.state.time_elapsed >= self.config.max_seconds:
                     logger.info("Maximum # of seconds (%s) reached. Training ran for %d seconds.",
