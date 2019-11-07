@@ -860,7 +860,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    setup_main_logger(file_logging=True,
+    setup_main_logger(file_logging=not args.no_logfile,
                       console=not args.quiet,
                       path=os.path.join(output_folder, C.LOG_NAME),
                       level=args.loglevel)

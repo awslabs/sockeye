@@ -10,6 +10,10 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [1.18.112]
+### Added
+- Option to suppress creation of logfiles for CLIs (`--no-logfile`).
+
 ## [1.18.111]
 ### Added
 - Added an optional checkpoint callback for the train function.

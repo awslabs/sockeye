@@ -364,6 +364,10 @@ def add_logging_args(params):
                                 default=False,
                                 action="store_true",
                                 help='Suppress console logging.')
+    logging_params.add_argument('--no-logfile',
+                                default=False,
+                                action="store_true",
+                                help='Suppress file logging')
     logging_params.add_argument('--loglevel',
                                 default='INFO',
                                 choices=['INFO', 'DEBUG'],
