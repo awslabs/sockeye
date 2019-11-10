@@ -22,6 +22,7 @@ import itertools
 import logging
 import math
 import os
+import pprint
 import random
 import shutil
 import subprocess
@@ -764,6 +765,18 @@ def split(data: mx.nd.NDArray,
     return ndarray_or_list
 
 
+_DTYPE_TO_STRING = {
+    np.float32: 'float32',
+    np.float16: 'float16',
+    np.int8: 'int8',
+    np.int32: 'int32'
+}
+
+
+def _print_dtype(dtype):
+    return _DTYPE_TO_STRING.get(dtype, str(dtype))
+
+
 def log_parameters(params: mx.gluon.ParameterDict):
     """
     Logs information about model parameters.
@@ -774,16 +787,15 @@ def log_parameters(params: mx.gluon.ParameterDict):
     learned_parameter_names = []
     #info = []  # type: List[str]
     for name, param in sorted(params.items()):
-        repr = "%s [%s, %s]" % (name, param.shape, param.dtype)
-        #info.append("%s shape=%s, dtype=%s" % (name, param.shape, param.dtype))
+        repr = "%s [%s, %s]" % (name, param.shape, _print_dtype(param.dtype))
         if param.grad_req == 'null':
             fixed_parameter_names.append(repr)
         else:
             learned_parameter_names.append(repr)
     #percent_fixed = 100 * (fixed_parameters / max(1, total_parameters))
     #percent_learned = 100 * (learned_parameters / max(1, total_parameters))
-    logger.info("Trainable parameters: %s", ", ".join(learned_parameter_names))
-    logger.info("Fixed model parameters: %s", ", ".join(fixed_parameter_names))
+    logger.info("Trainable parameters:\n%s", pprint.pformat(learned_parameter_names))
+    logger.info("Fixed model parameters:\n%s", pprint.pformat(fixed_parameter_names))
     #logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
     #logger.info("Learning %d parameters (%0.2f%%)", learned_parameters, percent_learned)
     #logger.info("Total # of parameters: %d", total_parameters)
