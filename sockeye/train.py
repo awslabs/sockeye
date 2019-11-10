@@ -796,6 +796,15 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             resume_training=resume_training,
             output_folder=output_folder)
 
+        if max_seq_len_source != config_data.max_seq_len_source:
+            logger.info("Maximum source length determined by prepared data. Using %d instead of %d",
+                        config_data.max_seq_len_source, max_seq_len_source)
+            max_seq_len_source = config_data.max_seq_len_source
+        if max_seq_len_target != config_data.max_seq_len_target:
+            logger.info("Maximum target length determined by prepared data. Using %d instead of %d",
+                        config_data.max_seq_len_target, max_seq_len_target)
+            max_seq_len_target = config_data.max_seq_len_target
+
         # Dump the vocabularies if we're just starting up
         if not resume_training:
             vocab.save_source_vocabs(source_vocabs, output_folder)
