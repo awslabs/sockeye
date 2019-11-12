@@ -245,7 +245,10 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,
-          output='train_data'
+          output='train_data',
+          quiet=False,
+          loglevel='INFO',
+          no_logfile=False
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -270,7 +273,10 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           min_num_shards=1,
           num_samples_per_shard=1000000,
           seed=13,
-          output='prepared_data'
+          output='prepared_data',
+          quiet=False,
+          loglevel='INFO',
+          no_logfile=False
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):

@@ -28,7 +28,6 @@ logger = logging.getLogger(__name__)
 def main():
     params = argparse.ArgumentParser(description='Preprocesses and shards training data.')
     arguments.add_prepare_data_cli_args(params)
-    arguments.add_logging_args(params)
     args = params.parse_args()
     prepare_data(args)
 
