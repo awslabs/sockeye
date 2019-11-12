@@ -495,6 +495,8 @@ def add_prepare_data_cli_args(params):
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
 
+    add_logging_args(params)
+
 
 def add_device_args(params):
     device_params = params.add_argument_group("Device parameters")
