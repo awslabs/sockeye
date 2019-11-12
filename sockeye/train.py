@@ -83,6 +83,7 @@ def check_arg_compatibility(args: argparse.Namespace):
     # Require at least one stopping criteria
     check_condition(any((args.max_samples,
                          args.max_updates,
+                         args.max_seconds,
                          args.max_checkpoints,
                          args.max_num_epochs,
                          args.max_num_checkpoint_not_improved)),
