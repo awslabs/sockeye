@@ -395,7 +395,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           num_samples_per_shard=1000000,
           seed=13,
           output='prepared_data',
-	  quiet=False,
+          quiet=False,
           loglevel='INFO',
           no_logfile=False
           ))
