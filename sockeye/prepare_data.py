@@ -38,7 +38,7 @@ def prepare_data(args: argparse.Namespace):
     setup_main_logger(console=not args.quiet,
                       file_logging=not args.no_logfile,
                       path=os.path.join(output_folder, C.LOG_NAME))
-
+    utils.log_basic_info(args)
     utils.seed_rngs(args.seed)
 
     minimum_num_shards = args.min_num_shards
