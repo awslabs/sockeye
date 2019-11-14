@@ -300,6 +300,19 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                 single_encoder_block = transformer.TransformerEncoderBlock(config, prefix="%d_" % 1)
                 for i in range(config.num_layers):
                     self.layers.add(single_encoder_block)
+            elif config.sandwich_coefficient > 0:
+                # Sandwich transformers treat each sublayer (self-attention or feed-forward) as a separate unit
+                num_sublayers = config.num_layers * 2
+                # Series of self-attention sublayers
+                for i in range(config.sandwich_coefficient):
+                    self.layers.add(transformer.TransformerSelfAttentionBlock(config, prefix='%d_' % i))
+                # Series of interleaved sublayers
+                for i in range(config.sandwich_coefficient, num_sublayers - config.sandwich_coefficient, 2):
+                    self.layers.add(transformer.TransformerSelfAttentionBlock(config, prefix='%d_' % i))
+                    self.layers.add(transformer.TransformerFeedForwardBlock(config, prefix='%d_' % (i + 1)))
+                # Series of feed-forward sublayers
+                for i in range(num_sublayers - config.sandwich_coefficient, num_sublayers):
+                    self.layers.add(transformer.TransformerFeedForwardBlock(config, prefix='%d_' % i))
             else:
                 for i in range(config.num_layers):
                     self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))

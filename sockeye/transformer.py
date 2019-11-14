@@ -36,6 +36,7 @@ class TransformerConfig(config.Config):
                  postprocess_sequence: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
+                 sandwich_coefficient: int = 0,
                  shared_layer_params: bool = False,
                  lhuc: bool = False) -> None:  # type: ignore
         super().__init__()
@@ -52,6 +53,7 @@ class TransformerConfig(config.Config):
         self.postprocess_sequence = postprocess_sequence
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
+        self.sandwich_coefficient = sandwich_coefficient
         self.shared_layer_params = shared_layer_params
         self.use_lhuc = lhuc
 
@@ -66,51 +68,18 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                  config: TransformerConfig,
                  prefix: str) -> None:
         super().__init__(prefix=prefix)
-
         with self.name_scope():
-            self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                              dropout=config.dropout_prepost,
-                                                              prefix="att_self_pre_",
-                                                              num_hidden=config.model_size)
-            self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                                heads=config.attention_heads,
-                                                                depth_out=config.model_size,
-                                                                dropout=config.dropout_attention,
-                                                                prefix="att_self_")
-            self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                               dropout=config.dropout_prepost,
-                                                               prefix="att_self_post_",
-                                                               num_hidden=config.model_size)
-
-            self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                  dropout=config.dropout_prepost,
-                                                  prefix="ff_pre_",
-                                                  num_hidden=config.model_size)
-            self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                             num_model=config.model_size,
-                                             act_type=config.act_type,
-                                             dropout=config.dropout_act,
-                                             prefix="ff_")
-            self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                   dropout=config.dropout_prepost,
-                                                   prefix="ff_post_",
-                                                   num_hidden=config.model_size)
+            self.self_attention = TransformerSelfAttentionBlock(config=config, prefix='att_self_')
+            self.feed_forward = TransformerFeedForwardBlock(config=config, prefix='ff_')
             self.lhuc = None
             if config.use_lhuc:
                 self.lhuc = layers.LHUC(config.model_size)
 
     def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
-        # self-attention
-        data_self_att, _, __ = self.self_attention(self.pre_self_attention(data, None), None, bias, None, None)
-        data = self.post_self_attention(data_self_att, data)
-
-        # feed-forward
-        data_ff = self.ff(self.pre_ff(data, None))
-        data = self.post_ff(data_ff, data)
-
+        data = self.self_attention(data, bias)
+        data = self.feed_forward(data, bias)
         if self.lhuc is not None:
             data = self.lhuc(data)
-
         return data
 
 
@@ -207,6 +176,66 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
             target = self.lhuc(target)
 
         return target, keys, values
+
+
+class TransformerSelfAttentionBlock(mx.gluon.HybridBlock):
+    """
+    Block for self-attention sublayer.
+    """
+
+    def __init__(self,
+                 config: TransformerConfig,
+                 prefix: str) -> None:
+        super().__init__(prefix=prefix)
+        with self.name_scope():
+            self.pre = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                               dropout=config.dropout_prepost,
+                                               prefix='pre_',
+                                               num_hidden=config.model_size)
+            self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                                heads=config.attention_heads,
+                                                                depth_out=config.model_size,
+                                                                dropout=config.dropout_attention,
+                                                                prefix='self_att_')
+            self.post = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                dropout=config.dropout_prepost,
+                                                prefix='post_',
+                                                num_hidden=config.model_size)
+
+    def hybrid_forward(self, F, data, bias):
+        data_self_att, _, _ = self.self_attention(self.pre(data, None), None, bias, None, None)
+        data = self.post(data_self_att, data)
+        return data
+
+
+class TransformerFeedForwardBlock(mx.gluon.HybridBlock):
+    """
+    Block for feed-forward sublayer.
+    """
+
+    def __init__(self,
+                 config: TransformerConfig,
+                 prefix: str) -> None:
+        super().__init__(prefix=prefix)
+        with self.name_scope():
+            self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                    dropout=config.dropout_prepost,
+                                                    prefix='pre_',
+                                                    num_hidden=config.model_size)
+            self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                                num_model=config.model_size,
+                                                act_type=config.act_type,
+                                                dropout=config.dropout_act,
+                                                prefix='ff_')
+            self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                    dropout=config.dropout_prepost,
+                                                    prefix='post_',
+                                                    num_hidden=config.model_size)
+
+    def hybrid_forward(self, F, data, bias):
+        data_ff = self.ff(self.pre_ff(data, None))
+        data = self.post_ff(data_ff, data)
+        return data
 
 
 class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
