@@ -182,10 +182,10 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                                            mx.sym.Symbol,
                                                                            mx.sym.Symbol]:
         # self-attention
-        target_self_att, kv = self.self_attention(self.pre_self_attention(target, None),
-                                                  None,
-                                                  target_bias,
-                                                  self_att_kv)
+        target_self_att, keys_values = self.self_attention(self.pre_self_attention(target, None),
+                                                           None,
+                                                           target_bias,
+                                                           self_att_kv)
         target = self.post_self_attention(target_self_att, target)
 
         # encoder attention
@@ -203,7 +203,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         if self.lhuc:
             target = self.lhuc(target)
 
-        return target, kv
+        return target, keys_values
 
 
 class TransformerProcessBlock(mx.gluon.nn.HybridBlock):

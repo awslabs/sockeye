@@ -360,6 +360,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
 
+        self.depth_att = depth_att
         with self.name_scope():
             self.ff_in = mx.gluon.nn.Dense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_')
 
@@ -367,7 +368,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                        inputs: mx.sym.Symbol,
                        input_lengths: Optional[mx.sym.Symbol] = None,
                        bias: Optional[mx.sym.Symbol] = None,
-                       previous_kv: Optional[mx.sym.Symbol] = None):  # mypy: ignore
+                       previous_keys_values: Optional[mx.sym.Symbol] = None):  # mypy: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -375,25 +376,24 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         May also use a cache of previously computed inputs.
         Returns a symbol of shape (batch, max_length, output_depth).
 
-        :param inputs: Input Data. Shape: (batch, max_length, input_depth).
+        :param inputs: Input Data. Shape: (max_length, batch, input_depth).
         :param input_lengths: Optional lengths of inputs to mask attention scores. Shape: (batch, 1).
         :param bias: Optional 3d bias tensor to mask attention scores.
-        :param previous_keys: Optional previous input projections of keys. Shape: (batch, max_length+1, depth_att).
-        :param previous_values: Optional previous input projections of values. Shape: (batch, max_length+1, depth_att).
-        :return: Symbol of shape (batch, max_length, output_depth).
+        :param previous_keys_values: Optional previous input projections of keys and values. Shape: (max_length+1, batch, depth_att * 2).
+        :return: Symbol of shape (max_length, batch, output_depth).
         """
 
         proj = self.ff_in(inputs)
-        queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
-        kv = F.concat(kv_1, kv_2, dim=2)
+        queries = F.slice(proj, begin=(None, None, None), end=(None, None, self.depth_att))
+        keys_values = F.slice(proj, begin=(None, None, self.depth_att), end=(None, None, None))
 
-        updated_kv = kv
-        if previous_kv is not None:
-            updated_kv = F.concat(previous_kv, kv, dim=0)
+        updated_keys_values = keys_values
+        if previous_keys_values is not None:
+            updated_keys_values = F.concat(previous_keys_values, keys_values, dim=0)
             # TODO: remove slicing and initialize with empty array when available in 1.6
-            kv = F.slice(updated_kv, begin=(1, None, None), end=(None, None, None))
+            keys_values = F.slice(updated_keys_values, begin=(1, None, None), end=(None, None, None))
 
-        return self._attend(F, queries, kv, lengths=input_lengths, bias=bias), updated_kv
+        return self._attend(F, queries, keys_values, lengths=input_lengths, bias=bias), updated_keys_values
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):

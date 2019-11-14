@@ -324,12 +324,14 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
         # (batch_size * heads, 1, seq_len)
         bias = F.expand_dims(self.valid_length_mask(data, valid_length), axis=1)
+        # (seq_len, batch_size, depth)
         data = F.transpose(data, axes=(1, 0, 2))
 
         for block in self.layers:
             data = block(data, bias)
 
         data = self.final_process(data, None)
+        # (batch_size, seq_len, depth)
         data = F.transpose(data, axes=(1, 0, 2))
         return data, valid_length
 
