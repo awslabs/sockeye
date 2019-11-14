@@ -470,32 +470,33 @@ def add_bucketing_args(params):
 
 
 def add_prepare_data_cli_args(params):
-    params = params.add_argument_group("Data preparation.")
     add_training_data_args(params, required=True)
     add_vocab_args(params)
     add_bucketing_args(params)
+    add_logging_args(params)
 
-    params.add_argument('--num-samples-per-shard',
+    data_prep = params.add_argument_group("Data preparation.")
+
+    data_prep.add_argument('--num-samples-per-shard',
                         type=int_greater_or_equal(1),
                         default=1000000,
                         help='The approximate number of samples per shard. Default: %(default)s.')
 
-    params.add_argument('--min-num-shards',
+    data_prep.add_argument('--min-num-shards',
                         default=1,
                         type=int_greater_or_equal(1),
                         help='The minimum number of shards to use, even if they would not '
                              'reach the desired number of samples per shard. Default: %(default)s.')
 
-    params.add_argument('--seed',
+    data_prep.add_argument('--seed',
                         type=int,
                         default=13,
                         help='Random seed used that makes shard assignments deterministic. Default: %(default)s.')
 
-    params.add_argument('--output', '-o',
+    data_prep.add_argument('--output', '-o',
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
 
-    add_logging_args(params)
 
 
 def add_device_args(params):
