@@ -326,8 +326,10 @@ def main():
     from . import arguments
     params = argparse.ArgumentParser(description='CLI to build source and target vocab(s).')
     arguments.add_build_vocab_args(params)
+    arguments.add_logging_args(params)
     args = params.parse_args()
     prepare_vocab(args)
+
 
 def prepare_vocab(args: argparse.Namespace):
     num_words, num_words_other = args.num_words
@@ -339,7 +341,7 @@ def prepare_vocab(args: argparse.Namespace):
     utils.check_condition(word_min_count == word_min_count_other,
                           "Vocabulary CLI only allows a common value for --word-min-count")
 
-    setup_main_logger(file_logging=True, console=True,
+    setup_main_logger(file_logging=not args.no_logfile, console=not args.quiet,
                       path="%s.%s" % (args.output, C.LOG_NAME))
 
     vocab = build_from_paths(args.inputs,

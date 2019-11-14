@@ -344,6 +344,10 @@ def add_logging_args(params):
                                 default=False,
                                 action="store_true",
                                 help='Suppress console logging.')
+    logging_params.add_argument('--no-logfile',
+                                default=False,
+                                action="store_true",
+                                help='Suppress file logging')
     logging_params.add_argument('--loglevel',
                                 default='INFO',
                                 choices=['INFO', 'DEBUG'],
@@ -450,7 +454,6 @@ def add_bucketing_args(params):
 
 
 def add_prepare_data_cli_args(params):
-    params = params.add_argument_group("Data preparation.")
     add_training_data_args(params, required=True)
     add_vocab_args(params)
     add_bucketing_args(params)
@@ -474,6 +477,8 @@ def add_prepare_data_cli_args(params):
     params.add_argument('--output', '-o',
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
+
+    add_logging_args(params)
 
 
 def add_device_args(params):

@@ -67,7 +67,9 @@ def test_io_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(quiet=False, loglevel='INFO')),
+    ('', dict(quiet=False,
+              loglevel='INFO',
+              no_logfile=False)),
 ])
 def test_logging_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_logging_args)
@@ -254,7 +256,10 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           min_num_shards=1,
           num_samples_per_shard=10000000,
           seed=13,
-          output='train_data'
+          output='train_data',
+          quiet=False,
+          loglevel='INFO',
+          no_logfile=False
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -279,7 +284,10 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           min_num_shards=1,
           num_samples_per_shard=10000000,
           seed=13,
-          output='prepared_data'
+          output='prepared_data',
+          quiet=False,
+          loglevel='INFO',
+          no_logfile=False
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):

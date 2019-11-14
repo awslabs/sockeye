@@ -83,6 +83,7 @@ def check_arg_compatibility(args: argparse.Namespace):
     # Require at least one stopping criteria
     check_condition(any((args.max_samples,
                          args.max_updates,
+                         args.max_seconds,
                          args.max_checkpoints,
                          args.max_num_epochs,
                          args.max_num_checkpoint_not_improved)),
@@ -789,7 +790,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    setup_main_logger(file_logging=True,
+    setup_main_logger(file_logging=not args.no_logfile,
                       console=not args.quiet,
                       path=os.path.join(output_folder, C.LOG_NAME),
                       level=args.loglevel)
@@ -822,6 +823,15 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             shared_vocab=use_shared_vocab(args),
             resume_training=resume_training,
             output_folder=output_folder)
+
+        if max_seq_len_source != config_data.max_seq_len_source:
+            logger.info("Maximum source length determined by prepared data. Using %d instead of %d",
+                        config_data.max_seq_len_source, max_seq_len_source)
+            max_seq_len_source = config_data.max_seq_len_source
+        if max_seq_len_target != config_data.max_seq_len_target:
+            logger.info("Maximum target length determined by prepared data. Using %d instead of %d",
+                        config_data.max_seq_len_target, max_seq_len_target)
+            max_seq_len_target = config_data.max_seq_len_target
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:

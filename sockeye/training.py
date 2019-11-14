@@ -160,8 +160,8 @@ class TrainState:
         self.gradients = {}
 
 
-
 class GluonEarlyStoppingTrainer:
+
     def __init__(self,
                  config: TrainerConfig,
                  optimizer_config: OptimizerConfig,
@@ -189,6 +189,7 @@ class GluonEarlyStoppingTrainer:
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
+        self._tflogger = TensorboardLogger(logdir=os.path.join(self.config.output_dir, C.TENSORBOARD_NAME))
         self.checkpoint_callback = checkpoint_callback
 
     def fit(self,
@@ -209,15 +210,16 @@ class GluonEarlyStoppingTrainer:
             self.state = TrainState(self.config.early_stopping_metric)
             self.model.save_config(self.config.output_dir)
             self.model.save_version(self.config.output_dir)
-            #~ self._save_training_state(train_iter)
-            #self._save_trainer_states(self.best_optimizer_states_fname) # not saving due to deferred initialization
+            # self._save_training_state(train_iter)
+            # self._save_trainer_states(self.best_optimizer_states_fname)  # not saving due to deferred initialization
             logger.info("Training started.")
 
         tic = time.time()
 
         if self.config.max_checkpoints is not None:
             self.config.max_updates = self.state.updates + self.config.max_checkpoints * self.config.checkpoint_interval
-            logger.info("Resetting max_updates to %d + %d * %d = %d in order to implement stopping after (an additional) %d checkpoints.",
+            logger.info("Resetting max_updates to %d + %d * %d = %d in order to implement stopping "
+                        "after (an additional) %d checkpoints.",
                         self.state.updates,
                         self.config.max_checkpoints,
                         self.config.checkpoint_interval,
@@ -539,11 +541,7 @@ class GluonEarlyStoppingTrainer:
         self.state.metrics.append(data)
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
 
-        # TODO: Tensorboard logging
-        # tf_metrics = data.copy()
-        # tf_metrics.update({"%s_grad" % n: v for n, v in self.state.gradients.items()})
-        # tf_metrics.update(self.model.params)
-        #self.tflogger.log_metrics(metrics=tf_metrics, checkpoint=self.state.checkpoint)
+        self._tflogger.log_metrics(metrics=data, checkpoint=self.state.checkpoint)
 
     def _update_best_params(self):
         """
@@ -759,43 +757,45 @@ class TensorboardLogger:
         try:
             import mxboard
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
-            self.sw = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
+            self._writer = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
         except ImportError:
             logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
-            self.sw = None
+            self._writer = None
 
     def log_metrics(self, metrics: Dict[str, Union[float, int, mx.nd.NDArray]], checkpoint: int):
-        if self.sw is None:
+        if self._writer is None:
             return
 
         for name, value in metrics.items():
             if isinstance(value, mx.nd.NDArray):
                 if mx.nd.contrib.isfinite(value).sum().asscalar() == value.size:
-                    self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+                    self._writer.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                 else:
                     logger.warning("Histogram of %s not logged to tensorboard because of infinite data.")
+            elif value is None:
+                continue
             else:
-                self.sw.add_scalar(tag=name, value=value, global_step=checkpoint)
+                self._writer.add_scalar(tag=name, value=value, global_step=checkpoint)
 
     def log_graph(self, symbol: mx.sym.Symbol):
-        if self.sw is None:
+        if self._writer is None:
             return
-        self.sw.add_graph(symbol)
+        self._writer.add_graph(symbol)
 
     def log_source_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
-        if self.sw is None or self.source_labels is None:
+        if self._writer is None or self.source_labels is None:
             return
-        self.sw.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
+        self._writer.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
 
     def log_target_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
-        if self.sw is None or self.target_labels is None:
+        if self._writer is None or self.target_labels is None:
             return
-        self.sw.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
+        self._writer.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
 
     def log_output_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
-        if self.sw is None or self.target_labels is None:
+        if self._writer is None or self.target_labels is None:
             return
-        self.sw.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
+        self._writer.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
 
 
 class Speedometer:

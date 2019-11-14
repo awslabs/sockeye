@@ -35,7 +35,9 @@ def main():
 def prepare_data(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
     os.makedirs(output_folder, exist_ok=True)
-    setup_main_logger(file_logging=True, path=os.path.join(output_folder, C.LOG_NAME))
+    setup_main_logger(console=not args.quiet,
+                      file_logging=not args.no_logfile,
+                      path=os.path.join(output_folder, C.LOG_NAME))
 
     utils.seed_rngs(args.seed)
 
