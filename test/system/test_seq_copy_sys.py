@@ -44,7 +44,7 @@ seed = random.randint(0, 1000)
 
 COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial-learning-rate 0.001" \
                          " --decode-and-evaluate 0 --label-smoothing 0.0" \
-                         " --optimized-metric perplexity --loss cross-entropy"
+                         " --optimized-metric perplexity --loss cross-entropy --weight-tying-type src_trg_softmax"
 
 
 @pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
