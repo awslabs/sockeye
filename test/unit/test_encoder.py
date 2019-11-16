@@ -28,11 +28,11 @@ def test_embedding_encoder(dropout, project_to_size, factor_configs, is_source):
     assert type(embedding) == sockeye.encoder.Embedding
 
 
-@pytest.mark.parametrize('shared_layer_params, lhuc, sandwich_coefficient', [
-    (False, False, 0),
-    (True, True, 10)
+@pytest.mark.parametrize('shared_layer_params, lhuc, sandwich_recipe', [
+    (False, False, (0, 0, 0)),
+    (True, True, (10, 20, 10))
 ])
-def test_get_transformer_encoder(shared_layer_params, lhuc, sandwich_coefficient):
+def test_get_transformer_encoder(shared_layer_params, lhuc, sandwich_recipe):
     prefix = "test_"
     config = sockeye.transformer.TransformerConfig(model_size=20,
                                                    attention_heads=10,
@@ -47,7 +47,7 @@ def test_get_transformer_encoder(shared_layer_params, lhuc, sandwich_coefficient
                                                    postprocess_sequence='test_post',
                                                    max_seq_len_source=50,
                                                    max_seq_len_target=60,
-                                                   sandwich_coefficient=sandwich_coefficient,
+                                                   sandwich_recipe=sandwich_recipe,
                                                    shared_layer_params=shared_layer_params,
                                                    lhuc=lhuc)
     encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix)

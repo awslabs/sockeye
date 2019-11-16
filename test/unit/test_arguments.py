@@ -102,7 +102,7 @@ def test_device_args(test_params, expected_params):
               transformer_positional_embedding_type="fixed",
               transformer_preprocess=('n', 'n'),
               transformer_postprocess=('dr', 'dr'),
-              transformer_sandwich_coefficient=(0, 0),
+              transformer_sandwich_recipe=(0, 0, 0),
               lhuc=None,
               encoder=C.TRANSFORMER_TYPE,
               decoder=C.TRANSFORMER_TYPE,

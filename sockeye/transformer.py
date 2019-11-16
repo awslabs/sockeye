@@ -11,7 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import mxnet as mx
 
@@ -36,7 +36,7 @@ class TransformerConfig(config.Config):
                  postprocess_sequence: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 sandwich_coefficient: int = 0,
+                 sandwich_recipe: Optional[List[int]] = None,
                  shared_layer_params: bool = False,
                  lhuc: bool = False) -> None:  # type: ignore
         super().__init__()
@@ -53,7 +53,7 @@ class TransformerConfig(config.Config):
         self.postprocess_sequence = postprocess_sequence
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
-        self.sandwich_coefficient = sandwich_coefficient
+        self.sandwich_recipe = sandwich_recipe
         self.shared_layer_params = shared_layer_params
         self.use_lhuc = lhuc
 

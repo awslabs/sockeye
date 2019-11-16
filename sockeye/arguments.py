@@ -625,13 +625,13 @@ def add_model_parameters(params):
                                    'You can specify separate sequences for encoder and decoder by separating with ":" '
                                    'For example: n:drn '
                                    'Default: %(default)s.')
-    model_params.add_argument('--transformer-sandwich-coefficient',
-                              type=multiple_values(num_values=2, greater_or_equal=0),
-                              default=(0, 0),
-                              help='Coefficient controlling transformer sublayer ordering (Press et al., 2019, '
-                                   'arxiv.org/abs/1911.03864). A value of zero indicates standard interleaved self-'
-                                   'attention and feed-forward sublayers. Currently limited to encoder. Default: '
-                                   '%(default)s.')
+    model_params.add_argument('--transformer-sandwich-recipe',
+                              type=multiple_values(num_values=3, greater_or_equal=0),
+                              default=(0, 0, 0),
+                              help='Values controlling transformer sublayer ordering (Press et al., 2019, '
+                                   'arxiv.org/abs/1911.03864). Specify "num_self_attention:num_interleaved:'
+                                   'num_feed_forward", ex: "6:20:6" for a 16 layer model with a sandwich coefficient '
+                                   'of 6. Currently limited to encoder. Default: %(default)s.')
 
     # LHUC
     model_params.add_argument('--lhuc',

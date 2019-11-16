@@ -101,15 +101,17 @@ def check_arg_compatibility(args: argparse.Namespace):
                         'Weight tying requires equal values for target --transformer-model-size and --num-embed')
 
     # Sandwich transformer compatibility
-    if args.transformer_sandwich_coefficient[0] > 0:
+    if sum(args.transformer_sandwich_recipe) > 0:
         check_condition(args.lhuc is None,
-                        'LHUC (--lhuc) is not supported for sandwich coefficients above 0 '
-                        '(--transformer-sandwich-coefficient)')
+                        'LHUC (--lhuc) is not supported for sandwich transformers (--transformer-sandwich-recipe)')
         check_condition(not args.shared_encoder_layer_params,
                         'Encoder layer parameter sharing (--shared-encoder-layer-params) is not supported for sandwich '
-                        'coefficients above 0 (--transformer-sandwich-coefficient)')
-        check_condition(args.transformer_sandwich_coefficient[0] <= args.num_layers[0],
-                        'The value of --transformer-sandwich-coefficient cannot exceed --num-layers')
+                        'transformers (--transformer-sandwich-recipe)')
+        check_condition(sum(args.transformer_sandwich_recipe) == args.num_layers[0] * 2,
+                        'The sum of --transformer-sandwich-recipe values should equal encoder --num-layers * 2')
+        check_condition(args.transformer_sandwich_recipe[1] % 2 == 0,
+                        'The second value of --transformer-sandwich-recipe (interleaved sublayers) should be a '
+                        'multiple of 2')
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -424,7 +426,7 @@ def create_encoder_config(args: argparse.Namespace,
         postprocess_sequence=encoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        sandwich_coefficient=args.transformer_sandwich_coefficient[0],
+        sandwich_recipe=args.transformer_sandwich_recipe,
         shared_layer_params=args.shared_encoder_layer_params,
         lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
     encoder_num_hidden = encoder_transformer_model_size
@@ -463,7 +465,6 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         postprocess_sequence=decoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        sandwich_coefficient=args.transformer_sandwich_coefficient[1],
         shared_layer_params=args.shared_decoder_layer_params,
         lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
 
