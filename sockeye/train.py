@@ -798,8 +798,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # Do not keep redundant copies of the checkpoint history
             args.keep_last_params = 1
 
-    utils.seed_rngs(args.seed)
-
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
@@ -829,6 +827,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                  "divisible by the number of devices. Choose a batch "
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
+
+        utils.seed_rngs(args.seed, ctx=context)
 
         train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,

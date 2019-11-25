@@ -668,14 +668,6 @@ class GluonEarlyStoppingTrainer:
         """
         utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep,
                                    self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations)
-        # if process_manager is not None:
-        #     result = process_manager.collect_results()
-        #     if result is not None:
-        #         decoded_checkpoint, decoder_metrics = result
-        #         self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-        #         self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
-        #         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
-        #         self.state.save(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
         if not keep_training_state:
             if os.path.exists(self.training_state_dirname):
