@@ -140,13 +140,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                                                                             fold_heads=False,
                                                                             name="bias")
             self.layers = mx.gluon.nn.HybridSequential()
-            if config.shared_layer_params:
-                single_decoder_block = transformer.TransformerDecoderBlock(config, prefix="%d_" % 1)
-                for i in range(config.num_layers):
-                    self.layers.add(single_decoder_block)
-            else:
-                for i in range(config.num_layers):
-                    self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i))
+            for i in range(config.num_layers):
+                self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i))
 
             self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                      dropout=config.dropout_prepost,

@@ -106,8 +106,7 @@ class EmbeddingConfig(config.Config):
                  num_embed: int,
                  dropout: float,
                  factor_configs: Optional[List[FactorConfig]] = None,
-                 source_factors_combine: str = C.SOURCE_FACTORS_COMBINE_CONCAT,
-                 project_to_size: Optional[int] = None) -> None:
+                 source_factors_combine: str = C.SOURCE_FACTORS_COMBINE_CONCAT) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
@@ -117,7 +116,6 @@ class EmbeddingConfig(config.Config):
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
         self.source_factors_combine = source_factors_combine
-        self.project_to_size = project_to_size
 
 
 class Embedding(Encoder):
@@ -153,22 +151,7 @@ class Embedding(Encoder):
                     self.factor_embeds.add(mx.gluon.nn.Embedding(fc.vocab_size, fc.num_embed,
                                                                  prefix="factor%d_" % i))
 
-            # If specified, add layer for linear projection
-            if self.config.project_to_size is not None:
-                # Embeddings are projected after factor embedding concatenation
-                total_num_embed = self.config.num_embed
-                if (self.config.factor_configs is not None
-                        and self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT):
-                    total_num_embed += sum(config.num_embed for config in self.config.factor_configs)
-                self.linear_project = mx.gluon.nn.Dense(in_units=total_num_embed,
-                                                        units=self.config.project_to_size,
-                                                        flatten=False)
-
-    def hybrid_forward(self,
-                       F,
-                       data,
-                       valid_length,
-                       embed_weight):  # pylint: disable=arguments-differ
+    def hybrid_forward(self, F, data, valid_length, embed_weight):  # pylint: disable=arguments-differ
         factor_embeds = []
         if self.is_source:
             if self.config.num_factors > 1 and self.config.factor_configs is not None:
@@ -188,9 +171,6 @@ class Embedding(Encoder):
             else:
                 embed = F.add_n(embed, *factor_embeds)
 
-        if self.config.project_to_size is not None:
-            embed = self.linear_project(embed)
-
         if self.config.dropout > 0:
             embed = F.Dropout(data=embed, p=self.config.dropout)
 
@@ -200,8 +180,6 @@ class Embedding(Encoder):
         """
         Return the representation size of this encoder.
         """
-        if self.config.project_to_size is not None:
-            return self.config.project_to_size
         return self.config.num_embed
 
 
@@ -296,23 +274,8 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                                                                             name="bias")
 
             self.layers = mx.gluon.nn.HybridSequential()
-            if config.shared_layer_params:
-                single_encoder_block = transformer.TransformerEncoderBlock(config, prefix="%d_" % 1)
-                for i in range(config.num_layers):
-                    self.layers.add(single_encoder_block)
-            elif config.sandwich_recipe is not None and sum(config.sandwich_recipe) > 0:
-                # Sandwich transformers treat each sublayer (self-attention or feed-forward) as a separate unit
-                num_self_attention, num_interleaved, num_feed_forward = config.sandwich_recipe
-                for i in range(num_self_attention):
-                    self.layers.add(transformer.TransformerSelfAttentionBlock(config, prefix='%d_' % len(self.layers)))
-                for i in range(num_interleaved // 2):
-                    self.layers.add(transformer.TransformerSelfAttentionBlock(config, prefix='%d_' % len(self.layers)))
-                    self.layers.add(transformer.TransformerFeedForwardBlock(config, prefix='%d_' % len(self.layers)))
-                for i in range(num_feed_forward):
-                    self.layers.add(transformer.TransformerFeedForwardBlock(config, prefix='%d_' % len(self.layers)))
-            else:
-                for i in range(config.num_layers):
-                    self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
+            for i in range(config.num_layers):
+                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
 
             self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                      dropout=config.dropout_prepost,

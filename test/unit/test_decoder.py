@@ -17,11 +17,11 @@ import sockeye.constants as C
 import sockeye.decoder
 import sockeye.transformer
 
-@pytest.mark.parametrize('shared_layer_params, lhuc', [
-    (False, False),
-    (True, True)
+@pytest.mark.parametrize('lhuc', [
+    (False,),
+    (True,)
 ])
-def test_get_decoder(shared_layer_params, lhuc):
+def test_get_decoder(lhuc):
     config = sockeye.transformer.TransformerConfig(
         model_size=20,
         attention_heads=10,
@@ -36,7 +36,6 @@ def test_get_decoder(shared_layer_params, lhuc):
         postprocess_sequence='test_post_seq',
         max_seq_len_source=60,
         max_seq_len_target=70,
-        shared_layer_params=shared_layer_params,
         lhuc=lhuc)
     decoder = sockeye.decoder.get_decoder(config, inference_only=False, prefix='test_')
 

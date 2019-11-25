@@ -18,21 +18,21 @@ import sockeye.encoder
 import sockeye.transformer
 
 
-@pytest.mark.parametrize('dropout, project_to_size, factor_configs, is_source', [
-    (0., None, None, False),
-    (0.1, 20, [sockeye.encoder.FactorConfig(vocab_size=5, num_embed=5)], True),
+@pytest.mark.parametrize('dropout, factor_configs, is_source', [
+    (0., None, False),
+    (0.1, [sockeye.encoder.FactorConfig(vocab_size=5, num_embed=5)], True),
 ])
-def test_embedding_encoder(dropout, project_to_size, factor_configs, is_source):
-    config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, project_to_size=project_to_size, factor_configs=factor_configs)
+def test_embedding_encoder(dropout, factor_configs, is_source):
+    config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, factor_configs=factor_configs)
     embedding = sockeye.encoder.Embedding(config, prefix='embedding', is_source=is_source)
     assert type(embedding) == sockeye.encoder.Embedding
 
 
-@pytest.mark.parametrize('shared_layer_params, lhuc, sandwich_recipe', [
-    (False, False, (0, 0, 0)),
-    (True, True, (10, 20, 10))
+@pytest.mark.parametrize('lhuc', [
+    (False,),
+    (True,)
 ])
-def test_get_transformer_encoder(shared_layer_params, lhuc, sandwich_recipe):
+def test_get_transformer_encoder(lhuc):
     prefix = "test_"
     config = sockeye.transformer.TransformerConfig(model_size=20,
                                                    attention_heads=10,
@@ -47,8 +47,6 @@ def test_get_transformer_encoder(shared_layer_params, lhuc, sandwich_recipe):
                                                    postprocess_sequence='test_post',
                                                    max_seq_len_source=50,
                                                    max_seq_len_target=60,
-                                                   sandwich_recipe=sandwich_recipe,
-                                                   shared_layer_params=shared_layer_params,
                                                    lhuc=lhuc)
     encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix)
     encoder.initialize()

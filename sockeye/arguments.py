@@ -572,13 +572,6 @@ def add_model_parameters(params):
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
 
-    model_params.add_argument('--shared-encoder-layer-params',
-                              action='store_true',
-                              help='Share parameters across encoder layers.')
-    model_params.add_argument('--shared-decoder-layer-params',
-                              action='store_true',
-                              help='Share parameters across decoder layers.')
-
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
                               type=multiple_values(num_values=2, greater_or_equal=1),
@@ -625,13 +618,6 @@ def add_model_parameters(params):
                                    'You can specify separate sequences for encoder and decoder by separating with ":" '
                                    'For example: n:drn '
                                    'Default: %(default)s.')
-    model_params.add_argument('--transformer-sandwich-recipe',
-                              type=multiple_values(num_values=3, greater_or_equal=0),
-                              default=(0, 0, 0),
-                              help='Values controlling transformer sublayer ordering (Press et al., 2019, '
-                                   'arxiv.org/abs/1911.03864). Specify "num_self_attention:num_interleaved:'
-                                   'num_feed_forward", ex: "6:20:6" for a 16 layer model with a sandwich coefficient '
-                                   'of 6. Currently limited to encoder. Default: %(default)s.')
 
     # LHUC
     model_params.add_argument('--lhuc',
@@ -661,12 +647,6 @@ def add_model_parameters(params):
                               choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
                               default=C.SOURCE_FACTORS_COMBINE_CONCAT,
                               help='How to combine source factors. Default: %(default)s.')
-    model_params.add_argument('--project-embed-to-size',
-                              type=multiple_values(num_values=2, greater_or_equal=1),
-                              default=(None, None),
-                              help='If specified, project embeddings to this size (use to project smaller embeddings '
-                                   'to model size, as in Lan et al. 2019, arxiv.org/abs/1909.11942). Use "x:x" to '
-                                   'specify separate values for source & target. Default: %(default)s.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,

@@ -90,29 +90,6 @@ def check_arg_compatibility(args: argparse.Namespace):
                     'Please specify at least one stopping criteria: --max-samples --max-updates --max-checkpoints '
                     '--max-num-epochs --max-num-checkpoint-not-improved')
 
-    # Require equal layer sizes for weight tying
-    num_embed_src = args.num_embed[0] if args.num_embed[0] is not None else args.transformer_model_size[0]
-    num_embed_trg = args.num_embed[1] if args.num_embed[1] is not None else args.transformer_model_size[1]
-    if args.weight_tying_type in [C.WEIGHT_TYING_SRC_TRG, C.WEIGHT_TYING_SRC_TRG_SOFTMAX]:
-        check_condition(num_embed_src == num_embed_trg,
-                        'Weight tying requires equal source & target values for --num-embed')
-    if args.weight_tying_type in [C.WEIGHT_TYING_TRG_SOFTMAX, C.WEIGHT_TYING_SRC_TRG_SOFTMAX]:
-        check_condition(num_embed_trg == args.transformer_model_size[1],
-                        'Weight tying requires equal values for target --transformer-model-size and --num-embed')
-
-    # Sandwich transformer compatibility
-    if sum(args.transformer_sandwich_recipe) > 0:
-        check_condition(args.lhuc is None,
-                        'LHUC (--lhuc) is not supported for sandwich transformers (--transformer-sandwich-recipe)')
-        check_condition(not args.shared_encoder_layer_params,
-                        'Encoder layer parameter sharing (--shared-encoder-layer-params) is not supported for sandwich '
-                        'transformers (--transformer-sandwich-recipe)')
-        check_condition(sum(args.transformer_sandwich_recipe) == args.num_layers[0] * 2,
-                        'The sum of --transformer-sandwich-recipe values should equal encoder --num-layers * 2')
-        check_condition(args.transformer_sandwich_recipe[1] % 2 == 0,
-                        'The second value of --transformer-sandwich-recipe (interleaved sublayers) should be a '
-                        'multiple of 2')
-
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -406,9 +383,7 @@ def create_encoder_config(args: argparse.Namespace,
     encoder_transformer_model_size = args.transformer_model_size[0]
 
     total_source_factor_size = sum(args.source_factors_num_embed)
-    if (args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT
-            and total_source_factor_size > 0
-            and args.project_embed_to_size[0] is None):
+    if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT and total_source_factor_size > 0:
         logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
             encoder_transformer_model_size, num_embed_source + total_source_factor_size))
         encoder_transformer_model_size = num_embed_source + total_source_factor_size
@@ -426,8 +401,6 @@ def create_encoder_config(args: argparse.Namespace,
         postprocess_sequence=encoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        sandwich_recipe=args.transformer_sandwich_recipe,
-        shared_layer_params=args.shared_encoder_layer_params,
         lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
     encoder_num_hidden = encoder_transformer_model_size
 
@@ -465,7 +438,6 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         postprocess_sequence=decoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        shared_layer_params=args.shared_decoder_layer_params,
         lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
 
     return config_decoder
@@ -480,24 +452,18 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
                         "Transformer source model size (%d).", transformer_model_size_source)
             num_embed_source = transformer_model_size_source
         else:
-            if args.project_embed_to_size[0] is not None:
-                check_condition(args.transformer_model_size[0] == args.project_embed_to_size[0],
-                                "Source embedding projected size must match transformer model size: %s vs. %s"
-                                % (args.transformer_model_size[0], args.project_embed_to_size[0]))
-            else:
-                check_condition(args.transformer_model_size[0] == num_embed_source,
-                                "Source embedding size must match transformer model size: %s vs. %s"
-                                % (args.transformer_model_size[0], num_embed_source))
+            check_condition(args.transformer_model_size[0] == num_embed_source,
+                            "Source embedding size must match transformer model size: %s vs. %s"
+                            % (args.transformer_model_size[0], num_embed_source))
 
-        if args.project_embed_to_size[0] is None:
-            total_source_factor_size = sum(args.source_factors_num_embed)
-            if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-                adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
-                check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
-                                adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
-                                "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
-                                "has to be even and a multiple of encoder attention heads (%d)" % (
-                                    adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
+        total_source_factor_size = sum(args.source_factors_num_embed)
+        if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
+            check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
+                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
+                            "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
+                            "has to be even and a multiple of encoder attention heads (%d)" % (
+                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
 
     if args.decoder == C.TRANSFORMER_TYPE:
         transformer_model_size_target = args.transformer_model_size[1]
@@ -506,15 +472,10 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
                         "Transformer target model size (%d).", transformer_model_size_target)
             num_embed_target = transformer_model_size_target
         else:
-            if args.project_embed_to_size[1] is not None:
-                check_condition(args.transformer_model_size[1] == args.project_embed_to_size[1],
-                                "Target embedding projected size must match transformer model size: %s vs. %s"
-                                % (args.transformer_model_size[1], args.project_embed_to_size[1]))
-            else:
-                # Make sure that if the user sets num_embed it matches the Transformer model size
-                check_condition(args.transformer_model_size[1] == num_embed_target,
-                                "Target embedding size must match transformer model size: %s vs. %s"
-                                % (args.transformer_model_size[1], num_embed_target))
+            # Make sure that if the user sets num_embed it matches the Transformer model size
+            check_condition(args.transformer_model_size[1] == num_embed_target,
+                            "Target embedding size must match transformer model size: %s vs. %s"
+                            % (args.transformer_model_size[1], num_embed_target))
 
     if not num_embed_source:
         num_embed_source = C.DEFAULT_NUM_EMBED
@@ -567,13 +528,11 @@ def create_model_config(args: argparse.Namespace,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
                                                   factor_configs=source_factor_configs,
-                                                  source_factors_combine=args.source_factors_combine,
-                                                  project_to_size=args.project_embed_to_size[0])
+                                                  source_factors_combine=args.source_factors_combine)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
-                                                  dropout=embed_dropout_target,
-                                                  project_to_size=args.project_embed_to_size[1])
+                                                  dropout=embed_dropout_target)
 
     config_length_task = None
     if args.length_task is not None:
@@ -943,6 +902,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         if using_amp:
             amp.init_trainer(gluon_trainer)
+            # AMP does not allow passing args when creating the loss scaler, so
+            # we set them immediately after calling init.
             gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
 
 

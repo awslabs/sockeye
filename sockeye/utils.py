@@ -16,7 +16,6 @@ A set of utility methods.
 """
 import binascii
 import errno
-from functools import reduce
 import glob
 import gzip
 import itertools
@@ -803,10 +802,5 @@ def log_parameters(params: mx.gluon.ParameterDict):
             fixed_parameter_names.append(repr)
         else:
             learned_parameter_names.append(repr)
-    #percent_fixed = 100 * (fixed_parameters / max(1, total_parameters))
-    #percent_learned = 100 * (learned_parameters / max(1, total_parameters))
     logger.info("Trainable parameters:\n%s", pprint.pformat(learned_parameter_names))
     logger.info("Fixed model parameters:\n%s", pprint.pformat(fixed_parameter_names))
-    #logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
-    #logger.info("Learning %d parameters (%0.2f%%)", learned_parameters, percent_learned)
-    #logger.info("Total # of parameters: %d", total_parameters)
