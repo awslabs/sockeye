@@ -11,12 +11,28 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import pytest
+
 import sockeye.constants as C
 import sockeye.encoder
 import sockeye.transformer
 
 
-def test_get_transformer_encoder():
+@pytest.mark.parametrize('dropout, factor_configs, is_source', [
+    (0., None, False),
+    (0.1, [sockeye.encoder.FactorConfig(vocab_size=5, num_embed=5)], True),
+])
+def test_embedding_encoder(dropout, factor_configs, is_source):
+    config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, factor_configs=factor_configs)
+    embedding = sockeye.encoder.Embedding(config, prefix='embedding', is_source=is_source)
+    assert type(embedding) == sockeye.encoder.Embedding
+
+
+@pytest.mark.parametrize('lhuc', [
+    (False,),
+    (True,)
+])
+def test_get_transformer_encoder(lhuc):
     prefix = "test_"
     config = sockeye.transformer.TransformerConfig(model_size=20,
                                                    attention_heads=10,
@@ -30,8 +46,11 @@ def test_get_transformer_encoder():
                                                    preprocess_sequence='test_pre',
                                                    postprocess_sequence='test_post',
                                                    max_seq_len_source=50,
-                                                   max_seq_len_target=60)
+                                                   max_seq_len_target=60,
+                                                   lhuc=lhuc)
     encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix)
+    encoder.initialize()
+    encoder.hybridize(static_alloc=True)
 
     assert type(encoder) == sockeye.encoder.TransformerEncoder
     assert encoder.prefix == prefix + C.TRANSFORMER_ENCODER_PREFIX

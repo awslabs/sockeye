@@ -46,8 +46,7 @@ class ModelConfig(Config):
     :param config_encoder: Encoder configuration.
     :param config_decoder: Decoder configuration.
     :param config_length_task: Optional length task configuration.
-    :param weight_tying: Enables weight tying if True.
-    :param weight_tying_type: Determines which weights get tied. Must be set if weight_tying is enabled.
+    :param weight_tying_type: Determines which weights get tied.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
     """
@@ -60,9 +59,8 @@ class ModelConfig(Config):
                  config_embed_target: encoder.EmbeddingConfig,
                  config_encoder: encoder.EncoderConfig,
                  config_decoder: decoder.DecoderConfig,
-                 config_length_task: layers.LengthRatioConfig = None,
-                 weight_tying: bool = False,
-                 weight_tying_type: Optional[str] = C.WEIGHT_TYING_TRG_SOFTMAX,
+                 config_length_task: layers.LengthRatioConfig= None,
+                 weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
                  lhuc: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
@@ -74,10 +72,7 @@ class ModelConfig(Config):
         self.config_encoder = config_encoder
         self.config_decoder = config_decoder
         self.config_length_task = config_length_task
-        self.weight_tying = weight_tying
         self.weight_tying_type = weight_tying_type
-        if weight_tying and weight_tying_type is None:
-            raise RuntimeError("weight_tying_type must be specified when using weight_tying.")
         self.lhuc = lhuc
         self.dtype = dtype
 
@@ -341,12 +336,10 @@ class SockeyeModel(mx.gluon.Block):
 
         :return: Tuple of source, target, and output embedding parameters.
         """
-        share_embed = self.config.weight_tying and \
-                      C.WEIGHT_TYING_SRC in self.config.weight_tying_type and \
+        share_embed = C.WEIGHT_TYING_SRC in self.config.weight_tying_type and \
                       C.WEIGHT_TYING_TRG in self.config.weight_tying_type
 
-        tie_weights = self.config.weight_tying and \
-                      C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type
+        tie_weights = C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type
 
         source_embed_name = C.SOURCE_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
         target_embed_name = C.TARGET_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"

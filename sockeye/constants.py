@@ -24,6 +24,7 @@ MXNET_SAFE_ACCUMULATION = 'MXNET_SAFE_ACCUMULATION'
 
 # Horovod environment variables
 HOROVOD_HIERARCHICAL_ALLREDUCE = 'HOROVOD_HIERARCHICAL_ALLREDUCE'
+HOROVOD_HIERARCHICAL_ALLGATHER = 'HOROVOD_HIERARCHICAL_ALLGATHER'
 
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
@@ -104,25 +105,22 @@ WEIGHT_TYING_SRC = 'src'
 WEIGHT_TYING_TRG = 'trg'
 WEIGHT_TYING_SOFTMAX = 'softmax'
 # weight tying types (combinations of above components):
+WEIGHT_TYING_NONE = 'none'
 WEIGHT_TYING_TRG_SOFTMAX = 'trg_softmax'
 WEIGHT_TYING_SRC_TRG = 'src_trg'
 WEIGHT_TYING_SRC_TRG_SOFTMAX = 'src_trg_softmax'
+WEIGHT_TYING_TYPES = [WEIGHT_TYING_NONE, WEIGHT_TYING_SRC_TRG_SOFTMAX, WEIGHT_TYING_SRC_TRG, WEIGHT_TYING_TRG_SOFTMAX]
 
 # default decoder prefixes
 TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
 
 # Activation types
-# Gaussian Error Linear Unit (https://arxiv.org/pdf/1606.08415.pdf)
-GELU = "gelu"
-# Gated Linear Unit (https://arxiv.org/pdf/1705.03122.pdf)
-GLU = "glu"
 RELU = "relu"
-SIGMOID = "sigmoid"
-SOFT_RELU = "softrelu"
 # Swish-1/SiLU (https://arxiv.org/pdf/1710.05941.pdf, https://arxiv.org/pdf/1702.03118.pdf)
 SWISH1 = "swish1"
-TANH = "tanh"
-TRANSFORMER_ACTIVATION_TYPES = [GELU, RELU, SWISH1]
+# Gaussian Error Linear Unit (https://arxiv.org/pdf/1606.08415.pdf)
+GELU = "gelu"
+TRANSFORMER_ACTIVATION_TYPES = [RELU, SWISH1, GELU]
 
 # default I/O variable names
 SOURCE_NAME = "source"
@@ -255,14 +253,15 @@ KVSTORE_TYPES = [KVSTORE_DEVICE, KVSTORE_LOCAL, KVSTORE_SYNC,
 
 # Training constants
 OPTIMIZER_ADAM = "adam"
-OPTIMIZER_BERTADAM = "bertadam"
 OPTIMIZER_SGD = "sgd"
-OPTIMIZERS = [OPTIMIZER_ADAM, OPTIMIZER_BERTADAM, OPTIMIZER_SGD]
+OPTIMIZERS = [OPTIMIZER_ADAM, OPTIMIZER_SGD]
 
+LR_SCHEDULER_NONE = 'none'
 LR_SCHEDULER_INV_SQRT_DECAY = 'inv-sqrt-decay'
 LR_SCHEDULER_LINEAR_DECAY = 'linear-decay'
 LR_SCHEDULER_PLATEAU_REDUCE = 'plateau-reduce'
-LR_SCHEDULERS = [LR_SCHEDULER_INV_SQRT_DECAY,
+LR_SCHEDULERS = [LR_SCHEDULER_NONE,
+                 LR_SCHEDULER_INV_SQRT_DECAY,
                  LR_SCHEDULER_LINEAR_DECAY,
                  LR_SCHEDULER_PLATEAU_REDUCE]
 

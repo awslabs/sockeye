@@ -181,11 +181,11 @@ def simple_dict() -> Callable:
     def parse(dict_str: str):
 
         def _parse(value: str):
-            if value == "True":
+            if value.lower() == "true":
                 return True
-            if value == "False":
+            if value.lower() == "false":
                 return False
-            if "." in value:
+            if "." in value or "e" in value:
                 return float(value)
             return int(value)
 
@@ -460,7 +460,7 @@ def add_prepare_data_cli_args(params):
 
     params.add_argument('--num-samples-per-shard',
                         type=int_greater_or_equal(1),
-                        default=1000000,
+                        default=10000000,
                         help='The approximate number of samples per shard. Default: %(default)s.')
 
     params.add_argument('--min-num-shards',
@@ -589,9 +589,11 @@ def add_model_parameters(params):
                               help='Number of hidden units in transformers feed forward layers. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
     model_params.add_argument('--transformer-activation-type',
-                              choices=C.TRANSFORMER_ACTIVATION_TYPES,
-                              default=C.RELU,
-                              help="Type activation to use for each feed forward layer. Default: %(default)s.")
+                              type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
+                              default=(C.RELU, C.RELU),
+                              help='Type of activation to use for each feed forward layer. Use "x:x" to specify '
+                                   'different values for encoder & decoder. Supported: {}. Default: '
+                                   '%(default)s.'.format(' '.join(C.TRANSFORMER_ACTIVATION_TYPES)))
     model_params.add_argument('--transformer-positional-embedding-type',
                               choices=C.POSITIONAL_EMBEDDING_TYPES,
                               default=C.FIXED_POSITIONAL_EMBEDDING,
@@ -646,16 +648,9 @@ def add_model_parameters(params):
                               default=C.SOURCE_FACTORS_COMBINE_CONCAT,
                               help='How to combine source factors. Default: %(default)s.')
 
-    model_params.add_argument('--weight-tying',
-                              action='store_true',
-                              help='Turn on weight tying (see arxiv.org/abs/1608.05859). '
-                                   'The type of weight sharing is determined through '
-                                   '--weight-tying-type. Default: %(default)s.')
     model_params.add_argument('--weight-tying-type',
-                              default=C.WEIGHT_TYING_TRG_SOFTMAX,
-                              choices=[C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
-                                       C.WEIGHT_TYING_SRC_TRG,
-                                       C.WEIGHT_TYING_TRG_SOFTMAX],
+                              default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
+                              choices=C.WEIGHT_TYING_TYPES,
                               help='The type of weight tying. source embeddings=src, target embeddings=trg, '
                                    'target softmax weight matrix=softmax. Default: %(default)s.')
 
@@ -663,6 +658,9 @@ def add_model_parameters(params):
                               help="Data type.")
 
     model_params.add_argument('--amp', action='store_true', help='Use MXNet\'s automatic mixed precision (AMP).')
+    model_params.add_argument('--amp-scale-interval', type=int, default=2000,
+                              help='Attempt to increase loss scale after this many updates without overflow. '
+                                   'Default: %(default)s.')
 
 
 def add_batch_args(params, default_batch_size=4096):
@@ -793,20 +791,23 @@ def add_training_args(params):
     train_params.add_argument('--embed-dropout',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
-                              help='Dropout probability for source & target embeddings. Use "x:x" to specify '
-                                   'separate values. Default: %(default)s.')
+                              help='Dropout probability for source & target embeddings. Use "x:x" to specify separate '
+                                   'values. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-attention',
-                              type=float,
-                              default=0.1,
-                              help='Dropout probability for multi-head attention. Default: %(default)s.')
+                              type=multiple_values(2, data_type=float),
+                              default=(0.1, 0.1),
+                              help='Dropout probability for multi-head attention. Use "x:x" to specify separate '
+                                   'values for encoder & decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-act',
-                              type=float,
-                              default=0.1,
-                              help='Dropout probability before activation in feed-forward block. Default: %(default)s.')
+                              type=multiple_values(2, data_type=float),
+                              default=(0.1, 0.1),
+                              help='Dropout probability before activation in feed-forward block. Use "x:x" to specify '
+                                   'separate values for encoder & decoder. Default: %(default)s.')
     train_params.add_argument('--transformer-dropout-prepost',
-                              type=float,
-                              default=0.1,
-                              help='Dropout probability for pre/postprocessing blocks. Default: %(default)s.')
+                              type=multiple_values(2, data_type=float),
+                              default=(0.1, 0.1),
+                              help='Dropout probability for pre/postprocessing blocks. Use "x:x" to specify separate '
+                                   'values for encoder & decoder. Default: %(default)s.')
 
     train_params.add_argument('--optimizer',
                               default=C.OPTIMIZER_ADAM,

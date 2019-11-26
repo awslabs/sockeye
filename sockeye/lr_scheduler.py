@@ -201,7 +201,7 @@ def get_lr_scheduler(scheduler_type: str,
 
     :return: Learning rate scheduler.
     """
-    if scheduler_type is None:
+    if scheduler_type is None or scheduler_type == C.LR_SCHEDULER_NONE:
         return None
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
         return LearningRateSchedulerInvSqrtDecay(warmup=learning_rate_warmup, t_scale=learning_rate_t_scale)

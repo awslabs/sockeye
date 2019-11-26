@@ -1138,7 +1138,7 @@ def ids2tokens(token_ids: Iterable[int],
     return (tok for token_id, tok in zip(token_ids, tokens) if token_id not in exclude_set)
 
 
-class SequenceReader(Iterable):
+class SequenceReader:
     """
     Reads sequence samples from path and (optionally) creates integer id sequences.
     Streams from disk, instead of loading all samples into memory.
@@ -1260,7 +1260,7 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
         "Different number of lines in source(s) and target iterables.")
 
 
-class FileListReader(Iterator):
+class FileListReader:
     """
     Reads sequence samples from path provided in a file.
 
@@ -1334,7 +1334,7 @@ def get_target_bucket(buckets: List[Tuple[int, int]],
     return bucket
 
 
-class ParallelDataSet(Sized):
+class ParallelDataSet:
     """
     Bucketed parallel data set
     """

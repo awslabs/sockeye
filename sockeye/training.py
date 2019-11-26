@@ -524,7 +524,8 @@ class GluonEarlyStoppingTrainer:
         Writes all metrics to the metrics file and optionally logs to tensorboard.
         """
         data = {"epoch": self.state.epoch,
-                "learning-rate": self.trainer.optimizer.lr_scheduler.lr,
+                "learning-rate": (self.trainer.learning_rate if self.trainer.optimizer.lr_scheduler is None
+                                  else self.trainer.optimizer.lr_scheduler.lr),
                 "gradient-norm": self.state.gradient_norm,
                 "time-elapsed": self.state.time_elapsed}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.context)
@@ -816,7 +817,7 @@ class Speedometer:
         if self.init:
             if count % self.frequency == 0:
                 toc = (time.time() - self.tic)
-                update_interval = batches / updates
+                update_interval = batches / max(1, updates)
                 updates_per_sec = self.frequency / update_interval / toc
                 samples_per_sec = self.samples / toc
                 tokens_per_sec = self.tokens / toc

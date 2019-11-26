@@ -205,10 +205,9 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
 
     :param: args: Arguments as returned by argparse.
     """
-    weight_tying = args.weight_tying
     weight_tying_type = args.weight_tying_type
     shared_vocab = args.shared_vocab
-    if weight_tying and C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
+    if C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
         if not shared_vocab:
             logger.info("A shared source/target vocabulary will be used as weight tying source/target weight tying "
                         "is enabled")
@@ -392,11 +391,11 @@ def create_encoder_config(args: argparse.Namespace,
         model_size=encoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[0],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[0],
-        act_type=args.transformer_activation_type,
+        act_type=args.transformer_activation_type[0],
         num_layers=encoder_num_layers,
-        dropout_attention=args.transformer_dropout_attention,
-        dropout_act=args.transformer_dropout_act,
-        dropout_prepost=args.transformer_dropout_prepost,
+        dropout_attention=args.transformer_dropout_attention[0],
+        dropout_act=args.transformer_dropout_act[0],
+        dropout_prepost=args.transformer_dropout_prepost[0],
         positional_embedding_type=args.transformer_positional_embedding_type,
         preprocess_sequence=encoder_transformer_preprocess,
         postprocess_sequence=encoder_transformer_postprocess,
@@ -429,11 +428,11 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         model_size=args.transformer_model_size[1],
         attention_heads=args.transformer_attention_heads[1],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
-        act_type=args.transformer_activation_type,
+        act_type=args.transformer_activation_type[1],
         num_layers=decoder_num_layers,
-        dropout_attention=args.transformer_dropout_attention,
-        dropout_act=args.transformer_dropout_act,
-        dropout_prepost=args.transformer_dropout_prepost,
+        dropout_attention=args.transformer_dropout_attention[1],
+        dropout_act=args.transformer_dropout_act[1],
+        dropout_prepost=args.transformer_dropout_prepost[1],
         positional_embedding_type=args.transformer_positional_embedding_type,
         preprocess_sequence=decoder_transformer_preprocess,
         postprocess_sequence=decoder_transformer_postprocess,
@@ -455,7 +454,7 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
         else:
             check_condition(args.transformer_model_size[0] == num_embed_source,
                             "Source embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size, num_embed_source))
+                            % (args.transformer_model_size[0], num_embed_source))
 
         total_source_factor_size = sum(args.source_factors_num_embed)
         if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
@@ -476,7 +475,7 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
             # Make sure that if the user sets num_embed it matches the Transformer model size
             check_condition(args.transformer_model_size[1] == num_embed_target,
                             "Target embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size, num_embed_target))
+                            % (args.transformer_model_size[1], num_embed_target))
 
     if not num_embed_source:
         num_embed_source = C.DEFAULT_NUM_EMBED
@@ -548,8 +547,7 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_length_task=config_length_task,
-                                     weight_tying=args.weight_tying,
-                                     weight_tying_type=args.weight_tying_type if args.weight_tying else None,
+                                     weight_tying_type=args.weight_tying_type,
                                      lhuc=args.lhuc is not None,
                                      dtype=args.dtype)
     return model_config
@@ -719,7 +717,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                   during training in a custom way. It should accept a list or a dictionary of
                                   (metric name, metric value) pairs, and an optional global_step/checkpoint parameter.
     :param checkpoint_callback: An optional callback function (int -> None). The function will be called
-+                                each time a checkpoint has been reached 
++                                each time a checkpoint has been reached
     """
 
     if args.dry_run:
@@ -743,10 +741,12 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
-        # Unless explicitly set otherwise, use NCCL for same-host allreduce and
-        # MPI for cross-host allreduce.
+        # Unless explicitly set otherwise, use NCCL for same-host
+        # allreduce/allgather and MPI for cross-host allreduce/allgather.
         if C.HOROVOD_HIERARCHICAL_ALLREDUCE not in os.environ:
             os.environ[C.HOROVOD_HIERARCHICAL_ALLREDUCE] = '1'
+        if C.HOROVOD_HIERARCHICAL_ALLGATHER not in os.environ:
+            os.environ[C.HOROVOD_HIERARCHICAL_ALLGATHER] = '1'
         horovod_mpi.hvd.init()
         # Each worker uses a separate output directory.  The primary worker
         # (rank 0) writes files to the root of the output directory (standard
@@ -902,6 +902,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         if using_amp:
             amp.init_trainer(gluon_trainer)
+            # AMP does not allow passing args when creating the loss scaler, so
+            # we set them immediately after calling init.
+            gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
+
 
         losses = create_losses(args)
 

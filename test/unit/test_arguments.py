@@ -22,6 +22,14 @@ import sockeye.constants as C
 
 from itertools import zip_longest
 
+
+def test_simple_dict():
+    dict_str = 'beta1:0.9,beta2:0.999,epsilon:1e-8,lazy_update:true'
+    expected = {'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8, 'lazy_update': True}
+    parse = arguments.simple_dict()
+    assert parse(dict_str) == expected
+
+
 # note that while --prepared-data and --source/--target are mutually exclusive this is not the case at the CLI level
 @pytest.mark.parametrize("test_params, expected_params", [
     # mandatory parameters
@@ -83,11 +91,10 @@ def test_device_args(test_params, expected_params):
               num_embed=(None, None),
               source_factors_num_embed=[],
               source_factors_combine=C.SOURCE_FACTORS_COMBINE_CONCAT,
-              weight_tying=False,
-              weight_tying_type="trg_softmax",
+              weight_tying_type="src_trg_softmax",
               transformer_attention_heads=(8, 8),
               transformer_feed_forward_num_hidden=(2048, 2048),
-              transformer_activation_type=C.RELU,
+              transformer_activation_type=(C.RELU, C.RELU),
               transformer_model_size=(512, 512),
               transformer_positional_embedding_type="fixed",
               transformer_preprocess=('n', 'n'),
@@ -96,7 +103,8 @@ def test_device_args(test_params, expected_params):
               encoder=C.TRANSFORMER_TYPE,
               decoder=C.TRANSFORMER_TYPE,
               dtype='float32',
-              amp=False))
+              amp=False,
+              amp_scale_interval=2000))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
@@ -152,9 +160,9 @@ def test_inference_args(test_params, expected_params):
               checkpoint_improvement_threshold=0.,
               max_checkpoints=None,
               embed_dropout=(.0, .0),
-              transformer_dropout_attention=0.1,
-              transformer_dropout_act=0.1,
-              transformer_dropout_prepost=0.1,
+              transformer_dropout_attention=(0.1, 0.1),
+              transformer_dropout_act=(0.1, 0.1),
+              transformer_dropout_prepost=(0.1, 0.1),
               optimizer='adam',
               optimizer_params=None,
               horovod=False,
@@ -243,7 +251,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           no_bucket_scaling=False,
           max_seq_len=(99, 99),
           min_num_shards=1,
-          num_samples_per_shard=1000000,
+          num_samples_per_shard=10000000,
           seed=13,
           output='train_data',
           quiet=False,
@@ -271,7 +279,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           no_bucket_scaling=False,
           max_seq_len=(99, 99),
           min_num_shards=1,
-          num_samples_per_shard=1000000,
+          num_samples_per_shard=10000000,
           seed=13,
           output='prepared_data',
           quiet=False,
