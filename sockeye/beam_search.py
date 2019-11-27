@@ -563,6 +563,8 @@ class BeamSearch(mx.gluon.Block):
                 full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
                 raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                        raw_constraint_list]
+            #Pad to a multiple of 8.
+            vocab_slice_ids = np.pad(vocab_slice_ids, (0,7-((len(vocab_slice_ids)-1) % 8)), mode='constant', constant_values = self.eos_id)
             vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
             if vocab_slice_ids.shape[0] < self.beam_size + 1:
