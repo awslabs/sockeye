@@ -253,14 +253,13 @@ class GluonEarlyStoppingTrainer:
                 # (1) save parameters and evaluate on validation data
                 self._save_params()
 
+                train_metrics = [lf.metric for lf in self.loss_functions]
+
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                             self.state.checkpoint, self.state.updates, self.state.epoch,
                             self.state.samples, time_cost, self.config.checkpoint_interval / time_cost)
                 logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
-                            "\t".join("Train-%s" % str(lf.metric) for lf in self.loss_functions))
-                safe_custom_metrics_logger(logging_function=self._custom_metrics_logger,
-                                           metrics=(lf.metric for lf in self.loss_functions),
-                                           global_step=self.state.checkpoint)
+                            "\t".join("Train-%s" % str(metric) for metric in train_metrics))
 
                 val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
 
@@ -275,9 +274,9 @@ class GluonEarlyStoppingTrainer:
                     self._save_trainer_states(self.best_optimizer_states_fname)
                 self._save_training_state(train_iter)
 
-                self._write_metrics_file(train_metrics=[l.metric for l in self.loss_functions], val_metrics=val_metrics)
-                for lf in self.loss_functions:
-                    lf.metric.reset()
+                self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+                for metric in train_metrics:
+                    metric.reset()
 
                 if self.checkpoint_callback:
                     self.checkpoint_callback(self.state.checkpoint)
@@ -385,9 +384,6 @@ class GluonEarlyStoppingTrainer:
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
-        safe_custom_metrics_logger(logging_function=self._custom_metrics_logger,
-                                   metrics=val_metrics,
-                                   global_step=self.state.checkpoint)
 
         return val_metrics
 
@@ -518,10 +514,10 @@ class GluonEarlyStoppingTrainer:
                 # overwriting here. TODO: make this better...
                 self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
 
-    def _write_metrics_file(self, train_metrics: List[loss.LossMetric], val_metrics: List[loss.LossMetric]):
+    def _write_and_log_metrics(self, train_metrics: Iterable[loss.LossMetric], val_metrics: Iterable[loss.LossMetric]):
         """
         Updates metrics for current checkpoint.
-        Writes all metrics to the metrics file and optionally logs to tensorboard.
+        Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
         """
         data = {"epoch": self.state.epoch,
                 "learning-rate": self.trainer.optimizer.lr_scheduler.lr,
@@ -541,6 +537,9 @@ class GluonEarlyStoppingTrainer:
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
 
         self._tflogger.log_metrics(metrics=data, checkpoint=self.state.checkpoint)
+        safe_custom_metrics_logger(logging_function=self._custom_metrics_logger,
+                                   metrics=data,
+                                   global_step=self.state.checkpoint)
 
     def _update_best_params(self):
         """
@@ -767,6 +766,7 @@ class TensorboardLogger:
                 continue
             else:
                 self._writer.add_scalar(tag=name, value=value, global_step=checkpoint)
+        self._writer.flush()
 
     def log_graph(self, symbol: mx.sym.Symbol):
         if self._writer is None:
@@ -842,21 +842,21 @@ class Speedometer:
 
 
 def safe_custom_metrics_logger(logging_function: Callable,
-                               metrics: Iterable[loss.LossMetric],
+                               metrics: Dict,
                                global_step: int = None):
     """
     A thin wrapper for calling a custom metrics logging function, if supplied. As it uses an external function,
     it should never throw an exception. If there is no logging_function supplied, the function does nothing.
     :param logging_function: The function supplied by a caller of sockeye.train
-    :param metrics: A list of LossMetrics.
+    :param metrics: A non-empty dict of (nonempty str, float/int/bool) pairs.
     :param global_step: Optional argument, which can be used e.g. by Tensorboard.
     """
     if logging_function is None:
         return
     try:
-        logging_function({m.name: m.get() for m in metrics}, global_step)
+        logging_function(metrics, global_step)
     except Exception as e:
-        logging.warning("Didn't use custom metrics logger, exception '{}' occured".format(str(e)))
+        logging.warning("Didn't use custom metrics logger, exception '{}' occurred".format(str(e)))
 
 
 def trainer_save_states_no_dump_optimizer(trainer: mx.gluon.Trainer, fname: str):
