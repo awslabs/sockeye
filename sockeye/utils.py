@@ -24,8 +24,6 @@ import math
 import os
 import pprint
 import random
-import shutil
-import subprocess
 import sys
 import time
 from contextlib import contextmanager, ExitStack
@@ -269,7 +267,7 @@ def get_num_gpus() -> int:
         return 0
 
 
-def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
+def get_gpu_memory_usage(ctx: Union[mx.context.Context, List[mx.context.Context]]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
 
@@ -281,30 +279,23 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
     ctx = [c for c in ctx if c.device_type == 'gpu']
     if not ctx:
         return {}
-    if shutil.which("nvidia-smi") is None:
-        logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
-        return {}
-    ids = [str(c.device_id) for c in ctx]
-    query = "--query-gpu=index,memory.used,memory.total"
-    format_arg = "--format=csv,noheader,nounits"
-    try:
-        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(ids)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
-    except OSError:
-        logger.exception("Failed calling nvidia-smi to query memory usage.")
-        return {}
-    memory_data = {}
-    for line in result:
-        gpu_id, mem_used, mem_total = line.split(",")
-        memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+
+    memory_data = {}  # type: Dict[int, Tuple[int, int]]
+    for c in ctx:
+        try:
+            free, total = mx.context.gpu_memory_info(device_id=c.device_id)  # in bytes
+            used = total - free
+            memory_data[c.device_id] = (used * 1e-06, total * 1e-06)
+        except mx.MXNetError:
+            logger.exception("Failed retrieving memory data for gpu%d", c.device_id)
+            continue
     log_gpu_memory_usage(memory_data)
     return memory_data
 
 
 def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
     log_str = " ".join(
-        "GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0 / v[1]) for k, v in memory_data.items())
+        "GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0 / v[1]) for k, v in memory_data.items() if v[1])
     logger.info(log_str)
 
 
