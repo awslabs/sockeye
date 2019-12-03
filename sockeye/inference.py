@@ -93,14 +93,10 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
     else:
         factor = length_ratio_mean + (length_ratio_std * num_stds)
 
-    if np.ceil(factor * supported_max_seq_len_source) > supported_max_seq_len_target:
-        # if heuristically-computed max output length exceeds the supported output length, lower max input length.
-        max_input_len = int(np.floor(supported_max_seq_len_target / factor))
+    if forced_max_input_len is not None:
+        max_input_len = min(supported_max_seq_len_source, forced_max_input_len + C.SPACE_FOR_XOS)
     else:
         max_input_len = supported_max_seq_len_source
-
-    if forced_max_input_len is not None:
-        max_input_len = min(max_input_len, forced_max_input_len + C.SPACE_FOR_XOS)
 
     def get_max_output_length(input_length: int):
         """
@@ -108,8 +104,7 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
         """
         if forced_max_output_len is not None:
             return forced_max_output_len + C.SPACE_FOR_XOS
-        else:
-            return int(np.ceil(factor * input_length))
+        return int(np.ceil(factor * input_length))
 
     return max_input_len, get_max_output_length
 

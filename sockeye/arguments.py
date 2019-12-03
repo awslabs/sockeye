@@ -495,6 +495,11 @@ def add_device_args(params):
     device_params.add_argument('--use-cpu',
                                action='store_true',
                                help='Use CPU device instead of GPU.')
+    device_params.add_argument('--omp-num-threads',
+                               type=int,
+                               help='Set the OMP_NUM_THREADS environment variable (CPU threads). Recommended: set to '
+                                    'number of GPUs for training, number of physical CPU cores for inference. Default: '
+                                    '%(default)s.')
     device_params.add_argument('--disable-device-locking',
                                action='store_true',
                                help='Just use the specified device ids without locking.')

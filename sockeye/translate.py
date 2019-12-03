@@ -14,6 +14,10 @@
 """
 Translation CLI.
 """
+from . import pre_mxnet
+# Called before importing mxnet or any module that imports mxnet
+pre_mxnet.init()
+
 import argparse
 import logging
 import sys

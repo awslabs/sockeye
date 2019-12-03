@@ -94,6 +94,9 @@ ALL_EXCEPT_EMBED_PARAMS = [
     'decoder_transformer_1_W',
     'decoder_transformer_2_W',
     'decoder_transformer_final_W',
+    # Embeddings
+    'source_pos_embed_weight',
+    'target_pos_embed_weight',
     # Output
     'target_output_bias',
     'target_output_weight',
