@@ -18,8 +18,6 @@ from typing import Optional, Union
 import mxnet as mx
 import numpy as np
 
-import sys #TODO remove
-
 from . import config
 from . import constants as C
 from . import quantization
@@ -183,7 +181,6 @@ class OutputLayer(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, data, weight, scaling, bias):
         if self.weight.dype == 'float32':
-            sys.stderr.write("Using fully connected forward.\n")
             return F.FullyConnected(data=data,
                                     num_hidden=self.vocab_size,
                                     weight=weight,
@@ -191,7 +188,6 @@ class OutputLayer(mx.gluon.HybridBlock):
                                     flatten=False,
                                     name=C.LOGITS_NAME)
         else:
-            sys.stderr.write("Using intgemm fully connected forward.\n")
             return F.contrib.intgemm_fully_connected(data=data,
                                     num_hidden=self.vocab_size,
                                     weight=weight,
