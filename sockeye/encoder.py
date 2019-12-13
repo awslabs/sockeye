@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 ImageEncoderConfig = None
 
 
-def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
-    return get_transformer_encoder(config, prefix)
+def get_encoder(config: 'EncoderConfig', prefix: str = '', dtype: str = 'float32') -> 'Encoder':
+    return get_transformer_encoder(config, prefix, dtype)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str, dtype: str) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
@@ -46,7 +46,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) 
     :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
-    return TransformerEncoder(config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX)
+    return TransformerEncoder(config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX, dtype=dtype)
 
 
 class Encoder(ABC, mx.gluon.HybridBlock):
@@ -258,7 +258,8 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX) -> None:
+                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX,
+                 dtype: str = 'float32') -> None:
         super().__init__(prefix=prefix)
         self.config = config
 
@@ -275,7 +276,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
             self.layers = mx.gluon.nn.HybridSequential()
             for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
+                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i, dtype=dtype))
 
             self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                      dropout=config.dropout_prepost,

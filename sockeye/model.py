@@ -120,12 +120,12 @@ class SockeyeModel(mx.gluon.Block):
                                                       embed_weight=self.target_embed_weight)
 
             # encoder & decoder first (to know the decoder depth)
-            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, prefix=self.prefix)
+            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
+            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, prefix=self.prefix, dtype=config.dtype)
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight)
+                                                   weight=self.output_weight, dtype='float32') #TODO
 
             self.length_ratio = None
             if self.config.config_length_task is not None:
@@ -448,7 +448,9 @@ def load_model(model_folder: str,
 
     model = SockeyeModel(model_config, inference_only=inference_only)
     model.initialize(ctx=context)
-    model.cast(model_config.dtype)
+    if model_config.dtype != 'int8':
+        # Casting to int8 doesn't make much sense anyway.  The model should be pre-converted.
+        model.cast(model_config.dtype)
 
     if dtype is None:
         logger.info("Model dtype: %s" % model_config.dtype)

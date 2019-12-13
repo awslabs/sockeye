@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '') -> 'Decoder':
-    return Decoder.get_decoder(config, inference_only, prefix)
+def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '', dtype: str = 'float32') -> 'Decoder':
+    return Decoder.get_decoder(config, inference_only, prefix, dtype)
 
 
 class Decoder(mx.gluon.Block):
@@ -61,13 +61,14 @@ class Decoder(mx.gluon.Block):
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str) -> 'Decoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str, dtype: str) -> 'Decoder':
         """
         Creates decoder based on config type.
 
         :param config: Decoder config.
         :param inference_ony: Create a decoder that is only used for inference.
         :param prefix: Prefix to prepend for decoder.
+        :param dtype: Data type for weights.
 
         :return: Decoder instance.
         """
@@ -76,7 +77,7 @@ class Decoder(mx.gluon.Block):
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls, suffix = cls.__registry[config_type]
         # TODO: move final suffix/prefix construction logic into config builder
-        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix)
+        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix, dtype=dtype)
 
     @abstractmethod
     def __init__(self):
@@ -123,7 +124,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX,
-                 inference_only: bool = False) -> None:
+                 inference_only: bool = False,
+                 dtype: str = 'float32') -> None:
         Decoder.__init__(self)
         mx.gluon.HybridBlock.__init__(self, prefix=prefix)
         self.config = config
@@ -141,7 +143,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                                                                             name="bias")
             self.layers = mx.gluon.nn.HybridSequential()
             for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i))
+                self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i, dtype=dtype))
 
             self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                      dropout=config.dropout_prepost,
