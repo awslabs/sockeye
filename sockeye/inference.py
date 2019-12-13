@@ -35,6 +35,7 @@ from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
 
+
 def models_max_input_output_length(models: List[SockeyeModel],
                                    num_stds: int,
                                    forced_max_input_length: Optional[int] = None,
