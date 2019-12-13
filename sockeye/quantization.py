@@ -99,10 +99,12 @@ class QuantizableDense(mx.gluon.HybridBlock):
                 self.act = None
 
     def cast(self, dtype):
-      #No casting an already quantized matrix.
-      if self._dtype != 'int8':
-         self._dtype = dtype
-         super(QuantizableDense, self).cast(dtype)
+        if self._dtype != 'int8':
+            self._dtype = dtype
+            super(QuantizableDense, self).cast(dtype)
+        else:
+            #No casting an already quantized matrix.
+              logger.warning("Ignoring casting on int8 matrix")
 
     def hybrid_forward(self, F, x, weight, scaling = None, bias=None):
         if self._dtype == 'int8':
