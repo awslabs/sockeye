@@ -139,6 +139,9 @@ class OutputLayer(mx.gluon.HybridBlock):
             if weight is None:
                 if dtype == 'int8':
                     self.scaling = self.params.get('scaling', shape=(1), init='zeros', dtype='float32')
+                    #This is only for inference but MXNet tries to create an
+                    #initializer anyway, then fails because most random
+                    #generators don't support int8 output.
                     weight_initializer = 'zeros'
                 self.weight = self.params.get("weight",
                                               shape=(vocab_size, hidden_size),
