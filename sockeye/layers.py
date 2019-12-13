@@ -180,18 +180,18 @@ class OutputLayer(mx.gluon.HybridBlock):
             return super().forward(data)
 
     def hybrid_forward(self, F, data, weight, scaling, bias):
-        if self.weight.dype == 'float32':
-            return F.FullyConnected(data=data,
-                                    num_hidden=self.vocab_size,
-                                    weight=weight,
-                                    bias=bias,
-                                    flatten=False,
-                                    name=C.LOGITS_NAME)
-        else:
+        if self.weight.dype == 'int8':
             return F.contrib.intgemm_fully_connected(data=data,
                                     num_hidden=self.vocab_size,
                                     weight=weight,
                                     scaling=scaling,
+                                    bias=bias,
+                                    flatten=False,
+                                    name=C.LOGITS_NAME)
+        else:
+            return F.FullyConnected(data=data,
+                                    num_hidden=self.vocab_size,
+                                    weight=weight,
                                     bias=bias,
                                     flatten=False,
                                     name=C.LOGITS_NAME)
