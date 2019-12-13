@@ -18,8 +18,11 @@ from typing import Optional, Union
 import mxnet as mx
 import numpy as np
 
+import sys #TODO remove
+
 from . import config
 from . import constants as C
+from . import quantization
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -133,8 +136,12 @@ class OutputLayer(mx.gluon.HybridBlock):
                  prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
         super().__init__(prefix=prefix)
         self.vocab_size = vocab_size
+
         with self.name_scope():
             if weight is None:
+                if dtype == 'int8':
+                    self.scaling = self.params.get('scaling', shape=(1), init='zeros', dtype='float32')
+                    weight_initializer = 'zeros'
                 self.weight = self.params.get("weight",
                                               shape=(vocab_size, hidden_size),
                                               init=weight_initializer,
@@ -152,25 +159,46 @@ class OutputLayer(mx.gluon.HybridBlock):
 
     def forward(self, data, vocab_slice_ids):
         if vocab_slice_ids is not None:
-            # imperative, reduced matrix multiplication for vocabulary selection
-            weight = self.weight.data().take(vocab_slice_ids)
             bias = self.bias.data().take(vocab_slice_ids)
-            return mx.nd.FullyConnected(data=data,
-                                        num_hidden=vocab_slice_ids.shape[0],
-                                        weight=weight,
-                                        bias=bias,
-                                        flatten=False,
-                                        name=C.LOGITS_NAME)
+            # imperative, reduced matrix multiplication for vocabulary selection
+            if self.weight.dtype == 'int8':
+                # TODO not used yet
+                weight = mx.nd.contrib.intgemm_take_weight(self.weight, vocab_slice_ids)
+                return mx.nd.contrib.intgemm_fully_connected(data=data,
+                                                             weight=weight,
+                                                             scaling=self.scaling,
+                                                             bias=bias,
+                                                             flatten=False,
+                                                             name=C.LOGITS_NAME)
+            else:
+                weight = self.weight.data().take(vocab_slice_ids)
+                return mx.nd.FullyConnected(data=data,
+                                            num_hidden=vocab_slice_ids.shape[0],
+                                            weight=weight,
+                                            bias=bias,
+                                            flatten=False,
+                                            name=C.LOGITS_NAME)
         else:
             return super().forward(data)
 
-    def hybrid_forward(self, F, data, weight, bias):
-        return F.FullyConnected(data=data,
-                                num_hidden=self.vocab_size,
-                                weight=weight,
-                                bias=bias,
-                                flatten=False,
-                                name=C.LOGITS_NAME)
+    def hybrid_forward(self, F, data, weight, scaling, bias):
+        if self.weight.dype == 'float32':
+            sys.stderr.write("Using fully connected forward.\n")
+            return F.FullyConnected(data=data,
+                                    num_hidden=self.vocab_size,
+                                    weight=weight,
+                                    bias=bias,
+                                    flatten=False,
+                                    name=C.LOGITS_NAME)
+        else:
+            sys.stderr.write("Using intgemm fully connected forward.\n")
+            return F.contrib.intgemm_fully_connected(data=data,
+                                    num_hidden=self.vocab_size,
+                                    weight=weight,
+                                    scaling=scaling,
+                                    bias=bias,
+                                    flatten=False,
+                                    name=C.LOGITS_NAME)
 
 
 class LengthRatioConfig(config.Config):
@@ -199,7 +227,8 @@ class LengthRatio(mx.gluon.HybridBlock):
     def __init__(self,
                  hidden_size: int,
                  num_layers: int,
-                 prefix: str = C.LENRATIOS_OUTPUT_LAYER_PREFIX) -> None:
+                 prefix: str = C.LENRATIOS_OUTPUT_LAYER_PREFIX,
+                 dtype: str = 'float32') -> None:
         utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
         super().__init__(prefix=prefix)
         self.num_layers = num_layers
@@ -208,11 +237,11 @@ class LengthRatio(mx.gluon.HybridBlock):
         with self.name_scope():
             self.layers = mx.gluon.nn.HybridSequential()
             for l in range(num_layers - 1):
-                self.layers.add(mx.gluon.nn.Dense(units=hidden_size, activation='tanh',
-                                                  flatten=False, prefix='dense%d_' % l))
+                self.layers.add(quantization.QuantizableDense(units=hidden_size, activation='tanh',
+                                                  flatten=False, prefix='dense%d_' % l, dtype = dtype))
             # SoftReLU activation to ensure positiveness of the predicted length ratio
-            self.layers.add(mx.gluon.nn.Dense(units=1, activation='softrelu',
-                                              flatten=False, prefix='dense%d_' % (num_layers - 1)))
+            self.layers.add(quantization.QuantizableDense(units=1, activation='softrelu',
+                                              flatten=False, prefix='dense%d_' % (num_layers - 1), dtype = dtype))
 
     def hybrid_forward(self, F, source_encoded, source_encoded_length):
         """
@@ -345,13 +374,15 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
+    :param dtype: Data type for weights
     """
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.0,
+                 dtype: str = 'float32') -> None:
         super().__init__(prefix=prefix)
         utils.check_condition(depth_att % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
@@ -362,7 +393,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
 
         with self.name_scope():
             self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
-            self.ff_out = mx.gluon.nn.Dense(in_units=depth_att, units=depth_out, flatten=False, use_bias=False, prefix='h2o_')
+            self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out, flatten=False, use_bias=False, prefix='h2o_', dtype = dtype)
 
     def _attend(self,
                 F,
@@ -412,17 +443,19 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
+    :param dtype: Data type for weights
     """
     def __init__(self,
                  prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0) -> None:
-        super().__init__(prefix, depth_att, heads, depth_out, dropout)
+                 dropout: float = 0.0,
+                 dtype: str = 'float32') -> None:
+        super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
-            self.ff_in = mx.gluon.nn.Dense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_')
+            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_', dtype = dtype)
 
     def hybrid_forward(self, F,
                        inputs: mx.sym.Symbol,
@@ -482,6 +515,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
+    :param dtype: Data type for weights
     """
 
     def __init__(self,
@@ -489,13 +523,14 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0) -> None:
-        super().__init__(prefix, depth_att, heads, depth_out, dropout)
+                 dropout: float = 0.0,
+                 dtype: str = 'float32') -> None:
+        super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
-            self.ff_q = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
-            self.ff_k = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='k2h_')
-            self.ff_v = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='v2h_')
+            self.ff_q = quantization.QuantizableDense(units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype = dtype)
+            self.ff_k = quantization.QuantizableDense(units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype = dtype)
+            self.ff_v = quantization.QuantizableDense(units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype = dtype)
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
@@ -559,12 +594,13 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
 
     def __init__(self,
                  prefix: str,
-                 num_hidden: int) -> None:
+                 num_hidden: int,
+                 dtype: str) -> None:
         super().__init__(prefix=prefix)
         self.num_hidden = num_hidden
         with self.name_scope():
-            self.q2h = mx.gluon.nn.Dense(units=num_hidden, flatten=False, use_bias=True)
-            self.kv2h = mx.gluon.nn.Dense(units=num_hidden * 2, flatten=False, use_bias=True)
+            self.q2h = quantization.QuantizableDense(units=num_hidden, flatten=False, use_bias=True, dtype = dtype)
+            self.kv2h = quantization.QuantizableDense(units=num_hidden * 2, flatten=False, use_bias=True, dtype = dtype)
             self.dot_att = DotAttentionCell()
 
     def hybrid_forward(self, F,
