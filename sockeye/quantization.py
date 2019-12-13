@@ -12,8 +12,6 @@
 # permissions and limitations under the License.
 
 import mxnet as mx
-import sys
-from mxnet.base import _Null
 
 class QuantizableDense(mx.gluon.HybridBlock):
     r"""Optionally Quantized fully-connected NN layer.
