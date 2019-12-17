@@ -96,7 +96,7 @@ class FactorConfig(config.Config):
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
-                 combine: C.SOURCE_FACTORS_COMBINE_CHOICES,
+                 combine: str, # From C.SOURCE_FACTORS_COMBINE_CHOICES
                  share_source_embedding: bool) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -147,7 +147,6 @@ class Embedding(Encoder):
                 self.embed_weight = embed_weight  # adds to self._reg_params
                 self.params.update({embed_weight.name: embed_weight})  # adds to self.params
 
-            self.embed_factor_weights = []
             if self.config.factor_configs is not None:
                 for i, fc in enumerate(self.config.factor_configs):
                     factor_weight_name = 'factor%d_weight' % i
