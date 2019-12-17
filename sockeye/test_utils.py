@@ -127,15 +127,20 @@ def tmp_digits_dataset(prefix: str,
                 'test_target': test_target_path}
 
         if with_source_factors:
-            train_factor_path = train_source_path + ".factors"
-            dev_factor_path = dev_source_path + ".factors"
-            test_factor_path = test_source_path + ".factors"
-            generate_low_high_factors(train_source_path, train_factor_path)
-            generate_low_high_factors(dev_source_path, dev_factor_path)
-            generate_low_high_factors(test_source_path, test_factor_path)
-            data['train_source_factors'] = [train_factor_path]
-            data['dev_source_factors'] = [dev_factor_path]
-            data['test_source_factors'] = [test_factor_path]
+            n_source_factors = 3
+            data['train_source_factors'] = []
+            data['dev_source_factors'] = []
+            data['test_source_factors'] = []
+            for i in range(n_source_factors):
+                train_factor_path = train_source_path + ".factors%d" % i
+                dev_factor_path = dev_source_path + ".factors%d" % i
+                test_factor_path = test_source_path + ".factors%d" % i
+                generate_low_high_factors(train_source_path, train_factor_path)
+                generate_low_high_factors(dev_source_path, dev_factor_path)
+                generate_low_high_factors(test_source_path, test_factor_path)
+                data['train_source_factors'].append(train_factor_path)
+                data['dev_source_factors'].append(dev_factor_path)
+                data['test_source_factors'].append(test_factor_path)
 
         yield data
 

@@ -93,10 +93,16 @@ class Encoder(ABC, mx.gluon.HybridBlock):
 
 class FactorConfig(config.Config):
 
-    def __init__(self, vocab_size: int, num_embed: int) -> None:
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 combine: C.SOURCE_FACTORS_COMBINE_CHOICES,
+                 share_source_embedding: bool) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
+        self.combine = combine
+        self.share_source_embedding = share_source_embedding
 
 
 class EmbeddingConfig(config.Config):
@@ -105,8 +111,7 @@ class EmbeddingConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  dropout: float,
-                 factor_configs: Optional[List[FactorConfig]] = None,
-                 source_factors_combine: str = C.SOURCE_FACTORS_COMBINE_CONCAT) -> None:
+                 factor_configs: Optional[List[FactorConfig]] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
@@ -115,7 +120,6 @@ class EmbeddingConfig(config.Config):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
-        self.source_factors_combine = source_factors_combine
 
 
 class Embedding(Encoder):
@@ -143,20 +147,39 @@ class Embedding(Encoder):
                 self.embed_weight = embed_weight  # adds to self._reg_params
                 self.params.update({embed_weight.name: embed_weight})  # adds to self.params
 
-            self.factor_embeds = None
+            self.embed_factor_weights = []
             if self.config.factor_configs is not None:
-                self.factor_embeds = mx.gluon.nn.HybridSequential()
-                # Factor weights aren't shared so they're not passed in and we create them here.
-                for i, fc in enumerate(self.config.factor_configs, 1):
-                    self.factor_embeds.add(mx.gluon.nn.Embedding(fc.vocab_size, fc.num_embed,
-                                                                 prefix="factor%d_" % i))
+                for i, fc in enumerate(self.config.factor_configs):
+                    factor_weight_name = 'factor%d_weight' % i
+                    factor_weight = embed_weight if fc.share_source_embedding else \
+                        self.params.get('factor%d_weight' % i, shape=(fc.vocab_size, fc.num_embed))
+                    # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
+                    setattr(self, factor_weight_name, factor_weight)
 
-    def hybrid_forward(self, F, data, valid_length, embed_weight):  # pylint: disable=arguments-differ
-        factor_embeds = []
+    def hybrid_forward(self, F, data, valid_length, embed_weight, **kwargs):  # pylint: disable=arguments-differ
+        # We will catch the optional factor weights in kwargs
+        average_factors_embeds = []  # type: List[mx.sym.Symbol]
+        concat_factors_embeds = []  # type: List[mx.sym.Symbol]
+        sum_factors_embeds = []  # type: List[mx.sym.Symbol]
         if self.is_source:
             if self.config.num_factors > 1 and self.config.factor_configs is not None:
-                data, *data_factors = F.split(data, num_outputs=self.config.num_factors, axis=2, squeeze_axis=True)
-                factor_embeds = [embed(data) for data, embed in zip(data_factors, self.factor_embeds)]
+                data, *data_factors = F.split(data=data,
+                                              num_outputs=self.config.num_factors,
+                                              axis=2,
+                                              squeeze_axis=True)
+                for i, (factor_data, factor_config) in enumerate(zip(data_factors,
+                                                                     self.config.factor_configs)):
+                    factor_weight = kwargs['factor%d_weight' % i]
+                    factor_embedding = F.Embedding(data=factor_data,
+                                                   input_dim=factor_config.vocab_size,
+                                                   weight=factor_weight,
+                                                   output_dim=factor_config.num_embed)
+                    if factor_config.combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+                        concat_factors_embeds.append(factor_embedding)
+                    elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_SUM:
+                        sum_factors_embeds.append(factor_embedding)
+                    elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_AVERAGE:
+                        average_factors_embeds.append(factor_embedding)
             else:
                 data = F.squeeze(data, axis=2)
 
@@ -165,11 +188,13 @@ class Embedding(Encoder):
                             input_dim=self.config.vocab_size,
                             output_dim=self.config.num_embed)
 
-        if factor_embeds:
-            if self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-                embed = F.concat(embed, *factor_embeds, dim=2)
-            else:
-                embed = F.add_n(embed, *factor_embeds)
+        if self.config.num_factors > 1 and self.config.factor_configs is not None:
+            if average_factors_embeds:
+                embed = F.add_n(embed, *average_factors_embeds) / (len(average_factors_embeds) + 1)
+            if sum_factors_embeds:
+                embed = F.add_n(embed, *sum_factors_embeds)
+            if concat_factors_embeds:
+                embed = F.concat(embed, *concat_factors_embeds, dim=2)
 
         if self.config.dropout > 0:
             embed = F.Dropout(data=embed, p=self.config.dropout)

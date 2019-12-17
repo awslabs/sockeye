@@ -10,6 +10,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.0.1]
+
+### Added
+
+- More flexibility for source factors combination
+
 ## [2.0.0]
 
 ### Changed
@@ -26,7 +32,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Added
 
-- Added distrbuted training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added distributed training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
 - Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
 - Added `none` learning rate scheduler (use a fixed rate throughout training)
 - Added `linear-decay` learning rate scheduler
