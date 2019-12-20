@@ -95,7 +95,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
             self._units = units
             self._in_units = in_units
             if dtype == 'int8':
-                self.scaling = self.params.get('scaling', shape=(1),
+                self.scaling = self.params.get('scaling', shape=(1,),
                                                init='zeros', dtype='float32',
                                                allow_deferred_init=True)
                 weight_initializer = 'zeros' # Most initializers don't work for int8, but this is for inference anyway.
