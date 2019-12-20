@@ -136,9 +136,12 @@ class OutputLayer(mx.gluon.HybridBlock):
         self.vocab_size = vocab_size
 
         with self.name_scope():
-            if weight is None:
+            # If we are in int8 mode, the model will have a separate copy of
+            # quantized embeddings because the input embeddings remain
+            # unquantized for the time being.
+            if weight is None or dtype == C.DTYPE_INT8:
                 if dtype == C.DTYPE_INT8:
-                    self.scaling = self.params.get('scaling', shape=(1,), init='zeros', dtype=C.DTYPE_FP32)
+                    self.scaling = self.params.get('scaling', shape=(1,), init='zeros', dtype=C.DTYPE_FP32, allow_deferred_init=False)
                     #This is only for inference but MXNet tries to create an
                     #initializer anyway, then fails because most random
                     #generators don't support int8 output.
@@ -155,7 +158,7 @@ class OutputLayer(mx.gluon.HybridBlock):
             self.bias = self.params.get("bias",
                                         shape=(vocab_size,),
                                         init=bias_initializer,
-                                        dtype=dtype,
+                                        dtype=dtype if dtype != 'int8' else C.DTYPE_FP32, #Bias stays fp32 even with int8 weights.
                                         allow_deferred_init=False)
 
     def forward(self, data, vocab_slice_ids):
@@ -163,11 +166,11 @@ class OutputLayer(mx.gluon.HybridBlock):
             bias = self.bias.data().take(vocab_slice_ids)
             # imperative, reduced matrix multiplication for vocabulary selection
             if self.weight.dtype == C.DTYPE_INT8:
-                # TODO not used yet
-                weight = mx.nd.contrib.intgemm_take_weight(self.weight, vocab_slice_ids)
+                weight = mx.nd.contrib.intgemm_take_weight(self.weight.data(), vocab_slice_ids)
                 return mx.nd.contrib.intgemm_fully_connected(data=data,
+                                                             num_hidden=vocab_slice_ids.shape[0],
                                                              weight=weight,
-                                                             scaling=self.scaling,
+                                                             scaling=self.scaling.data(),
                                                              bias=bias,
                                                              flatten=False,
                                                              name=C.LOGITS_NAME)
@@ -182,8 +185,8 @@ class OutputLayer(mx.gluon.HybridBlock):
         else:
             return super().forward(data)
 
-    def hybrid_forward(self, F, data, weight, scaling, bias):
-        if self.weight.dype == C.DTYPE_INT8:
+    def hybrid_forward(self, F, data, weight, bias, scaling = None):
+        if self.weight.dtype == C.DTYPE_INT8:
             return F.contrib.intgemm_fully_connected(data=data,
                                     num_hidden=self.vocab_size,
                                     weight=weight,

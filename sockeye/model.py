@@ -125,7 +125,7 @@ class SockeyeModel(mx.gluon.Block):
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight, dtype='float32') #TODO: int8 option
+                                                   weight=self.output_weight, dtype=config.dtype)
 
             self.length_ratio = None
             if self.config.config_length_task is not None:
