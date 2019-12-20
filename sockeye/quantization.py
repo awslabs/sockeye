@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import mxnet as mx
+from . import constants as C
 
 # Modified from the source to mxnet.gluon.nn.basic_layers.Dense which is:
 # Licensed to the Apache Software Foundation (ASF) under one
@@ -58,7 +59,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
         If true, all but the first axis of input data are collapsed together.
         If false, all but the last axis of input data are kept the same, and the transformation
         applies on the last axis.
-    dtype : str or np.dtype, default 'float32'
+    dtype : str or np.dtype, default C.DTYPE_FP32
         Data type of output embeddings.
     weight_initializer : str or `Initializer`
         Initializer for the `kernel` weights matrix.
@@ -94,9 +95,9 @@ class QuantizableDense(mx.gluon.HybridBlock):
         with self.name_scope():
             self._units = units
             self._in_units = in_units
-            if dtype == 'int8':
+            if dtype == C.DTYPE_INT8:
                 self.scaling = self.params.get('scaling', shape=(1,),
-                                               init='zeros', dtype='float32',
+                                               init='zeros', dtype=C.DTYPE_FP32,
                                                allow_deferred_init=True)
                 weight_initializer = 'zeros' # Most initializers don't work for int8, but this is for inference anyway.
 
@@ -106,7 +107,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
 
             if use_bias:
                 self.bias = self.params.get('bias', shape=(units,),
-                                            init=bias_initializer, dtype = 'float32',
+                                            init=bias_initializer, dtype = C.DTYPE_FP32,
                                             allow_deferred_init=True)
             else:
                 self.bias = None
@@ -116,7 +117,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
                 self.act = None
 
     def cast(self, dtype):
-        if self._dtype != 'int8':
+        if self._dtype != C.DTYPE_INT8:
             self._dtype = dtype
             super(QuantizableDense, self).cast(dtype)
         else:
@@ -124,7 +125,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
             logger.warning("Ignoring casting on int8 matrix")
 
     def hybrid_forward(self, F, x, weight, scaling = None, bias=None):
-        if self._dtype == 'int8':
+        if self._dtype == C.DTYPE_INT8:
             act = F.contrib.intgemm_fully_connected(x, weight, scaling, bias, no_bias=bias is None, num_hidden=self._units,
                                                     flatten=self._flatten, name='fwd')
         else:

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '', dtype: str = 'float32') -> 'Decoder':
+def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
     return Decoder.get_decoder(config, inference_only, prefix, dtype)
 
 
@@ -125,7 +125,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX,
                  inference_only: bool = False,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = C.DTYPE_FP32) -> None:
         Decoder.__init__(self)
         mx.gluon.HybridBlock.__init__(self, prefix=prefix)
         self.config = config

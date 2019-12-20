@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 ImageEncoderConfig = None
 
 
-def get_encoder(config: 'EncoderConfig', prefix: str = '', dtype: str = 'float32') -> 'Encoder':
+def get_encoder(config: 'EncoderConfig', prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Encoder':
     return get_transformer_encoder(config, prefix, dtype)
 
 
@@ -125,20 +125,23 @@ class Embedding(Encoder):
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
     :param is_source: Whether this is the source embedding instance. Default: False.
+    :param dtype: Data type. Default: 'float32'.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
                  is_source: bool = False,
-                 embed_weight: Optional[mx.gluon.Parameter] = None) -> None:
+                 embed_weight: Optional[mx.gluon.Parameter] = None,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
         self.is_source = is_source
+        self._dtype = dtype
 
         with self.name_scope():
             if embed_weight is None:
-                self.embed_weight = self.params.get('weight', shape=(self.config.vocab_size, self.config.num_embed))
+                self.embed_weight = self.params.get('weight', shape=(self.config.vocab_size, self.config.num_embed), dtype=dtype)
             else:
                 self.embed_weight = embed_weight  # adds to self._reg_params
                 self.params.update({embed_weight.name: embed_weight})  # adds to self.params
@@ -149,7 +152,7 @@ class Embedding(Encoder):
                 # Factor weights aren't shared so they're not passed in and we create them here.
                 for i, fc in enumerate(self.config.factor_configs, 1):
                     self.factor_embeds.add(mx.gluon.nn.Embedding(fc.vocab_size, fc.num_embed,
-                                                                 prefix="factor%d_" % i))
+                                                                 prefix="factor%d_" % i, dtype=dtype))
 
     def hybrid_forward(self, F, data, valid_length, embed_weight):  # pylint: disable=arguments-differ
         factor_embeds = []
@@ -163,7 +166,8 @@ class Embedding(Encoder):
         embed = F.Embedding(data,
                             weight=embed_weight,
                             input_dim=self.config.vocab_size,
-                            output_dim=self.config.num_embed)
+                            output_dim=self.config.num_embed,
+                            dtype=self._dtype)
 
         if factor_embeds:
             if self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
@@ -259,7 +263,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_ENCODER_PREFIX,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
 

@@ -125,7 +125,7 @@ class SockeyeModel(mx.gluon.Block):
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight, dtype='float32') #TODO
+                                                   weight=self.output_weight, dtype='float32') #TODO: int8 option
 
             self.length_ratio = None
             if self.config.config_length_task is not None:
@@ -448,8 +448,8 @@ def load_model(model_folder: str,
 
     model = SockeyeModel(model_config, inference_only=inference_only)
     model.initialize(ctx=context)
-    if model_config.dtype != 'int8':
-        # Casting to int8 doesn't make much sense anyway.  The model should be pre-converted.
+    if model_config.dtype != C.DTYPE_INT8:
+        # TODO implement casting to int8 models.  Currently this code mostly casts a model to the same dtype though.
         model.cast(model_config.dtype)
 
     if dtype is None:

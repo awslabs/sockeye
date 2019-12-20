@@ -130,15 +130,15 @@ class OutputLayer(mx.gluon.HybridBlock):
                  weight: Optional[mx.gluon.Parameter] = None,
                  weight_initializer: Optional[str] = None,
                  bias_initializer: str = 'zeros',
-                 dtype: str = 'float32',
+                 dtype: str = C.DTYPE_FP32,
                  prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
         super().__init__(prefix=prefix)
         self.vocab_size = vocab_size
 
         with self.name_scope():
             if weight is None:
-                if dtype == 'int8':
-                    self.scaling = self.params.get('scaling', shape=(1,), init='zeros', dtype='float32')
+                if dtype == C.DTYPE_INT8:
+                    self.scaling = self.params.get('scaling', shape=(1,), init='zeros', dtype=C.DTYPE_FP32)
                     #This is only for inference but MXNet tries to create an
                     #initializer anyway, then fails because most random
                     #generators don't support int8 output.
@@ -162,7 +162,7 @@ class OutputLayer(mx.gluon.HybridBlock):
         if vocab_slice_ids is not None:
             bias = self.bias.data().take(vocab_slice_ids)
             # imperative, reduced matrix multiplication for vocabulary selection
-            if self.weight.dtype == 'int8':
+            if self.weight.dtype == C.DTYPE_INT8:
                 # TODO not used yet
                 weight = mx.nd.contrib.intgemm_take_weight(self.weight, vocab_slice_ids)
                 return mx.nd.contrib.intgemm_fully_connected(data=data,
@@ -183,7 +183,7 @@ class OutputLayer(mx.gluon.HybridBlock):
             return super().forward(data)
 
     def hybrid_forward(self, F, data, weight, scaling, bias):
-        if self.weight.dype == 'int8':
+        if self.weight.dype == C.DTYPE_INT8:
             return F.contrib.intgemm_fully_connected(data=data,
                                     num_hidden=self.vocab_size,
                                     weight=weight,
@@ -227,7 +227,7 @@ class LengthRatio(mx.gluon.HybridBlock):
                  hidden_size: int,
                  num_layers: int,
                  prefix: str = C.LENRATIOS_OUTPUT_LAYER_PREFIX,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = C.DTYPE_FP32) -> None:
         utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
         super().__init__(prefix=prefix)
         self.num_layers = num_layers
@@ -330,7 +330,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
     def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
         super().__init__(prefix=prefix)
         self.dropout = dropout
-        self._dtype = 'float32'
+        self._dtype = C.DTYPE_FP32
 
     def cast(self, dtype):
         self._dtype = dtype
@@ -381,7 +381,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         utils.check_condition(depth_att % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
@@ -450,7 +450,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
@@ -523,7 +523,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
