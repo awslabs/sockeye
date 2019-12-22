@@ -956,7 +956,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # we set them immediately after calling init.
             gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
 
-
         losses = create_losses(args)
 
         hybridize = not args.no_hybridization

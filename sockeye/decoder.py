@@ -239,7 +239,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             # (batch, num_hidden)
             target = mx.nd.reshape(target, shape=(-1, self.get_num_hidden()))
 
-            # We also increment time step state (2nd state in the list) and add new caches
+            # We also increment time step state (1st state in the list) and add new caches
             step = states[0] + 1
 
             if self.inference_only:

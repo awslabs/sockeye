@@ -348,7 +348,8 @@ class SockeyeModel(mx.gluon.Block):
         source_embed_weight = self.params.get(source_embed_name,
                                               shape=(self.config.config_embed_source.vocab_size,
                                                      self.config.config_embed_source.num_embed),
-                                              allow_deferred_init=True)
+                                              allow_deferred_init=True,
+                                              grad_stype='default' if share_embed else 'row_sparse')
 
         if share_embed:
             target_embed_weight = source_embed_weight
@@ -356,7 +357,8 @@ class SockeyeModel(mx.gluon.Block):
             target_embed_weight = self.params.get(target_embed_name,
                                                   shape=(self.config.config_embed_target.vocab_size,
                                                          self.config.config_embed_target.num_embed),
-                                                  allow_deferred_init=True)
+                                                  allow_deferred_init=True,
+                                                  grad_stype='default' if tie_weights else 'row_sparse')
 
         if tie_weights:
             output_weight = target_embed_weight
