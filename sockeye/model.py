@@ -362,7 +362,8 @@ class SockeyeModel(mx.gluon.Block):
             output_weight = target_embed_weight
         else:
             output_weight = self.params.get(output_embed_name,
-                                            shape=(self.config.config_embed_target.vocab_size, 0),
+                                            shape=(self.config.config_embed_target.vocab_size,
+                                                   self.config.config_decoder.model_size),
                                             allow_deferred_init=True)
 
         return source_embed_weight, target_embed_weight, output_weight

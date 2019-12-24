@@ -27,6 +27,7 @@ import random
 import sys
 import time
 from contextlib import contextmanager, ExitStack
+from functools import reduce
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import mxnet as mx
@@ -786,12 +787,23 @@ def log_parameters(params: mx.gluon.ParameterDict):
     """
     fixed_parameter_names = []
     learned_parameter_names = []
-    #info = []  # type: List[str]
+    total_learned = 0
+    total_fixed = 0
     for name, param in sorted(params.items()):
         repr = "%s [%s, %s]" % (name, param.shape, _print_dtype(param.dtype))
+        size = reduce(lambda x, y: x * y, param.shape)
+        if size == 0:
+            logger.debug("Parameter shape for '%s' not yet fully inferred, using 0", name)
         if param.grad_req == 'null':
             fixed_parameter_names.append(repr)
+            total_fixed += size
         else:
+            total_learned += size
             learned_parameter_names.append(repr)
-    logger.info("Trainable parameters:\n%s", pprint.pformat(learned_parameter_names))
+    total_parameters = total_learned + total_fixed
+    logger.info("Total number of parameters: %d | learned: %d (%.2f%%) | fixed: %d (%.2f%%)",
+                total_parameters,
+                total_learned, total_learned / total_parameters * 100,
+                total_fixed, total_fixed / total_parameters * 100)
+    logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
     logger.info("Fixed model parameters:\n%s", pprint.pformat(fixed_parameter_names))
