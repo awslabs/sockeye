@@ -773,9 +773,9 @@ def log_parameters(params: mx.gluon.ParameterDict):
             total_learned += size
             learned_parameter_names.append(repr)
     total_parameters = total_learned + total_fixed
-    logger.info("Total number of parameters: %d | learned: %d (%.2f%%) | fixed: %d (%.2f%%)",
+    logger.info("# of parameters: %d | trainable: %d (%.2f%%) | fixed: %d (%.2f%%)",
                 total_parameters,
                 total_learned, total_learned / total_parameters * 100,
                 total_fixed, total_fixed / total_parameters * 100)
     logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
-    logger.info("Fixed model parameters:\n%s", pprint.pformat(fixed_parameter_names))
+    logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
