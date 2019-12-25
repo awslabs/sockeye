@@ -462,10 +462,11 @@ class BeamSearch(mx.gluon.Block):
             self._sort_by_index = SortByIndex(prefix='sort_by_index_')
             self._update_scores = UpdateScores(prefix='update_scores_')
             self._scorer = scorer
-            self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(prefix='sort_norm_and_update_finished_',
-                                                                        pad_id=C.PAD_ID,
-                                                                        eos_id=eos_id,
-                                                                        scorer=scorer)
+            self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
+                prefix='sort_norm_and_update_finished_',
+                pad_id=C.PAD_ID,
+                eos_id=eos_id,
+                scorer=scorer)
 
             self._sample = None  # type: Optional[mx.gluon.HybridBlock]
             self._top = None  # type: Optional[mx.gluon.HybridBlock]
@@ -553,8 +554,6 @@ class BeamSearch(mx.gluon.Block):
         vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            # TODO: See note in method about migrating to pure MXNet when set operations are supported.
-            #       We currently convert source to NumPy and target ids back to NDArray.
             vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
             if any(raw_constraint_list):
                 # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
