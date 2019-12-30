@@ -14,6 +14,9 @@
 """
 Simple Training CLI.
 """
+from . import pre_mxnet
+# Called before importing mxnet or any module that imports mxnet
+pre_mxnet.init()
 
 import argparse
 import logging
@@ -731,13 +734,22 @@ def fixed_param_names_from_stragegy(config: model.ModelConfig,
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
             # Any type of learned embedding.
             return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
-                        name.startswith(C.SOURCE_POSITIONAL_EMBEDDING_PREFIX) or
                         name.startswith(C.TARGET_EMBEDDING_PREFIX) or
-                        name.startswith(C.TARGET_POSITIONAL_EMBEDDING_PREFIX) or
                         name.startswith(C.SHARED_EMBEDDING_PREFIX))
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
             # Target output projection.
             return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)
+        if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_FEED_FORWARD:
+            return not (name.endswith("_ff_h2o_bias") or name.endswith("_ff_h2o_weight") or
+                        name.endswith("_ff_i2h_bias") or name.endswith("_ff_i2h_weight"))
+        if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_AND_SOURCE_EMBEDDINGS:
+            return name.startswith(C.ENCODER_PREFIX) or name.startswith(C.SOURCE_EMBEDDING_PREFIX)
+        if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_HALF_AND_SOURCE_EMBEDDINGS:
+            if name.startswith(C.ENCODER_PREFIX):
+                for i in range(num_encoder_layers // 2):
+                    if name.startswith("{}{}_".format(C.TRANSFORMER_ENCODER_PREFIX, i)):
+                        return True
+            return name.startswith(C.SOURCE_EMBEDDING_PREFIX)
         raise ValueError("Unknown fixed parameter strategy: %s" % strategy)
 
     return [name for name in params if is_fixed(name)]
