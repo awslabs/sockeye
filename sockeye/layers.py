@@ -480,8 +480,8 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
         with self.name_scope():
             self.ff_q = mx.gluon.nn.Dense(in_units=depth_att, units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
-            self.ff_k = mx.gluon.nn.Dense(in_units=depth_att, units=depth_att, flatten=False, use_bias=False, prefix='k2h_')
-            self.ff_v = mx.gluon.nn.Dense(in_units=depth_att, units=depth_att, flatten=False, use_bias=False, prefix='v2h_')
+            self.ff_k = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='k2h_')
+            self.ff_v = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='v2h_')
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
