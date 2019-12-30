@@ -169,6 +169,26 @@ def float_greater_or_equal(threshold: float) -> Callable:
     return check_greater_equal
 
 
+def bool_str() -> Callable:
+    """
+    Returns a method that can be used in argument parsing to check that the argument is a valid representation of
+    a boolean value.
+
+    :return: A method that can be used as a type in argparse.
+    """
+    def parse(value: str):
+        lower_value = value.lower()
+        if lower_value in ["true", "yes", "1"]:
+            return True
+        elif lower_value in ["false", "no", "0"]:
+            return False
+        else:
+            raise argparse.ArgumentTypeError(
+                "Invalid value for bool argument. Use true/false, yes/no or 1/0.")
+
+    return parse
+
+
 def simple_dict() -> Callable:
     """
     A simple dictionary format that does not require spaces or quoting.
@@ -365,6 +385,13 @@ def add_training_data_args(params, required=False):
                         type=regular_file(),
                         default=[],
                         help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
+    params.add_argument('--source-factors-use-source-vocab',
+                        required=False,
+                        nargs='+',
+                        type=bool_str(),
+                        default=[],
+                        help='List of bools signaling wether to use the source vocabulary for the source factors. '
+                        'If empty (default) each factor has its own vocabulary.')
     params.add_argument(C.TRAINING_ARG_TARGET, '-t',
                         required=required,
                         type=regular_file(),
@@ -645,8 +672,16 @@ def add_model_parameters(params):
                                    '(validation) source factor files. Default: %(default)s.')
     model_params.add_argument('--source-factors-combine', '-sfc',
                               choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
-                              default=C.SOURCE_FACTORS_COMBINE_CONCAT,
-                              help='How to combine source factors. Default: %(default)s.')
+                              default=[C.SOURCE_FACTORS_COMBINE_CONCAT],
+                              nargs='+',
+                              help='How to combine source factors. Can be either one value which will be applied to all '
+                              'source factors, or a list of values. Default: %(default)s.')
+    model_params.add_argument('--source-factors-share-embedding',
+                              type=bool_str(),
+                              nargs='+',
+                              default=[False],
+                              help='Share the embeddings with the source language. Can be either one value which will be '
+                              'applied to all source factors, or a list of values. Default: do not share.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,

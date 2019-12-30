@@ -71,7 +71,9 @@ ENCODER_DECODER_SETTINGS = [
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type trg_softmax"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-combine sum",
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --source-factors-combine sum concat average --source-factors-share-embedding true false true"
+     " --source-factors-num-embed 8 2 8",
      "--beam-size 2 --beam-search-stop first",
      True, True),
     # Basic transformer with LHUC

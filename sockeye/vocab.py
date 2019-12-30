@@ -224,6 +224,7 @@ def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, w
 def load_or_create_vocabs(source_paths: List[str],
                           target_path: str,
                           source_vocab_paths: List[Optional[str]],
+                          factor_vocab_same_as_source: List[bool],
                           target_vocab_path: Optional[str],
                           shared_vocab: bool,
                           num_words_source: Optional[int], word_min_count_source: int,
@@ -288,11 +289,25 @@ def load_or_create_vocabs(source_paths: List[str],
     vocab_source_factors = []  # type: List[Vocab]
     if source_factor_paths:
         logger.info("(2) Additional source factor vocabularies")
-        # source factor vocabs are always created
-        for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
+        if len(factor_vocab_same_as_source) > 1:
+            utils.check_condition(len(factor_vocab_same_as_source) == len(source_factor_paths),
+                                  "The number of flags for sharing the vocabulary of "
+                                  "source factors does not match the number of source "
+                                  "factors.")
+        elif len(factor_vocab_same_as_source) == 1:
+            factor_vocab_same_as_source = factor_vocab_same_as_source * len(source_factor_paths)
+        else:
+            factor_vocab_same_as_source = [False] * len(source_factor_paths)
+
+    for factor_path, factor_vocab_path, share_source_vocab in zip(source_factor_paths,
+                                                                  source_factor_vocab_paths,
+                                                                  factor_vocab_same_as_source):
+        if not share_source_vocab:
             vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
                                                              num_words_source, word_min_count_source,
                                                              pad_to_multiple_of=pad_to_multiple_of))
+        else:
+            vocab_source_factors.append(vocab_source)
 
     return [vocab_source] + vocab_source_factors, vocab_target
 
