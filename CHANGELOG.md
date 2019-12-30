@@ -22,8 +22,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
   - `all_except_feed_forward`: Only train feed forward layers.
   - `encoder_and_source_embeddings`: Only train the decoder (decoder layers, output layer, and target embeddings).
   - `encoder_half_and_source_embeddings`: Train the latter half of encoder layers and the decoder.
-
 - Option to specify the number of CPU threads without using an environment variable (`--omp-num-threads`).
+- More flexibility for source factors combination
 
 ## [2.0.0]
 
@@ -41,7 +41,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Added
 
-- Added distrbuted training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added distributed training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
 - Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
 - Added `none` learning rate scheduler (use a fixed rate throughout training)
 - Added `linear-decay` learning rate scheduler

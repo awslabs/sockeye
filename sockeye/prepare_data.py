@@ -66,6 +66,7 @@ def prepare_data(args: argparse.Namespace):
 
     source_vocabs, target_vocab = vocab.load_or_create_vocabs(
         source_paths=source_paths,
+        factor_vocab_same_as_source=args.source_factors_use_source_vocab,
         target_path=args.target,
         source_vocab_paths=source_vocab_paths,
         target_vocab_path=args.target_vocab,
