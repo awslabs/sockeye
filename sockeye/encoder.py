@@ -157,9 +157,9 @@ class Embedding(Encoder):
 
     def hybrid_forward(self, F, data, valid_length, embed_weight, **kwargs):  # pylint: disable=arguments-differ
         # We will catch the optional factor weights in kwargs
-        average_factors_embeds = []  # type: List[mx.sym.Symbol]
-        concat_factors_embeds = []  # type: List[mx.sym.Symbol]
-        sum_factors_embeds = []  # type: List[mx.sym.Symbol]
+        average_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
+        concat_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
+        sum_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         if self.is_source:
             if self.config.num_factors > 1 and self.config.factor_configs is not None:
                 data, *data_factors = F.split(data=data,

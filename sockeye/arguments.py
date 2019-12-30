@@ -674,12 +674,14 @@ def add_model_parameters(params):
                               choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
                               default=[C.SOURCE_FACTORS_COMBINE_CONCAT],
                               nargs='+',
-                              help='How to combine source factors. Default: %(default)s.')
+                              help='How to combine source factors. Can be either one value which will be applied to all '
+                              'source factors, or a list of values. Default: %(default)s.')
     model_params.add_argument('--source-factors-share-embedding',
                               type=bool_str(),
                               nargs='+',
                               default=[False],
-                              help='Share the embeddings with the source language. Default: do not share.')
+                              help='Share the embeddings with the source language. Can be either one value which will be '
+                              'applied to all source factors, or a list of values. Default: do not share.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
