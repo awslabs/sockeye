@@ -437,8 +437,7 @@ def create_encoder_config(args: argparse.Namespace,
 
 
 def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
-                          max_seq_len_source: int, max_seq_len_target: int,
-                          num_embed_target: int) -> decoder.DecoderConfig:
+                          max_seq_len_source: int, max_seq_len_target: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
@@ -446,7 +445,6 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     :param encoder_num_hidden: Number of hidden units of the Encoder.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
-    :param num_embed_target: The size of the source embedding.
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
@@ -467,7 +465,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         postprocess_sequence=decoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
+        lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
+        depth_key_value=encoder_num_hidden)
 
     return config_decoder
 
@@ -541,8 +540,7 @@ def create_model_config(args: argparse.Namespace,
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
                                                                num_embed_source)
-    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
-                                           num_embed_target)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:

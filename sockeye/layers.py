@@ -298,7 +298,6 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         # (n, lq, lk)
         logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
 
-
         # TODO(fhieber): consider softmax with length argument once available.
         # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
         if lengths is not None:
@@ -467,6 +466,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
+    :param depth_key_value: Dimension of input key and value vectors.
     :param dropout: Dropout probability on attention scores
     """
 
@@ -475,13 +475,14 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.0,
+                 depth_key_value: int = 0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
 
         with self.name_scope():
-            self.ff_q = mx.gluon.nn.Dense(in_units=depth_att, units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
-            self.ff_k = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='k2h_')
-            self.ff_v = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='v2h_')
+            self.ff_q = mx.gluon.nn.Dense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
+            self.ff_k = mx.gluon.nn.Dense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_')
+            self.ff_v = mx.gluon.nn.Dense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_')
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
