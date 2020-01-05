@@ -362,7 +362,8 @@ class SockeyeModel(mx.gluon.Block):
             output_weight = target_embed_weight
         else:
             output_weight = self.params.get(output_embed_name,
-                                            shape=(self.config.config_embed_target.vocab_size, 0),
+                                            shape=(self.config.config_embed_target.vocab_size,
+                                                   self.config.config_decoder.model_size),
                                             allow_deferred_init=True)
 
         return source_embed_weight, target_embed_weight, output_weight
@@ -420,8 +421,7 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
-    :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
-    :return:
+    :return: List of models, source vocabularies, target vocabulary.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
     target_vocab = vocab.load_target_vocab(model_folder)
@@ -448,7 +448,7 @@ def load_model(model_folder: str,
         cast_dtype = False
         dtype_source = 'saved'
     else:
-        logger.info("Model dtype: overriden to %s" % dtype)
+        logger.info("Model dtype: overridden to %s" % dtype)
         model.cast(dtype)
         cast_dtype = True
         dtype_source = 'current'

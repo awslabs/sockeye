@@ -36,7 +36,8 @@ class TransformerConfig(config.Config):
                  postprocess_sequence: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 lhuc: bool = False) -> None:  # type: ignore
+                 lhuc: bool = False,
+                 depth_key_value: int = 0) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -52,6 +53,7 @@ class TransformerConfig(config.Config):
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.use_lhuc = lhuc
+        self.depth_key_value = depth_key_value
 
 
 class TransformerEncoderBlock(mx.gluon.HybridBlock):
@@ -145,6 +147,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                            heads=config.attention_heads,
                                                            depth_out=config.model_size,
                                                            dropout=config.dropout_attention,
+                                                           depth_key_value=config.depth_key_value,
                                                            prefix="att_enc_")
             self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                               dropout=config.dropout_prepost,
