@@ -143,7 +143,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
      " --transformer-feed-forward-num-hidden 64"
-     " --source-factors-num-embed 2" + COMMON_TRAINING_PARAMS,
+     " --source-factors-num-embed 2 2 2" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
      True, True,
      1.03,
