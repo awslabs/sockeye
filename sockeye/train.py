@@ -566,14 +566,18 @@ def create_model_config(args: argparse.Namespace,
                                                                       args.source_factors_combine,
                                                                       args.source_factors_share_embedding)]
 
+    allow_sparse_grad = args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
+
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
-                                                  factor_configs=source_factor_configs)
+                                                  factor_configs=source_factor_configs,
+                                                  allow_sparse_grad=allow_sparse_grad)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
-                                                  dropout=embed_dropout_target)
+                                                  dropout=embed_dropout_target,
+                                                  allow_sparse_grad=allow_sparse_grad)
 
     config_length_task = None
     if args.length_task is not None:

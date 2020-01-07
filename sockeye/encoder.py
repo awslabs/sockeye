@@ -111,7 +111,8 @@ class EmbeddingConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  dropout: float,
-                 factor_configs: Optional[List[FactorConfig]] = None) -> None:
+                 factor_configs: Optional[List[FactorConfig]] = None,
+                 allow_sparse_grad: bool = False) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
@@ -120,6 +121,7 @@ class EmbeddingConfig(config.Config):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
+        self.allow_sparse_grad = allow_sparse_grad
 
 
 class Embedding(Encoder):
@@ -145,11 +147,11 @@ class Embedding(Encoder):
                 self.embed_weight = self.params.get('weight',
                                                     shape=(self.config.vocab_size, self.config.num_embed),
                                                     grad_stype='row_sparse')
-                self._use_sparse_grad = True
+                self._use_sparse_grad = self.config.allow_sparse_grad
             else:
                 self.embed_weight = embed_weight  # adds to self._reg_params
                 self.params.update({embed_weight.name: embed_weight})  # adds to self.params
-                self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse'
+                self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
             if self.config.factor_configs is not None:
                 for i, fc in enumerate(self.config.factor_configs):
