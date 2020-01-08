@@ -345,7 +345,7 @@ class SockeyeModel(mx.gluon.Block):
         target_embed_name = C.TARGET_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
         output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
 
-        source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not share_embed else 'default'
+        source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not tie_weights else 'default'
         source_embed_weight = self.params.get(source_embed_name,
                                               shape=(self.config.config_embed_source.vocab_size,
                                                      self.config.config_embed_source.num_embed),
