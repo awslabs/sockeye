@@ -56,7 +56,7 @@ class _SingleModelInference(_Inference):
 
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
-        predicted_output_length = predicted_output_length.expand_dims(axis=1)
+        predicted_output_length = predicted_output_length.expand_dims(axis=1, inplace=True)
         return states, predicted_output_length
 
     def decode_step(self,
