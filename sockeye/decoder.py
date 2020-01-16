@@ -185,8 +185,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         batch_size = encoder_outputs.shape[0]
         self_att_key_value_dummies = [mx.nd.zeros((batch_size, 1, self.config.model_size),
-                                                   ctx=encoder_outputs.context,
-                                                   dtype=encoder_outputs.dtype)] * self.config.num_layers * 2
+                                                  ctx=encoder_outputs.context,
+                                                  dtype=encoder_outputs.dtype)] * self.config.num_layers * 2
         states += self_att_key_value_dummies
 
         return states
@@ -243,7 +243,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
             # We also increment time step state (2nd state in the list) and add new caches
             step = states[0] + 1
-            
+
             if self.inference_only:
                 # pass in cached encoder states
                 encoder_attention_keys_values = states[2:2 + self.config.num_layers * 2]
@@ -252,7 +252,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                 encoder_outputs = states[1]
                 source_mask = states[2]
                 new_states = [step, encoder_outputs, source_mask] + self_attention_key_values
-                
+
             assert len(new_states) == len(states)
         else:
             new_states = None  # we don't care about states in training
@@ -264,7 +264,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             mask = None
 
             steps, source_mask, *other = states
-        
+
             source_encoded = None  # use constant pre-computed key value projections from the states
             enc_att_kv = other[:self.config.num_layers * 2]
             enc_att_kv = [enc_att_kv[i:i + 2] for i in range(0, len(enc_att_kv), 2)]
@@ -277,9 +277,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
             self_att_kv = other
             self_att_kv = [self_att_kv[i:i + 2] for i in range(0, len(self_att_kv), 2)]
-            
+
             enc_att_kv = [(None, None) for _ in range(self.config.num_layers)]
-        
+
         # Fold the heads of source_mask (batch_size, num_heads, seq_len) -> (batch_size * num_heads, 1, seq_len)
         source_mask = F.expand_dims(F.reshape(source_mask, shape=(-3, -2)), axis=1)
 

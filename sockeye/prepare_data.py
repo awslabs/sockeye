@@ -35,8 +35,10 @@ def main():
 def prepare_data(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
     os.makedirs(output_folder, exist_ok=True)
-    setup_main_logger(file_logging=True, path=os.path.join(output_folder, C.LOG_NAME))
-
+    setup_main_logger(console=not args.quiet,
+                      file_logging=not args.no_logfile,
+                      path=os.path.join(output_folder, C.LOG_NAME))
+    utils.log_basic_info(args)
     utils.seed_rngs(args.seed)
 
     minimum_num_shards = args.min_num_shards
@@ -64,6 +66,7 @@ def prepare_data(args: argparse.Namespace):
 
     source_vocabs, target_vocab = vocab.load_or_create_vocabs(
         source_paths=source_paths,
+        factor_vocab_same_as_source=args.source_factors_use_source_vocab,
         target_path=args.target,
         source_vocab_paths=source_vocab_paths,
         target_vocab_path=args.target_vocab,

@@ -94,10 +94,12 @@ class TrainState:
     Stores the state an EarlyStoppingTrainer instance.
     """
 
-    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
-                 'updates', 'samples', 'gradient_norm', 'gradients', 'metrics', 'start_tic',
-                 '_tic_last_time_elapsed', '_time_elapsed', 'early_stopping_metric',
-                 'best_metric', 'best_metric_history', 'best_checkpoint', 'converged', 'diverged']
+    _pickle_slots = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
+                     'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic', '_tic_last_time_elapsed',
+                     '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_metric_history', 
+                     'best_checkpoint', 'converged', 'diverged']
+ 
+    __slots__ = _pickle_slots + ['gradients']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -149,8 +151,17 @@ class TrainState:
     def time_elapsed(self):
         return self._time_elapsed
 
+    def __getstate__(self):
+        return {k: getattr(self, k) for k in self._pickle_slots}
+
+    def __setstate__(self, state):
+        for k, v in state.items():
+            setattr(self, k, v)
+        self.gradients = {}
+
 
 class GluonEarlyStoppingTrainer:
+
     def __init__(self,
                  config: TrainerConfig,
                  optimizer_config: OptimizerConfig,
@@ -160,7 +171,8 @@ class GluonEarlyStoppingTrainer:
                  context: List[mx.context.Context],
                  dtype: str,
                  using_amp: bool = False,
-                 custom_metrics_logger: Optional[Callable] = None) -> None:
+                 custom_metrics_logger: Optional[Callable] = None,
+                 checkpoint_callback: Optional[Callable] = None) -> None:
         self.config = config
         self.optimizer_config = optimizer_config
         self.model = sockeye_model
@@ -177,6 +189,8 @@ class GluonEarlyStoppingTrainer:
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
+        self._tflogger = TensorboardLogger(logdir=os.path.join(self.config.output_dir, C.TENSORBOARD_NAME))
+        self.checkpoint_callback = checkpoint_callback
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
@@ -196,15 +210,16 @@ class GluonEarlyStoppingTrainer:
             self.state = TrainState(self.config.early_stopping_metric)
             self.model.save_config(self.config.output_dir)
             self.model.save_version(self.config.output_dir)
-            #~ self._save_training_state(train_iter)
-            #self._save_trainer_states(self.best_optimizer_states_fname) # not saving due to deferred initialization
+            # self._save_training_state(train_iter)
+            # self._save_trainer_states(self.best_optimizer_states_fname)  # not saving due to deferred initialization
             logger.info("Training started.")
 
         tic = time.time()
 
         if self.config.max_checkpoints is not None:
             self.config.max_updates = self.state.updates + self.config.max_checkpoints * self.config.checkpoint_interval
-            logger.info("Resetting max_updates to %d + %d * %d = %d in order to implement stopping after (an additional) %d checkpoints.",
+            logger.info("Resetting max_updates to %d + %d * %d = %d in order to implement stopping "
+                        "after (an additional) %d checkpoints.",
                         self.state.updates,
                         self.config.max_checkpoints,
                         self.config.checkpoint_interval,
@@ -238,14 +253,13 @@ class GluonEarlyStoppingTrainer:
                 # (1) save parameters and evaluate on validation data
                 self._save_params()
 
+                train_metrics = [lf.metric for lf in self.loss_functions]
+
                 logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                             self.state.checkpoint, self.state.updates, self.state.epoch,
                             self.state.samples, time_cost, self.config.checkpoint_interval / time_cost)
                 logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
-                            "\t".join("Train-%s" % str(lf.metric) for lf in self.loss_functions))
-                safe_custom_metrics_logger(logging_function=self._custom_metrics_logger,
-                                           metrics=(lf.metric for lf in self.loss_functions),
-                                           global_step=self.state.checkpoint)
+                            "\t".join("Train-%s" % str(metric) for metric in train_metrics))
 
                 val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
 
@@ -260,9 +274,12 @@ class GluonEarlyStoppingTrainer:
                     self._save_trainer_states(self.best_optimizer_states_fname)
                 self._save_training_state(train_iter)
 
-                self._write_metrics_file(train_metrics=[l.metric for l in self.loss_functions], val_metrics=val_metrics)
-                for lf in self.loss_functions:
-                    lf.metric.reset()
+                self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+                for metric in train_metrics:
+                    metric.reset()
+
+                if self.checkpoint_callback:
+                    self.checkpoint_callback(self.state.checkpoint)
 
                 if self.config.max_seconds is not None and self.state.time_elapsed >= self.config.max_seconds:
                     logger.info("Maximum # of seconds (%s) reached. Training ran for %d seconds.",
@@ -367,9 +384,6 @@ class GluonEarlyStoppingTrainer:
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
-        safe_custom_metrics_logger(logging_function=self._custom_metrics_logger,
-                                   metrics=val_metrics,
-                                   global_step=self.state.checkpoint)
 
         return val_metrics
 
@@ -500,13 +514,14 @@ class GluonEarlyStoppingTrainer:
                 # overwriting here. TODO: make this better...
                 self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
 
-    def _write_metrics_file(self, train_metrics: List[loss.LossMetric], val_metrics: List[loss.LossMetric]):
+    def _write_and_log_metrics(self, train_metrics: Iterable[loss.LossMetric], val_metrics: Iterable[loss.LossMetric]):
         """
         Updates metrics for current checkpoint.
-        Writes all metrics to the metrics file and optionally logs to tensorboard.
+        Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
         """
         data = {"epoch": self.state.epoch,
-                "learning-rate": self.trainer.optimizer.lr_scheduler.lr,
+                "learning-rate": (self.trainer.learning_rate if self.trainer.optimizer.lr_scheduler is None
+                                  else self.trainer.optimizer.lr_scheduler.lr),
                 "gradient-norm": self.state.gradient_norm,
                 "time-elapsed": self.state.time_elapsed}
         gpu_memory_usage = utils.get_gpu_memory_usage(self.context)
@@ -522,11 +537,10 @@ class GluonEarlyStoppingTrainer:
         self.state.metrics.append(data)
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
 
-        # TODO: Tensorboard logging
-        # tf_metrics = data.copy()
-        # tf_metrics.update({"%s_grad" % n: v for n, v in self.state.gradients.items()})
-        # tf_metrics.update(self.model.params)
-        #self.tflogger.log_metrics(metrics=tf_metrics, checkpoint=self.state.checkpoint)
+        self._tflogger.log_metrics(metrics=data, checkpoint=self.state.checkpoint)
+        safe_custom_metrics_logger(logging_function=self._custom_metrics_logger,
+                                   metrics=data,
+                                   global_step=self.state.checkpoint)
 
     def _update_best_params(self):
         """
@@ -653,14 +667,6 @@ class GluonEarlyStoppingTrainer:
         """
         utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep,
                                    self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations)
-        # if process_manager is not None:
-        #     result = process_manager.collect_results()
-        #     if result is not None:
-        #         decoded_checkpoint, decoder_metrics = result
-        #         self.state.metrics[decoded_checkpoint - 1].update(decoder_metrics)
-        #         self.tflogger.log_metrics(decoder_metrics, decoded_checkpoint)
-        #         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
-        #         self.state.save(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
         if not keep_training_state:
             if os.path.exists(self.training_state_dirname):
@@ -742,43 +748,46 @@ class TensorboardLogger:
         try:
             import mxboard
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
-            self.sw = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
+            self._writer = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
         except ImportError:
             logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
-            self.sw = None
+            self._writer = None
 
     def log_metrics(self, metrics: Dict[str, Union[float, int, mx.nd.NDArray]], checkpoint: int):
-        if self.sw is None:
+        if self._writer is None:
             return
 
         for name, value in metrics.items():
             if isinstance(value, mx.nd.NDArray):
                 if mx.nd.contrib.isfinite(value).sum().asscalar() == value.size:
-                    self.sw.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
+                    self._writer.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                 else:
                     logger.warning("Histogram of %s not logged to tensorboard because of infinite data.")
+            elif value is None:
+                continue
             else:
-                self.sw.add_scalar(tag=name, value=value, global_step=checkpoint)
+                self._writer.add_scalar(tag=name, value=value, global_step=checkpoint)
+        self._writer.flush()
 
     def log_graph(self, symbol: mx.sym.Symbol):
-        if self.sw is None:
+        if self._writer is None:
             return
-        self.sw.add_graph(symbol)
+        self._writer.add_graph(symbol)
 
     def log_source_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
-        if self.sw is None or self.source_labels is None:
+        if self._writer is None or self.source_labels is None:
             return
-        self.sw.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
+        self._writer.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
 
     def log_target_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
-        if self.sw is None or self.target_labels is None:
+        if self._writer is None or self.target_labels is None:
             return
-        self.sw.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
+        self._writer.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
 
     def log_output_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
-        if self.sw is None or self.target_labels is None:
+        if self._writer is None or self.target_labels is None:
             return
-        self.sw.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
+        self._writer.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
 
 
 class Speedometer:
@@ -808,7 +817,7 @@ class Speedometer:
         if self.init:
             if count % self.frequency == 0:
                 toc = (time.time() - self.tic)
-                update_interval = batches / updates
+                update_interval = batches / max(1, updates)
                 updates_per_sec = self.frequency / update_interval / toc
                 samples_per_sec = self.samples / toc
                 tokens_per_sec = self.tokens / toc
@@ -834,21 +843,21 @@ class Speedometer:
 
 
 def safe_custom_metrics_logger(logging_function: Callable,
-                               metrics: Iterable[loss.LossMetric],
+                               metrics: Dict,
                                global_step: int = None):
     """
     A thin wrapper for calling a custom metrics logging function, if supplied. As it uses an external function,
     it should never throw an exception. If there is no logging_function supplied, the function does nothing.
     :param logging_function: The function supplied by a caller of sockeye.train
-    :param metrics: A list of LossMetrics.
+    :param metrics: A non-empty dict of (nonempty str, float/int/bool) pairs.
     :param global_step: Optional argument, which can be used e.g. by Tensorboard.
     """
     if logging_function is None:
         return
     try:
-        logging_function({m.name: m.get() for m in metrics}, global_step)
+        logging_function(metrics, global_step)
     except Exception as e:
-        logging.warning("Didn't use custom metrics logger, exception '{}' occured".format(str(e)))
+        logging.warning("Didn't use custom metrics logger, exception '{}' occurred".format(str(e)))
 
 
 def trainer_save_states_no_dump_optimizer(trainer: mx.gluon.Trainer, fname: str):

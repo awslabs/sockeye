@@ -20,7 +20,8 @@ import pytest
 import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.utils
-from test.common import check_train_translate, tmp_digits_dataset
+from sockeye.test_utils import tmp_digits_dataset
+from test.common import check_train_translate
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ seed = random.randint(0, 1000)
 
 COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial-learning-rate 0.001" \
                          " --decode-and-evaluate 0 --label-smoothing 0.0" \
-                         " --optimized-metric perplexity --loss cross-entropy"
+                         " --optimized-metric perplexity --loss cross-entropy --weight-tying-type src_trg_softmax"
 
 
 @pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
@@ -142,7 +143,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
      " --transformer-feed-forward-num-hidden 64"
-     " --source-factors-num-embed 2" + COMMON_TRAINING_PARAMS,
+     " --source-factors-num-embed 2 2 2" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
      True, True,
      1.03,

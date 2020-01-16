@@ -10,6 +10,21 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.0.1]
+
+### Changed
+
+- Inference defaults to using the max input length observed in training (versus scaling down based on mean length ratio and standard deviations).
+
+### Added
+
+- Additional parameter fixing strategies:
+  - `all_except_feed_forward`: Only train feed forward layers.
+  - `encoder_and_source_embeddings`: Only train the decoder (decoder layers, output layer, and target embeddings).
+  - `encoder_half_and_source_embeddings`: Train the latter half of encoder layers and the decoder.
+- Option to specify the number of CPU threads without using an environment variable (`--omp-num-threads`).
+- More flexibility for source factors combination
+
 ## [2.0.0]
 
 ### Changed
@@ -22,11 +37,13 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Removed unused training options: Eve, Nadam, RMSProp, Nag, Adagrad, and Adadelta optimizers, `fixed-step` and `fixed-rate-inv-t` learning rate schedulers
 - Updated and renamed learning rate scheduler `fixed-rate-inv-sqrt-t` -> `inv-sqrt-decay`
 - Added script for plotting metrics files: [sockeye_contrib/plot_metrics.py](sockeye_contrib/plot_metrics.py)
+- Removed option `--weight-tying`.  Weight tying is enabled by default, disable with `--weight-tying-type none`.
 
 ### Added
 
-- Added distrbuted training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added distributed training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
 - Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
+- Added `none` learning rate scheduler (use a fixed rate throughout training)
 - Added `linear-decay` learning rate scheduler
 - Added training option `--learning-rate-t-scale` for time-based decay schedulers
 - Added support for MXNet's [Automatic Mixed Precision](https://mxnet.incubator.apache.org/versions/master/tutorials/amp/amp_tutorial.html).  Activate with the `--amp` training flag.  For best results, make sure as many model dimensions are possible are multiples of 8.

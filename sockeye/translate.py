@@ -14,6 +14,10 @@
 """
 Translation CLI.
 """
+from . import pre_mxnet
+# Called before importing mxnet or any module that imports mxnet
+pre_mxnet.init()
+
 import argparse
 import logging
 import sys
@@ -49,7 +53,7 @@ def run_translate(args: argparse.Namespace):
 
     if args.output is not None:
         setup_main_logger(console=not args.quiet,
-                          file_logging=True,
+                          file_logging=not args.no_logfile,
                           path="%s.%s" % (args.output, C.LOG_NAME),
                           level=args.loglevel)
     else:

@@ -73,12 +73,10 @@ def nearest_k(similarity_matrix: mx.nd.NDArray,
 
 
 def get_embedding_parameter_names(config: model.ModelConfig) -> Tuple[str, str]:
-    if config.weight_tying and C.WEIGHT_TYING_SRC in config.weight_tying_type and \
-            C.WEIGHT_TYING_SRC_TRG_SOFTMAX in config.weight_tying_type:
+    if C.WEIGHT_TYING_SRC in config.weight_tying_type and C.WEIGHT_TYING_SRC_TRG_SOFTMAX in config.weight_tying_type:
         name = "%sweight" % C.SHARED_EMBEDDING_PREFIX
         return name, name
-    else:
-        return "%sweight" % C.SOURCE_EMBEDDING_PREFIX, "%sweight" % C.TARGET_EMBEDDING_PREFIX
+    return "%sweight" % C.SOURCE_EMBEDDING_PREFIX, "%sweight" % C.TARGET_EMBEDDING_PREFIX
 
 
 def main():

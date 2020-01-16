@@ -38,13 +38,13 @@ def main():
     params = arguments.ConfigArgumentParser(description='Score data with an existing model.')
     arguments.add_score_cli_args(params)
     args = params.parse_args()
-    setup_main_logger(file_logging=False, console=True, level=args.loglevel)  # pylint: disable=no-member
     score(args)
 
 
 def score(args: argparse.Namespace):
-
-    setup_main_logger(file_logging=False, console=not args.quiet)
+    setup_main_logger(file_logging=False,
+                      console=not args.quiet,
+                      level=args.loglevel)  # pylint: disable=no-member
 
     utils.log_basic_info(args)
 

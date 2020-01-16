@@ -55,7 +55,7 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     :return: chrF score as float between 0 and 1.
     """
     return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA,
-                                 remove_whitespace=True)
+                                 remove_whitespace=True).score
 
 
 def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -104,13 +104,13 @@ def raw_corpus_length_ratio(hypotheses: Iterable[str], references: Iterable[str]
 
 
 def main():
-    setup_main_logger(file_logging=False)
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
                                                  'respect to a reference set. If multiple hypotheses files are given'
                                                  'the mean and standard deviation of the metrics are reported.')
     arguments.add_evaluate_args(params)
     arguments.add_logging_args(params)
     args = params.parse_args()
+    setup_main_logger(file_logging=False)
 
     if args.quiet:
         logger.setLevel(logging.ERROR)

@@ -26,18 +26,6 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-class GeLU(mx.gluon.HybridBlock):
-
-    def __init__(self, prefix=''):
-        super().__init__(prefix=prefix)
-        with self.name_scope():
-            self.act = mx.gluon.nn.Activation(activation="tanh")
-
-    def hybrid_forward(self, F, x):
-        # Approximation of x * gaussian_cdf(x) used by Hendrycks and Gimpel
-        return 0.5 * x * (1 + self.act((math.sqrt(2 / math.pi) * (x + (0.044715 * (x ** 3))))))
-
-
 def get_activation(act_type: str) -> mx.gluon.Block:
     """
     Returns Gluon Block for given activation type.
@@ -54,10 +42,9 @@ def get_activation(act_type: str) -> mx.gluon.Block:
     """
     if act_type == C.SWISH1:
         return mx.gluon.nn.Swish()
-    elif act_type == C.GELU:
-        return GeLU()
-    else:
-        return mx.gluon.nn.Activation(activation=act_type)
+    if act_type == C.GELU:
+        return mx.gluon.nn.GELU()
+    return mx.gluon.nn.Activation(activation=act_type)
 
 
 class LHUC(mx.gluon.HybridBlock):
@@ -182,8 +169,7 @@ class OutputLayer(mx.gluon.HybridBlock):
                                             bias=bias,
                                             flatten=False,
                                             name=C.LOGITS_NAME)
-        else:
-            return super().forward(data)
+        return super().forward(data)
 
     def hybrid_forward(self, F, data, weight, bias, scaling = None):
         if self.weight.dtype == C.DTYPE_INT8:
@@ -342,7 +328,6 @@ class DotAttentionCell(mx.gluon.HybridBlock):
     def hybrid_forward(self, F, queries, keys, values, lengths=None, bias=None):
         # (n, lq, lk)
         logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
-
 
         # TODO(fhieber): consider softmax with length argument once available.
         # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
@@ -516,6 +501,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
+    :param depth_key_value: Dimension of input key and value vectors.
     :param dropout: Dropout probability on attention scores
     :param dtype: Data type for weights
     """
@@ -526,13 +512,14 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 dtype: str = C.DTYPE_FP32,
+                 depth_key_value: int = 0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
-            self.ff_q = quantization.QuantizableDense(units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype = dtype)
-            self.ff_k = quantization.QuantizableDense(units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype = dtype)
-            self.ff_v = quantization.QuantizableDense(units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype = dtype)
+            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype = dtype)
+            self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype = dtype)
+            self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype = dtype)
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,

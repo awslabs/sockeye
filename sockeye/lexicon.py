@@ -198,7 +198,7 @@ class TopKLexicon:
 
 
 def create(args):
-    setup_main_logger(console=not args.quiet, file_logging=True, path=args.output + ".log")
+    setup_main_logger(console=not args.quiet, file_logging=not args.no_logfile, path=args.output + ".log")
     global logger
     logger = logging.getLogger('create')
     log_sockeye_version(logger)
