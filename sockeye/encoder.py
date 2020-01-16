@@ -179,6 +179,8 @@ class Embedding(Encoder):
                         sum_factors_embeds.append(factor_embedding)
                     elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_AVERAGE:
                         average_factors_embeds.append(factor_embedding)
+                    else:
+                        raise ValueError("Unknown combine value for source factors: %s" % factor_config.combine)
             else:
                 data = F.squeeze(data, axis=2)
 
