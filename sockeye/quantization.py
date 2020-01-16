@@ -13,6 +13,10 @@
 
 import mxnet as mx
 from . import constants as C
+from mxnet.gluon.nn.activations import Activation
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Modified from the source to mxnet.gluon.nn.basic_layers.Dense which is:
 # Licensed to the Apache Software Foundation (ASF) under one
