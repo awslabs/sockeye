@@ -14,7 +14,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Changed
 
-- Version bump, which should have been included in the previous commit due to incompatible models.
+- Version bump, which should have been included in commit b0461b due to incompatible models.
 
 ## [2.0.1]
 
