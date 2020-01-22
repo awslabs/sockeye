@@ -3,6 +3,10 @@
 In this tutorial we will train a multilingual Sockeye model that can translate between several language pairs,
 including ones that we did not have training data for (this is called _zero-shot translation_).
 
+Please note: this tutorial assumes that you are familiar with the introductory tutorials on [copying
+sequences](https://awslabs.github.io/sockeye/tutorials/seqcopy.html)
+and [training a standard WMT model](https://awslabs.github.io/sockeye/tutorials/wmt.html).
+
 ## Approach
 
 There are several ways to train a multilingual translation system. This tutorial follows the approach described in [Johnson et al (2016)](https://arxiv.org/abs/1611.04558).
@@ -37,7 +41,7 @@ virtualenv -p python3 sockeye3
 source sockeye3/bin/activate
 ```
 
-Then install the correct version of Sockeye. Then we install several libraries for preprocessing,
+Then [install the correct version of Sockeye](https://awslabs.github.io/sockeye/setup.html). Then we install several libraries for preprocessing,
 monitoring and evaluation:
 
 ```bash
@@ -61,7 +65,7 @@ git clone https://github.com/bricksdont/moses-scripts $tools/moses-scripts
 
 ## Data
 
-We will use the data provided by the [IWSLT 2017 multilingual shared task](https://sites.google.com/site/iwsltevaluation2017/TED-tasks).
+We will use data provided by the [IWSLT 2017 multilingual shared task](https://sites.google.com/site/iwsltevaluation2017/TED-tasks).
 
 We will limit ourselves to using the training data of just 3 languages (DE, EN and FR), but in principle you could use all the training data.
 Using only DE, EN and FR is inspired by the [Fairseq example for preparing IWSLT17 data](https://github.com/pytorch/fairseq/blob/master/examples/translation/prepare-iwslt17-multilingual.sh).
@@ -87,7 +91,7 @@ TGT=en
 ROOT=$(dirname "$0")
 
 ORIG=$ROOT/iwslt17_orig
-DATA=$ROOT/iwslt17.de_fr.en
+DATA=$ROOT/data
 mkdir -p "$ORIG" "$DATA"
 
 URLS=(
@@ -322,7 +326,7 @@ mkdir -p translations
 python -m sockeye.translate \
                         -i $DATA/test.de-fr.tag.de \
                         -o translations/test.de-fr.tag.fr \
-                        -m $model_path \
+                        -m iwslt_model \
                         --beam-size 10 \
                         --length-penalty-alpha 1.0 \
                         --device-ids 0 \
@@ -331,7 +335,7 @@ python -m sockeye.translate \
 python -m sockeye.translate \
                         -i $DATA/test.fr-de.tag.fr \
                         -o translations/test.fr-de.tag.de \
-                        -m $model_path \
+                        -m iwslt_model \
                         --beam-size 10 \
                         --length-penalty-alpha 1.0 \
                         --device-ids 0 \
