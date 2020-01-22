@@ -1,6 +1,6 @@
 #! /bin/bash
 
-# Code taken from (slightly modified):
+# Code taken from (modified):
 # https://github.com/pytorch/fairseq/blob/master/examples/translation/prepare-iwslt17-multilingual.sh
 
 SRCS=(
@@ -24,8 +24,12 @@ ARCHIVES=(
     "fr-en.tgz"
 )
 VALID_SETS=(
-    "IWSLT17.TED.dev2010.de-en IWSLT17.TED.tst2010.de-en IWSLT17.TED.tst2011.de-en IWSLT17.TED.tst2012.de-en IWSLT17.TED.tst2013.de-en IWSLT17.TED.tst2014.de-en IWSLT17.TED.tst2015.de-en"
-    "IWSLT17.TED.dev2010.fr-en IWSLT17.TED.tst2010.fr-en IWSLT17.TED.tst2011.fr-en IWSLT17.TED.tst2012.fr-en IWSLT17.TED.tst2013.fr-en IWSLT17.TED.tst2014.fr-en IWSLT17.TED.tst2015.fr-en"
+    "IWSLT17.TED.dev2010.de-en IWSLT17.TED.tst2010.de-en IWSLT17.TED.tst2011.de-en IWSLT17.TED.tst2012.de-en"
+    "IWSLT17.TED.dev2010.fr-en IWSLT17.TED.tst2010.fr-en IWSLT17.TED.tst2011.fr-en IWSLT17.TED.tst2012.fr-en"
+)
+TEST_SETS=(
+    "IWSLT17.TED.tst2013.de-en IWSLT17.TED.tst2014.de-en IWSLT17.TED.tst2015.de-en"
+    "IWSLT17.TED.tst2013.fr-en IWSLT17.TED.tst2014.fr-en IWSLT17.TED.tst2015.fr-en"
 )
 
 # download and extract data
@@ -83,7 +87,22 @@ for ((i=0;i<${#SRCS[@]};++i)); do
                 | sed -e 's/<seg id="[0-9]*">\s*//g' \
                 | sed -e 's/\s*<\/seg>\s*//g' \
                 | sed -e "s/\’/\'/g" \
-                > "$DATA/valid.${SRC}-${TGT}.${LANG}"
+                >> "$DATA/valid.${SRC}-${TGT}.${LANG}"
+        done
+    done
+done
+
+echo "pre-processing test data..."
+for ((i=0;i<${#SRCS[@]};++i)); do
+    SRC=${SRCS[i]}
+    TEST_SET=${TEST_SETS[i]}
+    for FILE in ${TEST_SET[@]}; do
+        for LANG in "$SRC" "$TGT"; do
+            grep '<seg id' "$ORIG/${SRC}-${TGT}/${FILE}.${LANG}.xml" \
+                | sed -e 's/<seg id="[0-9]*">\s*//g' \
+                | sed -e 's/\s*<\/seg>\s*//g' \
+                | sed -e "s/\’/\'/g" \
+                >> "$DATA/test.${SRC}-${TGT}.${LANG}"
         done
     done
 done
