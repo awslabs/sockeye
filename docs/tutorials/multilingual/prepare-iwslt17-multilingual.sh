@@ -9,7 +9,7 @@ SRCS=(
 )
 TGT=en
 
-ROOT=$(dirname "$0")
+ROOT=$(dirname "$0")/..
 
 ORIG=$ROOT/iwslt17_orig
 DATA=$ROOT/data

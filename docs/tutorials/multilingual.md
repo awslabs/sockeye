@@ -59,7 +59,7 @@ pip install sacrebleu
 
 mkdir -p tools
 
-git clone https://github.com/bricksdont/moses-scripts $tools/moses-scripts
+git clone https://github.com/bricksdont/moses-scripts tools/moses-scripts
 
 # download helper scripts
 
@@ -89,7 +89,7 @@ the code is taken from the [Fairseq example for preparing IWSLT17 data](https://
 and adapted slightly.
 
 ```bash
-./tools/prepare-iwslt17-multilingual.sh
+bash tools/prepare-iwslt17-multilingual.sh
 ```
 
 After executing this script, all original files will be in `iwslt_orig` and extracted text files will be
