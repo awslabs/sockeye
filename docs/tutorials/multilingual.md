@@ -63,9 +63,9 @@ git clone https://github.com/bricksdont/moses-scripts $tools/moses-scripts
 
 # download helper scripts
 
-wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh
-wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/add_tag_to_lines.py
-wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/remove_tag_from_translations.py
+wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
+wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
+wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
 ```
 
 
@@ -89,7 +89,7 @@ the code is taken from the [Fairseq example for preparing IWSLT17 data](https://
 and adapted slightly.
 
 ```bash
-./prepare-iwslt17-multilingual.sh
+./tools/prepare-iwslt17-multilingual.sh
 ```
 
 After executing this script, all original files will be in `iwslt_orig` and extracted text files will be
@@ -151,17 +151,17 @@ done
 # add tags to BPE versions of files
 
 for corpus in train valid; do
-    cat $DATA/$corpus.de-en.bpe.de | python add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.de-en.tag.de
-    cat $DATA/$corpus.de-en.bpe.en | python add_tag_to_lines.py --tag "<2de>" > $DATA/$corpus.de-en.tag.en
+    cat $DATA/$corpus.de-en.bpe.de | python tools/add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.de-en.tag.de
+    cat $DATA/$corpus.de-en.bpe.en | python tools/add_tag_to_lines.py --tag "<2de>" > $DATA/$corpus.de-en.tag.en
 
-    cat $DATA/$corpus.en-de.bpe.de | python add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.en-de.tag.de
-    cat $DATA/$corpus.en-de.bpe.en | python add_tag_to_lines.py --tag "<2de>" > $DATA/$corpus.en-de.tag.en
+    cat $DATA/$corpus.en-de.bpe.de | python tools/add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.en-de.tag.de
+    cat $DATA/$corpus.en-de.bpe.en | python tools/add_tag_to_lines.py --tag "<2de>" > $DATA/$corpus.en-de.tag.en
 
-    cat $DATA/$corpus.fr-en.bpe.fr | python add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.fr-en.tag.fr
-    cat $DATA/$corpus.fr-en.bpe.en | python add_tag_to_lines.py --tag "<2fr>" > $DATA/$corpus.fr-en.tag.en
+    cat $DATA/$corpus.fr-en.bpe.fr | python tools/add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.fr-en.tag.fr
+    cat $DATA/$corpus.fr-en.bpe.en | python tools/add_tag_to_lines.py --tag "<2fr>" > $DATA/$corpus.fr-en.tag.en
 
-    cat $DATA/$corpus.en-fr.bpe.fr | python add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.en-fr.tag.fr
-    cat $DATA/$corpus.en-fr.bpe.en | python add_tag_to_lines.py --tag "<2fr>" > $DATA/$corpus.en-fr.tag.en
+    cat $DATA/$corpus.en-fr.bpe.fr | python tools/add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.en-fr.tag.fr
+    cat $DATA/$corpus.en-fr.bpe.en | python tools/add_tag_to_lines.py --tag "<2fr>" > $DATA/$corpus.en-fr.tag.en
 done
 
 ```
@@ -197,11 +197,11 @@ ln -s $DATA/valid.de-en.bpe.de $DATA/test.fr-de.bpe.de
 
 # add special target language tag
 
-cat $DATA/test.de-fr.bpe.de | python add_tag_to_lines.py --tag "<2fr" > $DATA/test.de-fr.tag.de
-cat $DATA/test.de-fr.bpe.fr | python add_tag_to_lines.py --tag "<2de" > $DATA/test.de-fr.tag.fr
+cat $DATA/test.de-fr.bpe.de | python tools/add_tag_to_lines.py --tag "<2fr" > $DATA/test.de-fr.tag.de
+cat $DATA/test.de-fr.bpe.fr | python tools/add_tag_to_lines.py --tag "<2de" > $DATA/test.de-fr.tag.fr
 
-cat $DATA/test.fr-de.bpe.de | python add_tag_to_lines.py --tag "<2fr" > $DATA/test.fr-de.tag.de
-cat $DATA/test.fr-de.bpe.fr | python add_tag_to_lines.py --tag "<2de" > $DATA/test.fr-de.tag.fr
+cat $DATA/test.fr-de.bpe.de | python tools/add_tag_to_lines.py --tag "<2fr" > $DATA/test.fr-de.tag.de
+cat $DATA/test.fr-de.bpe.fr | python tools/add_tag_to_lines.py --tag "<2de" > $DATA/test.fr-de.tag.fr
 ```
 
 We link both the raw text and create a tagged version, the tagged file as input for translation, the raw text for evaluation,
@@ -274,11 +274,11 @@ Next we post-process the translations, first removing the special target languag
 then detokenizing:
 
 ```bash
-cat translations/test.de-fr.tag.fr | python remove_tag_from_translations.py --tag "<2en>" > translations/test.de-fr.bpe.fr
+cat translations/test.de-fr.tag.fr | python tools/remove_tag_from_translations.py --tag "<2en>" > translations/test.de-fr.bpe.fr
 cat translations/test.de-fr.bpe.fr | sed -r 's/@@( |$)//g' > translations/test.de-fr.tok.fr
 cat translations/test.de-fr.tok.fr | $MOSES/tokenizer/detokenizer.perl -l "fr" > translations/test.de-fr.fr
 
-cat translations/test.fr-de.tag.de | python remove_tag_from_translations.py --tag "<2en>" > translations/test.fr-de.bpe.de
+cat translations/test.fr-de.tag.de | python tools/remove_tag_from_translations.py --tag "<2en>" > translations/test.fr-de.bpe.de
 cat translations/test.fr-de.bpe.de | sed -r 's/@@( |$)//g' > translations/test.fr-de.tok.de
 cat translations/test.fr-de.tok.de | $MOSES/tokenizer/detokenizer.perl -l "de" > translations/test.fr-de.de
 ```
