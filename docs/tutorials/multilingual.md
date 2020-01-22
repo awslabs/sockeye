@@ -45,8 +45,6 @@ Then [install the correct version of Sockeye](https://awslabs.github.io/sockeye/
 monitoring and evaluation:
 
 ```bash
-mkdir tools
-
 pip install matplotlib mxboard
 
 # install BPE library
@@ -59,7 +57,15 @@ pip install sacrebleu
 
 # install Moses scripts for preprocessing
 
+mkdir -p tools
+
 git clone https://github.com/bricksdont/moses-scripts $tools/moses-scripts
+
+# download helper scripts
+
+wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh
+wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/add_tag_to_lines.py
+wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/remove_tag_from_translations.py
 ```
 
 
@@ -67,8 +73,8 @@ git clone https://github.com/bricksdont/moses-scripts $tools/moses-scripts
 
 We will use data provided by the [IWSLT 2017 multilingual shared task](https://sites.google.com/site/iwsltevaluation2017/TED-tasks).
 
-We will limit ourselves to using the training data of just 3 languages (DE, EN and FR), but in principle you could use all the training data.
-Using only DE, EN and FR is inspired by the [Fairseq example for preparing IWSLT17 data](https://github.com/pytorch/fairseq/blob/master/examples/translation/prepare-iwslt17-multilingual.sh).
+We limit ourselves to using the training data of just 3 languages (DE, EN and FR), but in principle you could include many more
+language pairs.
 
 ## Preprocessing
 
@@ -78,103 +84,25 @@ The preprocessing consists of the following steps:
 - Tokenize the text and split with a learned BPE model.
 - Prefix the source sentences with a special target language indicator token.
 
+Run the following script to obtain IWSLT17 data in a convenient format,
+the code is taken from the [Fairseq example for preparing IWSLT17 data](https://github.com/pytorch/fairseq/blob/master/examples/translation/prepare-iwslt17-multilingual.sh)
+and adapted slightly.
+
 ```bash
-# Code taken from (slightly modified):
-# https://github.com/pytorch/fairseq/blob/master/examples/translation/prepare-iwslt17-multilingual.sh
-
-SRCS=(
-    "de"
-    "fr"
-)
-TGT=en
-
-ROOT=$(dirname "$0")
-
-ORIG=$ROOT/iwslt17_orig
-DATA=$ROOT/data
-mkdir -p "$ORIG" "$DATA"
-
-URLS=(
-    "https://wit3.fbk.eu/archive/2017-01-trnted/texts/de/en/de-en.tgz"
-    "https://wit3.fbk.eu/archive/2017-01-trnted/texts/fr/en/fr-en.tgz"
-)
-ARCHIVES=(
-    "de-en.tgz"
-    "fr-en.tgz"
-)
-VALID_SETS=(
-    "IWSLT17.TED.dev2010.de-en IWSLT17.TED.tst2010.de-en IWSLT17.TED.tst2011.de-en IWSLT17.TED.tst2012.de-en IWSLT17.TED.tst2013.de-en IWSLT17.TED.tst2014.de-en IWSLT17.TED.tst2015.de-en"
-    "IWSLT17.TED.dev2010.fr-en IWSLT17.TED.tst2010.fr-en IWSLT17.TED.tst2011.fr-en IWSLT17.TED.tst2012.fr-en IWSLT17.TED.tst2013.fr-en IWSLT17.TED.tst2014.fr-en IWSLT17.TED.tst2015.fr-en"
-)
-
-# download and extract data
-for ((i=0;i<${#URLS[@]};++i)); do
-    ARCHIVE=$ORIG/${ARCHIVES[i]}
-    if [ -f "$ARCHIVE" ]; then
-        echo "$ARCHIVE already exists, skipping download"
-    else
-        URL=${URLS[i]}
-        wget -P "$ORIG" "$URL"
-        if [ -f "$ARCHIVE" ]; then
-            echo "$URL successfully downloaded."
-        else
-            echo "$URL not successfully downloaded."
-            exit 1
-        fi
-    fi
-    FILE=${ARCHIVE: -4}
-    if [ -e "$FILE" ]; then
-        echo "$FILE already exists, skipping extraction"
-    else
-        tar -C "$ORIG" -xzvf "$ARCHIVE"
-    fi
-done
-
-echo "pre-processing train data..."
-for SRC in "${SRCS[@]}"; do
-    for LANG in "${SRC}" "${TGT}"; do
-        cat "$ORIG/${SRC}-${TGT}/train.tags.${SRC}-${TGT}.${LANG}" \
-            | grep -v '<url>' \
-            | grep -v '<talkid>' \
-            | grep -v '<keywords>' \
-            | grep -v '<speaker>' \
-            | grep -v '<reviewer' \
-            | grep -v '<translator' \
-            | grep -v '<doc' \
-            | grep -v '</doc>' \
-            | sed -e 's/<title>//g' \
-            | sed -e 's/<\/title>//g' \
-            | sed -e 's/<description>//g' \
-            | sed -e 's/<\/description>//g' \
-            | sed 's/^\s*//g' \
-            | sed 's/\s*$//g' \
-            > "$DATA/train.${SRC}-${TGT}.${LANG}"
-    done
-done
-
-echo "pre-processing valid data..."
-for ((i=0;i<${#SRCS[@]};++i)); do
-    SRC=${SRCS[i]}
-    VALID_SET=${VALID_SETS[i]}
-    for FILE in ${VALID_SET[@]}; do
-        for LANG in "$SRC" "$TGT"; do
-            grep '<seg id' "$ORIG/${SRC}-${TGT}/${FILE}.${LANG}.xml" \
-                | sed -e 's/<seg id="[0-9]*">\s*//g' \
-                | sed -e 's/\s*<\/seg>\s*//g' \
-                | sed -e "s/\’/\'/g" \
-                > "$DATA/valid.${SRC}-${TGT}.${LANG}"
-        done
-    done
-done
+./prepare-iwslt17-multilingual.sh
 ```
+
+After executing this script, all original files will be in `iwslt_orig` and extracted text files will be
+in `data`.
 
 We then normalize and tokenize all texts:
 
 ```bash
 MOSES=tools/moses-scripts/scripts
+DATA=data
 
-for SRC in "${SRCS[@]}"; do
-    for LANG in "${SRC}" "${TGT}"; do
+for SRC in de fr; do
+    for LANG in "${SRC}" en; do
         for corpus in train valid; do
             cat "$DATA/train.${SRC}-${TGT}.${LANG}" | perl $MOSES/tokenizer/normalize-punctuation.perl | perl $MOSES/tokenizer/tokenizer.perl -a -q -l $LANG  > "$DATA/train.${SRC}-${TGT}.tok.${LANG}"
         done
@@ -198,8 +126,8 @@ This will create a joint source and target BPE vocabulary.
 Next, we use apply the Byte Pair Encoding to our training and development data:
 
 ```bash
-for SRC in "${SRCS[@]}"; do
-    for LANG in "${SRC}" "${TGT}"; do
+for SRC in de fr; do
+    for LANG in "${SRC}" en; do
         for corpus in train valid; do
             python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 < "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}" > "$DATA/${corpus}.${SRC}-${TGT}.bpe.${LANG}"
         done
