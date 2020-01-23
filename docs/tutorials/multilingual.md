@@ -94,19 +94,56 @@ bash tools/prepare-iwslt17-multilingual.sh
 After executing this script, all original files will be in `iwslt_orig` and extracted text files will be
 in `data`.
 
-We then normalize and tokenize all texts:
-
 ```bash
 MOSES=tools/moses-scripts/scripts
 DATA=data
 
-SRCS=(
+TRAIN_PAIRS=(
+    "de en"
+    "en de"
+    "it en"
+    "en it"
+)
+
+TRAIN_SOURCES=(
     "de"
      "it"
 )
+
 TGT=en
 
-for SRC in "${SRCS[@]}"; do
+TEST_PAIRS=(
+    "de en"
+    "en de"
+    "it en"
+    "en it"
+    "de it"
+    "it de"
+)
+
+ALL_PAIRS=$TEST_PAIRS
+```
+
+We first create symlinks for the reverse training directions, i.e. EN-DE and EN-IT:
+
+```bash
+for SRC in "${TRAIN_SOURCES[@]}"; do
+    for LANG in "${SRC}" "${TGT}"; do
+        for corpus in train valid; do
+            ln -s $corpus.${SRC}-${TGT}.${LANG} $DATA/$corpus.${TGT}-${SRC}.${LANG}
+        done
+    done
+done
+```
+
+We then normalize and tokenize all texts:
+
+```bash
+for PAIR in "${ALL_PAIRS[@]}"; do
+    PAIR=($PAIR)
+    SRC=${PAIR[0]}
+    TGT=${PAIR[1]}
+
     for LANG in "${SRC}" "${TGT}"; do
         for corpus in train valid test; do
             cat "$DATA/${corpus}.${SRC}-${TGT}.${LANG}" | perl $MOSES/tokenizer/normalize-punctuation.perl | perl $MOSES/tokenizer/tokenizer.perl -a -q -l $LANG  > "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}"
@@ -131,22 +168,14 @@ This will create a joint source and target BPE vocabulary.
 Next, we use apply the Byte Pair Encoding to our training and development data:
 
 ```bash
-for SRC in "${SRCS[@]}"; do
+for PAIR in "${ALL_PAIRS[@]}"; do
+    PAIR=($PAIR)
+    SRC=${PAIR[0]}
+    TGT=${PAIR[1]}
+
     for LANG in "${SRC}" "${TGT}"; do
         for corpus in train valid test; do
-            subword-nmt apply_bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 < "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}" > "$DATA/${corpus}.${SRC}-${TGT}.bpe.${LANG}"
-        done
-    done
-done
-```
-
-We create symlinks for the reverse training directions, i.e. EN-DE and EN-IT:
-
-```bash
-for SRC in "${SRCS[@]}"; do
-    for LANG in "${SRC}" "${TGT}"; do
-        for corpus in train valid; do
-            ln -s $DATA/$corpus.${SRC}-${TGT}.bpe.${LANG} $DATA/$corpus.${TGT}-${SRC}.bpe.${LANG}
+            subword-nmt apply-bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 < "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}" > "$DATA/${corpus}.${SRC}-${TGT}.bpe.${LANG}"
         done
     done
 done
@@ -155,14 +184,14 @@ done
 Then we also need to prefix the source sentences with a special tag to indicate target language:
 
 ```bash
-for SRC in "${SRCS[@]}"; do
+for PAIR in "${ALL_PAIRS[@]}"; do
+    PAIR=($PAIR)
+    SRC=${PAIR[0]}
+    TGT=${PAIR[1]}
+
     for corpus in train valid test; do
         cat $DATA/$corpus.${SRC}-${TGT}.bpe.${SRC} | python tools/add_tag_to_lines.py --tag "<2${TGT}>" > $DATA/$corpus.${SRC}-${TGT}.tag.${SRC}
         cat $DATA/$corpus.${SRC}-${TGT}.bpe.${TGT} | python tools/add_tag_to_lines.py --tag "<2${SRC}>" > $DATA/$corpus.${SRC}-${TGT}.tag.${TGT}
-        
-        # same for reverse direction
-        cat $DATA/$corpus.${TGT}-${SRC}.bpe.${TGT} | python tools/add_tag_to_lines.py --tag "<2${SRC}>" > $DATA/$corpus.${TGT}-${SRC}.tag.${TGT}
-        cat $DATA/$corpus.${TGT}-${SRC}.bpe.${SRC} | python tools/add_tag_to_lines.py --tag "<2${TGT}>" > $DATA/$corpus.${TGT}-${SRC}.tag.${SRC}
     done
 done
 ```
@@ -230,15 +259,6 @@ To test the zero-shot condition, we translate from German to French and vice ver
 
 ```bash
 mkdir -p translations
-
-TEST_PAIRS=(
-    "de en"
-    "en de"
-    "it en"
-    "en it"
-    "de it"
-    "it de"
-)
 
 for TEST_PAIR in "${TEST_PAIRS[@]}"; do
     TEST_PAIR=($TEST_PAIR)
