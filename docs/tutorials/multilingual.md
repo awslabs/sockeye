@@ -110,18 +110,9 @@ TRAIN_SOURCES=(
      "it"
 )
 
-TGT=en
+TRAIN_TGT=en
 
 TEST_PAIRS=(
-    "de en"
-    "en de"
-    "it en"
-    "en it"
-    "de it"
-    "it de"
-)
-
-ALL_PAIRS=(
     "de en"
     "en de"
     "it en"
@@ -146,15 +137,25 @@ done
 We then normalize and tokenize all texts:
 
 ```bash
-for PAIR in "${ALL_PAIRS[@]}"; do
+for PAIR in "${TRAIN_PAIRS[@]}"; do
     PAIR=($PAIR)
     SRC=${PAIR[0]}
     TGT=${PAIR[1]}
 
     for LANG in "${SRC}" "${TGT}"; do
-        for corpus in train valid test; do
+        for corpus in train valid; do
             cat "$DATA/${corpus}.${SRC}-${TGT}.${LANG}" | perl $MOSES/tokenizer/normalize-punctuation.perl | perl $MOSES/tokenizer/tokenizer.perl -a -q -l $LANG  > "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}"
         done
+    done
+done
+
+for PAIR in "${TEST_PAIRS[@]}"; do
+    PAIR=($PAIR)
+    SRC=${PAIR[0]}
+    TGT=${PAIR[1]}
+
+    for LANG in "${SRC}" "${TGT}"; do
+        cat "$DATA/test.${SRC}-${TGT}.${LANG}" | perl $MOSES/tokenizer/normalize-punctuation.perl | perl $MOSES/tokenizer/tokenizer.perl -a -q -l $LANG  > "$DATA/test.${SRC}-${TGT}.tok.${LANG}"
     done
 done
 ```
@@ -172,18 +173,28 @@ rm train.tmp
 ```
 
 This will create a joint source and target BPE vocabulary.
-Next, we use apply the Byte Pair Encoding to our training and development data:
+Next, we apply the Byte Pair Encoding to our training and development data:
 
 ```bash
-for PAIR in "${ALL_PAIRS[@]}"; do
+for PAIR in "${TRAIN_PAIRS[@]}"; do
     PAIR=($PAIR)
     SRC=${PAIR[0]}
     TGT=${PAIR[1]}
 
     for LANG in "${SRC}" "${TGT}"; do
-        for corpus in train valid test; do
+        for corpus in train valid; do
             subword-nmt apply-bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 < "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}" > "$DATA/${corpus}.${SRC}-${TGT}.bpe.${LANG}"
         done
+    done
+done
+
+for PAIR in "${TEST_PAIRS[@]}"; do
+    PAIR=($PAIR)
+    SRC=${PAIR[0]}
+    TGT=${PAIR[1]}
+
+    for LANG in "${SRC}" "${TGT}"; do
+        subword-nmt apply-bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 < "$DATA/test.${SRC}-${TGT}.tok.${LANG}" > "$DATA/test.${SRC}-${TGT}.bpe.${LANG}"
     done
 done
 ```
@@ -191,15 +202,24 @@ done
 Then we also need to prefix the source sentences with a special tag to indicate target language:
 
 ```bash
-for PAIR in "${ALL_PAIRS[@]}"; do
+for PAIR in "${TRAIN_PAIRS[@]}"; do
     PAIR=($PAIR)
     SRC=${PAIR[0]}
     TGT=${PAIR[1]}
 
-    for corpus in train valid test; do
+    for corpus in train valid; do
         cat $DATA/$corpus.${SRC}-${TGT}.bpe.${SRC} | python tools/add_tag_to_lines.py --tag "<2${TGT}>" > $DATA/$corpus.${SRC}-${TGT}.tag.${SRC}
         cat $DATA/$corpus.${SRC}-${TGT}.bpe.${TGT} | python tools/add_tag_to_lines.py --tag "<2${SRC}>" > $DATA/$corpus.${SRC}-${TGT}.tag.${TGT}
     done
+done
+
+for PAIR in "${TEST_PAIRS[@]}"; do
+    PAIR=($PAIR)
+    SRC=${PAIR[0]}
+    TGT=${PAIR[1]}
+
+     cat $DATA/test.${SRC}-${TGT}.bpe.${SRC} | python tools/add_tag_to_lines.py --tag "<2${TGT}>" > $DATA/test.${SRC}-${TGT}.tag.${SRC}
+     cat $DATA/test.${SRC}-${TGT}.bpe.${TGT} | python tools/add_tag_to_lines.py --tag "<2${SRC}>" > $DATA/test.${SRC}-${TGT}.tag.${TGT}
 done
 ```
 
@@ -287,7 +307,6 @@ Next we post-process the translations, first removing the special target languag
 then detokenizing:
 
 ```bash
-TRAIN_TGT_TAG=en
 
 for TEST_PAIR in "${TEST_PAIRS[@]}"; do
     TEST_PAIR=($TEST_PAIR)
@@ -297,7 +316,7 @@ for TEST_PAIR in "${TEST_PAIRS[@]}"; do
     # remove target language tag
 
     cat translations/test.${SRC}-${TGT}.tag.${TGT} | \
-        python tools/remove_tag_from_translations.py --tag "<2${TRAIN_TGT_TAG}>" \
+        python tools/remove_tag_from_translations.py --tag "<2${TRAIN_TGT}>" \
         > translations/test.${SRC}-${TGT}.bpe.${TGT}
 
     # remove BPE encoding
