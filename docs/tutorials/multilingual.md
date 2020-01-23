@@ -256,33 +256,37 @@ Sanity checks to perform at this point:
 Before we start training we will prepare the training data by splitting it into shards and serializing it in matrix format:
 ```bash
 python -m sockeye.prepare_data \
-                        -s $DATA/train.src \
-                        -t $DATA/train.trg \
-                        -o train_data
+                        -s $DATA/train.tag.src \
+                        -t $DATA/train.tag.trg \
+                        -o train_data \
+                        --shared-vocab
 ```
 
 We can now kick off the training process:
 ```bash
 python -m sockeye.train -d train_data \
-                        -vs $DATA/valid.src \
-                        -vt $DATA/valid.trg \
+                        -vs $DATA/valid.tag.src \
+                        -vt $DATA/valid.tag.trg \
                         --encoder rnn \
                         --decoder rnn \
-                        --num-embed 256 \
+                        --num-embed 512 \
                         --rnn-num-hidden 512 \
                         --rnn-attention-type dot \
-                        --max-seq-len 60 \
+                        --weight-tying \
+                        --shared-vocab \
+                        --weight-tying-type src_trg_softmax \
                         --decode-and-evaluate 500 \
                         --device-ids 0 \
+                        --decode-and-evaluate-device-id 0 \
                         -o iwslt_model
 ```
 
-## Translation and Evaluation for Zero-Shot Directions
+## Translation and Evaluation including Zero-Shot Directions
 
 An interesting outcome of multilingual training is that a trained model is (to some extent) capable of translating between language pairs
 that is has not seen training examples for.
 
-To test the zero-shot condition, we translate from German to French and vice versa. Both pairs are unknown to the model.
+To test the zero-shot condition, we translate from German to Italian and vice versa. Both pairs are unknown to the model.
 
 ```bash
 mkdir -p translations
