@@ -73,8 +73,8 @@ wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/d
 
 We will use data provided by the [IWSLT 2017 multilingual shared task](https://sites.google.com/site/iwsltevaluation2017/TED-tasks).
 
-We limit ourselves to using the training data of just 3 languages (DE, EN and FR), but in principle you could include many more
-language pairs.
+We limit ourselves to using the training data of just 3 languages (DE, EN and IT), but in principle you could include many more
+language pairs, for instance NL and RO which are also part of this IWSLT data set.
 
 ## Preprocessing
 
@@ -85,8 +85,7 @@ The preprocessing consists of the following steps:
 - Prefix the source sentences with a special target language indicator token.
 
 Run the following script to obtain IWSLT17 data in a convenient format,
-the code is taken from the [Fairseq example for preparing IWSLT17 data](https://github.com/pytorch/fairseq/blob/master/examples/translation/prepare-iwslt17-multilingual.sh)
-and adapted slightly.
+the code is adapted from the [Fairseq example for preparing IWSLT17 data](https://github.com/pytorch/fairseq/blob/master/examples/translation/prepare-iwslt17-multilingual.sh).
 
 ```bash
 bash tools/prepare-iwslt17-multilingual.sh
@@ -101,10 +100,16 @@ We then normalize and tokenize all texts:
 MOSES=tools/moses-scripts/scripts
 DATA=data
 
-for SRC in de fr; do
-    for LANG in "${SRC}" en; do
-        for corpus in train valid; do
-            cat "$DATA/train.${SRC}-${TGT}.${LANG}" | perl $MOSES/tokenizer/normalize-punctuation.perl | perl $MOSES/tokenizer/tokenizer.perl -a -q -l $LANG  > "$DATA/train.${SRC}-${TGT}.tok.${LANG}"
+SRCS=(
+    "de"
+     "it"
+)
+TGT=en
+
+for SRC in "${SRCS[@]}"; do
+    for LANG in "${SRC}" "${TGT}"; do
+        for corpus in train valid test; do
+            cat "$DATA/${corpus}.${SRC}-${TGT}.${LANG}" | perl $MOSES/tokenizer/normalize-punctuation.perl | perl $MOSES/tokenizer/tokenizer.perl -a -q -l $LANG  > "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}"
         done
     done
 done
@@ -126,10 +131,22 @@ This will create a joint source and target BPE vocabulary.
 Next, we use apply the Byte Pair Encoding to our training and development data:
 
 ```bash
-for SRC in de fr; do
-    for LANG in "${SRC}" en; do
-        for corpus in train valid; do
+for SRC in "${SRCS[@]}"; do
+    for LANG in "${SRC}" "${TGT}"; do
+        for corpus in train valid test; do
             python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 < "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}" > "$DATA/${corpus}.${SRC}-${TGT}.bpe.${LANG}"
+        done
+    done
+done
+```
+
+We create symlinks for the reverse training directions, i.e. EN-DE and EN-IT:
+
+```bash
+for SRC in "${SRCS[@]}"; do
+    for LANG in "${SRC}" "${TGT}"; do
+        for corpus in train valid; do
+            ln -s $DATA/$corpus.${SRC}-${TGT}.bpe.${LANG} $DATA/$corpus.${TGT}-${SRC}.bpe.${LANG}
         done
     done
 done
@@ -138,32 +155,16 @@ done
 Then we also need to prefix the source sentences with a special tag to indicate target language:
 
 ```bash
-# link reverse directions
-
-for corpus in train valid; do
-    ln -s $DATA/$corpus.de-en.bpe.de $DATA/$corpus.en-de.bpe.de
-    ln -s $DATA/$corpus.de-en.bpe.en $DATA/$corpus.en-de.bpe.en
-    
-    ln -s $DATA/$corpus.fr-en.bpe.fr $DATA/$corpus.en-fr.bpe.fr
-    ln -s $DATA/$corpus.fr-en.bpe.en $DATA/$corpus.en-fr.bpe.en
+for SRC in "${SRCS[@]}"; do
+    for corpus in train valid test; do
+        cat $DATA/$corpus.${SRC}-${TGT}.bpe.${SRC} | python tools/add_tag_to_lines.py --tag "<2${TGT}>" > $DATA/$corpus.${SRC}-${TGT}.tag.${SRC}
+        cat $DATA/$corpus.${SRC}-${TGT}.bpe.${TGT} | python tools/add_tag_to_lines.py --tag "<2${SRC}>" > $DATA/$corpus.${SRC}-${TGT}.tag.${TGT}
+        
+        # same for reverse direction
+        cat $DATA/$corpus.${TGT}-${SRC}.bpe.${TGT} | python tools/add_tag_to_lines.py --tag "<2${SRC}>" > $DATA/$corpus.${TGT}-${SRC}.tag.${TGT}
+        cat $DATA/$corpus.${TGT}-${SRC}.bpe.${SRC} | python tools/add_tag_to_lines.py --tag "<2${TGT}>" > $DATA/$corpus.${TGT}-${SRC}.tag.${SRC}
+    done
 done
-
-# add tags to BPE versions of files
-
-for corpus in train valid; do
-    cat $DATA/$corpus.de-en.bpe.de | python tools/add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.de-en.tag.de
-    cat $DATA/$corpus.de-en.bpe.en | python tools/add_tag_to_lines.py --tag "<2de>" > $DATA/$corpus.de-en.tag.en
-
-    cat $DATA/$corpus.en-de.bpe.de | python tools/add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.en-de.tag.de
-    cat $DATA/$corpus.en-de.bpe.en | python tools/add_tag_to_lines.py --tag "<2de>" > $DATA/$corpus.en-de.tag.en
-
-    cat $DATA/$corpus.fr-en.bpe.fr | python tools/add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.fr-en.tag.fr
-    cat $DATA/$corpus.fr-en.bpe.en | python tools/add_tag_to_lines.py --tag "<2fr>" > $DATA/$corpus.fr-en.tag.en
-
-    cat $DATA/$corpus.en-fr.bpe.fr | python tools/add_tag_to_lines.py --tag "<2en>" > $DATA/$corpus.en-fr.tag.fr
-    cat $DATA/$corpus.en-fr.bpe.en | python tools/add_tag_to_lines.py --tag "<2fr>" > $DATA/$corpus.en-fr.tag.en
-done
-
 ```
 
 Concatenate all individual files to obtain final training and development files:
@@ -173,38 +174,14 @@ for corpus in train valid; do
     touch $DATA/$corpus.tag.src
     touch $DATA/$corpus.tag.trg
 
-    cat $DATA/$corpus.de-en.tag.de $DATA/$corpus.en-de.tag.en $DATA/$corpus.fr-en.tag.fr $DATA/$corpus.en-fr.tag.en > $DATA/$corpus.tag.src
-    cat $DATA/$corpus.de-en.tag.en $DATA/$corpus.en-de.tag.de $DATA/$corpus.fr-en.tag.en $DATA/$corpus.en-fr.tag.fr > $DATA/$corpus.tag.trg
+    # be specific here, to be safe
+
+    cat $DATA/$corpus.de-en.tag.de $DATA/$corpus.en-de.tag.en $DATA/$corpus.it-en.tag.it $DATA/$corpus.en-it.tag.en > $DATA/$corpus.tag.src
+    cat $DATA/$corpus.de-en.tag.en $DATA/$corpus.en-de.tag.de $DATA/$corpus.it-en.tag.en $DATA/$corpus.en-it.tag.it > $DATA/$corpus.tag.trg
 done
 ```
 
-For our test data, we exploit the fact that IWSLT17 development data is multi-way parallel:
-
-```bash
-# link existing files
-
-ln -s $DATA/valid.de-en.de $DATA/test.de-fr.de
-ln -s $DATA/valid.fr-en.fr $DATA/test.de-fr.fr
-
-ln -s $DATA/valid.de-en.de $DATA/test.fr-de.de
-ln -s $DATA/valid.fr-en.fr $DATA/test.fr-de.fr
-
-ln -s $DATA/valid.de-en.bpe.de $DATA/test.de-fr.bpe.de
-ln -s $DATA/valid.fr-en.bpe.fr $DATA/test.de-fr.bpe.fr
-
-ln -s $DATA/valid.fr-en.bpe.fr $DATA/test.fr-de.bpe.fr
-ln -s $DATA/valid.de-en.bpe.de $DATA/test.fr-de.bpe.de
-
-# add special target language tag
-
-cat $DATA/test.de-fr.bpe.de | python tools/add_tag_to_lines.py --tag "<2fr" > $DATA/test.de-fr.tag.de
-cat $DATA/test.de-fr.bpe.fr | python tools/add_tag_to_lines.py --tag "<2de" > $DATA/test.de-fr.tag.fr
-
-cat $DATA/test.fr-de.bpe.de | python tools/add_tag_to_lines.py --tag "<2fr" > $DATA/test.fr-de.tag.de
-cat $DATA/test.fr-de.bpe.fr | python tools/add_tag_to_lines.py --tag "<2de" > $DATA/test.fr-de.tag.fr
-```
-
-We link both the raw text and create a tagged version, the tagged file as input for translation, the raw text for evaluation,
+As our test data, need both the raw text and preprocessed, tagged version: the tagged file as input for translation, the raw text for evaluation,
 to compute detokenized BLEU.
 
 As a sanity check, compute number of lines in all files:
@@ -213,7 +190,10 @@ As a sanity check, compute number of lines in all files:
 wc -l $DATA/*
 ```
 
-Parallel files should still have the same number of lines.
+Sanity checks to perform at this point:
+- Parallel files should still have the same number of lines.
+- Most file endings indicate a language, language suffixes should be correct.
+- Importantly, corresponding lines in the preprocessed training and validation files should be parallel.
 
 ## Training
 
