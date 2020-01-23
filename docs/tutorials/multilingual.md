@@ -231,43 +231,69 @@ To test the zero-shot condition, we translate from German to French and vice ver
 ```bash
 mkdir -p translations
 
-python -m sockeye.translate \
-                        -i $DATA/test.de-fr.tag.de \
-                        -o translations/test.de-fr.tag.fr \
-                        -m iwslt_model \
-                        --beam-size 10 \
-                        --length-penalty-alpha 1.0 \
-                        --device-ids 0 \
-                        --batch-size 64
+TEST_PAIRS=(
+    "de en"
+    "en de"
+    "it en"
+    "en it"
+    "de it"
+    "it de"
+)
 
-python -m sockeye.translate \
-                        -i $DATA/test.fr-de.tag.fr \
-                        -o translations/test.fr-de.tag.de \
-                        -m iwslt_model \
-                        --beam-size 10 \
-                        --length-penalty-alpha 1.0 \
-                        --device-ids 0 \
-                        --batch-size 64
+for TEST_PAIR in "${TEST_PAIRS[@]}"; do
+    TEST_PAIR=($TEST_PAIR)
+    SRC=${TEST_PAIR[0]}
+    TGT=${TEST_PAIR[1]}
+
+    python -m sockeye.translate \
+                            -i $DATA/test.${SRC}-${TGT}.tag.${SRC} \
+                            -o translations/test.${SRC}-${TGT}.tag.${TGT} \
+                            -m iwslt_model \
+                            --beam-size 10 \
+                            --length-penalty-alpha 1.0 \
+                            --device-ids 0 \
+                            --batch-size 64
+done
 ```
 
 Next we post-process the translations, first removing the special target language tag, then removing BPE,
 then detokenizing:
 
 ```bash
-cat translations/test.de-fr.tag.fr | python tools/remove_tag_from_translations.py --tag "<2en>" > translations/test.de-fr.bpe.fr
-cat translations/test.de-fr.bpe.fr | sed -r 's/@@( |$)//g' > translations/test.de-fr.tok.fr
-cat translations/test.de-fr.tok.fr | $MOSES/tokenizer/detokenizer.perl -l "fr" > translations/test.de-fr.fr
+TRAIN_TGT_TAG=en
 
-cat translations/test.fr-de.tag.de | python tools/remove_tag_from_translations.py --tag "<2en>" > translations/test.fr-de.bpe.de
-cat translations/test.fr-de.bpe.de | sed -r 's/@@( |$)//g' > translations/test.fr-de.tok.de
-cat translations/test.fr-de.tok.de | $MOSES/tokenizer/detokenizer.perl -l "de" > translations/test.fr-de.de
+for TEST_PAIR in "${TEST_PAIRS[@]}"; do
+    TEST_PAIR=($TEST_PAIR)
+    SRC=${TEST_PAIR[0]}
+    TGT=${TEST_PAIR[1]}
+
+    # remove target language tag
+
+    cat translations/test.${SRC}-${TGT}.tag.${TGT} | \
+        python tools/remove_tag_from_translations.py --tag "<2${TRAIN_TGT_TAG}>" \
+        > translations/test.${SRC}-${TGT}.bpe.${TGT}
+
+    # remove BPE encoding
+
+    cat translations/test.${SRC}-${TGT}.bpe.${TGT} | sed -r 's/@@( |$)//g' > translations/test.${SRC}-${TGT}.tok.${TGT}
+
+    # remove tokenization
+
+    cat translations/test.${SRC}-${TGT}.tok.${TGT} | $MOSES/tokenizer/detokenizer.perl -l "de" > translations/test.${SRC}-${TGT}.${TGT}
+done
 ```
 
 Finally, we compute BLEU scores for both zero-shot directions with [sacreBLEU](https://github.com/mjpost/sacreBLEU):
 
 ```bash
-cat translations/test.de-fr.fr | sacrebleu $DATA/test.de-fr.fr
-cat translations/test.fr-de.de | sacrebleu $DATA/test.fr-de.de
+for TEST_PAIR in "${TEST_PAIRS[@]}"; do
+    TEST_PAIR=($TEST_PAIR)
+    SRC=${TEST_PAIR[0]}
+    TGT=${TEST_PAIR[1]}
+
+    echo "translations/test.${SRC}-${TGT}.${TGT}"
+    cat translations/test.${SRC}-${TGT}.${TGT} | sacrebleu $DATA/test.${SRC}-${TGT}.${TGT}
+done
 ```
 
 ## Summary
