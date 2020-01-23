@@ -121,7 +121,14 @@ TEST_PAIRS=(
     "it de"
 )
 
-ALL_PAIRS=$TEST_PAIRS
+ALL_PAIRS=(
+    "de en"
+    "en de"
+    "it en"
+    "en it"
+    "de it"
+    "it de"
+)
 ```
 
 We first create symlinks for the reverse training directions, i.e. EN-DE and EN-IT:
