@@ -134,7 +134,7 @@ Next, we use apply the Byte Pair Encoding to our training and development data:
 for SRC in "${SRCS[@]}"; do
     for LANG in "${SRC}" "${TGT}"; do
         for corpus in train valid test; do
-            python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 < "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}" > "$DATA/${corpus}.${SRC}-${TGT}.bpe.${LANG}"
+            subword-nmt apply_bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 < "$DATA/${corpus}.${SRC}-${TGT}.tok.${LANG}" > "$DATA/${corpus}.${SRC}-${TGT}.bpe.${LANG}"
         done
     done
 done
