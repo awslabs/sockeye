@@ -9,7 +9,8 @@ and [training a standard WMT model](https://awslabs.github.io/sockeye/tutorials/
 
 ## Approach
 
-There are several ways to train a multilingual translation system. This tutorial follows the approach described in [Johnson et al (2016)](https://arxiv.org/abs/1611.04558).
+There are several ways to train a multilingual translation system. This tutorial follows the approach
+described in [Johnson et al (2016)](https://arxiv.org/abs/1611.04558).
 
 In a nutshell,
 
@@ -41,8 +42,8 @@ virtualenv -p python3 sockeye3
 source sockeye3/bin/activate
 ```
 
-Then [install the correct version of Sockeye](https://awslabs.github.io/sockeye/setup.html). Then we install several libraries for preprocessing,
-monitoring and evaluation:
+Then [install the correct version of Sockeye](https://awslabs.github.io/sockeye/setup.html).
+We also install several libraries for preprocessing, monitoring and evaluation:
 
 ```bash
 pip install matplotlib mxboard
@@ -199,7 +200,7 @@ for PAIR in "${TEST_PAIRS[@]}"; do
 done
 ```
 
-Then we also need to prefix the source sentences with a special tag to indicate target language:
+We also need to prefix the source sentences with a special tag to indicate target language:
 
 ```bash
 for PAIR in "${TRAIN_PAIRS[@]}"; do
@@ -237,7 +238,7 @@ for corpus in train valid; do
 done
 ```
 
-As our test data, need both the raw text and preprocessed, tagged version: the tagged file as input for translation, the raw text for evaluation,
+As our test data, we need both the raw text and the preprocessed, tagged version: the tagged file as input for translation, the raw text for evaluation,
 to compute detokenized BLEU.
 
 As a sanity check, compute number of lines in all files:
@@ -286,7 +287,8 @@ python -m sockeye.train -d train_data \
 An interesting outcome of multilingual training is that a trained model is (to some extent) capable of translating between language pairs
 that is has not seen training examples for.
 
-To test the zero-shot condition, we translate from German to Italian and vice versa. Both pairs are unknown to the model.
+To test the zero-shot condition, we translate not only the trained directions, but also
+from German to Italian and vice versa. Both of those pairs are unknown to the model.
 
 ```bash
 mkdir -p translations
