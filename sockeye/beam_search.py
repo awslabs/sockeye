@@ -416,12 +416,11 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
             repeat_axis = 0
         elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
             # TODO: Change repeat axis to 1 when interleaved multihead attention is implemented
-            repeat_axis = 0
+            repeat_axis = 1
         else:
             raise ValueError("Provided state format %s not recognized." % state_format)
         repeated_state = state.repeat(repeats=beam_size, axis=repeat_axis)
         repeated_states.append(repeated_state)
-    return repeated_states
 
 
 class SortStates(mx.gluon.HybridBlock):
@@ -438,7 +437,7 @@ class SortStates(mx.gluon.HybridBlock):
                 sorted_state = F.take(state, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
                 # TODO: Change take axis to 1 when interleaved multihead attention is implemented
-                sorted_state = F.take(state, best_hyp_indices)
+                sorted_state = F.take(state, best_hyp_indices, axis=1)
             elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
                 sorted_state = state

@@ -297,7 +297,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, queries, key_values, heads, lengths=None, bias=None):
 
-        logits = F.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
+        logits = F.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
         # TODO(fhieber): consider softmax with length argument once available.
         # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
@@ -317,7 +317,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         probs = F.softmax(logits, axis=-1)
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
 
-        return F.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
+        return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):
@@ -436,18 +436,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         return self._attend(F, queries, kv, lengths=input_lengths, bias=bias), updated_kv
 
 
-<<<<<<< HEAD
-def _remove_first_step(F, data):
-    """
-    :param F: MXNet namespace.
-    :param data: Input data. Shape: (batch, heads, length, num_hidden).
-    :return: Output data. Shape: (batch, heads, length[1:], num_hidden
-    """
-    return F.slice(data, begin=(None, None, 1, None), end=(None, None, None, None))
-
-
-=======
->>>>>>> Removed transposes for decoder kv states (requires fast take on axis=1)
 class MultiHeadAttention(MultiHeadAttentionBase):
     """
     Multi-head attention layer for queries independent from keys/values.
@@ -472,6 +460,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
+<<<<<<< HEAD
             self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
             self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype=dtype)
             self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype=dtype)
@@ -489,6 +478,10 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         keys = split_heads(F, keys, depth_per_head=self.depth_per_head, heads=self.heads)
         values = split_heads(F, values, depth_per_head=self.depth_per_head, heads=self.heads)
         return keys, values
+=======
+            self.ff_q = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
+            self.ff_kv = mx.gluon.nn.Dense(in_units=depth_key_value, units=2*depth_att, flatten=False, use_bias=False, prefix='kv2h_')
+>>>>>>> Faster multihead attention for training, declared model state structure
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
