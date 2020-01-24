@@ -111,8 +111,6 @@ TRAIN_SOURCES=(
      "it"
 )
 
-TRAIN_TGT=en
-
 TEST_PAIRS=(
     "de en"
     "en de"
