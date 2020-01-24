@@ -320,7 +320,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, queries, key_values, heads, lengths=None, bias=None):
 
-        logits = F.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
+        logits = F.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
         # TODO(fhieber): consider softmax with length argument once available.
         # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
@@ -341,7 +341,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         probs = F.softmax(logits, axis=-1)
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
 
-        return F.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
+        return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):
@@ -547,22 +547,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
         with self.name_scope():
             self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
-            self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype=dtype)
-            self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype=dtype)
             self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att, flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
-
-    def project_and_isolate_heads(self, F, memory: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
-        """
-        Projects memory into keys and values, and separates attention heads dimension.
-
-        :param memory: Memory tensor. Shape: (batch, memory_max_length, input_depth).
-        :return: Symbol of shape (batch, heads, memory_max_length, depth_per_head).
-        """
-        keys = self.ff_k(memory)
-        values = self.ff_v(memory)
-        keys = split_heads(F, keys, depth_per_head=self.depth_per_head, heads=self.heads)
-        values = split_heads(F, values, depth_per_head=self.depth_per_head, heads=self.heads)
-        return keys, values
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
