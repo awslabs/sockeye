@@ -54,6 +54,9 @@ class _SingleModelInference(_Inference):
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
 
+    def state_structure(self):
+        return self._model.state_structure()
+
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
         predicted_output_length = predicted_output_length.expand_dims(axis=1)
@@ -84,6 +87,11 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
+
+    def state_structure(self):
+        structure = ''
+        for model in self._models:
+            structure.append(model.state_structure())
 
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
         model_states = []  # type: List[List[mx.nd.NDArray]]
@@ -388,25 +396,32 @@ class SampleK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
 
-def _repeat_states(states: List, beam_size) -> List:
+def _repeat_states(states: List, beam_size, state_structure) -> List:
     repeated_states = []
-    for i in range(len(states)):
-        if i < 2:
+    for i in range(len(state_structure)):
+        if state_structure[i] == 's':
+            # Steps and source_bias have batch dimension on axis 0
             state = states[i].repeat(repeats=beam_size, axis=0)
         else:
+            # Decoder and encoder layer states have batch dimension on axis 1
             state = states[i].repeat(repeats=beam_size, axis=1)
         repeated_states.append(state)
     return repeated_states
 
 
 class SortStates(mx.gluon.HybridBlock):
+
+    def __init__ (self, state_structure, prefix):
+        mx.gluon.HybridBlock.__init__(self, prefix=prefix)
+        self.state_structure = state_structure
+
     def hybrid_forward(self, F, best_hyp_indices, *states):
         sorted_states = []
-        for i in range(len(states)):
-            if i < 2:
+        for i in range(len(self.state_structure)):
+            if self.state_structure[i] == 's':
                 # Steps and source_bias have batch dimension on axis 0
                 state = F.take(states[i], best_hyp_indices)
-            elif i >= ((len(states) - 2) // 2) + 2:
+            elif self.state_structure[i] == 'd':
                 # Decoder layer states have batch dimension on axis 1
                 state = F.take(states[i], best_hyp_indices, axis=1)
             else:
@@ -458,7 +473,8 @@ class BeamSearch(mx.gluon.Block):
         self.global_avoid_trie = global_avoid_trie
 
         with self.name_scope():
-            self._sort_states = SortStates(prefix='sort_states_')
+            self._sort_states = SortStates(state_structure=self._inference.state_structure(),
+                                           prefix='sort_states_')
             self._update_scores = UpdateScores(prefix='update_scores_')
             self._scorer = scorer
             self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
@@ -592,7 +608,7 @@ class BeamSearch(mx.gluon.Block):
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
         # repeat states to beam_size
-        model_states = _repeat_states(model_states, self.beam_size)
+        model_states = _repeat_states(model_states, self.beam_size, self._inference.state_structure())
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence

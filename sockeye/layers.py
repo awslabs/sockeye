@@ -262,7 +262,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, queries, key_values, heads, lengths=None, bias=None):
 
-        logits = F.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
+        logits = F.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
         # TODO(fhieber): consider softmax with length argument once available.
         # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
@@ -282,7 +282,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         probs = F.softmax(logits, axis=-1)
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
 
-        return F.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
+        return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):
@@ -418,9 +418,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
 
         with self.name_scope():
-            self.ff_q = mx.gluon.nn.Dense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
-            self.ff_k = mx.gluon.nn.Dense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_')
-            self.ff_v = mx.gluon.nn.Dense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_')
+            self.ff_q = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
             self.ff_kv = mx.gluon.nn.Dense(in_units=depth_key_value, units=2*depth_att, flatten=False, use_bias=False, prefix='kv2h_')
 
     def hybrid_forward(self, F,

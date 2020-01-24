@@ -83,6 +83,10 @@ class Decoder(mx.gluon.Block):
         super().__init__()
 
     @abstractmethod
+    def state_structure(self):
+        raise NotImplementedError()
+
+    @abstractmethod
     def init_state_from_encoder(self,
                                 encoder_outputs: mx.nd.NDArray,
                                 encoder_valid_length: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
@@ -148,6 +152,22 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                                                                      prefix="final_process_",
                                                                      num_hidden=self.config.model_size)
 
+    def state_structure(self):
+        """
+        Returns the structure of states used for manipulation of the states.
+        Each state is either labeled 's' for step/source_mask (batch-major), 'd' for decoder,
+        or 'e' for encoder.
+        """
+        structure = ''
+        if self.inference_only:
+            structure += 'ss' + 'e' * self.config.num_layers
+        else:
+            structure += 'ses'
+        structure += 'd' * self.config.num_layers
+
+        return structure
+
+
     def init_state_from_encoder(self,
                                 encoder_outputs: mx.nd.NDArray,
                                 encoder_valid_length: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
@@ -179,7 +199,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                 states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
         else:
             # NO encoder projection caching
-            states = [step, encoder_outputs, source_mask]
+            states = [step, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), source_mask]
 
         batch_size = encoder_outputs.shape[0]
         self_att_key_value_dummies = [mx.nd.zeros((1, batch_size, 2 * self.config.model_size),
