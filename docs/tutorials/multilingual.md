@@ -345,7 +345,7 @@ for TEST_PAIR in "${TEST_PAIRS[@]}"; do
     # remove target language tag
 
     cat translations/test.${SRC}-${TGT}.tag.${TGT} | \
-        python tools/remove_tag_from_translations.py --tag "<2${TRAIN_TGT}>" \
+        python tools/remove_tag_from_translations.py --verbose \
         > translations/test.${SRC}-${TGT}.bpe.${TGT}
 
     # remove BPE encoding
@@ -354,7 +354,7 @@ for TEST_PAIR in "${TEST_PAIRS[@]}"; do
 
     # remove tokenization
 
-    cat translations/test.${SRC}-${TGT}.tok.${TGT} | $MOSES/tokenizer/detokenizer.perl -l "de" > translations/test.${SRC}-${TGT}.${TGT}
+    cat translations/test.${SRC}-${TGT}.tok.${TGT} | $MOSES/tokenizer/detokenizer.perl -l "${TGT}" > translations/test.${SRC}-${TGT}.${TGT}
 done
 ```
 
