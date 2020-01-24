@@ -286,6 +286,33 @@ that is has not seen training examples for.
 To test the zero-shot condition, we translate not only the trained directions, but also
 from German to Italian and vice versa. Both of those pairs are unknown to the model.
 
+Let's first try this for a single sentence in German. Remember to preprocess input text in exactly the same way as the
+training data.
+
+```bash
+echo "Was für ein schöner Tag!" | \
+    perl $MOSES/tokenizer/normalize-punctuation.perl | \
+    perl $MOSES/tokenizer/tokenizer.perl -a -q -l de | \
+    subword-nmt apply-bpe -c bpe.codes --vocabulary bpe.vocab --vocabulary-threshold 50 | \
+    python tools/add_tag_to_lines.py --tag "<2it>" | \
+    python -m sockeye.translate \
+                            -m iwslt_model \
+                            --beam-size 10 \
+                            --length-penalty-alpha 1.0 \
+                            --device-ids 1
+```
+
+If you trained your model for at least several hours, the output should be similar to:
+
+```bash
+<2en> Era un bel giorno !
+```
+
+Which is a reasonable enough translation! Note that a well-trained model always generates a special language tag as the first token.
+In this case it's `<2en>` since Italian data was always paired with English data in our training set.
+
+Now let's translate all of our test sets to evaluate performance in all translation directions:
+
 ```bash
 mkdir -p translations
 
