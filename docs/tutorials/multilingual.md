@@ -268,15 +268,11 @@ We can now kick off the training process:
 python -m sockeye.train -d train_data \
                         -vs $DATA/valid.tag.src \
                         -vt $DATA/valid.tag.trg \
-                        --encoder rnn \
-                        --decoder rnn \
-                        --num-embed 512 \
-                        --rnn-num-hidden 512 \
-                        --rnn-attention-type dot \
+                        --encoder transformer \
+                        --decoder transformer \
                         --weight-tying \
                         --shared-vocab \
                         --weight-tying-type src_trg_softmax \
-                        --decode-and-evaluate 500 \
                         --device-ids 0 \
                         --decode-and-evaluate-device-id 0 \
                         -o iwslt_model
