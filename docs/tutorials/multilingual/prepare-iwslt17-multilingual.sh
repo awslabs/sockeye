@@ -2,6 +2,7 @@
 
 # Code taken from (modified):
 # https://github.com/pytorch/fairseq/blob/master/examples/translation/prepare-iwslt17-multilingual.sh
+# MIT licensed. "Copyright (c) Facebook, Inc. and its affiliates. All rights reserved."
 
 SRCS=(
     "de"
