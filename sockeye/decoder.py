@@ -155,8 +155,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     def state_structure(self) -> str:
         """
         Returns the structure of states used for manipulation of the states.
-        Each state is either labeled 's' for step/source_mask (batch-major), 'd' for decoder,
-        or 'e' for encoder.
+        Each state is either labeled 's' for step (batch-major), 'b' for source_mask (batch-major),
+        'd' for decoder (time-major), or 'e' for encoder (time-major).
         """
         structure = ''
         if self.inference_only:
