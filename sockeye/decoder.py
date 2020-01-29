@@ -83,7 +83,7 @@ class Decoder(mx.gluon.Block):
         super().__init__()
 
     @abstractmethod
-    def state_structure(self):
+    def state_structure(self) -> str:
         raise NotImplementedError()
 
     @abstractmethod
@@ -152,7 +152,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                                                                      prefix="final_process_",
                                                                      num_hidden=self.config.model_size)
 
-    def state_structure(self):
+    def state_structure(self) -> str:
         """
         Returns the structure of states used for manipulation of the states.
         Each state is either labeled 's' for step/source_mask (batch-major), 'd' for decoder,
@@ -160,10 +160,10 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         """
         structure = ''
         if self.inference_only:
-            structure += 'ss' + 'e' * self.config.num_layers
+            structure += C.STEP_STATE + C.BIAS_STATE + C.ENCODER_STATE * self.config.num_layers
         else:
-            structure += 'ses'
-        structure += 'd' * self.config.num_layers
+            structure += C.STEP_STATE + C.ENCODER_STATE + C.BIAS_STATE
+        structure += C.DECODER_STATE * self.config.num_layers
 
         return structure
 

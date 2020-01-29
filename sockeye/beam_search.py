@@ -54,7 +54,7 @@ class _SingleModelInference(_Inference):
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
 
-    def state_structure(self):
+    def state_structure(self) -> str:
         return self._model.state_structure()
 
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
@@ -88,10 +88,11 @@ class _EnsembleInference(_Inference):
             raise ValueError()
         self._const_lr = constant_length_ratio
 
-    def state_structure(self):
+    def state_structure(self) -> str:
         structure = ''
         for model in self._models:
             structure.append(model.state_structure())
+        return structure
 
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
         model_states = []  # type: List[List[mx.nd.NDArray]]
@@ -396,15 +397,18 @@ class SampleK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
 
-def _repeat_states(states: List, beam_size, state_structure) -> List:
+def _repeat_states(states: List, beam_size: int, state_structure: str) -> List:
     repeated_states = []
-    for i in range(len(state_structure)):
-        if state_structure[i] == 's':
+    for i, state_format in enumerate(state_structure):
+        if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
             # Steps and source_bias have batch dimension on axis 0
-            state = states[i].repeat(repeats=beam_size, axis=0)
-        else:
+            repeat_axis = 0
+        elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
             # Decoder and encoder layer states have batch dimension on axis 1
-            state = states[i].repeat(repeats=beam_size, axis=1)
+            repeat_axis = 1
+        else:
+            raise ValueError("Provided state format %s not recognized." % state_format)
+        state = states[i].repeat(repeats=beam_size, axis=repeat_axis)
         repeated_states.append(state)
     return repeated_states
 
@@ -417,16 +421,18 @@ class SortStates(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, best_hyp_indices, *states):
         sorted_states = []
-        for i in range(len(self.state_structure)):
-            if self.state_structure[i] == 's':
+        for i, state_format in enumerate(self.state_structure):
+            if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
                 # Steps and source_bias have batch dimension on axis 0
                 state = F.take(states[i], best_hyp_indices)
-            elif self.state_structure[i] == 'd':
+            elif state_format == C.DECODER_STATE:
                 # Decoder layer states have batch dimension on axis 1
                 state = F.take(states[i], best_hyp_indices, axis=1)
-            else:
+            elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
                 state = states[i]
+            else:
+                raise ValueError("Provided state format %s not recognized." % state_format)
             sorted_states.append(state)
         return sorted_states
 
