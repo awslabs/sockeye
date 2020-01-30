@@ -64,9 +64,9 @@ git clone https://github.com/bricksdont/moses-scripts tools/moses-scripts
 
 # download helper scripts
 
-wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
-wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
-wget https://raw.githubusercontent.com/ZurichNLP/sockeye/multilingual-tutorial/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
 ```
 
 
