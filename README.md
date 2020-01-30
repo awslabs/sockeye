@@ -46,8 +46,16 @@ For technical information about Sockeye, see our paper on the arXiv ([BibTeX](so
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
 If you know more, please let us know or submit a pull request (last updated: August 2019).
 
+### 2020
+
+* Niu, Xing, Marine Carpuat. "Controlling Neural Machine Translation Formality with Synthetic Supervision." Proceedings of AAAI (2020)
+
 ### 2019
 
+* Agrawal, Sweta, Marine Carpuat. "Controlling Text Complexity in Neural Machine Translation." Proceedings of EMNLP (2019)
+* Beck, Daniel, Trevor Cohn, Gholamreza Haffari. "Neural Speech Translation using Lattice Transformations and Graph Networks." Proceedings of TextGraphs-13 (EMNLP 2019)
+* Currey, Anna, Kenneth Heafield. "Zero-Resource Neural Machine Translation with Monolingual Pivot Data." Proceedings of EMNLP (2019)
+* Gupta, Prabhakar, Mayank Sharma. "Unsupervised Translation Quality Estimation for Digital Entertainment Content Subtitles." IEEE International Journal of Semantic Computing (2019)
 * Hu, J. Edward, Huda Khayrallah, Ryan Culkin, Patrick Xia, Tongfei Chen, Matt Post, and Benjamin Van Durme. "Improved Lexically Constrained Decoding for Translation and Monolingual Rewriting." Proceedings of NAACL-HLT (2019)
 * Rosendahl, Jan, Christian Herold, Yunsu Kim, Miguel Graça,Weiyue Wang, Parnia Bahar, Yingbo Gao and Hermann Ney “The RWTH Aachen University Machine Translation Systems for WMT 2019” Proceedings of the 4th WMT: Research Papers (2019)
 * Thompson, Brian, Jeremy Gwinnup, Huda Khayrallah, Kevin Duh, and Philipp Koehn. "Overcoming catastrophic forgetting during domain adaptation of neural machine translation." Proceedings of NAACL-HLT 2019 (2019)
