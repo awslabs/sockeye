@@ -16,6 +16,7 @@ import time
 import logging
 import os
 from typing import cast, Optional, Tuple, Union, List
+from collections import defaultdict
 
 import mxnet as mx
 from sockeye import __version__
@@ -440,6 +441,11 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
+    #Are we converting the model to 8-bit?
+    quantizing = (dtype == C.DTYPE_INT8 and model_config.dtype != C.DTYPE_INT8)
+    if quantizing:
+        model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
+
     model = SockeyeModel(model_config, inference_only=inference_only)
     model.initialize(ctx=context)
     if model_config.dtype != C.DTYPE_INT8:
@@ -448,27 +454,42 @@ def load_model(model_folder: str,
         # mix of float32 and int8.  Cast would try to make everything int8.
         model.cast(model_config.dtype)
 
-    if dtype is None:
+    if quantizing:
+        logger.info("Model dtype: quantizing from float32 to int8")
+        #The scaling factors are missing
+        allow_missing = True
+        cast_dtype = True
+        dtype_source = 'saved'
+    elif dtype is None:
         logger.info("Model dtype: %s" % model_config.dtype)
+        allow_missing = False
         cast_dtype = False
         dtype_source = 'saved'
     else:
         logger.info("Model dtype: overridden to %s" % dtype)
         model.cast(dtype)
+        allow_missing = False
         cast_dtype = True
         dtype_source = 'current'
 
     model.load_parameters(filename=params_fname,
                           ctx=context,
-                          allow_missing=False,
+                          allow_missing=allow_missing,
                           ignore_extra=False,
                           cast_dtype=cast_dtype,
                           dtype_source=dtype_source)
-    for param in model.collect_params().values():
+    
+    params = model.collect_params()
+    for param in params.values():
         param.grad_req = 'null'
-
+    #float32 to int8.
+    if quantizing:
+        quantization.convert_weights_disk_format(params)
+        #TODO: check for missing parameters somehow.
+     
+    #Disk format to CPU-dependent format.
     if model_config.dtype == C.DTYPE_INT8:
-        quantization.convert_weights_cpu_dependent(model.collect_params())
+        quantization.convert_weights_cpu_dependent(params)
 
     if hybridize:
         model.hybridize(static_alloc=True)

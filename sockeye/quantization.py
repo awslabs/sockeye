@@ -148,8 +148,23 @@ class QuantizableDense(mx.gluon.HybridBlock):
                         act=self.act if self.act else 'linear',
                         layout='{0} -> {1}'.format(shape[1] if shape[1] else None, shape[0]))
 
-#Convert weights from disk format (B^T in int8 quantized format) to CPU-dependent (PrepareB) format for multiplication.
-def convert_weights_cpu_dependent(params):
+
+#Convert weights from float32 MXNet format (B^T in float32) to disk format (B^T in int8 format).
+#params is expected to be model.collect_params() from a float32 model
+def convert_weights_disk_format(params):
     for name, param in params.items():
+        if name.endswith("_weight"):
+            scaling_name = name[0:-6] + "scaling"
+            if scaling_name in params:
+                b_max = mx.nd.contrib.intgemm_maxabsolute(param.data())
+                params[scaling_name].set_data(b_max / 127.0)
+                quantized = mx.nd.contrib.intgemm_prepare_data(param.data(), b_max)
+                param.set_data(quantized)
+                param.dtype = C.DTYPE_INT8
+
+#Convert weights from disk format (B^T in int8 quantized format) to CPU-dependent (PrepareB) format for multiplication.
+#params is expected to be model.collect_params() from a model already in disk format.
+def convert_weights_cpu_dependent(params):
+    for param in params.values():
         if param.dtype == C.DTYPE_INT8:
             param.set_data(mx.nd.contrib.intgemm_prepare_weight(param.data(), already_quantized = True))
