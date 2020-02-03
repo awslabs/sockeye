@@ -413,7 +413,8 @@ def load_model(model_folder: str,
                dtype: Optional[str] = None,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
-               inference_only: bool = False) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
+               inference_only: bool = False,
+               for_disk_saving: bool = False) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
     """
     Load a model from model_folder.
 
@@ -423,6 +424,7 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param for_disk_saving: If the model is quantized, leave it in CPU-independent format. This is only useful if you are quantizing the model to convert it from float32 to int8 then save to disk.  The model object loaded into RAM will produce incorrect results.
     :return: List of models, source vocabularies, target vocabulary.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -488,7 +490,7 @@ def load_model(model_folder: str,
         #TODO: check for missing parameters somehow.
      
     #Disk format to CPU-dependent format.
-    if model_config.dtype == C.DTYPE_INT8:
+    if model_config.dtype == C.DTYPE_INT8 and not for_disk_saving:
         quantization.convert_weights_cpu_dependent(params)
 
     if hybridize:
