@@ -443,7 +443,9 @@ def load_model(model_folder: str,
     model = SockeyeModel(model_config, inference_only=inference_only)
     model.initialize(ctx=context)
     if model_config.dtype != C.DTYPE_INT8:
-        # TODO implement casting to int8 models.  Currently this code mostly casts a model to the same dtype though.
+        # If model_config.dtype is int8, then the above model construction
+        # (which also used model_config) already set everything to the correct
+        # mix of float32 and int8.  Cast would try to make everything int8.
         model.cast(model_config.dtype)
 
     if dtype is None:
