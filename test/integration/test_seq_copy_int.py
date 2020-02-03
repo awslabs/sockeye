@@ -52,7 +52,7 @@ ENCODER_DECODER_SETTINGS = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2 --nbest-size 2",
-     False, False),
+     False, 0),
     # Basic transformer w/ prepared data & greedy decoding
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -63,7 +63,7 @@ ENCODER_DECODER_SETTINGS = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 1",
-     True, False),
+     True, 0),
     # Basic transformer with source factor, beam-search-stop first decoding
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -75,7 +75,7 @@ ENCODER_DECODER_SETTINGS = [
      " --source-factors-combine sum concat average --source-factors-share-embedding true false true"
      " --source-factors-num-embed 8 2 8",
      "--beam-size 2 --beam-search-stop first",
-     True, True),
+     True, 3),
     # Basic transformer with LHUC
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -86,7 +86,7 @@ ENCODER_DECODER_SETTINGS = [
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
-     False, False),
+     False, 0),
     # Basic transformer and length ratio prediction, and learned brevity penalty during inference
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -99,7 +99,7 @@ ENCODER_DECODER_SETTINGS = [
      " --length-task ratio --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
      " --brevity-penalty-type learned --brevity-penalty-weight 1.0",
-     True, False),
+     True, 0),
     # Basic transformer and absolute length prediction, and constant brevity penalty during inference
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -112,16 +112,16 @@ ENCODER_DECODER_SETTINGS = [
      " --length-task length --length-task-weight 1.0 --length-task-layers 2",
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
-     False, False),
-    ]
+     False, 0),
+]
 
 
-@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, use_source_factors",
+@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, n_source_factors",
                          ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
-                  use_source_factors: bool):
+                  n_source_factors: int):
     """
     Task: copy short sequences of digits
     """
@@ -136,7 +136,7 @@ def test_seq_copy(train_params: str,
                             test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
-                            with_source_factors=use_source_factors) as data:
+                            with_n_source_factors=n_source_factors) as data:
 
         # TODO: Here we temporarily switch off comparing translation and scoring scores, which
         # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).

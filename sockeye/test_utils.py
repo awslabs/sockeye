@@ -99,7 +99,7 @@ def tmp_digits_dataset(prefix: str,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
-                       with_source_factors: bool = False) -> Dict[str, Any]:
+                       with_n_source_factors: int = 0) -> Dict[str, Any]:
     """
     Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
     files.
@@ -126,12 +126,11 @@ def tmp_digits_dataset(prefix: str,
                 'test_source': test_source_path,
                 'test_target': test_target_path}
 
-        if with_source_factors:
-            n_source_factors = 3
+        if with_n_source_factors > 0:
             data['train_source_factors'] = []
             data['dev_source_factors'] = []
             data['test_source_factors'] = []
-            for i in range(n_source_factors):
+            for i in range(with_n_source_factors):
                 train_factor_path = train_source_path + ".factors%d" % i
                 dev_factor_path = dev_source_path + ".factors%d" % i
                 test_factor_path = test_source_path + ".factors%d" % i

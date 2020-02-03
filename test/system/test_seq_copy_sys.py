@@ -95,7 +95,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                             test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
-                            with_source_factors=False) as data:
+                            with_n_source_factors=0) as data:
         data = check_train_translate(train_params=train_params,
                                      translate_params=translate_params,
                                      data=data,
@@ -124,7 +124,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
 
 
 @pytest.mark.parametrize(
-    "name, train_params, translate_params, use_prepared_data, use_source_factor, perplexity_thresh, bleu_thresh", [
+    "name, train_params, translate_params, use_prepared_data, n_source_factors, perplexity_thresh, bleu_thresh", [
     ("Sort:transformer:transformer",
      "--encoder transformer --decoder transformer"
      " --batch-size 16 --update-interval 1 --batch-type sentence"
@@ -133,7 +133,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
      " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
-     True, False,
+     True, 0,
      1.03,
      0.97),
     ("Sort:transformer_with_source_factor",
@@ -145,17 +145,17 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-feed-forward-num-hidden 64"
      " --source-factors-num-embed 2 2 2" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
-     True, True,
+     True, 3,
      1.03,
      0.96)
 ])
 def test_seq_sort(name, train_params, translate_params, use_prepared_data,
-                  use_source_factor, perplexity_thresh, bleu_thresh):
+                  n_source_factors, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.", _TRAIN_LINE_COUNT, _TRAIN_LINE_COUNT_EMPTY, _LINE_MAX_LENGTH, _DEV_LINE_COUNT, _LINE_MAX_LENGTH,
                             _TEST_LINE_COUNT, _TEST_LINE_COUNT_EMPTY, _TEST_MAX_LENGTH,
                             sort_target=True, seed_train=_SEED_TRAIN_DATA, seed_dev=_SEED_DEV_DATA,
-                            with_source_factors=use_source_factor) as data:
+                            with_n_source_factors=n_source_factors) as data:
         data = check_train_translate(train_params=train_params,
                                      translate_params=translate_params,
                                      data=data,
