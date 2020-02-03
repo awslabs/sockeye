@@ -147,3 +147,9 @@ class QuantizableDense(mx.gluon.HybridBlock):
         return s.format(name=self.__class__.__name__,
                         act=self.act if self.act else 'linear',
                         layout='{0} -> {1}'.format(shape[1] if shape[1] else None, shape[0]))
+
+#Convert weights from disk format (B^T in int8 quantized format) to CPU-dependent (PrepareB) format for multiplication.
+def convert_weights_cpu_dependent(params):
+    for name, param in params.items():
+        if param.dtype == C.DTYPE_INT8:
+            param.set_data(mx.nd.contrib.intgemm_prepare_weight(param.data(), already_quantized = True))

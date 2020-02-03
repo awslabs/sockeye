@@ -26,6 +26,7 @@ from . import data_io
 from . import decoder
 from . import encoder
 from . import layers
+from . import quantization
 from . import utils
 from . import vocab
 
@@ -463,6 +464,9 @@ def load_model(model_folder: str,
                           dtype_source=dtype_source)
     for param in model.collect_params().values():
         param.grad_req = 'null'
+
+    if model_config.dtype == C.DTYPE_INT8:
+        quantization.convert_weights_cpu_dependent(model.collect_params())
 
     if hybridize:
         model.hybridize(static_alloc=True)
