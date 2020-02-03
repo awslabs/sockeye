@@ -124,7 +124,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
 
 
 @pytest.mark.parametrize(
-    "name, train_params, translate_params, use_prepared_data, use_source_factor, perplexity_thresh, bleu_thresh", [
+    "name, train_params, translate_params, use_prepared_data, n_source_factors, perplexity_thresh, bleu_thresh", [
     ("Sort:transformer:transformer",
      "--encoder transformer --decoder transformer"
      " --batch-size 16 --update-interval 1 --batch-type sentence"
