@@ -266,9 +266,6 @@ We can now kick off the training process:
 python -m sockeye.train -d train_data \
                         -vs $DATA/valid.tag.src \
                         -vt $DATA/valid.tag.trg \
-                        --encoder transformer \
-                        --decoder transformer \
-                        --weight-tying \
                         --shared-vocab \
                         --weight-tying-type src_trg_softmax \
                         --device-ids 0 \
