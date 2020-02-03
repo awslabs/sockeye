@@ -10,6 +10,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.0]
+
+### Changed
+
+- Version bump, which should have been included in commit b0461b due to incompatible models.
+
 ## [2.0.1]
 
 ### Changed

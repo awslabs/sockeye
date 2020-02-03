@@ -25,3 +25,4 @@ recursive-include docs *.yml
 recursive-include docs *.ico
 recursive-include docs *.css
 recursive-include test *.txt
+include docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh

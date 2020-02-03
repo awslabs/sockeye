@@ -347,18 +347,22 @@ class SockeyeModel(mx.gluon.Block):
         target_embed_name = C.TARGET_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
         output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
 
+        source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not tie_weights else 'default'
         source_embed_weight = self.params.get(source_embed_name,
                                               shape=(self.config.config_embed_source.vocab_size,
                                                      self.config.config_embed_source.num_embed),
-                                              allow_deferred_init=True)
+                                              allow_deferred_init=True,
+                                              grad_stype=source_grad_stype)
 
         if share_embed:
             target_embed_weight = source_embed_weight
         else:
+            target_grad_stype = 'row_sparse' if self.config.config_embed_target.allow_sparse_grad and not tie_weights else 'default'
             target_embed_weight = self.params.get(target_embed_name,
                                                   shape=(self.config.config_embed_target.vocab_size,
                                                          self.config.config_embed_target.num_embed),
-                                                  allow_deferred_init=True)
+                                                  allow_deferred_init=True,
+                                                  grad_stype=target_grad_stype)
 
         if tie_weights:
             output_weight = target_embed_weight
