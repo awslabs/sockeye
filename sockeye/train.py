@@ -817,6 +817,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     print("local")
 
+    print("remote")
+
     setup_main_logger(file_logging=not args.no_logfile,
                       console=not args.quiet,
                       path=os.path.join(output_folder, C.LOG_NAME),
