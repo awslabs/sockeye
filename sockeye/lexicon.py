@@ -181,11 +181,12 @@ class TopKLexicon:
                                "contains at most %d entries per source.", k, loaded_k)
         else:
             top_k = loaded_k
-        self.lex = mx.nd.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype, ctx=self.ctx)
+        self.lex = mx.nd.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype, ctx=mx.cpu())
         for src_id, trg_ids in enumerate(_lex):
             self.lex[src_id, :] = mx.nd.sort(trg_ids[:top_k])
+        self.lex = self.lex.as_in_context(self.ctx)
         load_time = time.time() - load_time_start
-        logger.info("Loaded top-%d lexicon from \"%s\" in %.4fs.", top_k, path, load_time)
+        logger.info("Loaded top-%d lexicon from \"%s\" to \"%s\" in %.4fs.", top_k, path, self.ctx, load_time)
 
     def get_trg_ids(self, src_ids: mx.nd.NDArray) -> mx.nd.NDArray:
         """
