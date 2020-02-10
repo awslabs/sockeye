@@ -19,6 +19,7 @@ import sys
 
 OMP_NUM_THREADS = 'OMP_NUM_THREADS'
 OMP_NUM_THREADS_ARG = '--omp-num-threads'
+ENV_ARG = '--env'
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,15 @@ def handle_omp_num_threads():
                 val = sys.argv[i + 1]
             logger.warning('Setting %s=%s', OMP_NUM_THREADS, val)
             os.environ[OMP_NUM_THREADS] = val
+        elif arg.startswith(ENV_ARG):
+            if arg.startswith(ENV_ARG + '='):
+                argval = arg.split("=", 1)[1]
+            else:
+                argval = sys.argv[i + 1]
+            for var_val in argval.split(','):
+                var, val = var_val.split('=', 1)
+                logger.warning('Setting %s=%s', var, val)
+                os.environ[var] = val
 
 
 def init():

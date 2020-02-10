@@ -10,6 +10,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.1]
+
+### Added
+- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can 
+  configure MXNet as such: `--env "OMP_NUM_THREADS=1;MXNET_ENGINE_TYPE=NaiveEngine"`
+
 ## [2.1.0]
 
 ### Changed

@@ -78,9 +78,19 @@ def test_logging_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(device_ids=[-1], use_cpu=False, omp_num_threads=None, disable_device_locking=False, lock_dir='/tmp')),
+    ('', dict(device_ids=[-1],
+              use_cpu=False,
+              omp_num_threads=None,
+              env=None,
+              disable_device_locking=False,
+              lock_dir='/tmp')),
     ('--device-ids 1 2 3 --use-cpu --disable-device-locking --lock-dir test_dir',
-     dict(device_ids=[1, 2, 3], use_cpu=True, omp_num_threads=None, disable_device_locking=True, lock_dir='test_dir'))
+     dict(device_ids=[1, 2, 3],
+          use_cpu=True,
+          omp_num_threads=None,
+          env=None,
+          disable_device_locking=True,
+          lock_dir='test_dir'))
 ])
 def test_device_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_device_args)

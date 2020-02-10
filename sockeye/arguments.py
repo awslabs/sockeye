@@ -527,6 +527,9 @@ def add_device_args(params):
                                help='Set the OMP_NUM_THREADS environment variable (CPU threads). Recommended: set to '
                                     'number of GPUs for training, number of physical CPU cores for inference. Default: '
                                     '%(default)s.')
+    device_params.add_argument('--env',
+                               help='List of environment variables to be set before importing MXNet. Separated by ",", '
+                                    'e.g. --env=OMP_NUM_THREADS=4,MXNET_GPU_WORKER_NTHREADS=3 etc.')
     device_params.add_argument('--disable-device-locking',
                                action='store_true',
                                help='Just use the specified device ids without locking.')
