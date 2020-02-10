@@ -13,7 +13,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.1.1]
 
 ### Added
-- Ability to set environment variables from training/translate CLIs before MXNet is important. For example, users can 
+- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can 
   configure MXNet as such: `--env "OMP_NUM_THREADS=1;MXNET_ENGINE_TYPE=NaiveEngine"`
 
 ## [2.1.0]
