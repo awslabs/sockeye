@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 class _Inference(ABC):
 
     @abstractmethod
+    def state_structure(self):
+        raise NotImplementedError()
+
+    @abstractmethod
     def encode_and_initialize(self,
                               inputs: mx.nd.NDArray,
                               valid_length: Optional[mx.nd.NDArray] = None):
@@ -91,7 +95,7 @@ class _EnsembleInference(_Inference):
     def state_structure(self) -> str:
         structure = ''
         for model in self._models:
-            structure.append(model.state_structure())
+            structure += model.state_structure()
         return structure
 
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):

@@ -179,7 +179,6 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                        source_bias: mx.sym.Symbol,
                        self_att_kv: Optional[mx.sym.Symbol] = None,
                        enc_att_kv: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
-                                                                           mx.sym.Symbol,
                                                                            mx.sym.Symbol]:
         # self-attention
         target_self_att, keys_values = self.self_attention(self.pre_self_attention(target, None),
