@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 class _Inference(ABC):
 
     @abstractmethod
+    def state_structure(self):
+        raise NotImplementedError()
+
+    @abstractmethod
     def encode_and_initialize(self,
                               inputs: mx.nd.NDArray,
                               valid_length: Optional[mx.nd.NDArray] = None):
