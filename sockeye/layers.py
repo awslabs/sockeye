@@ -145,7 +145,7 @@ class OutputLayer(mx.gluon.HybridBlock):
             self.bias = self.params.get("bias",
                                         shape=(vocab_size,),
                                         init=bias_initializer,
-                                        dtype=dtype if dtype != 'int8' else C.DTYPE_FP32, #Bias stays fp32 even with int8 weights.
+                                        dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32, # Bias stays fp32 even with int8 weights.
                                         allow_deferred_init=False)
 
     def forward(self, data, vocab_slice_ids):
