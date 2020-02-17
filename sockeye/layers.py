@@ -226,10 +226,10 @@ class LengthRatio(mx.gluon.HybridBlock):
             self.layers = mx.gluon.nn.HybridSequential()
             for l in range(num_layers - 1):
                 self.layers.add(quantization.QuantizableDense(units=hidden_size, activation='tanh',
-                                                  flatten=False, prefix='dense%d_' % l, dtype = dtype))
+                                                  flatten=False, prefix='dense%d_' % l, dtype=dtype))
             # SoftReLU activation to ensure positiveness of the predicted length ratio
             self.layers.add(quantization.QuantizableDense(units=1, activation='softrelu',
-                                              flatten=False, prefix='dense%d_' % (num_layers - 1), dtype = dtype))
+                                              flatten=False, prefix='dense%d_' % (num_layers - 1), dtype=dtype))
 
     def hybrid_forward(self, F, source_encoded, source_encoded_length):
         """
