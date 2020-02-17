@@ -428,7 +428,10 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
-    :param for_disk_saving: If the model is quantized, leave it in CPU-independent format. This is only useful if you are quantizing the model to convert it from float32 to int8 then save to disk.  The model object loaded into RAM will produce incorrect results.
+    :param for_disk_saving: If the model is quantized, leave it in CPU-
+           independent format.  This is only useful if you are quantizing the
+           model to convert it from float32 to int8 then save to disk.  The
+           model object loaded into RAM will produce incorrect results.
     :return: List of models, source vocabularies, target vocabulary.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
