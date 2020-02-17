@@ -151,7 +151,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
 
 #Convert weights from float32 MXNet format (B^T in float32) to disk format (B^T in int8 format).
 #params is expected to be model.collect_params() from a float32 model
-def convert_weights_disk_format(params):
+def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict):
     for name, param in params.items():
         if name.endswith("_weight"):
             scaling_name = name[0:-6] + "scaling"
