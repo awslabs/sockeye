@@ -15,7 +15,13 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 
 - Updated to [MXNet 1.6.0](https://github.com/apache/incubator-mxnet/tree/1.6.0)
+
+### Added
+
+- Added support for CUDA 10.2
+
 ### Removed
+
 - Removed support for CUDA<9.1 / CUDNN<7.5
 
 ## [2.1.1]
