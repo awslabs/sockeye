@@ -181,7 +181,7 @@ class TopKLexicon:
                                "contains at most %d entries per source.", k, loaded_k)
         else:
             top_k = loaded_k
-        self.lex = mx.nd.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype, ctx=mx.cpu())
+        self.lex = mx.nd.zeros((len(self.vocab_source), top_k), dtype='int32', ctx=mx.cpu())
         for src_id, trg_ids in enumerate(_lex):
             self.lex[src_id, :] = mx.nd.sort(trg_ids[:top_k])
         self.lex = self.lex.as_in_context(self.ctx)
