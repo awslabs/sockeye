@@ -28,7 +28,7 @@ Depending on your version of CUDA, you can do this by running the following:
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 > rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-where `${CUDA_VERSION}` can be `92` (9.2), `100` (10.0),or `101` (10.1).
+where `${CUDA_VERSION}` can be `92` (9.2), `100` (10.0), `101` (10.1), or `102` (10.2).
 
 ### → via source...
 
@@ -47,7 +47,7 @@ running the following:
 > pip install -r requirements/requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install .
 ```
-where `${CUDA_VERSION}` can be `92` (9.2), `100` (10.0),or `101` (10.1).
+where `${CUDA_VERSION}` can be `92` (9.2), `100` (10.0), `101` (10.1), or `102` (10.2).
 
 Developers will be better served by pointing `$PYTHONPATH` to the root of the git-cloned source.
 
@@ -70,7 +70,7 @@ On an instance with a GPU, the following commands will work
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
-where `${CUDA_VERSION}` can be `92` (9.2), `100` (10.0),or `101` (10.1).
+where `${CUDA_VERSION}` can be `92` (9.2), `100` (10.0), `101` (10.1), or `102` (10.2).
 
 ### Optional dependencies
 In order to write training statistics to a Tensorboard event file for visualization, you can optionally install mxboard
