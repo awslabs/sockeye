@@ -275,7 +275,7 @@ class SockeyeModel(mx.gluon.Block):
         Saves model parameters to file.
         :param fname: Path to save parameters to.
         """
-        super().save_parameters(fname)
+        super().save_parameters(fname, deduplicate=True)
         logging.info('Saved params to "%s"', fname)
 
     def load_parameters(self,

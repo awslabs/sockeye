@@ -12,8 +12,8 @@
 # permissions and limitations under the License.
 
 import logging
-import math
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
+from functools import lru_cache
 
 import mxnet as mx
 import numpy as np
@@ -137,11 +137,16 @@ class OutputLayer(mx.gluon.HybridBlock):
                                         dtype=dtype,
                                         allow_deferred_init=False)
 
+    @lru_cache(maxsize=1)
+    def _take_slice(self, vocab_slice_ids: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
+        weight = self.weight.data().take(vocab_slice_ids)
+        bias = self.bias.data().take(vocab_slice_ids)
+        return weight, bias
+
     def forward(self, data, vocab_slice_ids):
         if vocab_slice_ids is not None:
             # imperative, reduced matrix multiplication for vocabulary selection
-            weight = self.weight.data().take(vocab_slice_ids)
-            bias = self.bias.data().take(vocab_slice_ids)
+            weight, bias = self._take_slice(vocab_slice_ids)
             return mx.nd.FullyConnected(data=data,
                                         num_hidden=vocab_slice_ids.shape[0],
                                         weight=weight,

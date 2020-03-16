@@ -44,7 +44,7 @@ For technical information about Sockeye, see our paper on the arXiv ([BibTeX](so
 ## Research with Sockeye
 
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
-If you know more, please let us know or submit a pull request (last updated: August 2019).
+If you know more, please let us know or submit a pull request (last updated: January 2020).
 
 ### 2020
 
