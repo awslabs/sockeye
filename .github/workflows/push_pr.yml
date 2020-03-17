@@ -1,9 +1,9 @@
 name: push and pull request testing
 on:
   push:
-    branches: [ sockeye_2 ]
+    branches: [sockeye_2]
   pull_request:
-    branches: [ sockeye_2 ]
+    branches: [sockeye_2]
 
 jobs:
   build:
