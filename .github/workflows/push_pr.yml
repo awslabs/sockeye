@@ -1,9 +1,13 @@
 name: push and pull request testing
 on:
   push:
-    branches: [sockeye_2]
+    branches:
+    - sockeye_2
+    - master
   pull_request:
-    branches: [sockeye_2]
+    branches:
+    - sockeye_2
+    - master
 
 jobs:
   build:
@@ -24,9 +28,12 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements/requirements.txt
-        pip install -r requirements/requirements.dev.txt
+    - name: Pip upgrade
+      run: python -m pip install --upgrade pip
+    - name: Sockeye requirements
+      run: pip install -r requirements/requirements.txt
+    - name: Development requirements
+      run: pip install -r requirements/requirements.dev.txt
     - name: Unit tests
       run: |
         pytest --version
