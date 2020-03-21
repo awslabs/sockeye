@@ -428,11 +428,12 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         May also use a cache of previously computed inputs.
         Returns a symbol of shape (batch, max_length, output_depth).
 
-        :param inputs: Input Data. Shape: (max_length, batch, input_depth).
+        :param inputs: Input Data. Shape: (batch, max_length, input_depth).
         :param input_lengths: Optional lengths of inputs to mask attention scores. Shape: (batch, 1).
         :param bias: Optional 3d bias tensor to mask attention scores.
-        :param previous_keys_values: Optional previous input projections of keys and values. Shape: (max_length+1, batch, depth_att * 2).
-        :return: Symbol of shape (max_length, batch, output_depth).
+        :param previous_keys: Optional previous input projections of keys. Shape: (batch, max_length+1, depth_att).
+        :param previous_keys: Optional previous input projections of values. Shape: (batch, max_length+1, depth_att).
+        :return: Symbol of shape (batch, max_length, output_depth).
         """
         # combined: (batch, max_length, depth * 3)
         combined = self.ff_in(inputs)
