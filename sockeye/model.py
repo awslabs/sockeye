@@ -134,6 +134,9 @@ class SockeyeModel(mx.gluon.Block):
         self.dtype = dtype
         super().cast(dtype)
 
+    def state_structure(self):
+        return self.decoder.state_structure()
+
     def encode(self, inputs, valid_length=None):
         """Encode the input sequence.
 
