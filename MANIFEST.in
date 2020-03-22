@@ -21,6 +21,7 @@ recursive-include docs *.html
 recursive-include docs *.png
 recursive-include docs *.md
 recursive-include docs *.py
+recursive-include docs *.sh
 recursive-include docs *.yml
 recursive-include docs *.ico
 recursive-include docs *.css
