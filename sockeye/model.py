@@ -317,6 +317,17 @@ class SockeyeModel(mx.gluon.Block):
                                 cast_dtype=cast_dtype, dtype_source=dtype_source)
         logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
 
+    def set_parameters(self, new_params: dict):
+        """
+        Update model params with new values from a dictionary.
+
+        :param new_params: Dictionary containing the new parameters.
+        """
+        model_params = self.collect_params()
+        for k in new_params:
+            if k in model_params:
+                model_params[k].set_data(new_params[k].data())
+
     @staticmethod
     def save_version(folder: str):
         """
@@ -415,7 +426,9 @@ def load_model(model_folder: str,
                dtype: Optional[str] = None,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
-               inference_only: bool = False) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
+               inference_only: bool = False,
+               allow_missing: bool = False,
+               set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
     """
     Load a model from model_folder.
 
@@ -425,6 +438,8 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param allow_missing: Allow missing parameters in the loaded model.
+    :param set_grad_req_null: Set grad_req to null for model parameters.
     :return: List of models, source vocabularies, target vocabulary.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -459,12 +474,13 @@ def load_model(model_folder: str,
 
     model.load_parameters(filename=params_fname,
                           ctx=context,
-                          allow_missing=False,
+                          allow_missing=allow_missing,
                           ignore_extra=False,
                           cast_dtype=cast_dtype,
                           dtype_source=dtype_source)
-    for param in model.collect_params().values():
-        param.grad_req = 'null'
+    if set_grad_req_null:
+        for param in model.collect_params().values():
+            param.grad_req = 'null'
 
     if hybridize:
         model.hybridize(static_alloc=True)
@@ -481,7 +497,9 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 checkpoints: Optional[List[int]] = None,
                 dtype: Optional[str] = C.DTYPE_FP32,
                 hybridize: bool = True,
-                inference_only: bool = False) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
+                inference_only: bool = False,
+                allow_missing: bool = False,
+                set_grad_req_null: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -491,6 +509,8 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param allow_missing: Allow missing parameters in the loaded models.
+    :param set_grad_req_null: Set grad_req to null for model parameters.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -510,7 +530,9 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                                               dtype=dtype,
                                               checkpoint=checkpoint,
                                               hybridize=hybridize,
-                                              inference_only=inference_only)
+                                              inference_only=inference_only,
+                                              allow_missing=allow_missing,
+                                              set_grad_req_null=set_grad_req_null)
         models.append(model)
         source_vocabs.append(src_vcbs)
         target_vocabs.append(trg_vcb)
