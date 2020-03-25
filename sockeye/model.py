@@ -15,7 +15,7 @@ import copy
 import time
 import logging
 import os
-from typing import cast, Optional, Tuple, Union, List
+from typing import cast, Dict, Optional, Tuple, Union, List
 
 import mxnet as mx
 from sockeye import __version__
@@ -317,15 +317,33 @@ class SockeyeModel(mx.gluon.Block):
                                 cast_dtype=cast_dtype, dtype_source=dtype_source)
         logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
 
-    def set_parameters(self, new_params: dict):
+    def set_parameters(self,
+                       new_params: Dict[str, mx.gluon.parameter.Parameter],
+                       allow_missing: bool = True,
+                       ignore_extra: bool = False):
         """
-        Update model params with new values from a dictionary.
+        Update model params on all contexts of the model with new values from a dictionary.
 
         :param new_params: Dictionary containing the new parameters.
+        :param allow_missing: Whether to skip setting parameters not represented in the dictionary.
+        :param ignore_extra: Whether to ignore parameters from new_params that are not present in this model.
         """
         model_params = self.collect_params()
+        if not allow_missing:
+            for k in model_params.keys():
+                assert k in new_params.keys(), "Parameter '%s' is missing in new_params dictionary. " \
+                                               "Set allow_missing=True to ignore missing parameters." % k
         for k in new_params:
+            assert new_params[k]._data is not None, "Parameter '%s' is not initialized in new_params dictionary." % k
+            if not ignore_extra and k not in model_params:
+                raise ValueError("Parameter '%s' in new_params dictionary is not preset in ParameterDict. "
+                                 "Set ignore_extra=True to ignore." % k)
             if k in model_params:
+                assert model_params[k]._data is not None, "Parameter '%s' must be initialized before it can be reset " \
+                                                          "using set_parameters." % k
+                assert model_params[k].shape == new_params[k].shape, \
+                    "Parameter '%s' has shape '%s' in the model but shape '%s' in the new_params dictionary." % \
+                    (k, model_params[k].shape, new_params[k].shape)
                 model_params[k].set_data(new_params[k].data())
 
     @staticmethod
