@@ -12,6 +12,8 @@
 # permissions and limitations under the License.
 
 import logging
+import functools
+import operator
 from abc import abstractmethod, ABC
 from typing import Tuple, Optional, List, Union
 
@@ -58,8 +60,8 @@ class _SingleModelInference(_Inference):
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
 
-    def state_structure(self) -> str:
-        return self._model.state_structure()
+    def state_structure(self) -> List:
+        return [self._model.state_structure()]
 
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
@@ -92,8 +94,8 @@ class _EnsembleInference(_Inference):
             raise ValueError()
         self._const_lr = constant_length_ratio
 
-    def state_structure(self) -> str:
-        structure = ''
+    def state_structure(self) -> List:
+        structure = []
         for model in self._models:
             structure.append(model.state_structure())
         return structure
@@ -104,7 +106,7 @@ class _EnsembleInference(_Inference):
         for model in self._models:
             states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
             predicted_output_lengths.append(predicted_output_length)
-            model_states.append(states)
+            model_states += states
         # average predicted output lengths, (batch, 1)
         predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=1), axis=1, keepdims=True)
         return model_states, predicted_output_lengths
@@ -114,11 +116,14 @@ class _EnsembleInference(_Inference):
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         outputs, new_states = [], []
-        for model, model_states in zip(self._models, states):
+        state_index = 0
+        for model, model_state_structure in zip(self._models, self.state_structure()):
+            model_states = states[state_index:state_index+len(model_state_structure)]
+            state_index += len(model_state_structure)
             logits, model_states, _ = model.decode_step(step_input, model_states, vocab_slice_ids)
             probs = logits.softmax(axis=-1)
             outputs.append(probs)
-            new_states.append(model_states)
+            new_states += model_states
         scores = self._interpolation(outputs)
         return scores, new_states
 
@@ -401,9 +406,11 @@ class SampleK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
 
-def _repeat_states(states: List, beam_size: int, state_structure: str) -> List:
+def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
     repeated_states = []
-    for i, state_format in enumerate(state_structure):
+    flat_structure = functools.reduce(operator.add, state_structure)
+    assert len(states) == len(flat_structure), "Number of states do not match the defined state structure"
+    for state, state_format in zip(states, flat_structure):
         if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
             repeat_axis = 0
         elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
@@ -411,8 +418,8 @@ def _repeat_states(states: List, beam_size: int, state_structure: str) -> List:
             repeat_axis = 0
         else:
             raise ValueError("Provided state format %s not recognized." % state_format)
-        state = states[i].repeat(repeats=beam_size, axis=repeat_axis)
-        repeated_states.append(state)
+        repeated_state = state.repeat(repeats=beam_size, axis=repeat_axis)
+        repeated_states.append(repeated_state)
     return repeated_states
 
 
@@ -420,22 +427,23 @@ class SortStates(mx.gluon.HybridBlock):
 
     def __init__(self, state_structure, prefix):
         mx.gluon.HybridBlock.__init__(self, prefix=prefix)
-        self.state_structure = state_structure
+        self.flat_structure = functools.reduce(operator.add, state_structure)
 
     def hybrid_forward(self, F, best_hyp_indices, *states):
         sorted_states = []
-        for i, state_format in enumerate(self.state_structure):
+        assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
+        for state, state_format in zip(states, self.flat_structure):
             if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
-                state = F.take(states[i], best_hyp_indices)
+                sorted_state = F.take(state, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
                 # TODO: Change take axis to 1 when interleaved multihead attention is implemented
-                state = F.take(states[i], best_hyp_indices)
+                sorted_state = F.take(state, best_hyp_indices)
             elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
-                state = states[i]
+                sorted_state = state
             else:
                 raise ValueError("Provided state format %s not recognized." % state_format)
-            sorted_states.append(state)
+            sorted_states.append(sorted_state)
         return sorted_states
 
 
