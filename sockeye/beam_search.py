@@ -101,7 +101,7 @@ class _EnsembleInference(_Inference):
         return structure
 
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
-        model_states = []  # type: List[List[mx.nd.NDArray]]
+        model_states = []  # type: List[mx.nd.NDArray]
         predicted_output_lengths = []  # type: List[mx.nd.NDArray]
         for model in self._models:
             states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
@@ -115,7 +115,8 @@ class _EnsembleInference(_Inference):
                     step_input: mx.nd.NDArray,
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
-        outputs, new_states = [], []
+        outputs = []  # type: List[mx.nd.NDArray]
+        new_states = []  # type: List[mx.nd.NDArray]
         state_index = 0
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
