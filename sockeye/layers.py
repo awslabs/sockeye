@@ -432,7 +432,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         :param input_lengths: Optional lengths of inputs to mask attention scores. Shape: (batch, 1).
         :param bias: Optional 3d bias tensor to mask attention scores.
         :param previous_keys: Optional previous input projections of keys. Shape: (batch, max_length+1, depth_att).
-        :param previous_keys: Optional previous input projections of values. Shape: (batch, max_length+1, depth_att).
+        :param previous_values: Optional previous input projections of values. Shape: (batch, max_length+1, depth_att).
         :return: Symbol of shape (batch, max_length, output_depth).
         """
         # combined: (batch, max_length, depth * 3)
