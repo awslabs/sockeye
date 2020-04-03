@@ -117,26 +117,6 @@ def test_candidate_scorer():
     assert np.allclose(unnormalized_scores, raw_scores)
 
 
-def test_sort_by_index():
-    data = [mx.nd.random.uniform(0, 1, (3, i)) for i in range(1, 5)]
-    indices = mx.nd.array([2, 0, 1], dtype='int32')
-    expected = [d.asnumpy()[indices.asnumpy()] for d in data]
-
-    sort_by_index = sockeye.beam_search.SortByIndex()
-    sort_by_index.initialize()
-
-    out = sort_by_index(indices, *data)
-    assert len(out) == len(data) == len(expected)
-    for o, e in zip(out, expected):
-        assert np.allclose(o.asnumpy(), e)
-
-    sort_by_index.hybridize()
-    out = sort_by_index(indices, *data)
-    assert len(out) == len(data) == len(expected)
-    for o, e in zip(out, expected):
-        assert np.allclose(o.asnumpy(), e)
-
-
 def numpy_topk(scores: mx.nd.NDArray,
                k: int,
                offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
@@ -274,13 +254,16 @@ class _TestInference(sockeye.beam_search._Inference):
         self.output_vocab_size = output_vocab_size
         self.states = []
 
+    def state_structure(self):
+        return C.STEP_STATE + C.STEP_STATE # is this the correct structure to use for self.states?
+
     def encode_and_initialize(self,
                               inputs: mx.nd.NDArray,
                               valid_length: Optional[mx.nd.NDArray] = None):
         batch_size = inputs.shape[0]
         # 'lengths'
         internal_lengths = mx.nd.zeros((batch_size, 1), dtype='int32')
-        num_decode_step_calls = 0
+        num_decode_step_calls = mx.nd.zeros((1, ), dtype='int32')
         self.states = [internal_lengths, num_decode_step_calls]  # TODO add nested states
         predicted_output_length = mx.nd.ones((batch_size, 1))  # does that work?
         return self.states, predicted_output_length
@@ -293,6 +276,7 @@ class _TestInference(sockeye.beam_search._Inference):
         print('step_input', step_input.asnumpy())
 
         internal_lengths, num_decode_step_calls = states
+        num_decode_step_calls = num_decode_step_calls.asscalar()
         if num_decode_step_calls == 0:  # first call to decode_step, we expect step input to be all <bos>
             assert (step_input.asnumpy() == C.BOS_ID).all()
 
@@ -314,7 +298,7 @@ class _TestInference(sockeye.beam_search._Inference):
         internal_lengths += 1
         num_decode_step_calls += 1
 
-        self.states = states = [internal_lengths, num_decode_step_calls]
+        self.states = states = [internal_lengths, mx.nd.array([num_decode_step_calls], dtype='int32')]
         return scores, states
 
 
@@ -332,6 +316,7 @@ def test_beam_search():
     inference = _TestInference(output_vocab_size=vocab_size)
     bs = sockeye.beam_search.BeamSearch(
         beam_size=beam_size,
+        dtype=dtype,
         bos_id=bos_id,
         eos_id=eos_id,
         context=context,

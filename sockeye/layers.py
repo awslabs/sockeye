@@ -411,6 +411,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  dropout: float = 0.0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout)
 
+        self.depth_att = depth_att
         with self.name_scope():
             self.ff_in = mx.gluon.nn.Dense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_')
 
