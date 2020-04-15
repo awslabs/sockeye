@@ -556,7 +556,7 @@ def create_model_config(args: argparse.Namespace,
             for i, combine in enumerate(args.source_factors_combine):
                 if combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]:
                     logger.info("Setting embedding size of factor %d to `num_embed` ('%d') for %s",
-                                num_embed_source, i + 1,
+                                i + 1, num_embed_source,
                                 "summing" if combine == C.SOURCE_FACTORS_COMBINE_SUM else "averaging")
                     source_factors_num_embed[i] = num_embed_source
 
