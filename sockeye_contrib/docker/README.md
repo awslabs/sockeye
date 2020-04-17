@@ -63,3 +63,23 @@ docker run --rm -i --network=host -v /mnt/share/ssh:/home/ec2-user/.ssh -v /mnt/
         --use-cpu \
         --horovod
 ```
+
+## Experimental CPU-Optimized Image
+
+To build a Docker image with the latest CPU-optimized version of Sockeye, run the following script:
+
+```bash
+python3 sockeye_contrib/docker/build_cpu_optimized.py
+```
+
+This produces an image called `sockeye-cpu:latest` that uses the latest versions of the following:
+
+- [kpuatamazon/incubator-mxnet](https://github.com/kpuatamazon/incubator-mxnet): The MXNet fork that supports [intgemm](https://github.com/kpu/intgemm) and makes full use of Intel MKL (versus just DNNL).
+- [kpuatamazon/sockeye](https://github.com/kpuatamazon/sockeye): The Sockeye fork that supports int8 quantization for inference.
+
+This image can then be used with existing Sockeye models, which can be quantized to int8 at load time.
+In the following example, `LEXICON` is a top-k lexicon (see the [fast_align documentation](sockeye_contrib/fast_align) and `sockeye.lexicon create`; k=200 works well in practice) and `NCPUS` is the number of physical CPU cores on the host running Sockeye.
+
+```bash
+docker run --rm -i -v $PWD:/work -w /work sockeye-cpu:latest python3 -m sockeye.translate --use-cpu --omp-num-threads NCPUS --dtype int8 --input test.src --restrict-lexicon LEXICON --models model --output test.out
+```
