@@ -1,4 +1,5 @@
 # Changelog
+
 All notable changes to the project are documented in this file.
 
 Version numbers are of the form `1.0.0`.
@@ -9,6 +10,14 @@ e.g. due to changing the architecture or simply modifying model parameter names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+
+## [2.1.4]
+
+### Added
+
+- Added Dockerfiles that build an experimental CPU-optimized Sockeye image:
+  - Uses the latest versions of [kpuatamazon/incubator-mxnet](https://github.com/kpuatamazon/incubator-mxnet) (supports [intgemm](https://github.com/kpu/intgemm) and makes full use of Intel MKL) and [kpuatamazon/sockeye](https://github.com/kpuatamazon/sockeye) (supports int8 quantization for inference).
+  - See [sockeye_contrib/docker](sockeye_contrib/docker).
 
 ## [2.1.3]
 
@@ -38,7 +47,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.1.1]
 
 ### Added
-- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can 
+- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can
   configure MXNet as such: `--env "OMP_NUM_THREADS=1;MXNET_ENGINE_TYPE=NaiveEngine"`
 
 ## [2.1.0]

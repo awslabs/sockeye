@@ -1,0 +1,81 @@
+FROM ubuntu:18.04
+
+ENV PYTHON_VERSION=3.6
+
+# Set default shell to /bin/bash
+SHELL ["/bin/bash", "-cu"]
+
+#
+# Install Intel MKL
+#
+
+RUN apt-get update && apt-get install -y gnupg wget
+
+RUN cd /tmp && \
+    wget https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB && \
+    apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB && \
+    rm GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
+
+RUN echo "deb https://apt.repos.intel.com/mkl all main" > /etc/apt/sources.list.d/intel-mkl.list
+
+RUN apt-get update && apt-get install -y intel-mkl-2019.4-070
+
+#
+# Install MXNet
+#
+
+# Workaround for making sure DNNL uses MKL
+ENV CXXFLAGS="-O3 -march=native -DUSE_MKL -I/opt/intel/mkl/include"
+ENV CFLAGS="-O3 -march=native -DUSE_MKL -I/opt/intel/mkl/include"
+ENV LD_PRELOAD=/opt/intel/mkl/lib/intel64/libmkl_rt.so
+
+# MXNet dependencies
+RUN mkdir /work && \
+    touch /work/requirements && \
+    cd /opt && \
+    wget https://raw.githubusercontent.com/apache/incubator-mxnet/master/ci/docker/install/ubuntu_core.sh && \
+    wget https://raw.githubusercontent.com/apache/incubator-mxnet/master/ci/docker/install/ubuntu_python.sh && \
+    sh ubuntu_core.sh && \
+    sh ubuntu_python.sh && \
+    rm -rf /work
+
+RUN pip3 install --no-cache-dir wheel 'pyyaml>=5.1'
+
+RUN apt-get update && apt-get install -y \
+    build-essential git ninja-build ccache google-perftools gcc-8 g++-8 awscli python3-venv libssl-dev
+
+# MXNet branch with intgemm support
+RUN cd /opt && \
+    git clone https://github.com/kpuatamazon/incubator-mxnet.git mxnet && \
+    cd mxnet && \
+    git checkout intgemm && \
+    git submodule init && \
+    git submodule update --recursive
+
+# Build MXNet
+RUN cd /opt/mxnet && \
+    rm -rf build && \
+    mkdir -p build && \
+    cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release -DUSE_MKL_IF_AVAILABLE=ON -DUSE_MKLDNN=ON -DUSE_CUDA=OFF -G Ninja -DUSE_INTGEMM=ON -DCMAKE_CXX_COMPILER=g++-8 -DCMAKE_C_COMPILER=gcc-8 .. && \
+    ninja -j$(nproc)
+
+# Install MXNet Python
+RUN cd /opt/mxnet/python && pip3 install -e .
+
+#
+# Install Sockeye
+#
+
+RUN cd /opt && \
+    git clone https://github.com/kpuatamazon/sockeye && \
+    cd sockeye && \
+    git checkout heafield-quantize
+
+# Sockeye dependencies
+RUN pip3 install --no-cache-dir numpy typing portalocker sacrebleu==1.3.6
+
+RUN cd /opt/sockeye && pip3 install . --no-deps
+
+# Guarantee Intel NumPy
+RUN pip3 install intel-numpy
