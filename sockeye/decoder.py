@@ -191,8 +191,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             states = [step, source_mask]
 
             for layer in self.layers:
-                encoder_attention_keys = layer.enc_attention.ff_k(encoder_outputs)
-                encoder_attention_values = layer.enc_attention.ff_v(encoder_outputs)
+                encoder_attention_keys, encoder_attention_values = \
+                    layer.enc_attention.project_and_isolate_heads(mx.nd, encoder_outputs)
                 states.append(encoder_attention_keys)
                 states.append(encoder_attention_values)
         else:
@@ -200,7 +200,11 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             states = [step, encoder_outputs, source_mask]
 
         batch_size = encoder_outputs.shape[0]
-        self_att_key_value_dummies = [mx.nd.zeros((batch_size, 1, self.config.model_size),
+        # shape: (batch, heads, length, depth_per_head)
+        self_att_key_value_dummies = [mx.nd.zeros((batch_size,
+                                                   self.config.attention_heads,
+                                                   1,
+                                                   self.config.model_size // self.config.attention_heads),
                                                   ctx=encoder_outputs.context,
                                                   dtype=encoder_outputs.dtype)] * self.config.num_layers * 2
         states += self_att_key_value_dummies
