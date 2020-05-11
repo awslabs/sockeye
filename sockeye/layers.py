@@ -154,11 +154,8 @@ class OutputLayer(mx.gluon.HybridBlock):
             # imperative, reduced matrix multiplication for vocabulary selection
             if self.weight.dtype == C.DTYPE_INT8:
                 weight = mx.nd.contrib.intgemm_take_weight(self.weight.data(), vocab_slice_ids)
-                return mx.nd.contrib.intgemm_fully_connected(data=data,
+                return mx.nd.contrib.intgemm_fully_connected(data, weight, self.scaling.data(), bias,
                                                              num_hidden=vocab_slice_ids.shape[0],
-                                                             weight=weight,
-                                                             scaling=self.scaling.data(),
-                                                             bias=bias,
                                                              flatten=False,
                                                              name=C.LOGITS_NAME)
             else:

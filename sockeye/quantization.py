@@ -130,8 +130,12 @@ class QuantizableDense(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, x, weight, scaling = None, bias=None):
         if self._dtype == C.DTYPE_INT8:
-            act = F.contrib.intgemm_fully_connected(x, weight, scaling, bias, no_bias=bias is None, num_hidden=self._units,
-                                                    flatten=self._flatten, name='fwd')
+            if bias is not None:
+                act = F.contrib.intgemm_fully_connected(x, weight, scaling, bias, no_bias=False, num_hidden=self._units,
+                                                        flatten=self._flatten, name='fwd')
+            else:
+                act = F.contrib.intgemm_fully_connected(x, weight, scaling, no_bias=True, num_hidden=self._units,
+                                                        flatten=self._flatten, name='fwd')
         else:
             #Newer MXNet allows a numpy array.
             #fc = F.npx.fully_connected if is_np_array() else F.FullyConnected
