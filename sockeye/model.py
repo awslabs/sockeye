@@ -450,6 +450,10 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
+    if (dtype == C.DTYPE_INT8 or model_config.dtype == C.DTYPE_INT8) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
+        #We're going to use int8 but it's not compiled into mxnet.
+        #TODO: configurable option for path!
+        mx.library.load(os.path.abspath("libintgemm.so"))
     #Are we converting the model to 8-bit?
     quantizing = (dtype == C.DTYPE_INT8 and model_config.dtype != C.DTYPE_INT8)
     if quantizing:
