@@ -12,8 +12,8 @@
 # permissions and limitations under the License.
 
 import logging
-import math
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
+from functools import lru_cache
 
 import mxnet as mx
 import numpy as np
@@ -148,18 +148,25 @@ class OutputLayer(mx.gluon.HybridBlock):
                                         dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32, # Bias stays fp32 even with int8 weights.
                                         allow_deferred_init=False)
 
+    @lru_cache(maxsize=1)
+    def _take_slice(self, vocab_slice_ids: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
+        if self.weight.dtype == C.DTYPE_INT8:
+            weight = mx.nd.contrib.intgemm_take_weight(self.weight.data(), vocab_slice_ids)
+        else:
+            weight = self.weight.data().take(vocab_slice_ids)
+        bias = self.bias.data().take(vocab_slice_ids)
+        return weight, bias
+
     def forward(self, data, vocab_slice_ids):
         if vocab_slice_ids is not None:
-            bias = self.bias.data().take(vocab_slice_ids)
             # imperative, reduced matrix multiplication for vocabulary selection
+            weight, bias = self._take_slice(vocab_slice_ids)
             if self.weight.dtype == C.DTYPE_INT8:
-                weight = mx.nd.contrib.intgemm_take_weight(self.weight.data(), vocab_slice_ids)
                 return mx.nd.contrib.intgemm_fully_connected(data, weight, self.scaling.data(), bias,
                                                              num_hidden=vocab_slice_ids.shape[0],
                                                              flatten=False,
                                                              name=C.LOGITS_NAME)
             else:
-                weight = self.weight.data().take(vocab_slice_ids)
                 return mx.nd.FullyConnected(data=data,
                                             num_hidden=vocab_slice_ids.shape[0],
                                             weight=weight,
@@ -254,19 +261,17 @@ class LengthRatio(mx.gluon.HybridBlock):
 
 def split_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
     """
-    Returns a symbol with head dimension folded into batch and depth divided by the number of heads.
+    Returns a symbol with heads as second dimension and channel depth / number of heads as last dimension.
 
     :param x: Symbol of shape (batch, length, depth).
     :param depth_per_head: Depth per head.
     :param heads: Number of heads.
-    :return: Symbol of shape (batch * heads, length, depth_per_heads).
+    :return: Symbol of shape (batch, heads, length, depth_per_heads).
     """
     # (batch, length, heads, depth_per_head)
     x = F.reshape(x, shape=(0, -1, heads, depth_per_head))
     # (batch, heads, length, depth/heads)
-    x = F.transpose(x, axes=(0, 2, 1, 3))
-    # (batch * heads, length, depth/heads)
-    return F.reshape(x, shape=(-3, -1, depth_per_head))
+    return F.transpose(x, axes=(0, 2, 1, 3))
 
 
 def combine_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
@@ -389,21 +394,20 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         """
         Returns context vectors of multi-head dot attention.
 
-        :param queries: Query tensor. Shape: (batch_size, query_max_length, depth).
-        :param keys: Keys. Shape: (batch_size, memory_max_length, depth).
-        :param values: Values. Shape: (batch_size, memory_max_length, depth).
+        :param queries: Query tensor. Shape: (batch_size, heads, query_max_length, depth_per_head).
+        :param keys: Keys. Shape: (batch_size, heads, memory_max_length, depth_per_head).
+        :param values: Values. Shape: (batch_size, heads, memory_max_length, depth_per_head).
         :param lengths: Optional lengths of keys. Shape: (batch_size,).
         :param bias: Optional 3d bias.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
-        # scale by sqrt(depth_per_head)
-        queries = queries * (self.depth_per_head ** -0.5)
-
+        # fold head dimension into batch dimension
         # (batch*heads, length, depth/heads)
-        queries = split_heads(F, queries, self.depth_per_head, self.heads)
-        keys = split_heads(F, keys, self.depth_per_head, self.heads)
-        values = split_heads(F, values, self.depth_per_head, self.heads)
-        lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1, fold_heads=True) if lengths is not None else lengths
+        queries = F.reshape(queries, shape=(-3, -1, self.depth_per_head))
+        keys = F.reshape(keys, shape=(-3, -1, self.depth_per_head))
+        values = F.reshape(values, shape=(-3, -1, self.depth_per_head))
+        lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1,
+                                     fold_heads=True) if lengths is not None else lengths
 
         # (batch*heads, query_max_length, depth_per_head)
         contexts = self.dot_att(queries, keys, values, lengths, bias)
@@ -438,6 +442,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
+        self.depth_att = depth_att
         with self.name_scope():
             self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_', dtype = dtype)
 
@@ -468,14 +473,21 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         # pylint: disable=unbalanced-tuple-unpacking
         queries, keys, values = F.split(combined, num_outputs=3, axis=2)
 
+        # scale by sqrt(depth_per_head)
+        queries = queries * (self.depth_per_head ** -0.5)
+        # (batch, heads, length, depth/heads)
+        queries = split_heads(F, queries, self.depth_per_head, self.heads)
+        keys = split_heads(F, keys, self.depth_per_head, self.heads)
+        values = split_heads(F, values, self.depth_per_head, self.heads)
+
         updated_keys = keys
         if previous_keys is not None:
-            updated_keys = F.concat(previous_keys, keys, dim=1)
+            updated_keys = F.concat(previous_keys, keys, dim=2)
             keys = _remove_first_step(F, updated_keys)
 
         updated_values = values
         if previous_values is not None:
-            updated_values = F.concat(previous_values, values, dim=1)
+            updated_values = F.concat(previous_values, values, dim=2)
             values = _remove_first_step(F, updated_values)
 
         return self._attend(F, queries, keys, values, lengths=input_lengths, bias=bias), updated_keys, updated_values
@@ -484,10 +496,10 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 def _remove_first_step(F, data):
     """
     :param F: MXNet namespace.
-    :param data: Input data. Shape: (batch, length, num_hidden).
-    :return: Output data. Shape: (batch, length[1:], num_hidden
+    :param data: Input data. Shape: (batch, heads, length, num_hidden).
+    :return: Output data. Shape: (batch, heads, length[1:], num_hidden
     """
-    return F.slice(data, begin=(None, 1, None), end=(None, None, None))
+    return F.slice(data, begin=(None, None, 1, None), end=(None, None, None, None))
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
@@ -518,6 +530,19 @@ class MultiHeadAttention(MultiHeadAttentionBase):
             self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype = dtype)
             self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype = dtype)
 
+    def project_and_isolate_heads(self, F, memory: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
+        """
+        Projects memory into keys and values, and separates attention heads dimension.
+
+        :param memory: Memory tensor. Shape: (batch, memory_max_length, input_depth).
+        :return: Symbol of shape (batch, heads, memory_max_length, depth_per_head).
+        """
+        keys = self.ff_k(memory)
+        values = self.ff_v(memory)
+        keys = split_heads(F, keys, depth_per_head=self.depth_per_head, heads=self.heads)
+        values = split_heads(F, values, depth_per_head=self.depth_per_head, heads=self.heads)
+        return keys, values
+
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
                        memory: mx.sym.Symbol,
@@ -541,8 +566,15 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         """
         # (batch, query_max_length, depth)
         queries = self.ff_q(queries)
-        keys = projected_memory_keys if projected_memory_keys is not None else self.ff_k(memory)
-        values = projected_memory_values if projected_memory_values is not None else self.ff_v(memory)
+        # scale by sqrt(depth_per_head)
+        queries = queries * (self.depth_per_head ** -0.5)
+        # (batch, heads, length, depth/heads)
+        queries = split_heads(F, queries, self.depth_per_head, self.heads)
+
+        if projected_memory_keys is not None and projected_memory_values is not None:
+            keys, values = projected_memory_keys, projected_memory_values
+        else:
+            keys, values = self.project_and_isolate_heads(F, memory)
 
         return self._attend(F, queries, keys, values, bias=bias, lengths=memory_lengths)
 

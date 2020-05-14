@@ -1,4 +1,5 @@
 # Changelog
+
 All notable changes to the project are documented in this file.
 
 Version numbers are of the form `1.0.0`.
@@ -9,6 +10,51 @@ e.g. due to changing the architecture or simply modifying model parameter names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+
+## [2.1.5]
+
+### Changed
+
+- Changed state caching for transformer models during beam search to cache states with attention heads already separated out. This avoids repeated transpose operations during decoding, leading to faster inference.
+
+## [2.1.4]
+
+### Added
+
+- Added Dockerfiles that build an experimental CPU-optimized Sockeye image:
+  - Uses the latest versions of [kpuatamazon/incubator-mxnet](https://github.com/kpuatamazon/incubator-mxnet) (supports [intgemm](https://github.com/kpu/intgemm) and makes full use of Intel MKL) and [kpuatamazon/sockeye](https://github.com/kpuatamazon/sockeye) (supports int8 quantization for inference).
+  - See [sockeye_contrib/docker](sockeye_contrib/docker).
+
+## [2.1.3]
+
+### Changed
+
+- Performance optimizations to beam search inference
+  - Remove unneeded take ops on encoder states
+  - Gathering input data before sending to GPU, rather than sending each batch element individually
+  - All of beam search can be done in fp16, if specified by the model
+  - Other small miscellaneous optimizations
+- Model states are now a flat list in ensemble inference, structure of states provided by `state_structure()`
+
+## [2.1.2]
+
+### Changed
+
+- Updated to [MXNet 1.6.0](https://github.com/apache/incubator-mxnet/tree/1.6.0)
+
+### Added
+
+- Added support for CUDA 10.2
+
+### Removed
+
+- Removed support for CUDA<9.1 / CUDNN<7.5
+
+## [2.1.1]
+
+### Added
+- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can
+  configure MXNet as such: `--env "OMP_NUM_THREADS=1;MXNET_ENGINE_TYPE=NaiveEngine"`
 
 ## [2.1.0]
 

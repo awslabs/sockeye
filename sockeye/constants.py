@@ -166,6 +166,12 @@ CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 BEAM_SEARCH_STOP_FIRST = 'first'
 BEAM_SEARCH_STOP_ALL = 'all'
 
+# State structure constants
+STEP_STATE = 's'
+BIAS_STATE = 'b'
+ENCODER_STATE = 'e'
+DECODER_STATE = 'd'
+
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
