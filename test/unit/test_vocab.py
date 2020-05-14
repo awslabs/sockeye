@@ -14,6 +14,8 @@
 import pytest
 from unittest import mock
 
+
+
 import sockeye.constants as C
 from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab, _get_sorted_source_vocab_fnames
 
