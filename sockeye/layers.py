@@ -473,7 +473,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     @property
     def num_state_tensors(self) -> int:
         """ Number of state tensors returned by the layer """
-        return 2
+        return 1
 
     @property
     def needs_mask(self) -> bool:
@@ -490,7 +490,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
 
     def hybrid_forward(self, F,
                        inputs: mx.sym.Symbol,
-                       previous_states: List[mx.sym.Symbol],
+                       previous_states: Optional[mx.sym.Symbol] = None,
                        input_lengths: Optional[mx.sym.Symbol] = None,
                        bias: Optional[mx.sym.Symbol] = None,
                        *args):  # mypy: ignore
@@ -515,11 +515,10 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
 
         updated_states = states
         if previous_states is not None:
-            previous_states = F.transpose(previous_states, axes=(1, 0, 2))
             updated_states = F.concat(previous_states, states, dim=0)
             states = F.slice(updated_states, begin=(1, None, None), end=(None, None, None))
 
-        return self._attend(F, queries, kv, lengths=input_lengths, bias=bias), updated_kv
+        return self._attend(F, queries, states, lengths=input_lengths, bias=bias), updated_states
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
@@ -838,7 +837,9 @@ class SSRU(AutoregressiveLayer):
                                                         [weighted_inputs, forget_rates],
                                                         previous_cell_state)
 
-        return F.transpose(cell_state, axes=(1, 0, 2)), last_step_state
+        # TODO: remove if transpose within the SSRU layer is unneeded
+        #return F.transpose(cell_state, axes=(1, 0, 2)), last_step_state
+        return cell_state, last_step_state
 
     @staticmethod
     def _inference_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:

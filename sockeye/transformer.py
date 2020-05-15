@@ -107,7 +107,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att, _, __ = self.self_attention(self.pre_self_attention(data, None), [None, None], None, bias)
+        data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, None, bias)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -228,10 +228,10 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                        autoregr_states: mx.sym.Symbol,
                        enc_att_kv: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
                                                                            mx.sym.Symbol]:
-        target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
-                                                                    autoregr_states,
-                                                                    None,
-                                                                    target_bias)
+        target_autoregr, new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
+                                                                   autoregr_states,
+                                                                   None,
+                                                                   target_bias)
 
         target = self.post_autoregr_layer(target_autoregr, target)
 
