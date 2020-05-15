@@ -413,15 +413,16 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
     assert len(states) == len(flat_structure), "Number of states do not match the defined state structure"
     for state, state_format in zip(states, flat_structure):
         if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+            # Steps and source_bias have batch dimension on axis 0
             repeat_axis = 0
         elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
-            # TODO: Change repeat axis to 1 when interleaved multihead attention is implemented
+            # Decoder and encoder layer states have batch dimension on axis 1
             repeat_axis = 1
         else:
             raise ValueError("Provided state format %s not recognized." % state_format)
         repeated_state = state.repeat(repeats=beam_size, axis=repeat_axis)
         repeated_states.append(repeated_state)
-
+    return repeated_states
 
 class SortStates(mx.gluon.HybridBlock):
 
@@ -434,9 +435,10 @@ class SortStates(mx.gluon.HybridBlock):
         assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
         for state, state_format in zip(states, self.flat_structure):
             if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+                # Steps and source_bias have batch dimension on axis 0
                 sorted_state = F.take(state, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
-                # TODO: Change take axis to 1 when interleaved multihead attention is implemented
+                # Decoder and encoder layer states have batch dimension on axis 1
                 sorted_state = F.take(state, best_hyp_indices, axis=1)
             elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
