@@ -195,8 +195,7 @@ def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param:
          b_max = optimize_quantization_mse(tensor_param.data())
          scaling_param.set_data(b_max / 127.0)
      else:
-         logger.info("Using existing scaling factor.")
-         b_max = 127.0 / scaling
+         b_max = scaling * 127.0
      return b_max
 
 
