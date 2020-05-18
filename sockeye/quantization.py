@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import mxnet as mx
+import math
 from . import constants as C
 from mxnet.gluon.nn.activations import Activation
 import logging
@@ -153,14 +154,45 @@ class QuantizableDense(mx.gluon.HybridBlock):
                         layout='{0} -> {1}'.format(shape[1] if shape[1] else None, shape[0]))
 
 
+#Minimize mean squared error of quantizing a tensor, returning the top value
+#(i.e. the one that quantizes to 127).  Scaling = 127.0 / return value.
+def optimize_quantization_mse(tensor, rounds = 10):
+    #This is a convex optimization problem.  EM works but makes slow steps.
+    #Instead of EM, use binary search in the direction minimization suggests.
+    best_mse = math.inf
+    best_top = None
+    maxabs = mx.nd.contrib.intgemm_maxabsolute(tensor)
+    # For converting python numbers to MXNet NDArray
+    one = mx.nd.ones(shape=(1,))
+    low = 0.0
+    high = maxabs
+    for i in range(rounds):
+        value = (low + high) / 2.0
+        quant = mx.nd.contrib.intgemm_prepare_data(tensor, value)
+        quant_float = mx.nd.cast(quant, dtype=C.DTYPE_FP32)
+        mse = (quant_float * (value / 127.0) - tensor).norm().asscalar() / math.sqrt(float(tensor.size))
+        if mse < best_mse:
+            best_mse = mse
+            best_top = value
+        #This optimizes scaling subject to cluster assignment.
+        #It can be used for EM but the step is really slow, so use it for direction.
+        scale = mx.nd.sum(quant_float * quant_float) / mx.nd.sum(quant_float * tensor)
+        top = 127.0 / scale.asscalar()
+        if top < value:
+            high = value
+        else:
+            low = value
+    return best_top
+
 #Convert weights from float32 MXNet format (B^T in float32) to disk format (B^T in int8 format).
 #params is expected to be model.collect_params() from a float32 model
 def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict):
+    logger.info("Optimizing quantization scaling factors")
     for name, param in params.items():
         if name.endswith("_weight"):
             scaling_name = name[0:-6] + "scaling"
             if scaling_name in params:
-                b_max = mx.nd.contrib.intgemm_maxabsolute(param.data())
+                b_max = optimize_quantization_mse(param.data())
                 params[scaling_name].set_data(b_max / 127.0)
                 quantized = mx.nd.contrib.intgemm_prepare_data(param.data(), b_max)
                 param.set_data(quantized)
