@@ -490,7 +490,7 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    if (dtype == C.DTYPE_INT8 or model_config.dtype == C.DTYPE_INT8) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
+    if (dtype == C.DTYPE_INT8 or model_config.dtype == C.DTYPE_INT8 or for_disk_saving is not None) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
         #We're going to use int8 but it's not compiled into mxnet.
         path = os.path.abspath(model_config.intgemm_custom_lib)
         try:
@@ -499,7 +499,7 @@ def load_model(model_folder: str,
             raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a custom operator library was not found in `" + path + "`.  Compile the custom operator then set the path using intgemm_custom_lib in the config file.")
 
     #Are we converting the model to 8-bit?
-    quantizing = (dtype == C.DTYPE_INT8 and model_config.dtype != C.DTYPE_INT8)
+    quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
     if quantizing:
         model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
 
@@ -546,7 +546,7 @@ def load_model(model_folder: str,
         if not quantizing:
             raise RuntimeError("Model is already quantized and for_disk_saving is set.")
         quantization.convert_weights_disk_format(params, for_disk_saving)
-        model_config.dtype = for_disk_saving
+        model.config.dtype = for_disk_saving
         #TODO: check for missing parameters somehow (we allowed scaling to be missing)
     if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
         #Disk format to CPU-dependent format.
