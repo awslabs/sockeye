@@ -765,7 +765,7 @@ def get_beam_search(models: List[SockeyeModel],
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
     bs = BeamSearch(
         beam_size=beam_size,
-        dtype='float32' if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
+        dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
         bos_id=C.BOS_ID,
         eos_id=C.EOS_ID,
         context=context,
