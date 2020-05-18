@@ -452,7 +452,7 @@ def load_model(model_folder: str,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
                inference_only: bool = False,
-               for_disk_saving: bool = False,
+               for_disk_saving: str = None,
                allow_missing: bool = False,
                set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
     """
@@ -464,10 +464,12 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
-    :param for_disk_saving: If the model is quantized, leave it in CPU-
-           independent format.  This is only useful if you are quantizing the
-           model to convert it from float32 to int8 then save to disk.  The
-           model object loaded into RAM will produce incorrect results.
+    :param for_disk_saving: For saving quantized models to disk.
+           None: load as usual and the model will work.
+           int8: The model loaded into RAM will not work, but is suitable for
+               writing to disk in quantized format (including scaling factors).
+           float32: The model loaded into RAM will not work, but is suitable
+               for writing to disk as float32 with precomputed scaling factors.
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :return: List of models, source vocabularies, target vocabulary.
@@ -530,7 +532,7 @@ def load_model(model_folder: str,
     model.load_parameters(filename=params_fname,
                           ctx=context,
                           allow_missing=allow_missing,
-                          ignore_extra=False,
+                          ignore_extra=True, #Scaling factors may be present in float32 models.
                           cast_dtype=cast_dtype,
                           dtype_source=dtype_source)
     
@@ -539,13 +541,15 @@ def load_model(model_folder: str,
         for param in params.values():
             param.grad_req = 'null'
     
-    #float32 to int8.
-    if quantizing:
-        quantization.convert_weights_disk_format(params)
-        #TODO: check for missing parameters somehow.
-     
-    #Disk format to CPU-dependent format.
-    if model_config.dtype == C.DTYPE_INT8 and not for_disk_saving:
+    if for_disk_saving is not None:
+        #Saving scaling factors and possibly int8 values to disk.
+        if not quantizing:
+            raise RuntimeError("Model is already quantized and for_disk_saving is set.")
+        quantization.convert_weights_disk_format(params, for_disk_saving)
+        model_config.dtype = for_disk_saving
+        #TODO: check for missing parameters somehow (we allowed scaling to be missing)
+    if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
+        #Disk format to CPU-dependent format.
         quantization.convert_weights_cpu_dependent(params)
 
     if hybridize:

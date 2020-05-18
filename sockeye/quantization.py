@@ -199,21 +199,51 @@ def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param:
      return b_max
 
 
-#Convert weights from float32 MXNet format (B^T in float32) to disk format (B^T in int8 format).
-#params is expected to be model.collect_params() from a float32 model
-def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict):
+def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_store: str):
+    """
+    Convert weights from float32 MXNet format (B^T in float32) to disk format
+    (B^T in int8 format).
+
+    If dtype_store == 'int8' then compute scaling and quantize the model.
+    If dtype_store == 'float32' then just annotate with scaling factors.
+    :param params model parameters from model.collect_params() in a float32
+       model.
+    :param dtype_store data type to store on disk.
+    """
+    logger.info("Optimizing quantization scaling factors")
     for name, param in params.items():
         if name.endswith("_weight"):
             scaling_name = name[0:-6] + "scaling"
             if scaling_name in params:
-                b_max = extract_quant_max(param, params[scaling_name])
-                quantized = mx.nd.contrib.intgemm_prepare_data(param.data(), b_max)
-                param.set_data(quantized)
+                if dtype_store == C.DTYPE_INT8:
+                    b_max = extract_quant_max(param, params[scaling_name])
+                    quantized = mx.nd.contrib.intgemm_prepare_data(param.data(), b_max)
+                    param.set_data(quantized)
+                    param.dtype = C.DTYPE_INT8
+
+def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
+    """
+    Convert weights from disk format to intgemm's CPU-dependent format for
+    quantized matrix multiplication.
+
+    :param params model parameters from model.collect_params() in a model that
+        came from convert_weights_disk_format.
+    """
+    logger.info("Converting weights to CPU format.")
+    for name, param in params.items():
+        if name.endswith("_weight"):
+            scaling_name = name[0:-6] + "scaling"
+            if scaling_name in params:
+                if param.dtype == C.DTYPE_INT8:
+                    #Already fully quantized, just rearrange.
+                    weight = mx.nd.contrib.intgemm_prepare_weight(
+                        param.data(), already_quantized = True)
+                else:
+                    #Use offline scaling factor if available.
+                    b_max = extract_quant_max(param, params[scaling_name])
+                    weight = mx.nd.contrib.intgemm_prepare_weight(
+                        param.data(),
+                        b_max)
+                param.set_data(weight)
                 param.dtype = C.DTYPE_INT8
 
-#Convert weights from disk format (B^T in int8 quantized format) to CPU-dependent (PrepareB) format for multiplication.
-#params is expected to be model.collect_params() from a model already in disk format.
-def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
-    for param in params.values():
-        if param.dtype == C.DTYPE_INT8:
-            param.set_data(mx.nd.contrib.intgemm_prepare_weight(param.data(), already_quantized = True))
