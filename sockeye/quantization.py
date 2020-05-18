@@ -195,6 +195,7 @@ def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param:
          b_max = optimize_quantization_mse(tensor_param.data())
          scaling_param.set_data(b_max / 127.0)
      else:
+         logger.info("Using existing scaling factor.")
          b_max = 127.0 / scaling
      return b_max
 
@@ -215,8 +216,8 @@ def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_
         if name.endswith("_weight"):
             scaling_name = name[0:-6] + "scaling"
             if scaling_name in params:
+                b_max = extract_quant_max(param, params[scaling_name])
                 if dtype_store == C.DTYPE_INT8:
-                    b_max = extract_quant_max(param, params[scaling_name])
                     quantized = mx.nd.contrib.intgemm_prepare_data(param.data(), b_max)
                     param.set_data(quantized)
                     param.dtype = C.DTYPE_INT8
