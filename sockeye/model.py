@@ -50,6 +50,7 @@ class ModelConfig(Config):
     :param weight_tying_type: Determines which weights get tied.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
+    :param intgemm_custom_lib: Path to intgemm custom operator library used for dtype is int8.  Default: libintgemm.so in the same directory as this script.
     """
 
     def __init__(self,
@@ -63,7 +64,8 @@ class ModelConfig(Config):
                  config_length_task: layers.LengthRatioConfig= None,
                  weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
                  lhuc: bool = False,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 dtype: str = C.DTYPE_FP32,
+                 intgemm_custom_lib: str = os.path.join(os.path.dirname(__file__), "libintgemm.so")) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size
@@ -76,6 +78,7 @@ class ModelConfig(Config):
         self.weight_tying_type = weight_tying_type
         self.lhuc = lhuc
         self.dtype = dtype
+        self.intgemm_custom_lib = intgemm_custom_lib
 
 
 class SockeyeModel(mx.gluon.Block):
@@ -487,8 +490,12 @@ def load_model(model_folder: str,
 
     if (dtype == C.DTYPE_INT8 or model_config.dtype == C.DTYPE_INT8) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
         #We're going to use int8 but it's not compiled into mxnet.
-        #TODO: configurable option for path!
-        mx.library.load(os.path.abspath("libintgemm.so"))
+        path = os.path.abspath(model_config.intgemm_custom_lib)
+        try:
+            mx.library.load(path)
+        except(mx.base.MXNetError):
+            raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a custom operator library was not found in `" + path + "`.  Compile the custom operator then set the path using intgemm_custom_lib in the config file.")
+
     #Are we converting the model to 8-bit?
     quantizing = (dtype == C.DTYPE_INT8 and model_config.dtype != C.DTYPE_INT8)
     if quantizing:
