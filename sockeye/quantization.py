@@ -102,7 +102,8 @@ class QuantizableDense(mx.gluon.HybridBlock):
             self._in_units = in_units
             if dtype == C.DTYPE_INT8:
                 self.scaling = self.params.get('scaling', shape=(1,),
-                                               init='zeros', dtype=C.DTYPE_FP32,
+                                               #Initialize to an obviously wrong value so we can detect later
+                                               init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32,
                                                allow_deferred_init=True)
                 weight_initializer = 'zeros' # Most initializers don't work for int8, but this is for inference anyway.
 
@@ -184,16 +185,28 @@ def optimize_quantization_mse(tensor, rounds = 10):
             low = value
     return best_top
 
+def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param: mx.gluon.parameter.Parameter) -> float:
+     """
+     Extract or tune the scaling factor for a parameter.
+     """
+     scaling = scaling_param.data()
+     if scaling.asscalar() < 0:
+         #Bogus auto initialized scaling factor.
+         b_max = optimize_quantization_mse(tensor_param.data())
+         scaling_param.set_data(b_max / 127.0)
+     else:
+         b_max = 127.0 / scaling
+     return b_max
+
+
 #Convert weights from float32 MXNet format (B^T in float32) to disk format (B^T in int8 format).
 #params is expected to be model.collect_params() from a float32 model
 def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict):
-    logger.info("Optimizing quantization scaling factors")
     for name, param in params.items():
         if name.endswith("_weight"):
             scaling_name = name[0:-6] + "scaling"
             if scaling_name in params:
-                b_max = optimize_quantization_mse(param.data())
-                params[scaling_name].set_data(b_max / 127.0)
+                b_max = extract_quant_max(param, params[scaling_name])
                 quantized = mx.nd.contrib.intgemm_prepare_data(param.data(), b_max)
                 param.set_data(quantized)
                 param.dtype = C.DTYPE_INT8
