@@ -684,7 +684,7 @@ class Translator:
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None) -> None:
         self.context = context
-        self.dtype = models[0].dtype
+        self.dtype='float32' if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
         self._scorer = scorer
         self.batch_size = batch_size
         self.beam_size = beam_size
