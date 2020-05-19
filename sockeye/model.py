@@ -50,7 +50,8 @@ class ModelConfig(Config):
     :param weight_tying_type: Determines which weights get tied.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
-    :param intgemm_custom_lib: Path to intgemm custom operator library used for dtype is int8.  Default: libintgemm.so in the same directory as this script.
+    :param intgemm_custom_lib: Path to intgemm custom operator library used for dtype is int8.  Default: libintgemm.so
+                               in the same directory as this script.
     """
 
     def __init__(self,
@@ -120,7 +121,8 @@ class SockeyeModel(mx.gluon.Block):
 
             # encoder & decoder first (to know the decoder depth)
             self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, prefix=self.prefix, dtype=config.dtype)
+            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
+                                               prefix=self.prefix, dtype=config.dtype)
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
@@ -452,7 +454,7 @@ def load_model(model_folder: str,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
                inference_only: bool = False,
-               for_disk_saving: str = None,
+               for_disk_saving: Optional[str] = None,
                allow_missing: bool = False,
                set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
     """
@@ -490,15 +492,19 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    if (dtype == C.DTYPE_INT8 or model_config.dtype == C.DTYPE_INT8 or for_disk_saving is not None) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
-        #We're going to use int8 but it's not compiled into mxnet.
+    if (dtype == C.DTYPE_INT8 or
+        model_config.dtype == C.DTYPE_INT8 or
+        for_disk_saving is not None) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
+        # We're going to use int8 but it's not compiled into mxnet.
         path = os.path.abspath(model_config.intgemm_custom_lib)
         try:
             mx.library.load(path)
-        except(mx.base.MXNetError):
-            raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a custom operator library was not found in `" + path + "`.  Compile the custom operator then set the path using intgemm_custom_lib in the config file.")
+        except mx.base.MXNetError:
+            raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a "
+                                      "custom operator library was not found in `%s`.  Compile the custom "
+                                      "operator then set the path using intgemm_custom_lib in the config file." % path)
 
-    #Are we converting the model to 8-bit?
+    # Are we converting the model to 8-bit?
     quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
     if quantizing:
         model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
@@ -535,12 +541,12 @@ def load_model(model_folder: str,
                           ignore_extra=True, #Scaling factors may be present in float32 models.
                           cast_dtype=cast_dtype,
                           dtype_source=dtype_source)
-    
+
     params = model.collect_params()
     if set_grad_req_null:
         for param in params.values():
             param.grad_req = 'null'
-    
+
     if for_disk_saving is not None:
         #Saving scaling factors and possibly int8 values to disk.
         if not quantizing:
