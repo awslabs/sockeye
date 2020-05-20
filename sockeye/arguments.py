@@ -1042,7 +1042,7 @@ def add_score_cli_args(params):
                         default=C.SCORING_TYPE_DEFAULT,
                         help='Score type to output. Default: %(default)s')
 
-    params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16],
+    params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                         help="Data type. Default: %(default)s infers from saved model.")
 
     add_logging_args(params)
@@ -1187,7 +1187,7 @@ def add_inference_args(params):
     add_length_penalty_args(decode_params)
     add_brevity_penalty_args(decode_params)
 
-    decode_params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16],
+    decode_params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                                help="Data type. Default: %(default)s infers from saved model.")
 
 

@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 ImageEncoderConfig = None
 
 
-def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
-    return get_transformer_encoder(config, prefix)
+def get_encoder(config: 'EncoderConfig', prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Encoder':
+    return get_transformer_encoder(config, prefix, dtype)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str, dtype: str) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
@@ -46,7 +46,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) 
     :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
-    return TransformerEncoder(config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX)
+    return TransformerEncoder(config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX, dtype=dtype)
 
 
 class Encoder(ABC, mx.gluon.HybridBlock):
@@ -131,22 +131,26 @@ class Embedding(Encoder):
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
     :param is_source: Whether this is the source embedding instance. Default: False.
+    :param dtype: Data type. Default: 'float32'.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
                  is_source: bool = False,
-                 embed_weight: Optional[mx.gluon.Parameter] = None) -> None:
+                 embed_weight: Optional[mx.gluon.Parameter] = None,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
         self.is_source = is_source
+        self._dtype = dtype
 
         with self.name_scope():
             if embed_weight is None:
                 self.embed_weight = self.params.get('weight',
                                                     shape=(self.config.vocab_size, self.config.num_embed),
-                                                    grad_stype='row_sparse')
+                                                    grad_stype='row_sparse',
+                                                    dtype=dtype)
                 self._use_sparse_grad = self.config.allow_sparse_grad
             else:
                 self.embed_weight = embed_weight  # adds to self._reg_params
@@ -157,7 +161,7 @@ class Embedding(Encoder):
                 for i, fc in enumerate(self.config.factor_configs):
                     factor_weight_name = 'factor%d_weight' % i
                     factor_weight = embed_weight if fc.share_source_embedding else \
-                        self.params.get('factor%d_weight' % i, shape=(fc.vocab_size, fc.num_embed))
+                        self.params.get('factor%d_weight' % i, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
                     # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
                     setattr(self, factor_weight_name, factor_weight)
 
@@ -194,6 +198,7 @@ class Embedding(Encoder):
                             weight=embed_weight,
                             input_dim=self.config.vocab_size,
                             output_dim=self.config.num_embed,
+                            dtype=self._dtype,
                             sparse_grad=self._use_sparse_grad)
 
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
@@ -291,7 +296,8 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX) -> None:
+                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
 
@@ -308,7 +314,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
             self.layers = mx.gluon.nn.HybridSequential()
             for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
+                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i, dtype=dtype))
 
             self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                      dropout=config.dropout_prepost,

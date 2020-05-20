@@ -26,6 +26,7 @@ from . import data_io
 from . import decoder
 from . import encoder
 from . import layers
+from . import quantization
 from . import utils
 from . import vocab
 
@@ -49,6 +50,7 @@ class ModelConfig(Config):
     :param weight_tying_type: Determines which weights get tied.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
+    :param intgemm_custom_lib: Path to intgemm custom operator library used for dtype is int8.  Default: libintgemm.so in the same directory as this script.
     """
 
     def __init__(self,
@@ -62,7 +64,8 @@ class ModelConfig(Config):
                  config_length_task: layers.LengthRatioConfig= None,
                  weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
                  lhuc: bool = False,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 dtype: str = C.DTYPE_FP32,
+                 intgemm_custom_lib: str = os.path.join(os.path.dirname(__file__), "libintgemm.so")) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size
@@ -75,6 +78,7 @@ class ModelConfig(Config):
         self.weight_tying_type = weight_tying_type
         self.lhuc = lhuc
         self.dtype = dtype
+        self.intgemm_custom_lib = intgemm_custom_lib
 
 
 class SockeyeModel(mx.gluon.Block):
@@ -115,12 +119,12 @@ class SockeyeModel(mx.gluon.Block):
                                                       embed_weight=self.target_embed_weight)
 
             # encoder & decoder first (to know the decoder depth)
-            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, prefix=self.prefix)
+            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
+            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, prefix=self.prefix, dtype=config.dtype)
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight)
+                                                   weight=self.output_weight, dtype=config.dtype)
 
             self.length_ratio = None
             if self.config.config_length_task is not None:
@@ -448,6 +452,7 @@ def load_model(model_folder: str,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
                inference_only: bool = False,
+               for_disk_saving: str = None,
                allow_missing: bool = False,
                set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
     """
@@ -459,6 +464,12 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param for_disk_saving: For saving quantized models to disk.
+           None: load as usual and the model will work.
+           int8: The model loaded into RAM will not work, but is suitable for
+               writing to disk in quantized format (including scaling factors).
+           float32: The model loaded into RAM will not work, but is suitable
+               for writing to disk as float32 with precomputed scaling factors.
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :return: List of models, source vocabularies, target vocabulary.
@@ -479,29 +490,67 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
+    if (dtype == C.DTYPE_INT8 or model_config.dtype == C.DTYPE_INT8 or for_disk_saving is not None) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
+        #We're going to use int8 but it's not compiled into mxnet.
+        path = os.path.abspath(model_config.intgemm_custom_lib)
+        try:
+            mx.library.load(path)
+        except(mx.base.MXNetError):
+            raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a custom operator library was not found in `" + path + "`.  Compile the custom operator then set the path using intgemm_custom_lib in the config file.")
+
+    #Are we converting the model to 8-bit?
+    quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
+    if quantizing:
+        model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
+
     model = SockeyeModel(model_config, inference_only=inference_only)
     model.initialize(ctx=context)
-    model.cast(model_config.dtype)
+    if model_config.dtype != C.DTYPE_INT8:
+        # If model_config.dtype is int8, then the above model construction
+        # (which also used model_config) already set everything to the correct
+        # mix of float32 and int8.  Cast would try to make everything int8.
+        model.cast(model_config.dtype)
 
-    if dtype is None:
+    if quantizing:
+        logger.info("Model dtype: quantizing from float32 to int8")
+        #The scaling factors are missing
+        allow_missing = True
+        cast_dtype = True
+        dtype_source = 'saved'
+    elif dtype is None:
         logger.info("Model dtype: %s" % model_config.dtype)
+        allow_missing = False
         cast_dtype = False
         dtype_source = 'saved'
     else:
         logger.info("Model dtype: overridden to %s" % dtype)
         model.cast(dtype)
+        allow_missing = False
         cast_dtype = True
         dtype_source = 'current'
 
     model.load_parameters(filename=params_fname,
                           ctx=context,
                           allow_missing=allow_missing,
-                          ignore_extra=False,
+                          ignore_extra=True, #Scaling factors may be present in float32 models.
                           cast_dtype=cast_dtype,
                           dtype_source=dtype_source)
+    
+    params = model.collect_params()
     if set_grad_req_null:
-        for param in model.collect_params().values():
+        for param in params.values():
             param.grad_req = 'null'
+    
+    if for_disk_saving is not None:
+        #Saving scaling factors and possibly int8 values to disk.
+        if not quantizing:
+            raise RuntimeError("Model is already quantized and for_disk_saving is set.")
+        quantization.convert_weights_disk_format(params, for_disk_saving)
+        model.config.dtype = for_disk_saving
+        #TODO: check for missing parameters somehow (we allowed scaling to be missing)
+    if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
+        #Disk format to CPU-dependent format.
+        quantization.convert_weights_cpu_dependent(params)
 
     if hybridize:
         model.hybridize(static_alloc=True)
