@@ -460,28 +460,13 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
-<<<<<<< HEAD
-            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
-            self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype=dtype)
-            self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype=dtype)
-            self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att, flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
+            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att,
+                                                      flatten=False, use_bias=False,
+                                                      prefix='q2h_', dtype=dtype)
+            self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att,
+                                                       flatten=False, use_bias=False,
+                                                       prefix='kv2h_', dtype=dtype)
 
-    def project_and_isolate_heads(self, F, memory: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
-        """
-        Projects memory into keys and values, and separates attention heads dimension.
-
-        :param memory: Memory tensor. Shape: (batch, memory_max_length, input_depth).
-        :return: Symbol of shape (batch, heads, memory_max_length, depth_per_head).
-        """
-        keys = self.ff_k(memory)
-        values = self.ff_v(memory)
-        keys = split_heads(F, keys, depth_per_head=self.depth_per_head, heads=self.heads)
-        values = split_heads(F, values, depth_per_head=self.depth_per_head, heads=self.heads)
-        return keys, values
-=======
-            self.ff_q = mx.gluon.nn.Dense(units=depth_att, flatten=False, use_bias=False, prefix='q2h_')
-            self.ff_kv = mx.gluon.nn.Dense(in_units=depth_key_value, units=2*depth_att, flatten=False, use_bias=False, prefix='kv2h_')
->>>>>>> Faster multihead attention for training, declared model state structure
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
@@ -507,11 +492,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         queries = self.ff_q(queries)
 
         # TODO: check whether memory has proper shape/structure for self.ff_kv projection
-<<<<<<< HEAD
-        kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(F.transpose(memory, axes=(1, 0, 2)))
-=======
         kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(memory)
->>>>>>> Removed transposes for decoder kv states (requires fast take on axis=1)
 
         return self._attend(F, queries, kv, bias=bias, lengths=memory_lengths)
 
