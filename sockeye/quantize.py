@@ -23,6 +23,28 @@ from sockeye.utils import check_condition
 logger = logging.getLogger(__name__)
 
 
+def annotate_model_params(model_dir: str):
+    log_sockeye_version(logger)
+
+    params_best = os.path.join(model_dir, C.PARAMS_BEST_NAME)
+    params_best_float32 = os.path.join(model_dir, C.PARAMS_BEST_NAME_FLOAT32)
+    config = os.path.join(model_dir, C.CONFIG_NAME)
+    config_float32 = os.path.join(model_dir, C.CONFIG_NAME_FLOAT32)
+
+    for fname in params_best_float32, config_float32:
+        check_condition(not os.path.exists(fname),
+                        'File "%s" exists, indicating this model has already been quantized.' % fname)
+
+    # Load model and compute scaling factors
+    model = sockeye.model.load_model(model_dir, for_disk_saving='float32', dtype='int8')
+    # Move original params and config files
+    os.rename(params_best, params_best_float32)
+    os.rename(config, config_float32)
+    # Write new params and config files with annotated scaling factors
+    model[0].save_parameters(params_best)
+    model[0].save_config(model_dir)
+
+
 def main():
     setup_main_logger(console=True, file_logging=False)
     params = argparse.ArgumentParser(
@@ -30,25 +52,7 @@ def main():
     params.add_argument('--model', '-m', required=True, help='Trained Sockeye model directory.')
     args = params.parse_args()
 
-    log_sockeye_version(logger)
-
-    params_best = os.path.join(args.model, C.PARAMS_BEST_NAME)
-    params_best_float32 = os.path.join(args.model, C.PARAMS_BEST_NAME_FLOAT32)
-    config = os.path.join(args.model, C.CONFIG_NAME)
-    config_float32 = os.path.join(args.model, C.CONFIG_NAME_FLOAT32)
-
-    for fname in params_best_float32, config_float32:
-        check_condition(not os.path.exists(fname),
-                        'File "%s" exists, indicating this model has already been quantized.' % fname)
-
-    # Load model and compute scaling factors
-    model = sockeye.model.load_model(args.model, for_disk_saving='float32', dtype='int8')
-    # Move original params and config files
-    os.rename(params_best, params_best_float32)
-    os.rename(config, config_float32)
-    # Write new params and config files with annotated scaling factors
-    model[0].save_parameters(params_best)
-    model[0].save_config(args.model)
+    annotate_model_params(args.model)
 
 
 if __name__ == '__main__':
