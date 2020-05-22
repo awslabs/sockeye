@@ -6,7 +6,10 @@ import sys
 
 
 SOCKEYE_DIR = os.path.dirname(os.path.dirname((os.path.dirname(os.path.abspath(__file__)))))
-DOCKERFILE = os.path.join(SOCKEYE_DIR, 'sockeye_contrib', 'docker', 'Dockerfile')
+DOCKERFILE_CPU = os.path.join(SOCKEYE_DIR, 'sockeye_contrib', 'docker', 'Dockerfile.cpu')
+DOCKERFILE_GPU = os.path.join(SOCKEYE_DIR, 'sockeye_contrib', 'docker', 'Dockerfile.gpu')
+REQS_BASE = os.path.join(SOCKEYE_DIR, 'requirements', 'requirements.txt')
+REQS_HOROVOD = os.path.join(SOCKEYE_DIR, 'requirements', 'requirements.horovod.txt')
 
 GIT = 'git'
 DOCKER = 'docker'
@@ -31,10 +34,28 @@ def run_command(cmd_args, get_output=False):
     return subprocess.call(cmd_args, cwd=SOCKEYE_DIR)
 
 
+def read_requirements(fname):
+    with open(fname, 'rt') as reqs_in:
+        # MXNet is installed separately in the Dockerfile
+        return ' '.join(line.strip() for line in reqs_in if not line.startswith('mxnet'))
+
+
 def main():
-    if not os.path.exists(DOCKERFILE):
-        msg = 'Cannot find {}. Please make sure {} is a properly cloned repository.'.format(DOCKERFILE, SOCKEYE_DIR)
-        raise FileNotFoundError(msg)
+    for fname in (DOCKERFILE_CPU, DOCKERFILE_GPU, REQS_BASE, REQS_HOROVOD):
+        if not os.path.exists(fname):
+            msg = 'Cannot find {}. Please make sure {} is a properly cloned repository.'.format(fname, SOCKEYE_DIR)
+            raise FileNotFoundError(msg)
+
+    if len(sys.argv[1:]) != 1:
+        print('Usage: {} (cpu|gpu)'.format(SOCKEYE_DIR), file=sys.stderr)
+        sys.exit(2)
+
+    if sys.argv[1] == 'cpu':
+        dockerfile = DOCKERFILE_CPU
+        repository = REPOSITORY + '-cpu'
+    else:
+        dockerfile = DOCKERFILE_GPU
+        repository = REPOSITORY + '-gpu'
 
     check_command(GIT)
     check_command(DOCKER)
@@ -44,8 +65,15 @@ def main():
     sockeye_commit = run_command([GIT, 'rev-parse', 'HEAD'], get_output=True)
     tag = run_command([GIT, 'rev-parse', '--short', 'HEAD'], get_output=True)
 
-    run_command([DOCKER, 'build', '-t', '{}:{}'.format(REPOSITORY, tag), '-f', DOCKERFILE, '.', '--build-arg',
-                 'SOCKEYE_COMMIT={}'.format(sockeye_commit)])
+    run_command([DOCKER, 'build',
+                 '-t', '{}:{}'.format(repository, tag),
+                 '-f', dockerfile,
+                 '.',
+                 '--build-arg', 'SOCKEYE_COMMIT={}'.format(sockeye_commit),
+                 '--build-arg', 'REQS_BASE={}'.format(read_requirements(REQS_BASE)),
+                 '--build-arg', 'REQS_HOROVOD={}'.format(read_requirements(REQS_HOROVOD))])
+
+    run_command([DOCKER, 'tag', '{}:{}'.format(repository, tag), '{}:latest'.format(repository)])
 
 
 if __name__ == '__main__':

@@ -11,6 +11,19 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.6]
+
+### Changed
+
+- Updated Dockerfiles optimized for CPU (intgemm int8 inference, full MKL support) and GPU (distributed training with Horovod).  See [sockeye_contrib/docker](sockeye_contrib/docker).
+
+### Added
+
+- Official support for int8 quantization with [intgemm](https://github.com/kpu/intgemm):
+  - This requires the "intgemm" fork of MXNet ([kpuatamazon/incubator-mxnet/intgemm](https://github.com/kpuatamazon/incubator-mxnet/tree/intgemm)).  This is the version of MXNet used in the Sockeye CPU docker image (see [sockeye_contrib/docker](sockeye_contrib/docker)).
+  - Use `sockeye.translate --dtype int8` to quantize a trained float32 model at runtime.
+  - Use the `sockeye.quantize` CLI to annotate a float32 model with int8 scaling factors for fast runtime quantization.
+
 ## [2.1.5]
 
 ### Changed

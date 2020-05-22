@@ -129,9 +129,9 @@ class OutputLayer(mx.gluon.HybridBlock):
             if weight is None or dtype == C.DTYPE_INT8:
                 if dtype == C.DTYPE_INT8:
                     self.scaling = self.params.get('scaling', shape=(1,), init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32, allow_deferred_init=False)
-                    #This is only for inference but MXNet tries to create an
-                    #initializer anyway, then fails because most random
-                    #generators don't support int8 output.
+                    # This is only for inference but MXNet tries to create an
+                    # initializer anyway, then fails because most random
+                    # generators don't support int8 output.
                     weight_initializer = 'zeros'
                 self.weight = self.params.get("weight",
                                               shape=(vocab_size, hidden_size),
@@ -444,7 +444,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
 
         self.depth_att = depth_att
         with self.name_scope():
-            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_', dtype = dtype)
+            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
 
     def hybrid_forward(self, F,
                        inputs: mx.sym.Symbol,
@@ -526,9 +526,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
-            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype = dtype)
-            self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype = dtype)
-            self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype = dtype)
+            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
+            self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype=dtype)
+            self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype=dtype)
 
     def project_and_isolate_heads(self, F, memory: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
         """
@@ -617,8 +617,8 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
         super().__init__(prefix=prefix)
         self.num_hidden = num_hidden
         with self.name_scope():
-            self.q2h = quantization.QuantizableDense(units=num_hidden, flatten=False, use_bias=True, dtype = dtype)
-            self.kv2h = quantization.QuantizableDense(units=num_hidden * 2, flatten=False, use_bias=True, dtype = dtype)
+            self.q2h = quantization.QuantizableDense(units=num_hidden, flatten=False, use_bias=True, dtype=dtype)
+            self.kv2h = quantization.QuantizableDense(units=num_hidden * 2, flatten=False, use_bias=True, dtype=dtype)
             self.dot_att = DotAttentionCell()
 
     def hybrid_forward(self, F,

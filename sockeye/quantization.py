@@ -1,4 +1,4 @@
-# Copyright 2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,13 +11,16 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import mxnet as mx
-import math
-from . import constants as C
-from mxnet.gluon.nn.activations import Activation
 import logging
+import math
+
+import mxnet as mx
+from mxnet.gluon.nn.activations import Activation
+
+from . import constants as C
 
 logger = logging.getLogger(__name__)
+
 
 # Modified from the source to mxnet.gluon.nn.basic_layers.Dense which is:
 # Licensed to the Apache Software Foundation (ASF) under one
@@ -130,7 +133,7 @@ class QuantizableDense(mx.gluon.HybridBlock):
             #No casting an already quantized matrix.
             logger.warning("Ignoring casting on int8 matrix")
 
-    def hybrid_forward(self, F, x, weight, scaling = None, bias=None):
+    def hybrid_forward(self, F, x, weight, scaling=None, bias=None):
         if self._dtype == C.DTYPE_INT8:
             if bias is not None:
                 act = F.contrib.intgemm_fully_connected(x, weight, scaling, bias, no_bias=False, num_hidden=self._units,
@@ -155,19 +158,20 @@ class QuantizableDense(mx.gluon.HybridBlock):
                         layout='{0} -> {1}'.format(shape[1] if shape[1] else None, shape[0]))
 
 
-#Minimize mean squared error of quantizing a tensor, returning the top value
-#(i.e. the one that quantizes to 127).  Scaling = 127.0 / return value.
-def optimize_quantization_mse(tensor, rounds = 10):
-    #This is a convex optimization problem.  EM works but makes slow steps.
-    #Instead of EM, use binary search in the direction minimization suggests.
+def optimize_quantization_mse(tensor, rounds=10):
+    """
+    Minimize mean squared error of quantizing a tensor, returning the top value
+    (i.e. the one that quantizes to 127).  Scaling = 127.0 / return value.
+
+    This is a convex optimization problem.  EM works but makes slow steps.
+    Instead of EM, use binary search in the direction minimization suggests.
+    """
     best_mse = math.inf
     best_top = None
     maxabs = mx.nd.contrib.intgemm_maxabsolute(tensor)
-    # For converting python numbers to MXNet NDArray
-    one = mx.nd.ones(shape=(1,))
     low = 0.0
     high = maxabs
-    for i in range(rounds):
+    for _ in range(rounds):
         value = (low + high) / 2.0
         quant = mx.nd.contrib.intgemm_prepare_data(tensor, value)
         quant_float = mx.nd.cast(quant, dtype=C.DTYPE_FP32)
@@ -175,8 +179,8 @@ def optimize_quantization_mse(tensor, rounds = 10):
         if mse < best_mse:
             best_mse = mse
             best_top = value
-        #This optimizes scaling subject to cluster assignment.
-        #It can be used for EM but the step is really slow, so use it for direction.
+        # This optimizes scaling subject to cluster assignment.
+        # It can be used for EM but the step is really slow, so use it for direction.
         scale = mx.nd.sum(quant_float * quant_float) / mx.nd.sum(quant_float * tensor)
         top = 127.0 / scale.asscalar()
         if top < value:
@@ -185,18 +189,19 @@ def optimize_quantization_mse(tensor, rounds = 10):
             low = value
     return best_top
 
+
 def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param: mx.gluon.parameter.Parameter) -> float:
-     """
-     Extract or tune the scaling factor for a parameter.
-     """
-     scaling = scaling_param.data()
-     if scaling.asscalar() < 0:
-         #Bogus auto initialized scaling factor.
-         b_max = optimize_quantization_mse(tensor_param.data())
-         scaling_param.set_data(b_max / 127.0)
-     else:
-         b_max = scaling * 127.0
-     return b_max
+    """
+    Extract or tune the scaling factor for a parameter.
+    """
+    scaling = scaling_param.data()
+    if scaling.asscalar() < 0:
+        # Bogus auto initialized scaling factor.
+        b_max = optimize_quantization_mse(tensor_param.data())
+        scaling_param.set_data(b_max / 127.0)
+    else:
+        b_max = scaling * 127.0
+    return b_max
 
 
 def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_store: str):
@@ -221,6 +226,7 @@ def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_
                     param.set_data(quantized)
                     param.dtype = C.DTYPE_INT8
 
+
 def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
     """
     Convert weights from disk format to intgemm's CPU-dependent format for
@@ -235,15 +241,11 @@ def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
             scaling_name = name[0:-6] + "scaling"
             if scaling_name in params:
                 if param.dtype == C.DTYPE_INT8:
-                    #Already fully quantized, just rearrange.
-                    weight = mx.nd.contrib.intgemm_prepare_weight(
-                        param.data(), already_quantized = True)
+                    # Already fully quantized, just rearrange.
+                    weight = mx.nd.contrib.intgemm_prepare_weight(param.data(), already_quantized = True)
                 else:
-                    #Use offline scaling factor if available.
+                    # Use offline scaling factor if available.
                     b_max = extract_quant_max(param, params[scaling_name])
-                    weight = mx.nd.contrib.intgemm_prepare_weight(
-                        param.data(),
-                        b_max)
+                    weight = mx.nd.contrib.intgemm_prepare_weight(param.data(), b_max)
                 param.set_data(weight)
                 param.dtype = C.DTYPE_INT8
-
