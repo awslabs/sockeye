@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.2.0]
+
+### Changed
+
+- Replaced multi-head attention with [interleaved_matmul_encdec](https://github.com/apache/incubator-mxnet/pull/16408) operators, which removes previous needed transposes and improves performance.
+
 ## [2.1.7]
 
 ### Changed
