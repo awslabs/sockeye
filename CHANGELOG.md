@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.7]
+
+### Changed
+
+- Optimize prepare_data by saving the shards in parallel. The prepare_data script accepts a new parameter max-processes to control the level of parallelization.
+
 ## [2.1.6]
 
 ### Changed
