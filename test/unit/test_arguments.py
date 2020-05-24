@@ -62,7 +62,7 @@ def test_simple_dict():
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], shared_vocab=False, num_words=(0, 0),
           word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
           no_bucketing=False, bucket_width=10, no_bucket_scaling=False, max_seq_len=(99, 99),
-          monitor_pattern=None, monitor_stat_func='mx_default')),
+          monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_io_args)
