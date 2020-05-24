@@ -537,8 +537,20 @@ def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int
     return max(int(math.ceil(num_samples / samples_per_shard)), min_num_shards)
 
 
-def process_shard(shard_idx, data_loader, shard_sources, shard_target, 
-                  shard_stats, output_prefix, keep_tmp_shard_files):
+def save_shard(shard_idx: int, data_loader: RawParallelDatasetLoader,
+               shard_sources: List[str], shard_target: str, 
+               shard_stats: 'DataStatistics', output_prefix: str, keep_tmp_shard_files: bool):
+    """
+    Load a shard source/target data files into an NDArrays and then save it to desk.
+    Optionally it can delete the source/target files
+    :param shard_idx: The index of the shard.
+    :param data_loader: A loader for loading parallel data from sources and target.
+    :param shard_sources: A list of sources file names.
+    :param shard_target: A target file name.
+    :param shard_stats: The statistics for the sources/target data.
+    :param output_prefix: The prefix of the output file name.
+    :param keep_tmp_shard_files: Keep the sources/target files when it is True otherwise delete them. 
+    """
     sources_sentences = [SequenceReader(s) for s in shard_sources]
     target_sentences = SequenceReader(shard_target)
     dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket)
@@ -611,19 +623,20 @@ def prepare_data(source_fnames: List[str],
 
     # 3. convert each shard to serialized ndarrays
     if not max_processes:
-        logger.info("Processing shards sequentily.")
+        logger.info("Processing shards sequentially.")
         # Process shards sequantially woithout using multiprocessing
         for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
-            process_shard(shard_idx, data_loader, shard_sources, shard_target, 
-                                                        shard_stats, output_prefix, keep_tmp_shard_files)
+            save_shard(shard_idx, data_loader, shard_sources, shard_target,
+                       shard_stats, output_prefix, keep_tmp_shard_files)
     else:
         logger.info(f"Processing shards using {max_processes} processes.")
         # Process shards in parallel using max_processes process
         results = []
         pool = multiprocessing.pool.Pool(processes=max_processes)
         for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
-            result = pool.apply_async(process_shard, args=(shard_idx, data_loader, shard_sources, shard_target, 
-                                                        shard_stats, output_prefix, keep_tmp_shard_files))
+            args = (shard_idx, data_loader, shard_sources, shard_target, 
+                    shard_stats, output_prefix, keep_tmp_shard_files)
+            result = pool.apply_async(save_shard, args=args)
             results.append(result)
         pool.close()
         pool.join()
@@ -631,7 +644,7 @@ def prepare_data(source_fnames: List[str],
         for result in results:
             if not result.successful():
                 logger.error("Process ended in error.")
-                raise RuntimeError("Shard processing fail")
+                raise RuntimeError("Shard processing failed.")
 
 
     data_info = DataInfo(sources=[os.path.abspath(fname) for fname in source_fnames],
