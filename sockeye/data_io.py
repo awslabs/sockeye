@@ -541,8 +541,9 @@ def save_shard(shard_idx: int, data_loader: RawParallelDatasetLoader,
                shard_sources: List[str], shard_target: str, 
                shard_stats: 'DataStatistics', output_prefix: str, keep_tmp_shard_files: bool):
     """
-    Load a shard source/target data files into an NDArrays and then save it to desk.
-    Optionally it can delete the source/target files
+    Load shard source and target data files into NDArrays and save to disk.
+    Optionally it can delete the source/target files.
+
     :param shard_idx: The index of the shard.
     :param data_loader: A loader for loading parallel data from sources and target.
     :param shard_sources: A list of sources file names.
@@ -581,7 +582,7 @@ def prepare_data(source_fnames: List[str],
                  output_prefix: str,
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
-                 max_processes: int = None):
+                 max_processes: int = 1):
     logger.info("Preparing data.")
     # write vocabularies to data folder
     vocab.save_source_vocabs(source_vocabs, output_prefix)
@@ -622,7 +623,7 @@ def prepare_data(source_fnames: List[str],
                                            pad_id=C.PAD_ID)
 
     # 3. convert each shard to serialized ndarrays
-    if not max_processes:
+    if max_processes == 1:
         logger.info("Processing shards sequentially.")
         # Process shards sequantially woithout using multiprocessing
         for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):

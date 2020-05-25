@@ -15,7 +15,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Changed
 
-- Optimize prepare_data by saving the shards in parallel. The prepare_data script accepts a new parameter max-processes to control the level of parallelization.
+- Optimize prepare_data by saving the shards in parallel. The prepare_data script accepts a new parameter `--max-processes` to control the level of parallelism with which shards are written to disk.
 
 ## [2.1.6]
 
