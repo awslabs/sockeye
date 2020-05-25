@@ -270,7 +270,8 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           output='train_data',
           quiet=False,
           loglevel='INFO',
-          no_logfile=False
+          no_logfile=False,
+          max_processes=1
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -299,7 +300,8 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           output='prepared_data',
           quiet=False,
           loglevel='INFO',
-          no_logfile=False
+          no_logfile=False,
+          max_processes=1
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):

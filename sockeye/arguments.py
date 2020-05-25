@@ -504,6 +504,10 @@ def add_prepare_data_cli_args(params):
     params.add_argument('--output', '-o',
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
+    params.add_argument('--max-processes',
+                        type=int_greater_or_equal(1),
+                        default=1,
+                        help='Process the shards in parallel using max-processes processes.')
 
     add_logging_args(params)
 

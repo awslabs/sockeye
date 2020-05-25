@@ -28,6 +28,8 @@ from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence
 import mxnet as mx
 import numpy as np
 
+import multiprocessing
+
 from . import config
 from . import constants as C
 from . import horovod_mpi
@@ -535,6 +537,35 @@ def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int
     return max(int(math.ceil(num_samples / samples_per_shard)), min_num_shards)
 
 
+def save_shard(shard_idx: int, data_loader: RawParallelDatasetLoader,
+               shard_sources: List[str], shard_target: str, 
+               shard_stats: 'DataStatistics', output_prefix: str, keep_tmp_shard_files: bool):
+    """
+    Load shard source and target data files into NDArrays and save to disk.
+    Optionally it can delete the source/target files.
+
+    :param shard_idx: The index of the shard.
+    :param data_loader: A loader for loading parallel data from sources and target.
+    :param shard_sources: A list of sources file names.
+    :param shard_target: A target file name.
+    :param shard_stats: The statistics for the sources/target data.
+    :param output_prefix: The prefix of the output file name.
+    :param keep_tmp_shard_files: Keep the sources/target files when it is True otherwise delete them. 
+    """
+    sources_sentences = [SequenceReader(s) for s in shard_sources]
+    target_sentences = SequenceReader(shard_target)
+    dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket)
+    shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
+    shard_stats.log()
+    logger.info("Writing '%s'", shard_fname)
+    dataset.save(shard_fname)
+
+    if not keep_tmp_shard_files:
+        for f in shard_sources:
+            os.remove(f)
+        os.remove(shard_target)
+
+
 def prepare_data(source_fnames: List[str],
                  target_fname: str,
                  source_vocabs: List[vocab.Vocab],
@@ -550,7 +581,8 @@ def prepare_data(source_fnames: List[str],
                  min_num_shards: int,
                  output_prefix: str,
                  bucket_scaling: bool = True,
-                 keep_tmp_shard_files: bool = False):
+                 keep_tmp_shard_files: bool = False,
+                 max_processes: int = 1):
     logger.info("Preparing data.")
     # write vocabularies to data folder
     vocab.save_source_vocabs(source_vocabs, output_prefix)
@@ -591,19 +623,30 @@ def prepare_data(source_fnames: List[str],
                                            pad_id=C.PAD_ID)
 
     # 3. convert each shard to serialized ndarrays
-    for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
-        sources_sentences = [SequenceReader(s) for s in shard_sources]
-        target_sentences = SequenceReader(shard_target)
-        dataset = data_loader.load(sources_sentences, target_sentences, shard_stats.num_sents_per_bucket)
-        shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
-        shard_stats.log()
-        logger.info("Writing '%s'", shard_fname)
-        dataset.save(shard_fname)
+    if max_processes == 1:
+        logger.info("Processing shards sequentially.")
+        # Process shards sequantially woithout using multiprocessing
+        for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
+            save_shard(shard_idx, data_loader, shard_sources, shard_target,
+                       shard_stats, output_prefix, keep_tmp_shard_files)
+    else:
+        logger.info(f"Processing shards using {max_processes} processes.")
+        # Process shards in parallel using max_processes process
+        results = []
+        pool = multiprocessing.pool.Pool(processes=max_processes)
+        for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
+            args = (shard_idx, data_loader, shard_sources, shard_target, 
+                    shard_stats, output_prefix, keep_tmp_shard_files)
+            result = pool.apply_async(save_shard, args=args)
+            results.append(result)
+        pool.close()
+        pool.join()
 
-        if not keep_tmp_shard_files:
-            for f in shard_sources:
-                os.remove(f)
-            os.remove(shard_target)
+        for result in results:
+            if not result.successful():
+                logger.error("Process ended in error.")
+                raise RuntimeError("Shard processing failed.")
+
 
     data_info = DataInfo(sources=[os.path.abspath(fname) for fname in source_fnames],
                          target=os.path.abspath(target_fname),
