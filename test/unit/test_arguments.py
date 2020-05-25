@@ -271,7 +271,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           quiet=False,
           loglevel='INFO',
           no_logfile=False,
-          max_processes=None
+          max_processes=1
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -301,7 +301,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           quiet=False,
           loglevel='INFO',
           no_logfile=False,
-          max_processes=None
+          max_processes=1
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):
