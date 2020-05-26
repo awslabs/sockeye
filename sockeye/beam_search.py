@@ -12,6 +12,8 @@
 # permissions and limitations under the License.
 
 import logging
+import functools
+import operator
 from abc import abstractmethod, ABC
 from typing import Tuple, Optional, List, Union
 
@@ -29,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 
 class _Inference(ABC):
+
+    @abstractmethod
+    def state_structure(self):
+        raise NotImplementedError()
 
     @abstractmethod
     def encode_and_initialize(self,
@@ -54,6 +60,9 @@ class _SingleModelInference(_Inference):
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
 
+    def state_structure(self) -> List:
+        return [self._model.state_structure()]
+
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
         predicted_output_length = predicted_output_length.expand_dims(axis=1)
@@ -64,8 +73,9 @@ class _SingleModelInference(_Inference):
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         logits, states, _ = self._model.decode_step(step_input, states, vocab_slice_ids)
-        logits = logits.astype('float32', copy=False)
-        scores = -logits if self._skip_softmax else -logits.log_softmax(axis=-1)
+        if not self._skip_softmax:
+            logits = logits.log_softmax(axis=-1)
+        scores = -logits
         return scores, states
 
 
@@ -84,13 +94,19 @@ class _EnsembleInference(_Inference):
             raise ValueError()
         self._const_lr = constant_length_ratio
 
+    def state_structure(self) -> List:
+        structure = []
+        for model in self._models:
+            structure.append(model.state_structure())
+        return structure
+
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
-        model_states = []  # type: List[List[mx.nd.NDArray]]
+        model_states = []  # type: List[mx.nd.NDArray]
         predicted_output_lengths = []  # type: List[mx.nd.NDArray]
         for model in self._models:
             states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
             predicted_output_lengths.append(predicted_output_length)
-            model_states.append(states)
+            model_states += states
         # average predicted output lengths, (batch, 1)
         predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=1), axis=1, keepdims=True)
         return model_states, predicted_output_lengths
@@ -99,13 +115,16 @@ class _EnsembleInference(_Inference):
                     step_input: mx.nd.NDArray,
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
-        outputs, new_states = [], []
-        for model, model_states in zip(self._models, states):
+        outputs = []  # type: List[mx.nd.NDArray]
+        new_states = []  # type: List[mx.nd.NDArray]
+        state_index = 0
+        for model, model_state_structure in zip(self._models, self.state_structure()):
+            model_states = states[state_index:state_index+len(model_state_structure)]
+            state_index += len(model_state_structure)
             logits, model_states, _ = model.decode_step(step_input, model_states, vocab_slice_ids)
-            logits = logits.astype('float32', copy=False)
             probs = logits.softmax(axis=-1)
             outputs.append(probs)
-            new_states.append(model_states)
+            new_states += model_states
         scores = self._interpolation(outputs)
         return scores, new_states
 
@@ -268,25 +287,19 @@ class CandidateScorer(mx.gluon.HybridBlock):
         return (scores + bp) * self._lp(lengths)
 
 
-class SortByIndex(mx.gluon.HybridBlock):
-    """
-    A HybridBlock that sorts args by the given indices.
-    """
-    def hybrid_forward(self, F, indices, *args):
-        return [F.take(arg, indices) for arg in args]
-
-
 class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
     """
 
     def __init__(self,
+                 dtype: str,
                  pad_id: int,
                  eos_id: int,
                  scorer: CandidateScorer,
                  **kwargs) -> None:
         super().__init__(**kwargs)
+        self.dtype = dtype
         self.pad_id = pad_id
         self.eos_id = eos_id
         self._scorer = scorer
@@ -304,7 +317,7 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         newly_finished = F.broadcast_logical_xor(all_finished, finished)
         scores_accumulated = F.where(newly_finished,
                                      self._scorer(scores_accumulated,
-                                                  F.cast(F.expand_dims(lengths, axis=1), 'float32'),
+                                                  F.cast(F.expand_dims(lengths, axis=1), self.dtype),
                                                   reference_lengths),
                                      scores_accumulated)
 
@@ -394,33 +407,47 @@ class SampleK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
 
-def _repeat_states(states: List, beam_size) -> List:
+def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
     repeated_states = []
-    for state in states:
-        if isinstance(state, List):
-            state = _repeat_states(state, beam_size)
-        elif isinstance(state, mx.nd.NDArray):
-            state = state.repeat(repeats=beam_size, axis=0)
+    flat_structure = functools.reduce(operator.add, state_structure)
+    assert len(states) == len(flat_structure), "Number of states do not match the defined state structure"
+    for state, state_format in zip(states, flat_structure):
+        if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+            repeat_axis = 0
+        elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
+            # TODO: Change repeat axis to 1 when interleaved multihead attention is implemented
+            repeat_axis = 0
         else:
-            ValueError("state list can only be nested list or NDArrays")
-        repeated_states.append(state)
+            raise ValueError("Provided state format %s not recognized." % state_format)
+        repeated_state = state.repeat(repeats=beam_size, axis=repeat_axis)
+        repeated_states.append(repeated_state)
     return repeated_states
 
 
-def _sort_states(states: List, best_hyp_indices: mx.nd.NDArray) -> List:
-    sorted_states = []
-    for state in states:
-        if isinstance(state, List):
-            state = _sort_states(state, best_hyp_indices)
-        elif isinstance(state, mx.nd.NDArray):
-            state = mx.nd.take(state, best_hyp_indices)
-        else:
-            ValueError("state list can only be nested list or NDArrays")
-        sorted_states.append(state)
-    return sorted_states
+class SortStates(mx.gluon.HybridBlock):
+
+    def __init__(self, state_structure, prefix):
+        mx.gluon.HybridBlock.__init__(self, prefix=prefix)
+        self.flat_structure = functools.reduce(operator.add, state_structure)
+
+    def hybrid_forward(self, F, best_hyp_indices, *states):
+        sorted_states = []
+        assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
+        for state, state_format in zip(states, self.flat_structure):
+            if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+                sorted_state = F.take(state, best_hyp_indices)
+            elif state_format == C.DECODER_STATE:
+                # TODO: Change take axis to 1 when interleaved multihead attention is implemented
+                sorted_state = F.take(state, best_hyp_indices)
+            elif state_format == C.ENCODER_STATE:
+                # No need for takes on encoder layer states
+                sorted_state = state
+            else:
+                raise ValueError("Provided state format %s not recognized." % state_format)
+            sorted_states.append(sorted_state)
+        return sorted_states
 
 
-# TODO (fhieber): add full fp16 decoding with mxnet > 1.5
 class BeamSearch(mx.gluon.Block):
     """
     Features:
@@ -437,6 +464,7 @@ class BeamSearch(mx.gluon.Block):
 
     def __init__(self,
                  beam_size: int,
+                 dtype: str,
                  bos_id: int,
                  eos_id: int,
                  context: Union[mx.Context, List[mx.Context]],
@@ -449,6 +477,7 @@ class BeamSearch(mx.gluon.Block):
                  sample: Optional[int] = None) -> None:
         super().__init__(prefix='beam_search_')
         self.beam_size = beam_size
+        self.dtype = dtype
         self.bos_id = bos_id
         self.eos_id = eos_id
         self.output_vocab_size = output_vocab_size
@@ -459,13 +488,16 @@ class BeamSearch(mx.gluon.Block):
         self.global_avoid_trie = global_avoid_trie
 
         with self.name_scope():
-            self._sort_by_index = SortByIndex(prefix='sort_by_index_')
+            self._sort_states = SortStates(state_structure=self._inference.state_structure(),
+                                           prefix='sort_states_')
             self._update_scores = UpdateScores(prefix='update_scores_')
             self._scorer = scorer
-            self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(prefix='sort_norm_and_update_finished_',
-                                                                        pad_id=C.PAD_ID,
-                                                                        eos_id=eos_id,
-                                                                        scorer=scorer)
+            self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
+                prefix='sort_norm_and_update_finished_',
+                dtype=self.dtype,
+                pad_id=C.PAD_ID,
+                eos_id=eos_id,
+                scorer=scorer)
 
             self._sample = None  # type: Optional[mx.gluon.HybridBlock]
             self._top = None  # type: Optional[mx.gluon.HybridBlock]
@@ -527,12 +559,12 @@ class BeamSearch(mx.gluon.Block):
 
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
-        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype='float32')
+        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
         first_step_mask[batch_indices] = 1.0
         pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
-                              ctx=self.context, dtype='float32')
+                              ctx=self.context, dtype=self.dtype)
         eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
-                              ctx=self.context, dtype='float32')
+                              ctx=self.context, dtype=self.dtype)
         eos_dist[:, C.EOS_ID] = 0
 
         # Best word and hypotheses indices across beam search steps from topk operation.
@@ -546,15 +578,13 @@ class BeamSearch(mx.gluon.Block):
         max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
-        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='float32')
+        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype=self.dtype)
 
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            # TODO: See note in method about migrating to pure MXNet when set operations are supported.
-            #       We currently convert source to NumPy and target ids back to NDArray.
             vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
             if any(raw_constraint_list):
                 # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
@@ -563,6 +593,9 @@ class BeamSearch(mx.gluon.Block):
                 full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
                 raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                        raw_constraint_list]
+            # Pad to a multiple of 8.
+            vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
+                                     mode='constant', constant_values = self.eos_id)
             vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
             if vocab_slice_ids.shape[0] < self.beam_size + 1:
@@ -593,7 +626,7 @@ class BeamSearch(mx.gluon.Block):
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
         # repeat states to beam_size
-        model_states = _repeat_states(model_states, self.beam_size)
+        model_states = _repeat_states(model_states, self.beam_size, self._inference.state_structure())
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
@@ -674,14 +707,14 @@ class BeamSearch(mx.gluon.Block):
                 break
 
             # (5) update models' state with winning hypotheses (ascending)
-            model_states = _sort_states(model_states, best_hyp_indices)
+            model_states = self._sort_states(best_hyp_indices, *model_states)
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
                                                                 self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores, axis=1), dtype='int32').reshape((-1,))
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1), dtype='int32').reshape((-1,))
         best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + offset
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
@@ -733,6 +766,7 @@ def get_beam_search(models: List[SockeyeModel],
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
     bs = BeamSearch(
         beam_size=beam_size,
+        dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
         bos_id=C.BOS_ID,
         eos_id=C.EOS_ID,
         context=context,

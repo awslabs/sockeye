@@ -151,8 +151,8 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
                          "expected_max_input_len, expected_max_output_len",
                          [
                              (99 + 1, 99 + 1, None, None, 1.0, 0.0, 100, 100),  # copy/sort test cases
-                             (99 + 1, 99 + 1, None, None, 0.9, 0.2, 90, 100),  # target shorter than source
-                             (99 + 1, 99 + 1, None, None, 1.1, 0.2, 76, 99),  # target longer than source
+                             (99 + 1, 99 + 1, None, None, 0.9, 0.2, 100, 111),  # target shorter than source
+                             (99 + 1, 99 + 1, None, None, 1.1, 0.2, 100, 130),  # target longer than source
                              (99 + 1, 99 + 1, 50, None, 1.1, 0.2, 51, 67),  # force a maximum input length
                              (99 + 1, 99 + 1, 50, None, 1.1, 0.2, 51, 67),  # force a maximum input length
                              (99 + 1, 99 + 1, 50, 80, 1.1, 0.2, 51, 81),  # force a maximum input length
@@ -177,8 +177,6 @@ def test_get_max_input_output_length(
     max_output_len = get_max_output_len(max_input_len)
 
     assert max_input_len <= supported_max_seq_len_source
-    for input_len in range(1, max_input_len + 1):
-        assert get_max_output_len(input_len) <= supported_max_seq_len_target
     assert max_input_len == expected_max_input_len
     assert max_output_len == expected_max_output_len
 

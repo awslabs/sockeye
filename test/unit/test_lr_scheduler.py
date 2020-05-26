@@ -68,7 +68,8 @@ def test_linear_decay_scheduler():
 
 
 @pytest.mark.parametrize('scheduler_type, expected_instance',
-                         [('inv-sqrt-decay', lr_scheduler.LearningRateSchedulerInvSqrtDecay),
+                         [('none', None),
+                          ('inv-sqrt-decay', lr_scheduler.LearningRateSchedulerInvSqrtDecay),
                           ('linear-decay', lr_scheduler.LearningRateSchedulerLinearDecay),
                           ('plateau-reduce', lr_scheduler.LearningRateSchedulerPlateauReduce)])
 def test_get_lr_scheduler(scheduler_type, expected_instance):
@@ -78,7 +79,10 @@ def test_get_lr_scheduler(scheduler_type, expected_instance):
                                               learning_rate_reduce_num_not_improved=16,
                                               learning_rate_warmup=1000,
                                               max_updates=10000)
-    assert isinstance(scheduler, expected_instance)
+    if expected_instance is None:
+        assert scheduler is None
+    else:
+        assert isinstance(scheduler, expected_instance)
 
 
 def test_get_lr_scheduler_no_reduce():

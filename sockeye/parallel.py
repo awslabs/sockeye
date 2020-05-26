@@ -120,7 +120,7 @@ class Parallel(object):
 
         arg = (self._in_queue, self._out_queue, self._parallizable)
         for _ in range(num_workers):
-            thread = threading.Thread(target=_worker, args=arg)
+            thread = threading.Thread(target=_worker, args=arg, daemon=True)
             self._threads.append(thread)
             thread.start()
 

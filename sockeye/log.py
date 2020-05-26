@@ -121,7 +121,8 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     else:
         log_config = LOGGING_CONFIGS["none"]
 
-    if path:
+    if file_logging:
+        assert path is not None, "Must provide a logfile path"
         log_config["handlers"]["rotating"]["filename"] = path  # type: ignore
 
     for _, handler_config in log_config['handlers'].items():  # type: ignore

@@ -33,11 +33,11 @@ logger = logging.getLogger(__name__)
 ImageEncoderConfig = None
 
 
-def get_encoder(config: 'EncoderConfig', prefix: str = '') -> 'Encoder':
-    return get_transformer_encoder(config, prefix)
+def get_encoder(config: 'EncoderConfig', prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Encoder':
+    return get_transformer_encoder(config, prefix, dtype)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str, dtype: str) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
@@ -46,7 +46,7 @@ def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str) 
     :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
-    return TransformerEncoder(config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX)
+    return TransformerEncoder(config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX, dtype=dtype)
 
 
 class Encoder(ABC, mx.gluon.HybridBlock):
@@ -66,7 +66,7 @@ class Encoder(ABC, mx.gluon.HybridBlock):
         Encodes inputs given valid lengths of individual examples.
 
         :param inputs: Input data.
-        :param valid_length: bla.
+        :param valid_length: Length of inputs without padding.
         :return: Encoded versions of input data (data, data_length).
         """
         return mx.gluon.HybridBlock.__call__(self, inputs, valid_length)
@@ -93,10 +93,16 @@ class Encoder(ABC, mx.gluon.HybridBlock):
 
 class FactorConfig(config.Config):
 
-    def __init__(self, vocab_size: int, num_embed: int) -> None:
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 combine: str, # From C.SOURCE_FACTORS_COMBINE_CHOICES
+                 share_source_embedding: bool) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
+        self.combine = combine
+        self.share_source_embedding = share_source_embedding
 
 
 class EmbeddingConfig(config.Config):
@@ -106,7 +112,7 @@ class EmbeddingConfig(config.Config):
                  num_embed: int,
                  dropout: float,
                  factor_configs: Optional[List[FactorConfig]] = None,
-                 source_factors_combine: str = C.SOURCE_FACTORS_COMBINE_CONCAT) -> None:
+                 allow_sparse_grad: bool = False) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
@@ -115,7 +121,7 @@ class EmbeddingConfig(config.Config):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
-        self.source_factors_combine = source_factors_combine
+        self.allow_sparse_grad = allow_sparse_grad
 
 
 class Embedding(Encoder):
@@ -125,51 +131,83 @@ class Embedding(Encoder):
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
     :param is_source: Whether this is the source embedding instance. Default: False.
+    :param dtype: Data type. Default: 'float32'.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
                  is_source: bool = False,
-                 embed_weight: Optional[mx.gluon.Parameter] = None) -> None:
+                 embed_weight: Optional[mx.gluon.Parameter] = None,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
         self.is_source = is_source
+        self._dtype = dtype
 
         with self.name_scope():
             if embed_weight is None:
-                self.embed_weight = self.params.get('weight', shape=(self.config.vocab_size, self.config.num_embed))
+                self.embed_weight = self.params.get('weight',
+                                                    shape=(self.config.vocab_size, self.config.num_embed),
+                                                    grad_stype='row_sparse',
+                                                    dtype=dtype)
+                self._use_sparse_grad = self.config.allow_sparse_grad
             else:
                 self.embed_weight = embed_weight  # adds to self._reg_params
                 self.params.update({embed_weight.name: embed_weight})  # adds to self.params
+                self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
-            self.factor_embeds = None
             if self.config.factor_configs is not None:
-                self.factor_embeds = mx.gluon.nn.HybridSequential()
-                # Factor weights aren't shared so they're not passed in and we create them here.
-                for i, fc in enumerate(self.config.factor_configs, 1):
-                    self.factor_embeds.add(mx.gluon.nn.Embedding(fc.vocab_size, fc.num_embed,
-                                                                 prefix="factor%d_" % i))
+                for i, fc in enumerate(self.config.factor_configs):
+                    factor_weight_name = 'factor%d_weight' % i
+                    factor_weight = embed_weight if fc.share_source_embedding else \
+                        self.params.get('factor%d_weight' % i, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
+                    # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
+                    setattr(self, factor_weight_name, factor_weight)
 
-    def hybrid_forward(self, F, data, valid_length, embed_weight):  # pylint: disable=arguments-differ
-        factor_embeds = []
+    def hybrid_forward(self, F, data, valid_length, embed_weight, **kwargs):  # pylint: disable=arguments-differ
+        # We will catch the optional factor weights in kwargs
+        average_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
+        concat_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
+        sum_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         if self.is_source:
             if self.config.num_factors > 1 and self.config.factor_configs is not None:
-                data, *data_factors = F.split(data, num_outputs=self.config.num_factors, axis=2, squeeze_axis=True)
-                factor_embeds = [embed(data) for data, embed in zip(data_factors, self.factor_embeds)]
+                data, *data_factors = F.split(data=data,
+                                              num_outputs=self.config.num_factors,
+                                              axis=2,
+                                              squeeze_axis=True)
+                for i, (factor_data, factor_config) in enumerate(zip(data_factors,
+                                                                     self.config.factor_configs)):
+                    factor_weight = kwargs['factor%d_weight' % i]
+                    factor_embedding = F.Embedding(data=factor_data,
+                                                   input_dim=factor_config.vocab_size,
+                                                   weight=factor_weight,
+                                                   output_dim=factor_config.num_embed)
+                    if factor_config.combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+                        concat_factors_embeds.append(factor_embedding)
+                    elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_SUM:
+                        sum_factors_embeds.append(factor_embedding)
+                    elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_AVERAGE:
+                        average_factors_embeds.append(factor_embedding)
+                    else:
+                        raise ValueError("Unknown combine value for source factors: %s" % factor_config.combine)
             else:
                 data = F.squeeze(data, axis=2)
 
         embed = F.Embedding(data,
                             weight=embed_weight,
                             input_dim=self.config.vocab_size,
-                            output_dim=self.config.num_embed)
+                            output_dim=self.config.num_embed,
+                            dtype=self._dtype,
+                            sparse_grad=self._use_sparse_grad)
 
-        if factor_embeds:
-            if self.config.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-                embed = F.concat(embed, *factor_embeds, dim=2)
-            else:
-                embed = F.add_n(embed, *factor_embeds)
+        if self.config.num_factors > 1 and self.config.factor_configs is not None:
+            if average_factors_embeds:
+                embed = F.add_n(embed, *average_factors_embeds) / (len(average_factors_embeds) + 1)
+            if sum_factors_embeds:
+                embed = F.add_n(embed, *sum_factors_embeds)
+            if concat_factors_embeds:
+                embed = F.concat(embed, *concat_factors_embeds, dim=2)
 
         if self.config.dropout > 0:
             embed = F.Dropout(data=embed, p=self.config.dropout)
@@ -258,7 +296,8 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX) -> None:
+                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX,
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
 
@@ -275,7 +314,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
             self.layers = mx.gluon.nn.HybridSequential()
             for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i))
+                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i, dtype=dtype))
 
             self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                      dropout=config.dropout_prepost,

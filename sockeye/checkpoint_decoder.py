@@ -100,6 +100,8 @@ class CheckpointDecoder:
 
             utils.check_condition(all(len(l) == len(target_sentences) for l in inputs_sentences),
                                   "Sentences differ in length")
+            utils.check_condition(all(len(sentence.strip()) > 0 for sentence in target_sentences),
+                                  "Empty target validation sentence.")
 
             if sample_size <= 0:
                 sample_size = len(inputs_sentences[0])

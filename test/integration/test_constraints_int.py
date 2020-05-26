@@ -20,12 +20,8 @@ import sys
 from typing import Dict, List, Any
 from unittest.mock import patch
 
-import pytest
-
-import sockeye.constants as C
 import sockeye.translate
-from test.common import run_train_translate, tmp_digits_dataset, collect_translate_output_and_scores, \
-    _TRANSLATE_PARAMS_COMMON
+from sockeye.test_utils import collect_translate_output_and_scores, TRANSLATE_PARAMS_COMMON
 
 _TRAIN_LINE_COUNT = 20
 _TRAIN_LINE_COUNT_EMPTY = 1
@@ -41,7 +37,7 @@ TEST_CONFIGS = [
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
@@ -51,7 +47,7 @@ TEST_CONFIGS = [
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 4 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 4 --optimizer adam --initial-learning-rate 0.01",
@@ -89,9 +85,9 @@ def _test_constrained_type(constraint_type: str, data: Dict[str, Any], translate
     out_path_constrained = os.path.join(data['work_dir'], "out_constrained.txt")
     params = "{} {} {} --json-input --output-type translation_with_score".format(
         sockeye.translate.__file__,
-        _TRANSLATE_PARAMS_COMMON.format(model=data['model'],
-                                        input=new_test_source_path,
-                                        output=out_path_constrained),
+        TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                       input=new_test_source_path,
+                                       output=out_path_constrained),
         translate_params)
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()

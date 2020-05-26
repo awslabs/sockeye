@@ -22,12 +22,12 @@ import itertools
 import logging
 import math
 import os
+import pprint
 import random
-import shutil
-import subprocess
 import sys
 import time
 from contextlib import contextmanager, ExitStack
+from functools import reduce
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import mxnet as mx
@@ -100,15 +100,27 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seed_rngs(seed: int) -> None:
+def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = None) -> None:
     """
-    Seed the random number generators (Python, Numpy and MXNet)
+    Seed the random number generators (Python, Numpy and MXNet).
 
     :param seed: The random seed.
+    :param ctx: Random number generators in MXNet are device specific.
+           If None, MXNet will set the state of each generator of each device using seed and device id. This will lead
+           to different results on different devices. If ctx is provided, this function will seed
+           device-specific generators with a fixed offset. E.g. for 2 devices and seed=13, seed for gpu(0) will be 13,
+           14 for gpu(1). See https://beta.mxnet.io/api/gluon-related/_autogen/mxnet.random.seed.html.
     """
+    logger.info("Random seed: %d", seed)
     np.random.seed(seed)
     random.seed(seed)
-    mx.random.seed(seed)
+    if ctx is None:
+        mx.random.seed(seed, ctx='all')
+    else:
+        if isinstance(ctx, mx.Context):
+            ctx = [ctx]
+        for i, c in enumerate(ctx):
+            mx.random.seed(seed + i, ctx=c)
 
 
 def check_condition(condition: bool, error_message: str):
@@ -256,7 +268,7 @@ def get_num_gpus() -> int:
         return 0
 
 
-def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
+def get_gpu_memory_usage(ctx: Union[mx.context.Context, List[mx.context.Context]]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
 
@@ -268,30 +280,23 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
     ctx = [c for c in ctx if c.device_type == 'gpu']
     if not ctx:
         return {}
-    if shutil.which("nvidia-smi") is None:
-        logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
-        return {}
-    ids = [str(c.device_id) for c in ctx]
-    query = "--query-gpu=index,memory.used,memory.total"
-    format_arg = "--format=csv,noheader,nounits"
-    try:
-        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(ids)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
-    except OSError:
-        logger.exception("Failed calling nvidia-smi to query memory usage.")
-        return {}
-    memory_data = {}
-    for line in result:
-        gpu_id, mem_used, mem_total = line.split(",")
-        memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
+
+    memory_data = {}  # type: Dict[int, Tuple[int, int]]
+    for c in ctx:
+        try:
+            free, total = mx.context.gpu_memory_info(device_id=c.device_id)  # in bytes
+            used = total - free
+            memory_data[c.device_id] = (used * 1e-06, total * 1e-06)
+        except mx.MXNetError:
+            logger.exception("Failed retrieving memory data for gpu%d", c.device_id)
+            continue
     log_gpu_memory_usage(memory_data)
     return memory_data
 
 
 def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
     log_str = " ".join(
-        "GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0 / v[1]) for k, v in memory_data.items())
+        "GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0 / v[1]) for k, v in memory_data.items() if v[1])
     logger.info(log_str)
 
 
@@ -711,34 +716,6 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
                     logger.warning('File has already been removed: %s', param_fname_n)
 
 
-def cast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
-    """
-    Workaround until no-op cast will be fixed in MXNet codebase.
-    Creates cast symbol only if dtype is different from default one, i.e. float32.
-
-    :param data: Input symbol.
-    :param dtype: Target dtype.
-    :return: Cast symbol or just data symbol.
-    """
-    if dtype != C.DTYPE_FP32:
-        return F.cast(data=data, dtype=dtype)
-    return data
-
-
-def uncast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
-    """
-    Workaround until no-op cast will be fixed in MXNet codebase.
-    Creates cast to float32 symbol only if dtype is different from default one, i.e. float32.
-
-    :param data: Input symbol.
-    :param dtype: Input symbol dtype.
-    :return: Cast symbol or just data symbol.
-    """
-    if dtype != C.DTYPE_FP32:
-        return F.cast(data=data, dtype=C.DTYPE_FP32)
-    return data
-
-
 def split(data: mx.nd.NDArray,
           num_outputs: int,
           axis: int = 1,
@@ -764,26 +741,41 @@ def split(data: mx.nd.NDArray,
     return ndarray_or_list
 
 
+_DTYPE_TO_STRING = {
+    np.float32: 'float32',
+    np.float16: 'float16',
+    np.int8: 'int8',
+    np.int32: 'int32'
+}
+
+
+def _print_dtype(dtype):
+    return _DTYPE_TO_STRING.get(dtype, str(dtype))
+
+
 def log_parameters(params: mx.gluon.ParameterDict):
     """
     Logs information about model parameters.
     """
-    fixed_parameters = 0
-    learned_parameters = 0
     fixed_parameter_names = []
     learned_parameter_names = []
-    #info = []  # type: List[str]
+    total_learned = 0
+    total_fixed = 0
     for name, param in sorted(params.items()):
-        repr = "%s [%s, %s]" % (name, param.shape, param.dtype)
-        #info.append("%s shape=%s, dtype=%s" % (name, param.shape, param.dtype))
+        repr = "%s [%s, %s]" % (name, param.shape, _print_dtype(param.dtype))
+        size = reduce(lambda x, y: x * y, param.shape)
+        if size == 0:
+            logger.debug("Parameter shape for '%s' not yet fully inferred, using 0", name)
         if param.grad_req == 'null':
             fixed_parameter_names.append(repr)
+            total_fixed += size
         else:
+            total_learned += size
             learned_parameter_names.append(repr)
-    #percent_fixed = 100 * (fixed_parameters / max(1, total_parameters))
-    #percent_learned = 100 * (learned_parameters / max(1, total_parameters))
-    logger.info("Trainable parameters: %s", ", ".join(learned_parameter_names))
-    logger.info("Fixed model parameters: %s", ", ".join(fixed_parameter_names))
-    #logger.info("Fixing %d parameters (%0.2f%%)", fixed_parameters, percent_fixed)
-    #logger.info("Learning %d parameters (%0.2f%%)", learned_parameters, percent_learned)
-    #logger.info("Total # of parameters: %d", total_parameters)
+    total_parameters = total_learned + total_fixed
+    logger.info("# of parameters: %d | trainable: %d (%.2f%%) | fixed: %d (%.2f%%)",
+                total_parameters,
+                total_learned, total_learned / total_parameters * 100,
+                total_fixed, total_fixed / total_parameters * 100)
+    logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
+    logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))

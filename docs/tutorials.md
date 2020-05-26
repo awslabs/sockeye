@@ -14,3 +14,4 @@ introduce different concepts and parameters used for training and translation.
 1. [WMT German to English news translation](tutorials/wmt.html)
 1. [Domain adaptation of NMT models](tutorials/adapt.html)
 1. [Large data: WMT German-English 2018](tutorials/wmt_large.html)
+1. [Multilingual Zero-shot Translation IWSLT 2017](tutorials/multilingual.html)

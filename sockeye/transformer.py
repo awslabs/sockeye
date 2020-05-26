@@ -11,13 +11,14 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import mxnet as mx
 
 from . import config
 from . import constants as C
 from . import layers
+from . import quantization
 
 
 class TransformerConfig(config.Config):
@@ -36,7 +37,8 @@ class TransformerConfig(config.Config):
                  postprocess_sequence: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
-                 lhuc: bool = False) -> None:  # type: ignore
+                 lhuc: bool = False,
+                 depth_key_value: int = 0) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -52,6 +54,7 @@ class TransformerConfig(config.Config):
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
         self.use_lhuc = lhuc
+        self.depth_key_value = depth_key_value
 
 
 class TransformerEncoderBlock(mx.gluon.HybridBlock):
@@ -62,7 +65,8 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: TransformerConfig,
-                 prefix: str) -> None:
+                 prefix: str,
+                 dtype: str) -> None:
         super().__init__(prefix=prefix)
 
         with self.name_scope():
@@ -74,7 +78,8 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                                                 heads=config.attention_heads,
                                                                 depth_out=config.model_size,
                                                                 dropout=config.dropout_attention,
-                                                                prefix="att_self_")
+                                                                prefix="att_self_",
+                                                                dtype=dtype)
             self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                                dropout=config.dropout_prepost,
                                                                prefix="att_self_post_",
@@ -88,7 +93,8 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                              num_model=config.model_size,
                                              act_type=config.act_type,
                                              dropout=config.dropout_act,
-                                             prefix="ff_")
+                                             prefix="ff_",
+                                             dtype=dtype)
             self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                    dropout=config.dropout_prepost,
                                                    prefix="ff_post_",
@@ -120,7 +126,8 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: TransformerConfig,
-                 prefix: str) -> None:
+                 prefix: str,
+                 dtype: str) -> None:
         super().__init__(prefix=prefix)
         with self.name_scope():
             self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
@@ -131,7 +138,8 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                                 heads=config.attention_heads,
                                                                 depth_out=config.model_size,
                                                                 dropout=config.dropout_attention,
-                                                                prefix="att_self_")
+                                                                prefix="att_self_",
+                                                                dtype=dtype)
             self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                                dropout=config.dropout_prepost,
                                                                prefix="att_self_post_",
@@ -145,7 +153,9 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                            heads=config.attention_heads,
                                                            depth_out=config.model_size,
                                                            dropout=config.dropout_attention,
-                                                           prefix="att_enc_")
+                                                           depth_key_value=config.depth_key_value,
+                                                           prefix="att_enc_",
+                                                           dtype=dtype)
             self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                               dropout=config.dropout_prepost,
                                                               prefix="att_enc_post_",
@@ -159,7 +169,8 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                              num_model=config.model_size,
                                              act_type=config.act_type,
                                              dropout=config.dropout_act,
-                                             prefix="ff_")
+                                             prefix="ff_",
+                                             dtype=dtype)
             self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                    dropout=config.dropout_prepost,
                                                    prefix="ff_post_",
@@ -270,13 +281,14 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
                  num_model: int,
                  act_type: str,
                  dropout: float,
-                 prefix: str) -> None:
+                 prefix: str,
+                 dtype: str) -> None:
         super().__init__(prefix=prefix)
         self.dropout = dropout
         with self.name_scope():
-            self.ff1 = mx.gluon.nn.Dense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_')
+            self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_', dtype = dtype)
             self.act = layers.get_activation(act_type)
-            self.ff2 = mx.gluon.nn.Dense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_')
+            self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_', dtype = dtype)
 
     def hybrid_forward(self, F, x):
         h = self.ff1(x)

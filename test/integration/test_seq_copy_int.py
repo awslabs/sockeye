@@ -27,7 +27,8 @@ import sockeye.evaluate
 import sockeye.extract_parameters
 from sockeye import constants as C
 from sockeye.model import load_model
-from test.common import check_train_translate, run_train_translate, tmp_digits_dataset
+from sockeye.test_utils import run_train_translate, tmp_digits_dataset
+from test.common import check_train_translate
 
 logger = logging.getLogger(__name__)
 
@@ -46,79 +47,81 @@ ENCODER_DECODER_SETTINGS = [
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2 --nbest-size 2",
-     False, False),
+     False, 0),
     # Basic transformer w/ prepared data & greedy decoding
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg"
+     " --weight-tying-type src_trg"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 1",
-     True, False),
+     True, 0),
     # Basic transformer with source factor, beam-search-stop first decoding
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type trg_softmax"
+     " --weight-tying-type trg_softmax"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-combine sum",
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --source-factors-combine sum concat average --source-factors-share-embedding true false true"
+     " --source-factors-num-embed 8 2 8",
      "--beam-size 2 --beam-search-stop first",
-     True, True),
+     True, 3),
     # Basic transformer with LHUC
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
-     False, False),
+     False, 0),
     # Basic transformer and length ratio prediction, and learned brevity penalty during inference
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --length-task ratio --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
      " --brevity-penalty-type learned --brevity-penalty-weight 1.0",
-     True, False),
+     True, 0),
     # Basic transformer and absolute length prediction, and constant brevity penalty during inference
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
+     " --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --length-task length --length-task-weight 1.0 --length-task-layers 2",
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
-     False, False),
-    ]
+     False, 0),
+]
 
 
-@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, use_source_factors",
+@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, n_source_factors",
                          ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
-                  use_source_factors: bool):
+                  n_source_factors: int):
     """
     Task: copy short sequences of digits
     """
@@ -133,7 +136,7 @@ def test_seq_copy(train_params: str,
                             test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
-                            with_source_factors=use_source_factors) as data:
+                            with_n_source_factors=n_source_factors) as data:
 
         # TODO: Here we temporarily switch off comparing translation and scoring scores, which
         # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).
@@ -146,7 +149,7 @@ def test_seq_copy(train_params: str,
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"
-                    " --transformer-feed-forward-num-hidden 4 --weight-tying --weight-tying-type src_trg_softmax"
+                    " --transformer-feed-forward-num-hidden 4 --weight-tying-type src_trg_softmax"
                     " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 0"
                     " --checkpoint-interval 4",
                     "--beam-size 1")]

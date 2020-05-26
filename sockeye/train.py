@@ -14,6 +14,9 @@
 """
 Simple Training CLI.
 """
+from . import pre_mxnet
+# Called before importing mxnet or any module that imports mxnet
+pre_mxnet.init()
 
 import argparse
 import logging
@@ -83,11 +86,31 @@ def check_arg_compatibility(args: argparse.Namespace):
     # Require at least one stopping criteria
     check_condition(any((args.max_samples,
                          args.max_updates,
+                         args.max_seconds,
                          args.max_checkpoints,
                          args.max_num_epochs,
                          args.max_num_checkpoint_not_improved)),
                     'Please specify at least one stopping criteria: --max-samples --max-updates --max-checkpoints '
                     '--max-num-epochs --max-num-checkpoint-not-improved')
+
+    # Check and possibly adapt the parameters for source factors
+    n_source_factors = len(args.validation_source_factors)
+    if len(args.source_factors_combine) > 1:
+        check_condition(n_source_factors == len(args.source_factors_combine),
+                        'The number of combination strategies for source '
+                        'factors does not match the number of source factors.')
+    else:
+        # Length 1: expand the list to the appropriate length
+        args.source_factors_combine = args.source_factors_combine * n_source_factors
+    if len(args.source_factors_share_embedding) > 1:
+        check_condition(n_source_factors == len(args.source_factors_share_embedding),
+                        'The number of vocabulary sharing flags for source '
+                        'factors does not match the number of source factors.')
+    else:
+        # Length 1: expand the list to the appropriate length
+        args.source_factors_share_embedding = args.source_factors_share_embedding * n_source_factors
+
+
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -204,10 +227,9 @@ def use_shared_vocab(args: argparse.Namespace) -> bool:
 
     :param: args: Arguments as returned by argparse.
     """
-    weight_tying = args.weight_tying
     weight_tying_type = args.weight_tying_type
     shared_vocab = args.shared_vocab
-    if weight_tying and C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
+    if C.WEIGHT_TYING_SRC in weight_tying_type and C.WEIGHT_TYING_TRG in weight_tying_type:
         if not shared_vocab:
             logger.info("A shared source/target vocabulary will be used as weight tying source/target weight tying "
                         "is enabled")
@@ -271,7 +293,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_num_devices=batch_num_devices,
             batch_sentences_multiple_of=args.round_batch_sizes_to_multiple_of)
 
-        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+        check_condition(all([combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]
+                             for combine in args.source_factors_combine])
                         or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
                             len(source_vocabs), len(args.source_factors_num_embed) + 1))
@@ -316,6 +339,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 source_paths=[args.source] + args.source_factors,
                 target_path=args.target,
                 source_vocab_paths=source_vocab_paths,
+                factor_vocab_same_as_source=args.source_factors_share_embedding,
                 target_vocab_path=target_vocab_path,
                 shared_vocab=shared_vocab,
                 num_words_source=num_words_source,
@@ -324,7 +348,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
-        check_condition(args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM \
+        check_condition(all([combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]
+                             for combine in args.source_factors_combine])
                         or len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
                             len(args.source_factors), len(args.source_factors_num_embed)))
@@ -382,20 +407,24 @@ def create_encoder_config(args: argparse.Namespace,
     encoder_transformer_postprocess, _ = args.transformer_postprocess
     encoder_transformer_model_size = args.transformer_model_size[0]
 
-    total_source_factor_size = sum(args.source_factors_num_embed)
-    if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT and total_source_factor_size > 0:
+    total_source_factor_size = 0
+    for factor_combine, factor_size in zip(args.source_factors_combine, args.source_factors_num_embed):
+        if factor_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            total_source_factor_size += factor_size
+    if total_source_factor_size > 0:
         logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
             encoder_transformer_model_size, num_embed_source + total_source_factor_size))
         encoder_transformer_model_size = num_embed_source + total_source_factor_size
+
     config_encoder = transformer.TransformerConfig(
         model_size=encoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[0],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[0],
-        act_type=args.transformer_activation_type,
+        act_type=args.transformer_activation_type[0],
         num_layers=encoder_num_layers,
-        dropout_attention=args.transformer_dropout_attention,
-        dropout_act=args.transformer_dropout_act,
-        dropout_prepost=args.transformer_dropout_prepost,
+        dropout_attention=args.transformer_dropout_attention[0],
+        dropout_act=args.transformer_dropout_act[0],
+        dropout_prepost=args.transformer_dropout_prepost[0],
         positional_embedding_type=args.transformer_positional_embedding_type,
         preprocess_sequence=encoder_transformer_preprocess,
         postprocess_sequence=encoder_transformer_postprocess,
@@ -408,8 +437,7 @@ def create_encoder_config(args: argparse.Namespace,
 
 
 def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
-                          max_seq_len_source: int, max_seq_len_target: int,
-                          num_embed_target: int) -> decoder.DecoderConfig:
+                          max_seq_len_source: int, max_seq_len_target: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
@@ -417,7 +445,6 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     :param encoder_num_hidden: Number of hidden units of the Encoder.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
-    :param num_embed_target: The size of the source embedding.
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
@@ -428,17 +455,18 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         model_size=args.transformer_model_size[1],
         attention_heads=args.transformer_attention_heads[1],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
-        act_type=args.transformer_activation_type,
+        act_type=args.transformer_activation_type[1],
         num_layers=decoder_num_layers,
-        dropout_attention=args.transformer_dropout_attention,
-        dropout_act=args.transformer_dropout_act,
-        dropout_prepost=args.transformer_dropout_prepost,
+        dropout_attention=args.transformer_dropout_attention[1],
+        dropout_act=args.transformer_dropout_act[1],
+        dropout_prepost=args.transformer_dropout_prepost[1],
         positional_embedding_type=args.transformer_positional_embedding_type,
         preprocess_sequence=decoder_transformer_preprocess,
         postprocess_sequence=decoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc))
+        lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
+        depth_key_value=encoder_num_hidden)
 
     return config_decoder
 
@@ -454,10 +482,13 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
         else:
             check_condition(args.transformer_model_size[0] == num_embed_source,
                             "Source embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size, num_embed_source))
+                            % (args.transformer_model_size[0], num_embed_source))
 
-        total_source_factor_size = sum(args.source_factors_num_embed)
-        if total_source_factor_size > 0 and args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+        total_source_factor_size = 0
+        for factor_combine, factor_size in zip(args.source_factors_combine, args.source_factors_num_embed):
+            if factor_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+                total_source_factor_size += factor_size
+        if total_source_factor_size > 0:
             adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
             check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
                             adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
@@ -475,7 +506,7 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
             # Make sure that if the user sets num_embed it matches the Transformer model size
             check_condition(args.transformer_model_size[1] == num_embed_target,
                             "Target embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size, num_embed_target))
+                            % (args.transformer_model_size[1], num_embed_target))
 
     if not num_embed_source:
         num_embed_source = C.DEFAULT_NUM_EMBED
@@ -509,30 +540,44 @@ def create_model_config(args: argparse.Namespace,
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
                                                                num_embed_source)
-    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
-                                           num_embed_target)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
         source_factors_num_embed = args.source_factors_num_embed
-        if args.source_factors_combine == C.SOURCE_FACTORS_COMBINE_SUM:
-            # If factors are being added instead of concatenated, set all dimensions to the embedding dimensions
-            logger.info("Setting all source factor embedding sizes to `num_embed` ('%d') for summing",
+        if not source_factors_num_embed:
+            # This happens if the combination method is sum or average. We then
+            # set the dimension to num_embed_source for all factors
+            logger.info("Setting all source factor embedding sizes to `num_embed` ('%d')",
                         num_embed_source)
             source_factors_num_embed = [num_embed_source] * len(source_factor_vocab_sizes)
+        else:
+            # Check each individual factor
+            for i, combine in enumerate(args.source_factors_combine):
+                if combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]:
+                    logger.info("Setting embedding size of factor %d to `num_embed` ('%d') for %s",
+                                i + 1, num_embed_source,
+                                "summing" if combine == C.SOURCE_FACTORS_COMBINE_SUM else "averaging")
+                    source_factors_num_embed[i] = num_embed_source
 
-        source_factor_configs = [encoder.FactorConfig(size, dim) for size, dim in zip(source_factor_vocab_sizes,
-                                                                                      source_factors_num_embed)]
+        source_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
+                                 for size, dim, combine, share in zip(source_factor_vocab_sizes,
+                                                                      source_factors_num_embed,
+                                                                      args.source_factors_combine,
+                                                                      args.source_factors_share_embedding)]
+
+    allow_sparse_grad = args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
 
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
                                                   factor_configs=source_factor_configs,
-                                                  source_factors_combine=args.source_factors_combine)
+                                                  allow_sparse_grad=allow_sparse_grad)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
-                                                  dropout=embed_dropout_target)
+                                                  dropout=embed_dropout_target,
+                                                  allow_sparse_grad=allow_sparse_grad)
 
     config_length_task = None
     if args.length_task is not None:
@@ -547,8 +592,7 @@ def create_model_config(args: argparse.Namespace,
                                      config_encoder=config_encoder,
                                      config_decoder=config_decoder,
                                      config_length_task=config_length_task,
-                                     weight_tying=args.weight_tying,
-                                     weight_tying_type=args.weight_tying_type if args.weight_tying else None,
+                                     weight_tying_type=args.weight_tying_type,
                                      lhuc=args.lhuc is not None,
                                      dtype=args.dtype)
     return model_config
@@ -692,13 +736,22 @@ def fixed_param_names_from_stragegy(config: model.ModelConfig,
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
             # Any type of learned embedding.
             return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
-                        name.startswith(C.SOURCE_POSITIONAL_EMBEDDING_PREFIX) or
                         name.startswith(C.TARGET_EMBEDDING_PREFIX) or
-                        name.startswith(C.TARGET_POSITIONAL_EMBEDDING_PREFIX) or
                         name.startswith(C.SHARED_EMBEDDING_PREFIX))
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
             # Target output projection.
             return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)
+        if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_FEED_FORWARD:
+            return not (name.endswith("_ff_h2o_bias") or name.endswith("_ff_h2o_weight") or
+                        name.endswith("_ff_i2h_bias") or name.endswith("_ff_i2h_weight"))
+        if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_AND_SOURCE_EMBEDDINGS:
+            return name.startswith(C.ENCODER_PREFIX) or name.startswith(C.SOURCE_EMBEDDING_PREFIX)
+        if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_HALF_AND_SOURCE_EMBEDDINGS:
+            if name.startswith(C.ENCODER_PREFIX):
+                for i in range(num_encoder_layers // 2):
+                    if name.startswith("{}{}_".format(C.TRANSFORMER_ENCODER_PREFIX, i)):
+                        return True
+            return name.startswith(C.SOURCE_EMBEDDING_PREFIX)
         raise ValueError("Unknown fixed parameter strategy: %s" % strategy)
 
     return [name for name in params if is_fixed(name)]
@@ -711,11 +764,14 @@ def main():
     train(args)
 
 
-def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None) -> training.TrainState:
+def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None,
+          checkpoint_callback: Optional[Callable] = None) -> training.TrainState:
     """
     :param custom_metrics_logger: Optional custom metrics logging function. If supplied, takes care of metrics produced
                                   during training in a custom way. It should accept a list or a dictionary of
                                   (metric name, metric value) pairs, and an optional global_step/checkpoint parameter.
+    :param checkpoint_callback: An optional callback function (int -> None). The function will be called
++                                each time a checkpoint has been reached
     """
 
     if args.dry_run:
@@ -739,10 +795,12 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
-        # Unless explicitly set otherwise, use NCCL for same-host allreduce and
-        # MPI for cross-host allreduce.
+        # Unless explicitly set otherwise, use NCCL for same-host
+        # allreduce/allgather and MPI for cross-host allreduce/allgather.
         if C.HOROVOD_HIERARCHICAL_ALLREDUCE not in os.environ:
             os.environ[C.HOROVOD_HIERARCHICAL_ALLREDUCE] = '1'
+        if C.HOROVOD_HIERARCHICAL_ALLGATHER not in os.environ:
+            os.environ[C.HOROVOD_HIERARCHICAL_ALLGATHER] = '1'
         horovod_mpi.hvd.init()
         # Each worker uses a separate output directory.  The primary worker
         # (rank 0) writes files to the root of the output directory (standard
@@ -753,13 +811,11 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # Do not keep redundant copies of the checkpoint history
             args.keep_last_params = 1
 
-    utils.seed_rngs(args.seed)
-
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
     resume_training = check_resume(args, output_folder)
 
-    setup_main_logger(file_logging=True,
+    setup_main_logger(file_logging=not args.no_logfile,
                       console=not args.quiet,
                       path=os.path.join(output_folder, C.LOG_NAME),
                       level=args.loglevel)
@@ -785,6 +841,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
 
+        utils.seed_rngs(args.seed, ctx=context)
+
         train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
             args=args,
             max_seq_len_source=max_seq_len_source,
@@ -792,6 +850,15 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             shared_vocab=use_shared_vocab(args),
             resume_training=resume_training,
             output_folder=output_folder)
+
+        if max_seq_len_source != config_data.max_seq_len_source:
+            logger.info("Maximum source length determined by prepared data. Using %d instead of %d",
+                        config_data.max_seq_len_source, max_seq_len_source)
+            max_seq_len_source = config_data.max_seq_len_source
+        if max_seq_len_target != config_data.max_seq_len_target:
+            logger.info("Maximum target length determined by prepared data. Using %d instead of %d",
+                        config_data.max_seq_len_target, max_seq_len_target)
+            max_seq_len_target = config_data.max_seq_len_target
 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
@@ -889,6 +956,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         if using_amp:
             amp.init_trainer(gluon_trainer)
+            # AMP does not allow passing args when creating the loss scaler, so
+            # we set them immediately after calling init.
+            gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
 
         losses = create_losses(args)
 
@@ -912,7 +982,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             context=context,
             dtype=args.dtype,
             using_amp=using_amp,
-            custom_metrics_logger=custom_metrics_logger
+            custom_metrics_logger=custom_metrics_logger,
+            checkpoint_callback=checkpoint_callback
         )
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
