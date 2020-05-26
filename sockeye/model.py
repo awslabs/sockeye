@@ -523,7 +523,7 @@ def load_model(model_folder: str,
         allow_missing = True
         cast_dtype = True
         dtype_source = 'saved'
-    elif dtype is None:
+    elif dtype is None or dtype == model_config.dtype:
         logger.info("Model dtype: %s" % model_config.dtype)
         allow_missing = False
         cast_dtype = False
