@@ -630,7 +630,7 @@ def prepare_data(source_fnames: List[str],
             save_shard(shard_idx, data_loader, shard_sources, shard_target,
                        shard_stats, output_prefix, keep_tmp_shard_files)
     else:
-        logger.info(f"Processing shards using {max_processes} processes.")
+        logger.info("Processing shards using %s processes.", max_processes)
         # Process shards in parallel using max_processes process
         results = []
         pool = multiprocessing.pool.Pool(processes=max_processes)
