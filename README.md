@@ -36,7 +36,12 @@ For information on how to use Sockeye, please visit [our documentation](https://
 
 ## Citation
 
-For technical information about Sockeye, see our paper on the arXiv ([BibTeX](sockeye.bib)):
+For more information about Sockeye 2, see our paper ([BibTeX](sockeye2.bib)):
+
+> Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar. 2020.
+> [Sockeye 2: A Toolkit for Neural Machine Translation](https://www.amazon.science/publications/sockeye-2-a-toolkit-for-neural-machine-translation). To appear in EAMT 2020, project track.
+
+For technical information about Sockeye 1, see our paper on the arXiv ([BibTeX](sockeye.bib)):
 
 > Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton and Matt Post. 2017.
 > [Sockeye: A Toolkit for Neural Machine Translation](https://arxiv.org/abs/1712.05690). ArXiv e-prints.
