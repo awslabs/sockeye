@@ -1,4 +1,5 @@
 # Changelog
+
 All notable changes to the project are documented in this file.
 
 Version numbers are of the form `1.0.0`.
@@ -10,63 +11,120 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [1.18.115]
-### Added
-- Added requirements for MXnet compatible with cuda 10.1.
-
-## [1.18.114]
-### Fixed
-- Fix bug in prepare_train_data arguments.
-
-## [1.18.113]
-### Fixed
-- Added logging arguments for prepare_data CLI.
-
-## [1.18.112]
-### Added
-- Option to suppress creation of logfiles for CLIs (`--no-logfile`).
-
-## [1.18.111]
-### Added
-- Added an optional checkpoint callback for the train function.
+## [2.1.7]
 
 ### Changed
-- Excluded gradients from pickled fields of TrainState
 
-## [1.18.110]
+- Optimize prepare_data by saving the shards in parallel. The prepare_data script accepts a new parameter `--max-processes` to control the level of parallelism with which shards are written to disk.
+
+## [2.1.6]
+
 ### Changed
-- We now guard against failures to run `nvidia-smi` for GPU memory monitoring.
 
-## [1.18.109]
-### Fixed
-- Fixed the metric names by prefixing training metrics with 'train-' and validation metrics with 'val-'. Also restricted the custom logging function to accept only a dictionary and a compulsory global_step parameter.
+- Updated Dockerfiles optimized for CPU (intgemm int8 inference, full MKL support) and GPU (distributed training with Horovod).  See [sockeye_contrib/docker](sockeye_contrib/docker).
 
-## [1.18.108]
-### Changed
-- More verbose log messages about target token counts.
-
-## [1.18.107]
-### Changed
-- Updated to [MXNet 1.5.0](https://github.com/apache/incubator-mxnet/tree/1.5.0)
-
-## [1.18.106]
 ### Added
-- Added an optional time limit for stopping training. The training will stop at the next checkpoint after reaching the time limit.
 
-## [1.18.105]
-### Added
-- Added support for a possibility to have a custom metrics logger - a function passed as an extra parameter. If supplied, the logger is called during training.
+- Official support for int8 quantization with [intgemm](https://github.com/kpu/intgemm):
+  - This requires the "intgemm" fork of MXNet ([kpuatamazon/incubator-mxnet/intgemm](https://github.com/kpuatamazon/incubator-mxnet/tree/intgemm)).  This is the version of MXNet used in the Sockeye CPU docker image (see [sockeye_contrib/docker](sockeye_contrib/docker)).
+  - Use `sockeye.translate --dtype int8` to quantize a trained float32 model at runtime.
+  - Use the `sockeye.quantize` CLI to annotate a float32 model with int8 scaling factors for fast runtime quantization.
 
-## [1.18.104]
+## [2.1.5]
+
 ### Changed
-- Implemented an attention-based copy mechanism as described in [Jia, Robin, and Percy Liang. "Data recombination for neural semantic parsing." (2016)](https://arxiv.org/abs/1606.03622).
-- Added a <ptr\d+> special symbol to explicitly point at an input token in the target sequence
-- Changed the decoder interface to pass both the decoder data and the pointer data.
-- Changed the AttentionState named tuple to add the raw attention scores.
+
+- Changed state caching for transformer models during beam search to cache states with attention heads already separated out. This avoids repeated transpose operations during decoding, leading to faster inference.
+
+## [2.1.4]
+
+### Added
+
+- Added Dockerfiles that build an experimental CPU-optimized Sockeye image:
+  - Uses the latest versions of [kpuatamazon/incubator-mxnet](https://github.com/kpuatamazon/incubator-mxnet) (supports [intgemm](https://github.com/kpu/intgemm) and makes full use of Intel MKL) and [kpuatamazon/sockeye](https://github.com/kpuatamazon/sockeye) (supports int8 quantization for inference).
+  - See [sockeye_contrib/docker](sockeye_contrib/docker).
+
+## [2.1.3]
+
+### Changed
+
+- Performance optimizations to beam search inference
+  - Remove unneeded take ops on encoder states
+  - Gathering input data before sending to GPU, rather than sending each batch element individually
+  - All of beam search can be done in fp16, if specified by the model
+  - Other small miscellaneous optimizations
+- Model states are now a flat list in ensemble inference, structure of states provided by `state_structure()`
+
+## [2.1.2]
+
+### Changed
+
+- Updated to [MXNet 1.6.0](https://github.com/apache/incubator-mxnet/tree/1.6.0)
+
+### Added
+
+- Added support for CUDA 10.2
+
+### Removed
+
+- Removed support for CUDA<9.1 / CUDNN<7.5
+
+## [2.1.1]
+
+### Added
+- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can
+  configure MXNet as such: `--env "OMP_NUM_THREADS=1;MXNET_ENGINE_TYPE=NaiveEngine"`
+
+## [2.1.0]
+
+### Changed
+
+- Version bump, which should have been included in commit b0461b due to incompatible models.
+
+## [2.0.1]
+
+### Changed
+
+- Inference defaults to using the max input length observed in training (versus scaling down based on mean length ratio and standard deviations).
+
+### Added
+
+- Additional parameter fixing strategies:
+  - `all_except_feed_forward`: Only train feed forward layers.
+  - `encoder_and_source_embeddings`: Only train the decoder (decoder layers, output layer, and target embeddings).
+  - `encoder_half_and_source_embeddings`: Train the latter half of encoder layers and the decoder.
+- Option to specify the number of CPU threads without using an environment variable (`--omp-num-threads`).
+- More flexibility for source factors combination
+
+## [2.0.0]
+
+### Changed
+
+- Update to [MXNet 1.5.0](https://github.com/apache/incubator-mxnet/tree/1.5.0)
+- Moved `SockeyeModel` implementation and all layers to [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html)
+- Removed support for Python 3.4.
+- Removed image captioning module
+- Removed outdated Autopilot module
+- Removed unused training options: Eve, Nadam, RMSProp, Nag, Adagrad, and Adadelta optimizers, `fixed-step` and `fixed-rate-inv-t` learning rate schedulers
+- Updated and renamed learning rate scheduler `fixed-rate-inv-sqrt-t` -> `inv-sqrt-decay`
+- Added script for plotting metrics files: [sockeye_contrib/plot_metrics.py](sockeye_contrib/plot_metrics.py)
+- Removed option `--weight-tying`.  Weight tying is enabled by default, disable with `--weight-tying-type none`.
+
+### Added
+
+- Added distributed training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
+- Added `none` learning rate scheduler (use a fixed rate throughout training)
+- Added `linear-decay` learning rate scheduler
+- Added training option `--learning-rate-t-scale` for time-based decay schedulers
+- Added support for MXNet's [Automatic Mixed Precision](https://mxnet.incubator.apache.org/versions/master/tutorials/amp/amp_tutorial.html).  Activate with the `--amp` training flag.  For best results, make sure as many model dimensions are possible are multiples of 8.
+- Added options for making various model dimensions multiples of a given value.  For example, use `--pad-vocab-to-multiple-of 8`, `--bucket-width 8 --no-bucket-scaling`, and `--round-batch-sizes-to-multiple-of 8` with AMP training.
+- Added [GluonNLP](http://gluon-nlp.mxnet.io/)'s BERTAdam optimizer, an implementation of the Adam variant used by Devlin et al. ([2018](https://arxiv.org/pdf/1810.04805.pdf)).  Use `--optimizer bertadam`.
+- Added training option `--checkpoint-improvement-threshold` to set the amount of metric improvement required over the window of previous checkpoints to be considered actual model improvement (used with `--max-num-checkpoint-not-improved`).
 
 ## [1.18.103]
 ### Added
-- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine 
+- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine
   translation to the image captioning module.
 
 ## [1.18.102]
@@ -95,7 +153,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [1.18.96]
 ### Changed
-- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line. 
+- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line.
 
 ## [1.18.95]
 ### Changed

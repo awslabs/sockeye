@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -19,7 +19,6 @@ from collections import Counter
 from contextlib import ExitStack
 from itertools import chain, islice
 from typing import Dict, Iterable, List, Optional, Tuple
-import re
 
 from sockeye.log import setup_main_logger
 from . import constants as C
@@ -32,14 +31,8 @@ Vocab = Dict[str, int]
 InverseVocab = Dict[int, str]
 
 
-pointer_pattern = re.compile(C.POINTER_PATTERN)
-def is_pointer(token):
-    return pointer_pattern.match(token) is not None
-
-
 def build_from_paths(paths: List[str], num_words: Optional[int] = None, min_count: int = 1,
-                     pad_to_multiple_of: Optional[int] = None,
-                     num_pointers: int = 0) -> Vocab:
+                     pad_to_multiple_of: Optional[int] = None) -> Vocab:
     """
     Creates vocabulary from paths to a file in sentence-per-line format. A sentence is just a whitespace delimited
     list of tokens. Note that special symbols like the beginning of sentence (BOS) symbol will be added to the
@@ -53,13 +46,12 @@ def build_from_paths(paths: List[str], num_words: Optional[int] = None, min_coun
     """
     with ExitStack() as stack:
         logger.info("Building vocabulary from dataset(s): %s", paths)
-        files = (stack.enter_context(utils.smart_open(path)) for path in paths)  # pylint: disable=no-member
-        return build_vocab(chain(*files), num_words, min_count, pad_to_multiple_of, num_pointers)
+        files = (stack.enter_context(utils.smart_open(path)) for path in paths)
+        return build_vocab(chain(*files), num_words, min_count, pad_to_multiple_of)
 
 
 def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count: int = 1,
-                pad_to_multiple_of: Optional[int] = None,
-                num_pointers: int = 0) -> Vocab:
+                pad_to_multiple_of: Optional[int] = None) -> Vocab:
     """
     Creates a vocabulary mapping from words to ids. Increasing integer ids are assigned by word frequency,
     using lexical sorting as a tie breaker. The only exception to this are special symbols such as the padding symbol
@@ -72,12 +64,8 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
     :return: Word-to-id mapping.
     """
     vocab_symbols_set = set(C.VOCAB_SYMBOLS)
-    
-    if num_pointers:
-        is_symbol = lambda token: (token in vocab_symbols_set or is_pointer(token))
-    else:
-        is_symbol = lambda token: (token in vocab_symbols_set)
-    raw_vocab = Counter(token for line in data for token in utils.get_tokens(line) if not is_symbol(token))
+    raw_vocab = Counter(token for line in data for token in utils.get_tokens(line)
+                        if token not in vocab_symbols_set)
     # For words with the same count, they will be ordered reverse alphabetically.
     # Not an issue since we only care for consistency
     pruned_vocab = [w for c, w in sorted(((c, w) for w, c in raw_vocab.items() if c >= min_count), reverse=True)]
@@ -88,7 +76,7 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
     else:
         vocab = pruned_vocab
         num_words_log = "None"
-    
+
     if pad_to_multiple_of is not None:
         current_vocab_size = len(vocab) + len(C.VOCAB_SYMBOLS)
         rest = current_vocab_size % pad_to_multiple_of
@@ -100,10 +88,8 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
     else:
         pad_entries = []
         pad_to_multiple_log = "None"
-    
-    pointer_entries = [C.POINTER_FORMAT % idx for idx in range(num_pointers)]
-    
-    word_to_id = {word: idx for idx, word in enumerate(chain(C.VOCAB_SYMBOLS, vocab, pad_entries, pointer_entries))}
+
+    word_to_id = {word: idx for idx, word in enumerate(chain(C.VOCAB_SYMBOLS, vocab, pad_entries))}
     logger.info("Vocabulary: types: %d/%d/%d/%d (initial/min_pruned/max_pruned/+special) " +
                 "[min_frequency=%d, max_num_types=%s, pad_to_multiple_of=%s]",
                 len(raw_vocab), len(pruned_vocab), len(vocab),
@@ -130,15 +116,19 @@ def is_valid_vocab(vocab: Vocab) -> bool:
     """
     Checks if a vocabulary is valid. We define valid as:
     1. All indices from 0 to num_words - 1 are present without duplicates.
-    2. All special symbols C.PAD_SYMBOL, C.UNK_SYMBOL, C.BOS_SYMBOL, C.EOS_SYMBOL are present.
-    3. PAD_ID has word id 0.
+    2. PAD_SYMBOL has word id 0, UNK_SYMBOL has word id 1, BOS_SYMBOL has word id 2, EOS_SYMBOL has word id 3.
     """
-    for symbol in [C.PAD_SYMBOL, C.UNK_SYMBOL, C.BOS_SYMBOL, C.EOS_SYMBOL]:
-        if symbol not in vocab:
-            logger.warning("%s missing from vocabulary.", symbol)
-            return False
-    if vocab[C.PAD_SYMBOL] != 0:
-        logger.warning("PAD_ID does not have word id 0 in vocabulary.")
+    if vocab[C.PAD_SYMBOL] != C.PAD_ID:
+        logger.warning("PAD_SYMBOL does not have word id 0 in vocabulary.")
+        return False
+    if vocab[C.UNK_SYMBOL] != C.UNK_ID:
+        logger.warning("UNK_SYMBOL does not have word id 1 in vocabulary.")
+        return False
+    if vocab[C.BOS_SYMBOL] != C.BOS_ID:
+        logger.warning("BOS_SYMBOL does not have word id 2 in vocabulary.")
+        return False
+    if vocab[C.EOS_SYMBOL] != C.EOS_ID:
+        logger.warning("EOS_SYMBOL does not have word id 3 in vocabulary.")
         return False
     word_ids = []
     for word, word_id in vocab.items():
@@ -219,16 +209,14 @@ def load_target_vocab(folder: str) -> Vocab:
 
 
 def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, word_min_count: int,
-                         pad_to_multiple_of: Optional[int] = None,
-                         num_pointers: int = 0) -> Vocab:
+                         pad_to_multiple_of: Optional[int] = None) -> Vocab:
     """
     If the vocabulary path is defined, the vocabulary is loaded from the path.
     Otherwise, it is built from the data file. No writing to disk occurs.
     """
     if vocab_path is None:
         return build_from_paths(paths=[data], num_words=num_words, min_count=word_min_count,
-                                pad_to_multiple_of=pad_to_multiple_of,
-                                num_pointers=num_pointers)
+                                pad_to_multiple_of=pad_to_multiple_of)
     else:
         return vocab_from_json(vocab_path)
 
@@ -236,12 +224,12 @@ def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, w
 def load_or_create_vocabs(source_paths: List[str],
                           target_path: str,
                           source_vocab_paths: List[Optional[str]],
+                          factor_vocab_same_as_source: List[bool],
                           target_vocab_path: Optional[str],
                           shared_vocab: bool,
                           num_words_source: Optional[int], word_min_count_source: int,
                           num_words_target: Optional[int], word_min_count_target: int,
-                          pad_to_multiple_of: Optional[int] = None,
-                          num_pointers: int = 0) -> Tuple[List[Vocab], Vocab]:
+                          pad_to_multiple_of: Optional[int] = None) -> Tuple[List[Vocab], Vocab]:
     """
     Returns vocabularies for source files (including factors) and target.
     If the respective vocabulary paths are not None, the vocabulary is read from the path and returned.
@@ -285,8 +273,7 @@ def load_or_create_vocabs(source_paths: List[str],
             vocab_source = vocab_target = build_from_paths(paths=[source_path, target_path],
                                                            num_words=num_words_source,
                                                            min_count=word_min_count_source,
-                                                           pad_to_multiple_of=pad_to_multiple_of,
-                                                           num_pointers=num_pointers)
+                                                           pad_to_multiple_of=pad_to_multiple_of)
 
         else:
             vocab_path = source_vocab_path if source_vocab_path is not None else target_vocab_path
@@ -297,16 +284,30 @@ def load_or_create_vocabs(source_paths: List[str],
         vocab_source = load_or_create_vocab(source_path, source_vocab_path, num_words_source, word_min_count_source,
                                             pad_to_multiple_of=pad_to_multiple_of)
         vocab_target = load_or_create_vocab(target_path, target_vocab_path, num_words_target, word_min_count_target,
-                                            pad_to_multiple_of=pad_to_multiple_of,
-                                            num_pointers=num_pointers)
+                                            pad_to_multiple_of=pad_to_multiple_of)
 
     vocab_source_factors = []  # type: List[Vocab]
     if source_factor_paths:
         logger.info("(2) Additional source factor vocabularies")
-        # source factor vocabs are always created
-        for factor_path, factor_vocab_path in zip(source_factor_paths, source_factor_vocab_paths):
+        if len(factor_vocab_same_as_source) > 1:
+            utils.check_condition(len(factor_vocab_same_as_source) == len(source_factor_paths),
+                                  "The number of flags for sharing the vocabulary of "
+                                  "source factors does not match the number of source "
+                                  "factors.")
+        elif len(factor_vocab_same_as_source) == 1:
+            factor_vocab_same_as_source = factor_vocab_same_as_source * len(source_factor_paths)
+        else:
+            factor_vocab_same_as_source = [False] * len(source_factor_paths)
+
+    for factor_path, factor_vocab_path, share_source_vocab in zip(source_factor_paths,
+                                                                  source_factor_vocab_paths,
+                                                                  factor_vocab_same_as_source):
+        if not share_source_vocab:
             vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
-                                                             num_words_source, word_min_count_source))
+                                                             num_words_source, word_min_count_source,
+                                                             pad_to_multiple_of=pad_to_multiple_of))
+        else:
+            vocab_source_factors.append(vocab_source)
 
     return [vocab_source] + vocab_source_factors, vocab_target
 

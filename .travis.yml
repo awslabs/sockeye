@@ -8,7 +8,6 @@ before_install:
   - docker pull ubuntu:16.04
 
 python:
-  - "3.4"
   - "3.5"
   - "3.6"
 
@@ -26,9 +25,7 @@ script:
   - mypy --version
   - mypy --ignore-missing-imports --follow-imports=silent @typechecked-files --no-strict-optional
   - check-manifest --ignore sockeye/git_version.py
-  - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:lstm:lstm" --maxfail=1 test/system; fi
   - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:transformer:transformer" --maxfail=1 test/system; fi
-  - if [ "$TRAVIS_EVENT_TYPE" != "cron" ]; then python -m pytest -k "Copy:cnn:cnn" --maxfail=1 test/system; fi
   - if [ "$TRAVIS_EVENT_TYPE" = "cron" ]; then python -m pytest --maxfail=1 test/system; fi
   - if [ "$TRAVIS_EVENT_TYPE" = "cron" ]; then python -m sockeye_contrib.autopilot.test; fi
 

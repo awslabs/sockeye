@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -59,7 +59,7 @@ class Reranker:
         :param reference: A single string with the actual reference translation.
         :return: Nbest translations sorted by reranking scores.
         """
-        scores = [self.scoring_function(hypothesis, reference) for hypothesis in hypotheses['translations']]
+        scores = [self.scoring_function(hypothesis, reference).score for hypothesis in hypotheses['translations']]
         ranking = list(np.argsort(scores, kind='mergesort')[::-1])  # descending
         reranked_hypotheses = self._sort_by_ranking(hypotheses, ranking)
         if self.return_score:

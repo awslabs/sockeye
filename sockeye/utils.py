@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -18,28 +18,30 @@ import binascii
 import errno
 import glob
 import gzip
-import math
 import itertools
 import logging
+import math
 import os
+import pprint
 import random
-import shutil
-import subprocess
 import sys
 import time
-import sockeye.multiprocessing_utils as mp_utils
-import multiprocessing
 from contextlib import contextmanager, ExitStack
-from typing import Mapping, Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
+from functools import reduce
+from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import mxnet as mx
 import numpy as np
 import portalocker
 
 from . import __version__, constants as C
+from . import horovod_mpi
 from .log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
+
+
+NDarrayOrSymbol = Union[mx.nd.NDArray, mx.sym.Symbol]
 
 
 class SockeyeError(Exception):
@@ -98,15 +100,27 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seed_rngs(seed: int) -> None:
+def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = None) -> None:
     """
-    Seed the random number generators (Python, Numpy and MXNet)
+    Seed the random number generators (Python, Numpy and MXNet).
 
     :param seed: The random seed.
+    :param ctx: Random number generators in MXNet are device specific.
+           If None, MXNet will set the state of each generator of each device using seed and device id. This will lead
+           to different results on different devices. If ctx is provided, this function will seed
+           device-specific generators with a fixed offset. E.g. for 2 devices and seed=13, seed for gpu(0) will be 13,
+           14 for gpu(1). See https://beta.mxnet.io/api/gluon-related/_autogen/mxnet.random.seed.html.
     """
+    logger.info("Random seed: %d", seed)
     np.random.seed(seed)
     random.seed(seed)
-    mx.random.seed(seed)
+    if ctx is None:
+        mx.random.seed(seed, ctx='all')
+    else:
+        if isinstance(ctx, mx.Context):
+            ctx = [ctx]
+        for i, c in enumerate(ctx):
+            mx.random.seed(seed + i, ctx=c)
 
 
 def check_condition(condition: bool, error_message: str):
@@ -143,89 +157,6 @@ def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
     return mx.sym.sum(sequence_data != C.PAD_ID, axis=1)
 
 
-def save_params(arg_params: Mapping[str, mx.nd.NDArray], fname: str,
-                aux_params: Optional[Mapping[str, mx.nd.NDArray]] = None):
-    """
-    Saves the parameters to a file.
-
-    :param arg_params: Mapping from parameter names to the actual parameters.
-    :param fname: The file name to store the parameters in.
-    :param aux_params: Optional mapping from parameter names to the auxiliary parameters.
-    """
-    save_dict = {('arg:%s' % k): v.as_in_context(mx.cpu()) for k, v in arg_params.items()}
-    if aux_params is not None:
-        save_dict.update({('aux:%s' % k): v.as_in_context(mx.cpu()) for k, v in aux_params.items()})
-    mx.nd.save(fname, save_dict)
-
-
-def load_params(fname: str) -> Tuple[Dict[str, mx.nd.NDArray], Dict[str, mx.nd.NDArray]]:
-    """
-    Loads parameters from a file.
-
-    :param fname: The file containing the parameters.
-    :return: Mapping from parameter names to the actual parameters for both the arg parameters and the aux parameters.
-    """
-    save_dict = mx.nd.load(fname)
-    arg_params = {}
-    aux_params = {}
-    for k, v in save_dict.items():
-        tp, name = k.split(':', 1)
-        if tp == 'arg':
-            """TODO(fhieber):
-            temporary weight split for models with combined weight for keys & values
-            in transformer source attention layers. This can be removed once with the next major version change."""
-            if "att_enc_kv2h_weight" in name:
-                logger.info("Splitting '%s' parameters into separate k & v matrices.", name)
-                v_split = mx.nd.split(v, axis=0, num_outputs=2)
-                arg_params[name.replace('kv2h', "k2h")] = v_split[0]
-                arg_params[name.replace('kv2h', "v2h")] = v_split[1]
-            else:
-                arg_params[name] = v
-        if tp == 'aux':
-            aux_params[name] = v
-    return arg_params, aux_params
-
-
-class Accuracy(mx.metric.EvalMetric):
-    """
-    Calculates accuracy. Taken from MXNet and adapted to work with batch-major labels
-    (reshapes (batch_size, time) -> (batch_size * time).
-    Also allows defining an ignore_label/pad symbol
-    """
-
-    def __init__(self,
-                 name='accuracy',
-                 output_names=None,
-                 label_names=None,
-                 ignore_label=None):
-        super(Accuracy, self).__init__(name=name,
-                                       output_names=output_names,
-                                       label_names=label_names,
-                                       ignore_label=ignore_label)
-        self.ignore_label = ignore_label
-
-    def update(self, labels, preds):
-        mx.metric.check_label_shapes(labels, preds)
-
-        for label, pred_label in zip(labels, preds):
-            if pred_label.shape != label.shape:
-                pred_label = mx.nd.argmax_channel(pred_label)
-            pred_label = pred_label.asnumpy().astype('int32')
-            label = mx.nd.reshape(label, shape=(pred_label.size,)).asnumpy().astype('int32')
-
-            mx.metric.check_label_shapes(label, pred_label)
-            if self.ignore_label is not None:
-                correct = ((pred_label.flat == label.flat) * (label.flat != self.ignore_label)).sum()
-                ignore = (label.flat == self.ignore_label).sum()
-                n = pred_label.size - ignore
-            else:
-                correct = (pred_label.flat == label.flat).sum()
-                n = pred_label.size
-
-            self.sum_metric += correct
-            self.num_inst += n
-
-
 class OnlineMeanAndVariance:
     def __init__(self) -> None:
         self._count = 0
@@ -258,61 +189,6 @@ class OnlineMeanAndVariance:
     def std(self) -> float:
         variance = self.variance
         return math.sqrt(variance) if not math.isnan(variance) else 0.0
-
-
-def top1(scores: mx.nd.NDArray,
-         offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
-    """
-    Get the single lowest element per sentence from a `scores` matrix. Expects that
-    beam size is 1, for greedy decoding.
-
-    NOTE(mathmu): The current implementation of argmin in MXNet much slower than topk with k=1.
-
-    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-    :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
-    :return: The row indices, column indices and values of the smallest items in matrix.
-    """
-    best_word_indices = mx.nd.cast(mx.nd.argmin(scores, axis=1), dtype='int32')
-    values = scores[mx.nd.arange(scores.shape[0], dtype='int32', ctx=scores.context), best_word_indices]
-
-    values = values.reshape((-1, 1))
-
-    # for top1, the best hyp indices are equal to the plain offset
-
-    return offset, best_word_indices, values
-
-
-def topk(scores: mx.nd.NDArray,
-         offset: mx.nd.NDArray,
-         k: int) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
-    """
-    Get the lowest k elements per sentence from a `scores` matrix.
-    At the first timestep, the shape of scores is (batch, target_vocabulary_size).
-    At subsequent steps, the shape is (batch * k, target_vocabulary_size).
-
-    :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-    :param offset: Array (shape: batch_size * k) containing offsets to add to the hypothesis indices in batch decoding.
-    :param k: The number of smallest scores to return.
-    :return: The row indices, column indices and values of the k smallest items in matrix.
-    """
-
-    # Compute the batch size from the offsets and k. We don't know the batch size because it is
-    # either 1 (at timestep 1) or k (at timesteps 2+).
-    # (batch_size, beam_size * target_vocab_size)
-    batch_size = int(offset.shape[-1] / k)
-    folded_scores = scores.reshape((batch_size, -1))
-
-    # pylint: disable=unbalanced-tuple-unpacking
-    values, indices = mx.nd.topk(folded_scores, axis=1, k=k, ret_typ='both', is_ascend=True)
-    indices = mx.nd.cast(indices, 'int32').reshape((-1,))
-    best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * k, scores.shape[-1]))
-
-    if batch_size > 1:
-        # Offsetting the indices to match the shape of the scores matrix
-        best_hyp_indices += offset
-
-    values = values.reshape((-1, 1))
-    return best_hyp_indices, best_word_indices, values
 
 
 def chunks(some_list: List, n: int) -> Iterable[List]:
@@ -363,88 +239,6 @@ def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
-def plot_attention(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str], filename: str):
-    """
-    Uses matplotlib for creating a visualization of the attention matrix.
-
-    :param attention_matrix: The attention matrix.
-    :param source_tokens: A list of source tokens.
-    :param target_tokens: A list of target tokens.
-    :param filename: The file to which the attention visualization will be written to.
-    """
-    try:
-        import matplotlib
-    except ImportError:
-        raise RuntimeError("Please install matplotlib.")
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    assert attention_matrix.shape[0] == len(target_tokens)
-
-    plt.imshow(attention_matrix.transpose(), interpolation="nearest", cmap="Greys")
-    plt.xlabel("target")
-    plt.ylabel("source")
-    plt.gca().set_xticks([i for i in range(0, len(target_tokens))])
-    plt.gca().set_yticks([i for i in range(0, len(source_tokens))])
-    plt.gca().set_xticklabels(target_tokens, rotation='vertical')
-    plt.gca().set_yticklabels(source_tokens)
-    plt.tight_layout()
-    plt.savefig(filename)
-    logger.info("Saved alignment visualization to " + filename)
-
-
-def print_attention_text(attention_matrix: np.ndarray, source_tokens: List[str], target_tokens: List[str],
-                         threshold: float):
-    """
-    Prints the attention matrix to standard out.
-
-    :param attention_matrix: The attention matrix.
-    :param source_tokens: A list of source tokens.
-    :param target_tokens: A list of target tokens.
-    :param threshold: The threshold for including an alignment link in the result.
-    """
-    sys.stdout.write("  ")
-    for _ in target_tokens:
-        sys.stdout.write("---")
-    sys.stdout.write("\n")
-    for i, f_i in enumerate(source_tokens):  # type: ignore
-        sys.stdout.write(" |")
-        for j in range(len(target_tokens)):
-            align_prob = attention_matrix[j, i]
-            if align_prob > threshold:
-                sys.stdout.write("(*)")
-            elif align_prob > 0.4:
-                sys.stdout.write("(?)")
-            else:
-                sys.stdout.write("   ")
-        sys.stdout.write(" | %s\n" % f_i)
-    sys.stdout.write("  ")
-    for _ in target_tokens:
-        sys.stdout.write("---")
-    sys.stdout.write("\n")
-    for k in range(max(map(len, target_tokens))):
-        sys.stdout.write("  ")
-        for word in target_tokens:
-            letter = word[k] if len(word) > k else " "
-            sys.stdout.write(" %s " % letter)
-        sys.stdout.write("\n")
-    sys.stdout.write("\n")
-
-
-def get_alignments(attention_matrix: np.ndarray, threshold: float = .9) -> Iterator[Tuple[int, int]]:
-    """
-    Yields hard alignments from an attention_matrix (target_length, source_length)
-    given a threshold.
-
-    :param attention_matrix: The attention matrix.
-    :param threshold: The threshold for including an alignment link in the result.
-    :return: Generator yielding strings of the form 0-0, 0-1, 2-1, 2-2, 3-4...
-    """
-    for src_idx in range(attention_matrix.shape[1]):
-        for trg_idx in range(attention_matrix.shape[0]):
-            if attention_matrix[trg_idx, src_idx] > threshold:
-                yield (src_idx, trg_idx)
-
-
 def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     """
     Take a list of arrays of the same shape and take the element wise average.
@@ -466,41 +260,15 @@ def get_num_gpus() -> int:
 
     :return: The number of GPUs on the system.
     """
-    return mx.context.num_gpus()
-
-
-def query_nvidia_smi(device_ids: List[int], result_queue: multiprocessing.Queue) -> None:
-    """
-    Runs nvidia-smi to determine the memory usage.
-
-    :param device_ids: A list of devices for which the the memory usage will be queried.
-    :param result_queue: The queue to which the result dictionary of device id mapping to a tuple of
-    (memory used, memory total) is added.
-    """
-    device_id_strs = [str(device_id) for device_id in device_ids]
-    query = "--query-gpu=index,memory.used,memory.total"
-    format_arg = "--format=csv,noheader,nounits"
     try:
-        sp = subprocess.Popen(['nvidia-smi', query, format_arg, "-i", ",".join(device_id_strs)],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        result = sp.communicate()[0].decode("utf-8").rstrip().split("\n")
-    except OSError:
-        logger.exception("Failed calling nvidia-smi to query memory usage.")
-        result_queue.put({})
-        return
-    try:
-        memory_data = {}
-        for line in result:
-            gpu_id, mem_used, mem_total = line.split(",")
-            memory_data[int(gpu_id)] = (int(mem_used), int(mem_total))
-
-        result_queue.put(memory_data)
-    except:
-        logger.exception("Failed parsing nvidia-smi output %s", "\n".join(result))
-        result_queue.put({})
+        return mx.context.num_gpus()
+    except mx.MXNetError:
+        # Some builds of MXNet will raise a CUDA error when CUDA is not
+        # installed on the host.  In this case, zero GPUs are available.
+        return 0
 
 
-def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, int]]:
+def get_gpu_memory_usage(ctx: Union[mx.context.Context, List[mx.context.Context]]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
 
@@ -512,33 +280,23 @@ def get_gpu_memory_usage(ctx: List[mx.context.Context]) -> Dict[int, Tuple[int, 
     ctx = [c for c in ctx if c.device_type == 'gpu']
     if not ctx:
         return {}
-    if shutil.which("nvidia-smi") is None:
-        logger.warning("Couldn't find nvidia-smi, therefore we assume no GPUs are available.")
-        return {}
 
-    device_ids = [c.device_id for c in ctx]
-
-    # Run from clean forkserver process to not leak any CUDA resources
-    try:
-        mp_context = mp_utils.get_context()
-        result_queue = mp_context.Queue()
-        nvidia_smi_process = mp_context.Process(target=query_nvidia_smi, args=(device_ids, result_queue,))
-        nvidia_smi_process.start()
-        nvidia_smi_process.join()
-
-        memory_data = result_queue.get()
-
-        log_gpu_memory_usage(memory_data)
-
-        return memory_data
-    except:
-        logger.exception("Failed querying the GPU memory using nvidia-smi.")
-        return {}
+    memory_data = {}  # type: Dict[int, Tuple[int, int]]
+    for c in ctx:
+        try:
+            free, total = mx.context.gpu_memory_info(device_id=c.device_id)  # in bytes
+            used = total - free
+            memory_data[c.device_id] = (used * 1e-06, total * 1e-06)
+        except mx.MXNetError:
+            logger.exception("Failed retrieving memory data for gpu%d", c.device_id)
+            continue
+    log_gpu_memory_usage(memory_data)
+    return memory_data
 
 
 def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
     log_str = " ".join(
-        "GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0 / v[1]) for k, v in memory_data.items())
+        "GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0 / v[1]) for k, v in memory_data.items() if v[1])
     logger.info(log_str)
 
 
@@ -555,6 +313,7 @@ def determine_context(device_ids: List[int],
     :param disable_device_locking: Disable Sockeye's device locking feature.
     :param lock_dir: Directory to place device lock files in.
     :param exit_stack: An ExitStack from contextlib.
+
     :return: A list with the context(s) to run on.
     """
     if use_cpu:
@@ -563,11 +322,19 @@ def determine_context(device_ids: List[int],
         num_gpus = get_num_gpus()
         check_condition(num_gpus >= 1,
                         "No GPUs found, consider running on the CPU with --use-cpu ")
-        if disable_device_locking:
-            context = expand_requested_device_ids(device_ids)
+        if horovod_mpi.using_horovod():
+            # Running with Horovod/OpenMPI: GPU(s) are determined by local rank
+            check_condition(len(device_ids) == 1 and device_ids[0] < 0,
+                            "When using Horovod, --device-ids should be a negative integer indicating the number of "
+                            "GPUs each worker should use.")
+            n_ids = -device_ids[0]
+            context = [mx.gpu(_id + horovod_mpi.hvd.local_rank() * n_ids) for _id in range(n_ids)]
         else:
-            context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
-        context = [mx.gpu(gpu_id) for gpu_id in context]
+            if disable_device_locking:
+                context = expand_requested_device_ids(device_ids)
+            else:
+                context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
+            context = [mx.gpu(gpu_id) for gpu_id in context]
     return context
 
 
@@ -676,7 +443,6 @@ def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
                 # This will make sure that we use consecutive device ids whenever possible.
                 if master_lock is not None:
                     for candidates in candidates_to_request:
-                        # pylint: disable=no-member
                         gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
                         if gpu_id is not None:
                             acquired_gpus.append(cast(int, gpu_id))
@@ -787,6 +553,8 @@ def parse_metrics_line(line_number: int, line: str) -> Dict[str, Any]:
         key, value = field.split("=", 1)
         if value == 'True' or value == 'False':
             metric[key] = (value == 'True')
+        elif value == 'None':
+            metric[key] = None
         else:
             metric[key] = float(value)
     return metric
@@ -938,35 +706,14 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
         if n != best_checkpoint:
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files:
-                os.remove(param_fname_n)
-
-
-def cast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
-    """
-    Workaround until no-op cast will be fixed in MXNet codebase.
-    Creates cast symbol only if dtype is different from default one, i.e. float32.
-
-    :param data: Input symbol.
-    :param dtype: Target dtype.
-    :return: Cast symbol or just data symbol.
-    """
-    if dtype != C.DTYPE_FP32:
-        return F.cast(data=data, dtype=dtype)
-    return data
-
-
-def uncast_conditionally(F, data: mx.sym.Symbol, dtype: str) -> mx.sym.Symbol:
-    """
-    Workaround until no-op cast will be fixed in MXNet codebase.
-    Creates cast to float32 symbol only if dtype is different from default one, i.e. float32.
-
-    :param data: Input symbol.
-    :param dtype: Input symbol dtype.
-    :return: Cast symbol or just data symbol.
-    """
-    if dtype != C.DTYPE_FP32:
-        return F.cast(data=data, dtype=C.DTYPE_FP32)
-    return data
+                try:
+                    os.remove(param_fname_n)
+                except FileNotFoundError:
+                    # This can be occur on file systems with higher latency,
+                    # such as distributed file systems.  While repeated
+                    # occurrences of this warning may indicate a problem, seeing
+                    # one or two warnings during training is usually fine.
+                    logger.warning('File has already been removed: %s', param_fname_n)
 
 
 def split(data: mx.nd.NDArray,
@@ -994,27 +741,41 @@ def split(data: mx.nd.NDArray,
     return ndarray_or_list
 
 
-def inflect(word: str,
-            count: int):
-    """
-    Minimal inflection module.
-
-    :param word: The word to inflect.
-    :param count: The count.
-    :return: The word, perhaps inflected for number.
-    """
-    if word in ['time', 'sentence']:
-        return word if count == 1 else word + 's'
-    elif word == 'was':
-        return 'was' if count == 1 else 'were'
-    else:
-        return word + '(s)'
+_DTYPE_TO_STRING = {
+    np.float32: 'float32',
+    np.float16: 'float16',
+    np.int8: 'int8',
+    np.int32: 'int32'
+}
 
 
-def isfinite(data: mx.nd.NDArray) -> mx.nd.NDArray:
-    """Performs an element-wise check to determine if the NDArray contains an infinite element or not.
-       TODO: remove this funciton after upgrade to MXNet 1.4.* in favor of mx.ndarray.contrib.isfinite()
+def _print_dtype(dtype):
+    return _DTYPE_TO_STRING.get(dtype, str(dtype))
+
+
+def log_parameters(params: mx.gluon.ParameterDict):
     """
-    is_data_not_nan = data == data
-    is_data_not_infinite = data.abs() != np.inf
-    return mx.nd.logical_and(is_data_not_infinite, is_data_not_nan)
+    Logs information about model parameters.
+    """
+    fixed_parameter_names = []
+    learned_parameter_names = []
+    total_learned = 0
+    total_fixed = 0
+    for name, param in sorted(params.items()):
+        repr = "%s [%s, %s]" % (name, param.shape, _print_dtype(param.dtype))
+        size = reduce(lambda x, y: x * y, param.shape)
+        if size == 0:
+            logger.debug("Parameter shape for '%s' not yet fully inferred, using 0", name)
+        if param.grad_req == 'null':
+            fixed_parameter_names.append(repr)
+            total_fixed += size
+        else:
+            total_learned += size
+            learned_parameter_names.append(repr)
+    total_parameters = total_learned + total_fixed
+    logger.info("# of parameters: %d | trainable: %d (%.2f%%) | fixed: %d (%.2f%%)",
+                total_parameters,
+                total_learned, total_learned / total_parameters * 100,
+                total_fixed, total_fixed / total_parameters * 100)
+    logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
+    logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))

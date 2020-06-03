@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -73,12 +73,10 @@ def nearest_k(similarity_matrix: mx.nd.NDArray,
 
 
 def get_embedding_parameter_names(config: model.ModelConfig) -> Tuple[str, str]:
-    if config.weight_tying and C.WEIGHT_TYING_SRC in config.weight_tying_type and \
-            C.WEIGHT_TYING_SRC_TRG_SOFTMAX in config.weight_tying_type:
+    if C.WEIGHT_TYING_SRC in config.weight_tying_type and C.WEIGHT_TYING_SRC_TRG_SOFTMAX in config.weight_tying_type:
         name = "%sweight" % C.SHARED_EMBEDDING_PREFIX
         return name, name
-    else:
-        return "%sweight" % C.SOURCE_EMBEDDING_PREFIX, "%sweight" % C.TARGET_EMBEDDING_PREFIX
+    return "%sweight" % C.SOURCE_EMBEDDING_PREFIX, "%sweight" % C.TARGET_EMBEDDING_PREFIX
 
 
 def main():
@@ -102,25 +100,21 @@ def main():
 def embeddings(args: argparse.Namespace):
     logger.info("Arguments: %s", args)
 
-    config = model.SockeyeModel.load_config(os.path.join(args.model, C.CONFIG_NAME))
-    source_embedding_name, target_embedding_name = get_embedding_parameter_names(config)
+    sockeye_model, source_vocabs, target_vocab = model.load_model(args.model, checkpoint=args.checkpoint, hybridize=False)
 
     if args.side == "source":
-        vocab = load_source_vocabs(args.model)[0]
+        vocab = source_vocabs[0]
     else:
-        vocab = load_target_vocab(args.model)
+        vocab = target_vocab
     vocab_inv = reverse_vocab(vocab)
 
-    params_fname = C.PARAMS_BEST_NAME
-    if args.checkpoint is not None:
-        params_fname = C.PARAMS_NAME % args.checkpoint
-    params, _ = utils.load_params(os.path.join(args.model, params_fname))
+    params = sockeye_model.collect_params()
     if args.side == "source":
-        logger.info("Loading %s", source_embedding_name)
-        weights = params[source_embedding_name]
+        logger.info("Loading %s", sockeye_model.source_embed_weight.name)
+        weights = params[sockeye_model.source_embed_weight.name].data()
     else:
-        logger.info("Loading %s", target_embedding_name)
-        weights = params[target_embedding_name]
+        logger.info("Loading %s", sockeye_model.target_embed_weight.name)
+        weights = params[sockeye_model.target_embed_weight.name].data()
     logger.info("Embedding size: %d", weights.shape[1])
 
     logger.info("Computing pairwise similarities...")

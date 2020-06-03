@@ -82,6 +82,7 @@ entry_points={
         'sockeye-lexicon = sockeye.lexicon:main',
         'sockeye-init-embed = sockeye.init_embedding:main',
         'sockeye-prepare-data = sockeye.prepare_data:main',
+        'sockeye-quantize = sockeye.quantize:main',
         'sockeye-score = sockeye.score:main',
         'sockeye-train = sockeye.train:main',
         'sockeye-translate = sockeye.translate:main',

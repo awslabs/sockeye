@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -41,30 +41,21 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
     :param param_paths: List of paths to parameter files.
     :return: Averaged parameter dictionary.
     """
-    all_arg_params = []
-    all_aux_params = []
+    all_params = []  # type: List[Dict[str, mx.nd.NDArray]]
     for path in param_paths:
         logger.info("Loading parameters from '%s'", path)
-        arg_params, aux_params = utils.load_params(path)
-        all_arg_params.append(arg_params)
-        all_aux_params.append(aux_params)
+        params = mx.nd.load(path)
+        all_params.append(params)
 
-    logger.info("%d models loaded", len(all_arg_params))
-    utils.check_condition(all(all_arg_params[0].keys() == p.keys() for p in all_arg_params),
-                          "arg_param names do not match across models")
-    utils.check_condition(all(all_aux_params[0].keys() == p.keys() for p in all_aux_params),
-                          "aux_param names do not match across models")
+    logger.info("%d models loaded", len(all_params))
+    utils.check_condition(all(all_params[0].keys() == p.keys() for p in all_params),
+                          "param names do not match across models")
 
     avg_params = {}
     # average arg_params
-    for k in all_arg_params[0]:
-        arrays = [p[k] for p in all_arg_params]
-        avg_params["arg:" + k] = utils.average_arrays(arrays)
-    # average aux_params
-    for k in all_aux_params[0]:
-        arrays = [p[k] for p in all_aux_params]
-        avg_params["aux:" + k] = utils.average_arrays(arrays)
-
+    for k in all_params[0]:
+        arrays = [p[k] for p in all_params]
+        avg_params[k] = utils.average_arrays(arrays)
     return avg_params
 
 

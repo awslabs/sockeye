@@ -64,9 +64,9 @@ git clone https://github.com/bricksdont/moses-scripts tools/moses-scripts
 
 # download helper scripts
 
-wget https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
-wget https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
-wget https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
 ```
 
 
@@ -266,9 +266,6 @@ We can now kick off the training process:
 python -m sockeye.train -d train_data \
                         -vs $DATA/valid.tag.src \
                         -vt $DATA/valid.tag.trg \
-                        --encoder transformer \
-                        --decoder transformer \
-                        --weight-tying \
                         --shared-vocab \
                         --weight-tying-type src_trg_softmax \
                         --device-ids 0 \

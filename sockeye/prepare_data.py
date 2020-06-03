@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -38,13 +38,14 @@ def prepare_data(args: argparse.Namespace):
     setup_main_logger(console=not args.quiet,
                       file_logging=not args.no_logfile,
                       path=os.path.join(output_folder, C.LOG_NAME))
-
+    utils.log_basic_info(args)
     utils.seed_rngs(args.seed)
 
     minimum_num_shards = args.min_num_shards
     samples_per_shard = args.num_samples_per_shard
     bucketing = not args.no_bucketing
     bucket_width = args.bucket_width
+    bucket_scaling = not args.no_bucket_scaling
 
     source_paths = [args.source] + args.source_factors
     source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
@@ -65,6 +66,7 @@ def prepare_data(args: argparse.Namespace):
 
     source_vocabs, target_vocab = vocab.load_or_create_vocabs(
         source_paths=source_paths,
+        factor_vocab_same_as_source=args.source_factors_use_source_vocab,
         target_path=args.target,
         source_vocab_paths=source_vocab_paths,
         target_vocab_path=args.target_vocab,
@@ -88,7 +90,9 @@ def prepare_data(args: argparse.Namespace):
                          bucket_width=bucket_width,
                          samples_per_shard=samples_per_shard,
                          min_num_shards=minimum_num_shards,
-                         output_prefix=output_folder)
+                         output_prefix=output_folder,
+                         bucket_scaling=bucket_scaling,
+                         max_processes=args.max_processes)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 pyyaml>=5.1
-mxnet-cu100mkl==1.5.1
-numpy>=1.14
+mxnet-cu100mkl==1.6.0
+numpy>1.16.0,<2.0.0
 typing
 portalocker
-sacrebleu==1.3.6
+sacrebleu==1.4.3

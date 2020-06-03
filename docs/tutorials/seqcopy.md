@@ -44,42 +44,42 @@ python3 -m sockeye.train -s data/train.source \
                          -t data/train.target \
                          -vs data/dev.source \
                          -vt data/dev.target \
-                         --encoder rnn --decoder rnn \
+                         --encoder transformer --decoder transformer \
                          --num-layers 1:1 \
                          --num-embed 32 \
-                         --rnn-num-hidden 64 \
-                         --rnn-attention-type dot \
+                         --transformer-model-size 32 \
+                         --transformer-feed-forward-num-hidden 64 \
+                         --transformer-attention-heads 4 \
                          --use-cpu \
-                         --metrics perplexity accuracy \
                          --max-num-checkpoint-not-improved 3 \
                          -o seqcopy_model
 ```
 
-This will train a 1-layer RNN model with a bidirectional LSTM as the encoder and a uni-directional LSTM as the decoder.
-The RNNs have 64 hidden units and we learn embeddings of size 32.
+This will train a 1-layer Transformer model with 32 hidden units as the embedding size.
+The Feed-Forward sublayers have 64 hidden units and attention mechanisms are using 4 heads.
 Looking at the log we can see that our training data was assigned to buckets according to their lengths.
-Additionally, Sockeye will take care of correctly padding sequences and masking relevant parts of the network, in order to deal with sequences of variable length.
+Additionally, Sockeye will take care of correctly padding sequences and masking relevant parts of the network,
+in order to deal with sequences of variable length.
 
 
 ### Metrics and checkpointing
 During training Sockeye will print relevant metrics on both the training and the validation data.
-The metrics can be chosen using the `--metrics` parameter.
 Validation metrics are evaluated every time we create a checkpoint.
 During checkpointing the current model parameters are saved into the model directory and current validation scores are evaluated.
-By default Sockeye will create a checkpoint every 1000 updates.
+By default Sockeye will create a checkpoint every 4000 updates.
 This can be adjusted through the `--checkpoint-interval` parameter.
 
-From the log you can see that initially the accuracy is around 0.1:
+From the log you can see that initially the perplexity is around `20.0`:
 ```bash
 ...
+[INFO:sockeye.training] Early stopping by optimizing 'perplexity'
+[INFO:sockeye.model] Saved model config to "seqcopy_model/config"
 [INFO:sockeye.training] Training started.
-[INFO:sockeye.callback] Early stopping by optimizing 'perplexity'
-[INFO:root] Epoch[0] Batch [50]  Speed: 683.23 samples/sec perplexity=14.104128 accuracy=0.092011
-[INFO:root] Epoch[0] Batch [100] Speed: 849.97 samples/sec perplexity=13.036482 accuracy=0.096760
+[INFO:sockeye.training] Epoch[0] Batch [50]	Speed: 429.27 samples/sec 10879.00 tokens/sec 2.16 updates/sec	perplexity=20.074619
+[INFO:sockeye.training] Epoch[0] Batch [100]	Speed: 534.38 samples/sec 13846.37 tokens/sec 2.76 updates/sec	perplexity=17.064554
 ...
 ```
-With a vocabulary of size 10 this essentially means that the model is guessing randomly.
-As training progresses we see that after around 14 epochs the accuracy goes up to ~1.0 and the perplexity down to ~1.0.
+As training progresses we see that after the first checkpoint (~7 epochs) the validation perplexity is at ~1.05.
 Sockeye performs early stopping based on the validation metrics tracked when checkpointing.
 Once the validation metrics have not improved for several checkpoints the training is stopped.
 The number of tolerated non-improving checkpoints can be adjusted (`--max-num-checkpoint-not-improved`).
@@ -111,8 +111,8 @@ If you open the file you can see that in addition to the digits Sockeye also add
 
 ```
 
-Note that the model was trained on sequences consisting of between 10 and 30 characters.
-Therefore, the model will most likely have some difficulties with sequences shorter than 10 characters.
+Note that the model was trained on sequences consisting of between 10 and 30 digits.
+Therefore, the model will most likely have some difficulties with sequences shorter than 10 digits.
 By default Sockeye will read sentence from stdin and print the translations on stdout.
 
 Internally Sockeye will run a beam search in order to (approximately) find the translation with the highest probability.

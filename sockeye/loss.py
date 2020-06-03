@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -15,223 +15,281 @@
 Functions to generate loss symbols for sequence-to-sequence models.
 """
 import logging
+import math
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict
+from typing import Any, Dict
 
 import mxnet as mx
-from mxnet.metric import EvalMetric
 
-from . import config
 from . import constants as C
+from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-class LossConfig(config.Config):
+class Loss(mx.gluon.HybridBlock):
     """
-    Loss configuration.
-
-    :param name: Loss name.
-    :param vocab_size: Target vocab size.
-    :param normalization_type: How to normalize the loss.
-    :param label_smoothing: Optional smoothing constant for label smoothing.
-    :param link: Link function.
-    :param weight: Loss weight.
+    Generic Loss interface.
+    A loss has a name, a configuration, and stores information about the output and label it requires from the model(s),
+    as well as a weight (default 1.0) and a method to create the corresponding metric.
     """
 
     def __init__(self,
                  name: str,
-                 vocab_size: Optional[int] = None,
-                 normalization_type: Optional[str] = None,
-                 label_smoothing: float = 0.0,
-                 length_task_link: Optional[str] = None,
-                 length_task_weight: float = 1.0) -> None:
-        super().__init__()
-        self.name = name
-        self.vocab_size = vocab_size
-        self.normalization_type = normalization_type
-        self.label_smoothing = label_smoothing
-        self.length_task_link = length_task_link
-        self.length_task_weight = length_task_weight
+                 output_name: str,
+                 label_name: str,
+                 weight: float = 1.0) -> None:
+        super().__init__(prefix=name)
+        self._output_name = output_name
+        self._label_name = label_name
+        self._weight = weight
+        self._metric = None
+        logger.info("Loss: %s | weight=%.2f | metric: %s | output_name: '%s' | label_name: '%s'",
+                    self.prefix, self.weight, self.metric.name, self.output_name, self.label_name)
 
-
-def get_loss(config: LossConfig) -> 'Loss':
-    """
-    Returns a Loss instance.
-
-    :param config: Loss configuration.
-    :return: Instance implementing the Loss.
-    """
-    if config.name == C.CROSS_ENTROPY:
-        return CrossEntropyLoss(config,
-                                output_names=[C.SOFTMAX_OUTPUT_NAME],
-                                label_names=[C.TARGET_LABEL_NAME])
-    else:
-        raise ValueError("unknown loss name: %s" % config.name)
-
-
-def get_length_task_loss(config: LossConfig) -> 'Loss':
-    """
-    Returns a Loss instance.
-
-    :param config: Loss configuration.
-    :return: Instance implementing Loss.
-    """
-    if config.length_task_link is not None:
-        if config.length_task_link == C.LINK_NORMAL:
-            return MSELoss(config,
-                           output_names=[C.LENRATIO_OUTPUT_NAME],
-                           label_names=[C.LENRATIO_LABEL_NAME])
-        elif config.length_task_link == C.LINK_POISSON:
-            return PoissonLoss(config,
-                               output_names=[C.LENRATIO_OUTPUT_NAME],
-                               label_names=[C.LENRATIO_LABEL_NAME])
-        else:
-            raise ValueError("unknown link function name for length task: %s" % config.length_task_link)
-    return None
-
-
-class Loss(ABC):
-    """
-    Generic Loss interface.
-    get_loss() method should return a loss symbol.
-    The softmax outputs (named C.SOFTMAX_NAME) are used by EvalMetrics to compute various metrics,
-    e.g. perplexity, accuracy. In the special case of cross_entropy, the SoftmaxOutput symbol
-    provides softmax outputs for forward() AND cross_entropy gradients for backward().
-    """
-
-    def __init__(self, loss_config: LossConfig, output_names: List[str], label_names: List[str]) -> None:
-        self.output_names = output_names
-        self.label_names = label_names
-        self.loss_config = loss_config
-
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def forward(self, outputs: Dict[str, Any], labels: Dict[str, Any]):
         """
-        Returns loss and softmax output symbols given logits and integer-coded labels.
+        Loss retrieves the required output and label.
+        """
+        utils.check_condition(self.output_name in outputs,
+                              "output '%s' not found. Loss requires this output key" % self.output_name)
+        utils.check_condition(self.label_name in labels,
+                              "label '%s' not found. Loss requires this label key" % self.output_name)
+        output = outputs[self.output_name]
+        label = labels[self.label_name]
+        return super().forward(output.astype(label, copy=False), label)
 
-        :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
-        :param labels: Shape: (batch_size * target_seq_len,).
-        :return: Loss symbol.
+    def hybrid_forward(self, F, outputs, labels):
+        """
+        Given outputs and labels, the loss returns two scalars: the loss value and a normalizer for that loss value.
         """
         raise NotImplementedError()
 
-    def __repr__(self):
-        return self.loss_config.name
-
     @abstractmethod
-    def create_metric(self) -> EvalMetric:
+    def create_metric(self) -> 'LossMetric':
         """
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
-        pass
+        raise NotImplementedError()
+
+    @property
+    def metric(self):
+        if self._metric is None:
+            self._metric = self.create_metric()
+        return self._metric
+
+    @property
+    def weight(self):
+        return self._weight
+
+    @property
+    def output_name(self):
+        return self._output_name
+
+    @property
+    def label_name(self):
+        return self._label_name
+
+
+class LossMetric(ABC):
+    def __init__(self, name: str) -> None:
+        self._name = name
+        self._sum = 0.0
+        self._num_inst = 0.0
+
+    def __repr__(self):
+        return "%s(%.2f/%.2f=%.2f)" % (self.name, self._sum, self._num_inst, self.get())
+
+    def __str__(self):
+        return "%s=%f" % (self.name, self.get())
+
+    @property
+    def name(self):
+        return self._name
+
+    def update(self, loss, num_samples):
+        self._sum += loss
+        self._num_inst += num_samples
+
+    def get(self) -> float:
+        return self._sum / self._num_inst if self._num_inst else float('nan')
+
+    def reset(self):
+        self._sum = 0.0
+        self._num_inst = 0.0
 
 
 class CrossEntropyLoss(Loss):
     """
     Computes the cross-entropy loss.
-
-    :param loss_config: Loss configuration.
-    """
-
-    def __init__(self, loss_config: LossConfig,
-                 output_names: List[str], label_names: List[str],
-                 ignore_label: int=C.PAD_ID, name: str=C.SOFTMAX_NAME) -> None:
-        logger.info("Loss: CrossEntropy(normalization_type=%s, label_smoothing=%s)",
-                    loss_config.normalization_type, loss_config.label_smoothing)
-        super().__init__(loss_config=loss_config, output_names=output_names, label_names=label_names)
-        self.ignore_label = ignore_label
-        self.name = name
-
-    def get_loss(self, logits: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Returns loss symbol given logits and integer-coded labels.
-
-        :param logits: Shape: (batch_size * target_seq_len, target_vocab_size).
-        :param labels: Shape: (batch_size * target_seq_len,).
-        :return: List of loss symbols.
-        """
-        if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
-            normalization = "valid"
-        elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
-            normalization = "null"
-        else:
-            raise ValueError("Unknown loss normalization type: %s" % self.loss_config.normalization_type)
-        return mx.sym.SoftmaxOutput(data=logits,
-                                    label=labels,
-                                    ignore_label=self.ignore_label,
-                                    use_ignore=True,
-                                    normalization=normalization,
-                                    smooth_alpha=self.loss_config.label_smoothing,
-                                    name=self.name)
-
-    def create_metric(self) -> "CrossEntropyMetric":
-        return CrossEntropyMetric(self.loss_config)
-
-
-class CrossEntropyMetric(EvalMetric):
-    """
-    Version of the cross entropy metric that ignores padding tokens.
-
-    :param loss_config: The configuration used for the corresponding loss.
-    :param name: Name of this metric instance for display.
-    :param output_names: Name of predictions that should be used when updating with update_dict.
-    :param label_names: Name of labels that should be used when updating with update_dict.
+    Uses F.SoftmaxOutput to efficiently backpropagate cross-entropy gradients and do label smoothing.
     """
 
     def __init__(self,
-                 loss_config: LossConfig,
                  name: str = C.CROSS_ENTROPY,
-                 output_names: Optional[List[str]] = None,
-                 label_names: Optional[List[str]] = None) -> None:
-        super().__init__(name, output_names=output_names, label_names=label_names)
-        self.loss_config = loss_config
+                 weight: float = 1.0,
+                 label_smoothing: float = 0.0,
+                 dtype: str = C.DTYPE_FP32,
+                 output_name: str = C.LOGITS_NAME,
+                 label_name: str = C.TARGET_LABEL_NAME,
+                 ignore_label: int = C.PAD_ID) -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
+        self.ignore_label = ignore_label
+        self._alpha = label_smoothing
+        self._normalization = "valid"
+        self._dtype = dtype
 
-    @staticmethod
-    def cross_entropy(logprob, label):
-        ce = -mx.nd.pick(logprob, label)  # pylint: disable=invalid-unary-operand-type
-        return ce
+    def hybrid_forward(self, F, logits, labels):
+        """
+        Returns unnormalized cross-entropy loss of the batch.
 
-    @staticmethod
-    def cross_entropy_smoothed(logprob, label, alpha, num_classes):
-        ce = CrossEntropyMetric.cross_entropy(logprob, label)
-        # gain for each incorrect class
-        per_class_gain = alpha / (num_classes - 1)
-        # discounted loss for correct class
-        ce *= 1 - alpha - per_class_gain
-        # add gain for incorrect classes to total cross-entropy
-        ce -= mx.nd.sum(logprob * per_class_gain, axis=-1, keepdims=False)
-        return ce
+        :param F: MXNet API namespace.
+        :param logits: Logits. Shape: (batch_size, sequence_length, output_dim).
+        :param labels: Sparse labels. Shape: (batch_size, sequence_length)
+        :return: Cross-entropy loss (1,), and number of valid tokens for normalization.
+        """
+        # computes softmax over the last axis, backpropagates ce gradients. Shape: (batch, len, vocab)
+        softmax_out = F.SoftmaxOutput(data=logits,
+                                      label=labels,
+                                      ignore_label=self.ignore_label,
+                                      use_ignore=True,
+                                      normalization=self._normalization,
+                                      smooth_alpha=self._alpha,
+                                      # see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
+                                      grad_scale=self.weight,
+                                      preserve_shape=True)
+        # (batch, len)
+        pred = F.log(F.pick(F.BlockGrad(softmax_out), labels, axis=-1, keepdims=False))
+        # (batch, len,)
+        valid_mask = labels != self.ignore_label
+        # (batch, len)
+        pred = pred * valid_mask
+        # (1,)
+        ce = -F.sum(pred)
+        return ce, F.sum(valid_mask)
 
-    def update(self, labels, preds):
-        for label, pred in zip(labels, preds):
-            batch_size = label.shape[0]
-            label = label.as_in_context(pred.context).reshape((label.size,))
+    def create_metric(self) -> 'LossMetric':
+        """
+        Create an instance of the EvalMetric that corresponds to this Loss function.
+        """
+        return PerplexityMetric()
 
-            logprob = mx.nd.log(mx.nd.maximum(1e-10, pred))
 
-            # ce: (batch*time,)
-            if self.loss_config.label_smoothing > 0.0:
-                ce = self.cross_entropy_smoothed(logprob, label,
-                                                 alpha=self.loss_config.label_smoothing,
-                                                 num_classes=self.loss_config.vocab_size)
-            else:
-                ce = self.cross_entropy(logprob, label)
+class CrossEntropyLossWithoutSoftmaxOutput(Loss):
+    """ no label smoothing supported """
 
-            # mask pad tokens
-            valid = (label != C.PAD_ID).astype(dtype=pred.dtype)
-            ce *= valid
+    def __init__(self,
+                 name: str = C.CROSS_ENTROPY,
+                 weight: float = 1.0,
+                 label_smoothing: float = 0.0,
+                 dtype: str = C.DTYPE_FP32,
+                 output_name: str = C.LOGITS_NAME,
+                 label_name: str = C.TARGET_LABEL_NAME,
+                 ignore_label: int = C.PAD_ID) -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
+        self.ls = None
+        if label_smoothing > 0.0:
+            with self.name_scope():
+                self.ls = LabelSmoothing(epsilon=label_smoothing, units=8230)  # TODO
+        self.ignore_label = ignore_label
+        self._alpha = label_smoothing
+        self._dtype = dtype
 
-            ce = mx.nd.sum(ce)
-            if self.loss_config.normalization_type == C.LOSS_NORM_VALID:
-                num_valid = mx.nd.sum(valid)
-                ce /= num_valid
-                self.num_inst += 1
-            elif self.loss_config.normalization_type == C.LOSS_NORM_BATCH:
-                # When not normalizing, we divide by the batch size (number of sequences)
-                # NOTE: This is different from MXNet's metrics
-                self.num_inst += batch_size
+    def hybrid_forward(self, F, logits, labels):
+        pred = F.log_softmax(logits, axis=-1)
 
-            self.sum_metric += ce.asscalar()
+        if self.ls is None:
+            # (batch, len)
+            loss = -F.pick(pred, labels, axis=-1, keepdims=False)
+        else:
+            loss = -F.sum(pred * self.ls(labels), axis=-1, keepdims=False)
+
+        # (batch, len,)
+        valid_mask = labels != self.ignore_label
+
+        # (batch, len)
+        loss = loss * valid_mask
+
+        # (1,)
+        ce = F.sum(loss) * self.weight
+        return ce, F.sum(valid_mask)
+
+    def create_metric(self) -> 'LossMetric':
+        """
+        Create an instance of the EvalMetric that corresponds to this Loss function.
+        """
+        return PerplexityMetric()
+
+
+class LabelSmoothing(mx.gluon.HybridBlock):
+    """Applies label smoothing. See https://arxiv.org/abs/1512.00567.
+
+    Parameters
+    ----------
+    axis : int, default -1
+        The axis to smooth.
+    epsilon : float, default 0.1
+        The epsilon parameter in label smoothing
+    sparse_label : bool, default True
+        Whether input is an integer array instead of one hot array.
+    units : int or None
+        Vocabulary size. If units is not given, it will be inferred from the input.
+    prefix : str or None
+        Prefix for name of `Block`s
+        (and name of weight if params is `None`).
+    params : Parameter or None
+        Container for weight sharing between cells.
+        Created if `None`.
+    """
+    def __init__(self, axis=-1, epsilon=0.1, units=None,
+                 sparse_label=True, prefix=None, params=None):
+        super(LabelSmoothing, self).__init__(prefix=prefix, params=params)
+        self._axis = axis
+        self._epsilon = epsilon
+        self._sparse_label = sparse_label
+        self._units = units
+
+    def hybrid_forward(self, F, inputs, units=None): # pylint: disable=arguments-differ
+        """
+
+        Parameters
+        ----------
+        F
+        inputs : Symbol or NDArray
+            Shape (batch_size, length) or (batch_size, length, V)
+        units : int or None
+        Returns
+        -------
+        smoothed_label : Symbol or NDArray
+            Shape (batch_size, length, V)
+        """
+        if self._sparse_label:
+            assert units is not None or self._units is not None, \
+                'units needs to be given in function call or ' \
+                'instance initialization when sparse_label is False'
+            if units is None:
+                units = self._units
+            inputs = F.one_hot(inputs, depth=units)
+        if units is None and self._units is None:
+            return F.Custom(inputs, epsilon=self._epsilon, axis=self._axis,
+                            op_type='_smoothing_with_dim')
+        else:
+            if units is None:
+                units = self._units
+            return ((1 - self._epsilon) * inputs) + (self._epsilon / units)
+
+
+class PerplexityMetric(LossMetric):
+
+    def __init__(self, name=C.PERPLEXITY):
+        super().__init__(name=name)
+
+    def update(self, batch_cross_entropy: float, batch_num_valid: float):
+        self._sum += batch_cross_entropy
+        self._num_inst += batch_num_valid
+
+    def get(self):
+        return math.exp(super().get())
 
 
 class PoissonLoss(Loss):
@@ -239,136 +297,61 @@ class PoissonLoss(Loss):
     Computes the Poisson regression loss.
     MSEMetric for this loss will be reporting the mean
     square error between lengths, not length ratios!
-
-    :param loss_config: Loss configuration.
     """
 
     def __init__(self,
-                 loss_config: LossConfig,
-                 output_names: List[str], label_names: List[str],
-                 name: str = C.LENRATIO_LOSS_NAME) -> None:
-        super().__init__(loss_config=loss_config,
-                         output_names=output_names, label_names=label_names)
-        self.name = name
+                 name: str = C.LENRATIO_NAME + "_" + C.LINK_POISSON,
+                 weight: float = 1.0,
+                 output_name: str = C.LENRATIO_NAME,
+                 label_name: str = C.LENRATIO_LABEL_NAME) -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
 
-    def get_loss(self, pred: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def hybrid_forward(self, F, length_predictions, labels):
         """
         Returns Poisson loss and output symbol given data and expected integers as labels.
 
-        :param pred: Predictions. shape: (batch_size, 1).
-        :param labels: Target integers. Shape: (batch_size,).
-        :return: Loss symbol.
+        :param length_predictions: Length predictions. Shape: (batch_size,).
+        :param labels: Targets. Shape: (batch_size,).
+        :return: Poisson loss of length predictions of the batch, and number of samples (batch size).
         """
-        labels = mx.sym.reshape(labels, shape=(-1, 1))
-        loss_value = pred - labels * mx.sym.log(mx.sym.maximum(1e-10, pred))
-        # MakeLoss scales only the gradient, so scaling explicitly
-        loss_value = self.loss_config.length_task_weight * loss_value
-        loss_value = mx.sym.MakeLoss(data=loss_value,
-                                     normalization='batch',
-                                     name=self.name)
-        return loss_value
+        # (batch_size,)
+        loss = length_predictions - labels * F.log(F.maximum(1e-10, length_predictions))
+        # (1,)
+        loss = F.sum(loss * self.weight)
+        num_samples = F.sum(F.ones_like(length_predictions))
+        return loss, num_samples
 
-    def create_metric(self) -> 'MSEMetric':
-        return LengthRatioMSEMetric(name=C.LENRATIO_MSE,
-                                    output_names=self.output_names,
-                                    label_names=self.label_names)
+    def create_metric(self) -> 'LossMetric':
+        return LossMetric(name=C.LENRATIO_MSE)
 
 
 class MSELoss(Loss):
     """
     Computes the Mean Squared Error loss.
-    MSEMetric for this loss will be reporting the mea
-    square error between length ratios.
-
-    :param loss_config: Loss configuration.
+    MSEMetric for this loss will be reporting the mean square error between length ratios.
     """
 
     def __init__(self,
-                 loss_config: LossConfig,
-                 output_names: List[str], label_names: List[str],
-                 name: str = C.LENRATIO_LOSS_NAME) -> None:
-        super().__init__(loss_config=loss_config,
-                         output_names=output_names, label_names=label_names)
-        self.name = name
+                 name: str = C.LENRATIO_NAME + "_" + C.LINK_NORMAL,
+                 weight: float = 1.0,
+                 output_name: str = C.LENRATIO_NAME,
+                 label_name: str = C.LENRATIO_LABEL_NAME) -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
 
-    def get_loss(self, pred: mx.sym.Symbol, labels: mx.sym.Symbol) -> mx.sym.Symbol:
+    def hybrid_forward(self, F, length_predictions, labels):
         """
-        Returns MSE loss and output symbol given logits and expected integers as labels.
+        Returns MSE loss.
 
-        :param pred: Predictions. Shape: (batch_size, 1).
+        :param length_predictions: Length predictions. Shape: (batch_size,).
         :param labels: Targets. Shape: (batch_size,).
-        :return: Loss symbol.
+        :return: MSE loss of length predictions of the batch.
         """
-        labels = mx.sym.reshape(labels, shape=(-1, 1))
-        loss_value = self.loss_config.length_task_weight / 2 * mx.sym.square(pred - labels)
-        loss_value = mx.sym.MakeLoss(data=loss_value,
-                                     normalization='batch',
-                                     name=self.name)
-        return loss_value
+        # (batch_size,)
+        loss = (self.weight / 2) * F.square(length_predictions - labels)
+        # (1,)
+        loss = F.sum(loss)
+        num_samples = F.sum(F.ones_like(length_predictions))
+        return loss, num_samples
 
-    def create_metric(self) -> 'MSEMetric':
-        return LengthRatioMSEMetric(name=C.LENRATIO_MSE,
-                                    output_names=self.output_names,
-                                    label_names=self.label_names)
-
-
-class MSEMetric(EvalMetric):
-    """
-    Version of the MSE metric that ignores padding tokens.
-
-    :param loss_config: The configuration used for the corresponding loss.
-    :param name: Name of this metric instance for display.
-    :param output_names: Name of predictions that should be used when updating with update_dict.
-    :param label_names: Name of labels that should be used when updating with update_dict.
-    """
-
-    def __init__(self,
-                 name: str,
-                 output_names: Optional[List[str]] = None,
-                 label_names: Optional[List[str]] = None) -> None:
-        super().__init__(name, output_names=output_names, label_names=label_names)
-
-    def update(self, labels, preds):
-        """
-        :param labels: List of (batch_size,)-shaped NDArrays.
-        :param preds: List of (batch_size,1)-shaped NDArrays.
-        """
-        for label, pred in zip(labels, preds):
-            batch_size = label.shape[0]
-            # label: (batch_size, 1)
-            label = label.as_in_context(pred.context).reshape((label.size,1))
-            # mse: (batch_size,)
-            mse = mx.nd.square(label - pred)
-            # mse: (1,)
-            mse = mx.nd.sum(mse)
-            self.num_inst += batch_size
-
-            self.sum_metric += mse.asscalar()
-
-
-class LengthRatioMSEMetric(MSEMetric):
-    """
-    Version of the MSE metric specific to length ratio prediction, that
-    looks for its labels in the network outputs instead of the iterator,
-    as those are generated on the fly by the TrainingModel's sym_gen().
-
-    :param loss_config: The configuration used for the corresponding loss.
-    :param name: Name of this metric instance for display.
-    :param output_names: Name of predictions that should be used when updating with update_dict.
-    :param label_names: Name of labels that should be used when updating with update_dict.
-    """
-
-    def __init__(self,
-                 name: str,
-                 output_names: Optional[List[str]] = None,
-                 label_names: Optional[List[str]] = None) -> None:
-        super().__init__(name, output_names=output_names, label_names=label_names)
-
-    def update_dict(self, label: Dict, pred: Dict):
-        """
-        If label is missing the right name, copy it from the prediction.
-        """
-        if not set(self.label_names).issubset(set(label.keys())):
-            label.update({name:pred[name] for name in self.label_names})
-        super().update_dict(label, pred)
-
+    def create_metric(self) -> 'LossMetric':
+        return LossMetric(name=C.LENRATIO_MSE)
