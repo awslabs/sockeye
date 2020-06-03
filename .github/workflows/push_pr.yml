@@ -2,11 +2,9 @@ name: push and pull request testing
 on:
   push:
     branches:
-    - sockeye_2
     - master
   pull_request:
     branches:
-    - sockeye_2
     - master
 
 jobs:
