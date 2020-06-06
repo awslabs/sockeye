@@ -11,9 +11,6 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [2.1.8]
-- Slightly improve inference speed by using softmax operator with `length` argument as available in MXNet 1.6.
-
 ## [2.1.7]
 
 ### Changed
