@@ -466,18 +466,19 @@ def add_bucketing_args(params):
 
     params.add_argument('--bucket-width',
                         type=int_greater_or_equal(1),
-                        default=10,
+                        default=8,
                         help='Width of buckets in tokens. Default: %(default)s.')
 
-    params.add_argument('--no-bucket-scaling',
+    params.add_argument('--bucket-scaling',
                         action='store_true',
-                        help='Disable scaling source/target buckets based on length ratio. Default: %(default)s.')
+                        help='Scale source/target buckets based on length ratio to reduce padding. Default: '
+                             '%(default)s.')
 
     params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
-                        default=(99, 99),
-                        help='Maximum sequence length in tokens.'
-                             'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
+                        default=(95, 95),
+                        help='Maximum sequence length in tokens, not counting BOS/EOS tokens (internal max sequence '
+                             'length is X+1). Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
 
 def add_prepare_data_cli_args(params):
@@ -710,28 +711,36 @@ def add_model_parameters(params):
                                    'Default: %(default)s.')
 
 
-def add_batch_args(params, default_batch_size=4096):
+def add_batch_args(params, default_batch_size=2048):
     params.add_argument('--batch-size', '-b',
                         type=int_greater_or_equal(1),
                         default=default_batch_size,
-                        help='Mini-batch size. Note that depending on the batch-type this either refers to '
-                             'words or sentences.'
-                             'Sentence: each batch contains X sentences, number of words varies. '
-                             'Word: each batch contains (approximately) X words, number of sentences varies. '
+                        help='Mini-batch size per device (ex: batch size 2048 with 4 devices gives effective batch '
+                             'size 8192). Depending on --batch-type, this either refers to words or sentences. '
+                             'Sentence: each batch contains exactly X sentences. '
+                             'Word: each batch contains up to X target words, variable number of sentences depending '
+                             'on sentence length. '
                              'Default: %(default)s.')
     params.add_argument("--batch-type",
                         type=str,
                         default=C.BATCH_TYPE_WORD,
                         choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
-                        help="Sentence: each batch contains X sentences, number of words varies."
-                             "Word: each batch contains (approximately) X target words, "
-                             "number of sentences varies. Default: %(default)s.")
-    params.add_argument('--round-batch-sizes-to-multiple-of',
+                        help='Sentence: each batch contains exactly X sentences. '
+                             'Word: each batch contains up to X target words. '
+                             'Default: %(default)s.')
+    params.add_argument('--batch-sentences-multiple-of',
+                        type=int,
+                        default=8,
+                        help='For word-based batching, guarantee that each batch contains a multiple of X sentences, '
+                             'always rounding down (for X=8, a batch normally containing 127 sentences would contain '
+                             '120, not 128).'
+                             'Default: %(default)s.')
+    params.add_argument('--update-interval',
                         type=int,
                         default=1,
-                        help='For word-based batches, round each bucket\'s batch size (measured in sentences) to a '
-                             'multiple of this integer. Default: %(default)s.')
-
+                        help='Accumulate gradients over X batches for each model update. Set a value higher than 1 to '
+                             'simulate large batches (ex: batch size 2048, 4 devices, update interval 4 gives effective '
+                             'batch size 32768). Default: %(default)s.')
 
 
 def add_hybridization_arg(params):
@@ -775,10 +784,6 @@ def add_training_args(params):
                               choices=C.METRICS,
                               help='Metric to optimize with early stopping {%(choices)s}. Default: %(default)s.')
 
-    train_params.add_argument('--update-interval',
-                              type=int,
-                              default=1,
-                              help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
     train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
                               type=int_greater_or_equal(1),
                               default=4000,
@@ -867,9 +872,11 @@ def add_training_args(params):
 
     train_params.add_argument('--horovod',
                               action='store_true',
-                              help='Use Horovod/OpenMPI for distributed training (Sergeev and Del Balso 2018, '
+                              help='Use Horovod/MPI for distributed training (Sergeev and Del Balso 2018, '
                                    'arxiv.org/abs/1802.05799).  When using this option, run Sockeye with `horovodrun '
-                                   '-np ... -H ... python`.')
+                                   '-np X python3 -m sockeye.train` where X is the number of processes.  Increasing '
+                                   'the number of processes has the same effect on batch size as increasing the number '
+                                   'of devices (ex: batch size 2048 with `-np 4` gives effective batch size 8192).')
 
     train_params.add_argument("--kvstore",
                               type=str,

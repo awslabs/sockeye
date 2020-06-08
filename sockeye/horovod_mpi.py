@@ -10,7 +10,7 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-"""Optional Horovod and OpenMPI support"""
+"""Optional Horovod and MPI support"""
 
 # Import MPI-related packages once and in order.  Horovod should be initialized
 # once and mpi4py should not auto-initialize.

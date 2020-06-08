@@ -291,7 +291,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            batch_sentences_multiple_of=args.round_batch_sizes_to_multiple_of)
+            batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
         check_condition(all([combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])
@@ -378,8 +378,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
-            bucket_scaling=not args.no_bucket_scaling,
-            batch_sentences_multiple_of=args.round_batch_sizes_to_multiple_of)
+            bucket_scaling=args.bucket_scaling,
+            batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
@@ -788,10 +788,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         amp.init()
 
     # When using Horovod, multiple workers (instances of sockeye.train) are
-    # launched via OpenMPI.  Each worker has a rank (unique among all workers in
-    # the training run) and a local rank (unique on the current host).  For
-    # example, running on 2 hosts with 4 slots each will assign ranks 0-7 and
-    # local ranks 0-3.
+    # launched via MPI.  Each worker has a rank (unique among all workers in the
+    # training run) and a local rank (unique on the current host).  For example,
+    # running on 2 hosts with 4 slots each will assign ranks 0-7 and local ranks
+    # 0-3.
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')

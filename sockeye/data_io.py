@@ -156,28 +156,26 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
     """
     Computes bucket-specific batch sizes (sentences, average_words).
 
-    If sentence-based batching: number of sentences is the same for each batch, determines the
-    number of words. Hence all batch sizes for each bucket are equal.
+    If sentence-based batching: number of sentences is the same for each batch.
 
-    If word-based batching: number of sentences for each batch is set to the multiple of number
-    of devices that produces the number of words closest to the target batch size.  Average
-    target sentence length (non-padding symbols) is used for word number calculations.
+    If word-based batching: number of sentences for each batch is set to the
+    multiple of batch_sentences_multiple_of that is closest to batch_size
+    without exceeding the value.
 
     :param buckets: Bucket list.
-    :param batch_size: Batch size.
+    :param batch_size: Batch size per device.
     :param batch_by_words: Batch by words.
     :param batch_num_devices: Number of devices.
-    :param data_target_average_len: Optional average target length for each bucket.
-    :param batch_sentences_multiple_of: Round the number of sentences in each
-        bucket's batch to a multiple of this value (word-based batching only).
+    :param data_target_average_len: Optional average target length for each
+        bucket.
+    :param batch_sentences_multiple_of: Guarantee the number of sentences in
+        each bucket's batch to a multiple of this value (always round down,
+        word-based batching only).
     """
     check_condition(len(data_target_average_len) == len(buckets),
                     "Must provide None or average target length for each bucket")
     data_target_average_len = list(data_target_average_len)
     bucket_batch_sizes = []  # type: List[BucketBatchSize]
-    largest_total_num_words = 0
-    # Ensure the correct multiple for each batch per device.
-    min_batch_step = batch_sentences_multiple_of * batch_num_devices
 
     for buck_idx, bucket in enumerate(buckets):
         # Target/label length with padding
@@ -187,33 +185,26 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
             data_target_average_len[buck_idx] = padded_seq_len
         average_seq_len = data_target_average_len[buck_idx]
 
-        # Word-based: num words determines num sentences
-        # Sentence-based: num sentences determines num words
+        # Batch size for each bucket is measured in sentences:
+        # - Word-based batching: convert word-based size to number of sequences
+        # - Sentence-based batching: use batch size directly
         if batch_by_words:
-            check_condition(padded_seq_len <= batch_size, "Word batch size must cover sequence lengths for all"
-                                                          " buckets: (%d > %d)" % (padded_seq_len, batch_size))
-            # Multiple of minimum batch step closest to target number of words,
-            # assuming each sentence is of average length
-            batch_size_seq = min_batch_step * max(1, round((batch_size / average_seq_len) / min_batch_step))
-            batch_size_word = batch_size_seq * average_seq_len
+            check_condition(padded_seq_len <= batch_size,
+                            'Word batch size must cover sequence lengths for all buckets: (%d > %d)'
+                            % (padded_seq_len, batch_size))
+            # Max number of sequences without exceeding batch size
+            batch_size_seq = batch_size // padded_seq_len
+            # Round down to closest multiple
+            batch_size_seq = (batch_size_seq // batch_sentences_multiple_of) * batch_sentences_multiple_of
         else:
             batch_size_seq = batch_size
-            batch_size_word = batch_size_seq * average_seq_len
-        bucket_batch_sizes.append(BucketBatchSize(bucket, batch_size_seq, batch_size_word))
-        # Track largest number of source or target word samples in a batch
-        largest_total_num_words = max(largest_total_num_words, batch_size_seq * max(*bucket))
+        # Batch size is per device
+        batch_size_seq *= batch_num_devices
+        # Number of words here is an average of non-padding tokens
+        batch_size_word = batch_size_seq * average_seq_len
 
-    # Final step: guarantee that largest bucket by sequence length also has a batch size so that it covers any
-    # (batch_size, len_source) and (batch_size, len_target) matrix from the data iterator to allow for memory sharing.
-    # When batching by sentences, this will already be the case.
-    if batch_by_words:
-        padded_seq_len = max(*buckets[-1])
-        average_seq_len = data_target_average_len[-1]
-        while bucket_batch_sizes[-1].batch_size * padded_seq_len < largest_total_num_words:
-            bucket_batch_sizes[-1] = BucketBatchSize(
-                bucket_batch_sizes[-1].bucket,
-                bucket_batch_sizes[-1].batch_size + min_batch_step,
-                bucket_batch_sizes[-1].average_target_words_per_batch + min_batch_step * average_seq_len)
+        bucket_batch_sizes.append(BucketBatchSize(bucket, batch_size_seq, batch_size_word))
+
     return bucket_batch_sizes
 
 
@@ -1750,7 +1741,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
 
             if horovod_mpi.using_horovod():
                 # Synchronize shard order across workers
-                horovod_mpi.MPI.COMM_WORLD.bcast(self.shards_fnames, root=0)
+                self.shards_fnames = horovod_mpi.MPI.COMM_WORLD.bcast(self.shards_fnames, root=0)
 
             self.shard_index = 0
             self._load_shard()

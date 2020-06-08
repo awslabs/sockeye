@@ -229,38 +229,26 @@ def test_sample_based_define_bucket_batch_sizes():
 
 
 @pytest.mark.parametrize("length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
-        # Reference batch sizes manually inspected for sanity.  Note that for
-        # very unbalanced lengths, the last batch can be very large.  This is
-        # due to the requirement for any size batch (total elements) to fit into
-        # the same allocated space for MXNet's memory sharing.
-        (0.5, 1, [200.0, 100.0, 67.0, 50.0, 40.0, 33.0, 29.0, 25.0, 22.0, 41.0]),
-        (1.5, 1, [100.0, 50.0, 33.0, 25.0, 20.0, 20.0, 20.0, 20.0]),
-        (1.5, 8, [96.0, 48.0, 32.0, 24.0, 16.0, 16.0, 16.0, 24.0])])
+        # Reference batch sizes manually inspected for sanity.
+        (0.5, 1, [200, 100, 66, 50, 40, 33, 28, 25, 22, 20]),
+        (1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
+        (1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
 def test_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
     batch_by_words = True
     batch_num_devices = 1
     batch_size = 1000
     max_seq_len = 50
-    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1, length_ratio)
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, True, length_ratio)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_by_words=batch_by_words,
                                                            batch_num_devices=batch_num_devices,
                                                            data_target_average_len=[None] * len(buckets),
                                                            batch_sentences_multiple_of=batch_sentences_multiple_of)
-    max_num_words = 0
-    # last bucket batch size is different
     for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
-        assert bbs.batch_size == expected_batch_size
+        assert bbs.batch_size == expected_batch_size, (buckets, len(buckets), [bbs.batch_size for bbs in bucket_batch_sizes])
         expected_average_target_words_per_batch = expected_batch_size * bbs.bucket[1]
         assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
-        max_num_words = max(max_num_words, bbs.batch_size * max(*bbs.bucket))
-
-    last_bbs = bucket_batch_sizes[-1]
-    min_expected_batch_size = round((batch_size / last_bbs.bucket[1]) / batch_num_devices)
-    assert last_bbs.batch_size >= min_expected_batch_size
-    last_bbs_num_words = last_bbs.batch_size * max(*last_bbs.bucket)
-    assert last_bbs_num_words >= max_num_words
 
 
 def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
