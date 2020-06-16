@@ -663,7 +663,6 @@ def add_model_parameters(params):
                                    'For example: n:drn '
                                    'Default: %(default)s.')
 
-    # LHUC
     model_params.add_argument('--lhuc',
                               nargs="+",
                               default=None,
@@ -738,7 +737,6 @@ def add_batch_args(params, default_batch_size=4096):
                              'multiple of this integer. Default: %(default)s.')
 
 
-
 def add_hybridization_arg(params):
     params.add_argument('--no-hybridization',
                         action='store_true',
@@ -752,8 +750,8 @@ def add_training_args(params):
     add_batch_args(train_params)
 
     train_params.add_argument('--loss',
-                              default=C.CROSS_ENTROPY,
-                              choices=[C.CROSS_ENTROPY],
+                              default=C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT,
+                              choices=[C.CROSS_ENTROPY, C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT],
                               help='Loss to optimize. Default: %(default)s.')
     train_params.add_argument('--label-smoothing',
                               default=0.1,
