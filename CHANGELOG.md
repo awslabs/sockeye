@@ -11,12 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [2.1.X]
+## [2.1.999]
 
 ### Changed
 
-- Batch sizes are now per device (ex: `--batch-size 2048 --device-ids -4` gives an effective batch size of 8192).
+- Batch sizes are now per device (ex: `--batch-size 2560 --device-ids -4` gives an effective batch size of 10240).
 - Word-based batch sizes are now a max and include padding tokens in the count.  This makes memory usage more predictable.
+- Default batch size is increased from 2048 to 2560.
 - Renamed `--round-batch-sizes-to-multiple-of` to `--batch-sentences-multiple-of` for clarity.  Sizes are always rounded down.
 - Default bucketing settings changed to width 8, max sequence length 95 (96 including BOS/EOS tokens), and no bucket scaling.
 - Argument `--no-bucket-scaling` replaced with `--bucket-scaling` which is False by default.
