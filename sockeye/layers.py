@@ -424,8 +424,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase):
         """
 
         proj = self.ff_in(inputs)
-        queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
-        kv = F.concat(kv_1, kv_2, dim=2)
+        queries = F.slice(proj, begin=(None, None, None), end=(None, None, self.depth_att))
+        kv = F.slice(proj, begin=(None, None, self.depth_att), end=(None, None, None))
 
         updated_kv = kv
         if previous_kv is not None:
