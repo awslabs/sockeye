@@ -595,6 +595,11 @@ def add_model_parameters(params):
                               default=False,
                               help="Allow missing parameters when initializing model parameters from file. "
                                    "Default: %(default)s.")
+    model_params.add_argument('--ignore-extra-params',
+                              action="store_true",
+                              default=False,
+                              help="Allow extra parameters when initializing model parameters from file. "
+                                   "Default: %(default)s.")
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,

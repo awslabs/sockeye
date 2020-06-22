@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.9]
+
+### Added
+
+- Added training argument `--ignore-extra-params` to ignore extra parameters when loading models.  The primary use case is continuing training with a model that has already been annotated with scaling factors (`sockeye.quantize`).
+
 ## [2.1.8]
 
 ### Changed
