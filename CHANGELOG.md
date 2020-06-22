@@ -17,6 +17,10 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 - Added training argument `--ignore-extra-params` to ignore extra parameters when loading models.  The primary use case is continuing training with a model that has already been annotated with scaling factors (`sockeye.quantize`).
 
+### Fixed
+
+- Properly pass `allow_missing` flag to `model.load_parameters()`
+
 ## [2.1.8]
 
 ### Changed
