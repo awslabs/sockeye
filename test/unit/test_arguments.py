@@ -163,7 +163,7 @@ def test_inference_args(test_params, expected_params):
     ('', dict(batch_size=4096,
               batch_type='word',
               round_batch_sizes_to_multiple_of=1,
-              loss=C.CROSS_ENTROPY,
+              loss='cross-entropy-without-softmax-output',
               label_smoothing=0.1,
               length_task=None,
               length_task_layers=1,
