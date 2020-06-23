@@ -519,26 +519,25 @@ def load_model(model_folder: str,
 
     if quantizing:
         logger.info("Model dtype: quantizing from float32 to int8")
-        #The scaling factors are missing
-        allow_missing = True
+        allow_missing = True  # The scaling factors are missing
         cast_dtype = True
         dtype_source = 'saved'
     elif dtype is None or dtype == model_config.dtype:
         logger.info("Model dtype: %s" % model_config.dtype)
-        allow_missing = False
+        allow_missing = allow_missing
         cast_dtype = False
         dtype_source = 'saved'
     else:
         logger.info("Model dtype: overridden to %s" % dtype)
         model.cast(dtype)
-        allow_missing = False
+        allow_missing = allow_missing
         cast_dtype = True
         dtype_source = 'current'
 
     model.load_parameters(filename=params_fname,
                           ctx=context,
                           allow_missing=allow_missing,
-                          ignore_extra=True, #Scaling factors may be present in float32 models.
+                          ignore_extra=True,  # Scaling factors may be present in float32 models.
                           cast_dtype=cast_dtype,
                           dtype_source=dtype_source)
 
@@ -548,14 +547,14 @@ def load_model(model_folder: str,
             param.grad_req = 'null'
 
     if for_disk_saving is not None:
-        #Saving scaling factors and possibly int8 values to disk.
+        # Saving scaling factors and possibly int8 values to disk.
         if not quantizing:
             raise RuntimeError("Model is already quantized and for_disk_saving is set.")
         quantization.convert_weights_disk_format(params, for_disk_saving)
         model.config.dtype = for_disk_saving
-        #TODO: check for missing parameters somehow (we allowed scaling to be missing)
+        # TODO: check for missing parameters somehow (we allowed scaling to be missing)
     if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
-        #Disk format to CPU-dependent format.
+        # Disk format to CPU-dependent format.
         quantization.convert_weights_cpu_dependent(params)
 
     if hybridize:

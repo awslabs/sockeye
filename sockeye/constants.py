@@ -324,6 +324,7 @@ EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT = 'cross-entropy-without-softmax-output'
 LENRATIO_REGRESSION = 'length-ratio-regression'
 
 LINK_NORMAL = 'normal'

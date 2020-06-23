@@ -54,7 +54,7 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     :param references: Reference stream.
     :return: chrF score as float between 0 and 1.
     """
-    return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA,
+    return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.sacrebleu.CHRF_ORDER, beta=sacrebleu.sacrebleu.CHRF_BETA,
                                  remove_whitespace=True).score
 
 

@@ -3,4 +3,4 @@ mxnet-cu92mkl==1.6.0
 numpy>1.16.0,<2.0.0
 typing
 portalocker
-sacrebleu==1.4.3
+sacrebleu==1.4.10
