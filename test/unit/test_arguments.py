@@ -99,6 +99,7 @@ def test_device_args(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(params=None,
               allow_missing_params=False,
+              ignore_extra_params=False,
               num_layers=(6, 6),
               num_embed=(None, None),
               source_factors_num_embed=[],
@@ -162,7 +163,7 @@ def test_inference_args(test_params, expected_params):
     ('', dict(batch_size=2560,
               batch_type='word',
               batch_sentences_multiple_of=8,
-              loss=C.CROSS_ENTROPY,
+              loss='cross-entropy-without-softmax-output',
               label_smoothing=0.1,
               length_task=None,
               length_task_layers=1,

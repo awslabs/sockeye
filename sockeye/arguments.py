@@ -596,6 +596,11 @@ def add_model_parameters(params):
                               default=False,
                               help="Allow missing parameters when initializing model parameters from file. "
                                    "Default: %(default)s.")
+    model_params.add_argument('--ignore-extra-params',
+                              action="store_true",
+                              default=False,
+                              help="Allow extra parameters when initializing model parameters from file. "
+                                   "Default: %(default)s.")
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,
@@ -659,7 +664,6 @@ def add_model_parameters(params):
                                    'For example: n:drn '
                                    'Default: %(default)s.')
 
-    # LHUC
     model_params.add_argument('--lhuc',
                               nargs="+",
                               default=None,
@@ -742,7 +746,6 @@ def add_batch_args(params, default_batch_size=2560):
                              'simulate large batches (ex: batch size 2560, 4 devices, update interval 4 gives effective '
                              'batch size 40960). Default: %(default)s.')
 
-
 def add_hybridization_arg(params):
     params.add_argument('--no-hybridization',
                         action='store_true',
@@ -756,8 +759,8 @@ def add_training_args(params):
     add_batch_args(train_params)
 
     train_params.add_argument('--loss',
-                              default=C.CROSS_ENTROPY,
-                              choices=[C.CROSS_ENTROPY],
+                              default=C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT,
+                              choices=[C.CROSS_ENTROPY, C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT],
                               help='Loss to optimize. Default: %(default)s.')
     train_params.add_argument('--label-smoothing',
                               default=0.1,

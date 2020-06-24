@@ -22,6 +22,28 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Default bucketing settings changed to width 8, max sequence length 95 (96 including BOS/EOS tokens), and no bucket scaling.
 - Argument `--no-bucket-scaling` replaced with `--bucket-scaling` which is False by default.
 
+## [2.1.10]
+
+### Changed
+
+- Changed to a cross-entropy loss implementation that avoids the use of SoftmaxOutput.
+
+## [2.1.9]
+
+### Added
+
+- Added training argument `--ignore-extra-params` to ignore extra parameters when loading models.  The primary use case is continuing training with a model that has already been annotated with scaling factors (`sockeye.quantize`).
+
+### Fixed
+
+- Properly pass `allow_missing` flag to `model.load_parameters()`
+
+## [2.1.8]
+
+### Changed
+
+- Update to sacrebleu=1.4.10
+
 ## [2.1.7]
 
 ### Changed

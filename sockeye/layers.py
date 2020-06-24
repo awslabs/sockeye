@@ -123,16 +123,13 @@ class OutputLayer(mx.gluon.HybridBlock):
         self.vocab_size = vocab_size
 
         with self.name_scope():
-            # If we are in int8 mode, the model will have a separate copy of
-            # quantized embeddings because the input embeddings remain
-            # unquantized for the time being.
-            if weight is None or dtype == C.DTYPE_INT8:
-                if dtype == C.DTYPE_INT8:
-                    self.scaling = self.params.get('scaling', shape=(1,), init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32, allow_deferred_init=False)
-                    # This is only for inference but MXNet tries to create an
-                    # initializer anyway, then fails because most random
-                    # generators don't support int8 output.
-                    weight_initializer = 'zeros'
+            if dtype == C.DTYPE_INT8:
+                self.scaling = self.params.get('scaling', shape=(1,), init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32, allow_deferred_init=False)
+                # This is only for inference but MXNet tries to create an
+                # initializer anyway, then fails because most random
+                # generators don't support int8 output.
+                weight_initializer = 'zeros'
+            if weight is None:
                 self.weight = self.params.get("weight",
                                               shape=(vocab_size, hidden_size),
                                               init=weight_initializer,

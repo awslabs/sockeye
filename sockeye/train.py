@@ -598,14 +598,25 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_losses(args: argparse.Namespace) -> List[loss.Loss]:
+def create_losses(args: argparse.Namespace, num_classes: int = 0) -> List[loss.Loss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
-    losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
-                                    weight=softmax_output_grad_scale,
-                                    label_smoothing=args.label_smoothing,
-                                    dtype=args.dtype,
-                                    output_name=C.LOGITS_NAME,
-                                    label_name=C.TARGET_LABEL_NAME)]
+    if args.loss == C.CROSS_ENTROPY:
+        losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
+                                        weight=softmax_output_grad_scale,
+                                        label_smoothing=args.label_smoothing,
+                                        dtype=args.dtype,
+                                        output_name=C.LOGITS_NAME,
+                                        label_name=C.TARGET_LABEL_NAME)]
+    elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
+        losses = [loss.CrossEntropyLossWithoutSoftmaxOutput(name=C.CROSS_ENTROPY,
+                                                            weight=softmax_output_grad_scale,
+                                                            label_smoothing=args.label_smoothing,
+                                                            dtype=args.dtype,
+                                                            output_name=C.LOGITS_NAME,
+                                                            label_name=C.TARGET_LABEL_NAME,
+                                                            num_labels=num_classes)]
+    else:
+        raise ValueError('Unknown loss %s', args.loss)
     if args.length_task is not None:
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:
@@ -910,6 +921,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             training_model.load_parameters(filename=args.params,
                                            ctx=context,
                                            allow_missing=args.allow_missing_params or model_config.lhuc,
+                                           ignore_extra=args.ignore_extra_params,
                                            cast_dtype=True,
                                            dtype_source='current')
         params = training_model.collect_params()
@@ -960,7 +972,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # we set them immediately after calling init.
             gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
 
-        losses = create_losses(args)
+        losses = create_losses(args, num_classes=target_vocab_size)
 
         hybridize = not args.no_hybridization
         if hybridize:
