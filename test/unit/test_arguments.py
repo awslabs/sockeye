@@ -160,7 +160,7 @@ def test_inference_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(batch_size=2560,
+    ('', dict(batch_size=4096,
               batch_type='word',
               batch_sentences_multiple_of=8,
               loss='cross-entropy-without-softmax-output',

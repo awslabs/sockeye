@@ -715,36 +715,33 @@ def add_model_parameters(params):
                                    'Default: %(default)s.')
 
 
-def add_batch_args(params, default_batch_size=2560):
+def add_batch_args(params, default_batch_size=4096):
     params.add_argument('--batch-size', '-b',
                         type=int_greater_or_equal(1),
                         default=default_batch_size,
-                        help='Mini-batch size per device (ex: batch size 2560 with 4 devices gives effective batch '
-                             'size 10240). Depending on --batch-type, this either refers to words or sentences. '
-                             'Sentence: each batch contains exactly X sentences. '
-                             'Word: each batch contains up to X target words, variable number of sentences depending '
-                             'on sentence length. '
-                             'Default: %(default)s.')
-    params.add_argument("--batch-type",
+                        help='Mini-batch size per process. Depending on --batch-type, this either refers to words or '
+                             'sentences. The effective batch size (update size) is num_processes * batch_size * '
+                             'update_interval. Default: %(default)s.')
+    params.add_argument('--batch-type',
                         type=str,
                         default=C.BATCH_TYPE_WORD,
-                        choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
-                        help='Sentence: each batch contains exactly X sentences. '
-                             'Word: each batch contains up to X target words. '
+                        choices=C.BATCH_TYPES,
+                        help='sentence: each batch contains exactly X sentences. '
+                             'word: each batch contains approximately X target words. '
+                             'max-word: each batch contains at most X target words. '
                              'Default: %(default)s.')
     params.add_argument('--batch-sentences-multiple-of',
                         type=int,
                         default=8,
-                        help='For word-based batching, guarantee that each batch contains a multiple of X sentences, '
-                             'always rounding down (for X=8, a batch normally containing 127 sentences would contain '
-                             '120, not 128).'
-                             'Default: %(default)s.')
+                        help='For word and max-word batching, guarantee that each batch contains a multiple of X '
+                             'sentences. For word batching, round up or down to nearest multiple. For max-word '
+                             'batching, always round down. Default: %(default)s.')
     params.add_argument('--update-interval',
                         type=int,
                         default=1,
                         help='Accumulate gradients over X batches for each model update. Set a value higher than 1 to '
-                             'simulate large batches (ex: batch size 2560, 4 devices, update interval 4 gives effective '
-                             'batch size 40960). Default: %(default)s.')
+                             'simulate large batches (ex: batch_size 2560 with update_interval 4 gives effective batch '
+                             'size 10240). Default: %(default)s.')
 
 def add_hybridization_arg(params):
     params.add_argument('--no-hybridization',
@@ -876,10 +873,10 @@ def add_training_args(params):
     train_params.add_argument('--horovod',
                               action='store_true',
                               help='Use Horovod/MPI for distributed training (Sergeev and Del Balso 2018, '
-                                   'arxiv.org/abs/1802.05799).  When using this option, run Sockeye with `horovodrun '
-                                   '-np X python3 -m sockeye.train` where X is the number of processes.  Increasing '
-                                   'the number of processes has the same effect on batch size as increasing the number '
-                                   'of devices (ex: batch size 2560 with `-np 4` gives effective batch size 10240).')
+                                   'arxiv.org/abs/1802.05799). When using this option, run Sockeye with `horovodrun '
+                                   '-np X python3 -m sockeye.train` where X is the number of processes. Increasing '
+                                   'the number of processes multiplies the effective batch size (ex: batch_size 2560 '
+                                   'with `-np 4` gives effective batch size 10240).')
 
     train_params.add_argument("--kvstore",
                               type=str,

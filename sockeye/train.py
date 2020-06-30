@@ -263,7 +263,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     word_min_count_source, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
-    batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
@@ -289,7 +288,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             validation_target=validation_target,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
-            batch_by_words=batch_by_words,
+            batch_type=args.batch_type,
             batch_num_devices=batch_num_devices,
             batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
@@ -372,7 +371,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             target_vocab_path=target_vocab_path,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
-            batch_by_words=batch_by_words,
+            batch_type=args.batch_type,
             batch_num_devices=batch_num_devices,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,

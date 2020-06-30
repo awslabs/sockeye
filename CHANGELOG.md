@@ -13,12 +13,13 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [2.1.999]
 
+### Added
+
+- Batch type option `max-word` for max number of words including padding tokens (more predictable memory usage than `word`).
+- Batching option `--batch-sentences-multiple-of` that is similar to `--round-batch-sizes-to-multiple-of` but always rounds down (more predictable memory usage).
+
 ### Changed
 
-- Batch sizes are now per device (ex: `--batch-size 2560 --device-ids -4` gives an effective batch size of 10240).
-- Word-based batch sizes are now a max and include padding tokens in the count.  This makes memory usage more predictable.
-- Default batch size is increased from 2048 to 2560.
-- Renamed `--round-batch-sizes-to-multiple-of` to `--batch-sentences-multiple-of` for clarity.  Sizes are always rounded down.
 - Default bucketing settings changed to width 8, max sequence length 95 (96 including BOS/EOS tokens), and no bucket scaling.
 - Argument `--no-bucket-scaling` replaced with `--bucket-scaling` which is False by default.
 
