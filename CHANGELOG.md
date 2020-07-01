@@ -11,6 +11,16 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.11]
+
+### Changed
+
+- Updated `sockeye.rerank` module to use "add-k" smoothing for sentence-level BLEU.
+
+### Fixed
+
+- Updated `sockeye.rerank` module to use current N-best format.
+
 ## [2.1.10]
 
 ### Changed
