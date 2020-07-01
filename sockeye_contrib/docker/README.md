@@ -32,7 +32,7 @@ This is an example running on CPUs across 2 hosts.
 #### Secondary Host(s)
 
 On each secondary host, start a Docker container running sshd.
-Horovod/OpenMPI will connect to these hosts to launch workers.
+Horovod/MPI will connect to these hosts to launch workers.
 
 ```bash
 docker run --rm -i --network=host -v /mnt/share/ssh:/home/ec2-user/.ssh -v /mnt/share:/mnt/share sockeye-gpu \

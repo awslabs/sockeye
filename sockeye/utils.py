@@ -323,7 +323,7 @@ def determine_context(device_ids: List[int],
         check_condition(num_gpus >= 1,
                         "No GPUs found, consider running on the CPU with --use-cpu ")
         if horovod_mpi.using_horovod():
-            # Running with Horovod/OpenMPI: GPU(s) are determined by local rank
+            # Running with Horovod/MPI: GPU(s) are determined by local rank
             check_condition(len(device_ids) == 1 and device_ids[0] < 0,
                             "When using Horovod, --device-ids should be a negative integer indicating the number of "
                             "GPUs each worker should use.")

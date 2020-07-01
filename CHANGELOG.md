@@ -11,6 +11,18 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.12]
+
+### Added
+
+- Batch type option `max-word` for max number of words including padding tokens (more predictable memory usage than `word`).
+- Batching option `--batch-sentences-multiple-of` that is similar to `--round-batch-sizes-to-multiple-of` but always rounds down (more predictable memory usage).
+
+### Changed
+
+- Default bucketing settings changed to width 8, max sequence length 95 (96 including BOS/EOS tokens), and no bucket scaling.
+- Argument `--no-bucket-scaling` replaced with `--bucket-scaling` which is False by default.
+
 ## [2.1.11]
 
 ### Changed
@@ -144,7 +156,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Added
 
-- Added distributed training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added distributed training support with Horovod/MPI.  Use `horovodrun` and the `--horovod` training flag.
 - Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
 - Added `none` learning rate scheduler (use a fixed rate throughout training)
 - Added `linear-decay` learning rate scheduler

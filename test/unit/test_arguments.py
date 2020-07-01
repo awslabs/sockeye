@@ -45,7 +45,7 @@ def test_simple_dict():
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], shared_vocab=False, num_words=(0, 0),
           word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
-          no_bucketing=False, bucket_width=10, no_bucket_scaling=False, max_seq_len=(99, 99),
+          no_bucketing=False, bucket_width=8, bucket_scaling=False, no_bucket_scaling=None, max_seq_len=(95, 95),
           monitor_pattern=None, monitor_stat_func='mx_default')),
 
     # short parameters
@@ -61,7 +61,7 @@ def test_simple_dict():
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], shared_vocab=False, num_words=(0, 0),
           word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
-          no_bucketing=False, bucket_width=10, no_bucket_scaling=False, max_seq_len=(99, 99),
+          no_bucketing=False, bucket_width=8, bucket_scaling=False, no_bucket_scaling=None, max_seq_len=(95, 95),
           monitor_pattern=None, monitor_stat_func='mx_default'))
 ])
 def test_io_args(test_params, expected_params):
@@ -162,7 +162,8 @@ def test_inference_args(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(batch_size=4096,
               batch_type='word',
-              round_batch_sizes_to_multiple_of=1,
+              batch_sentences_multiple_of=8,
+              round_batch_sizes_to_multiple_of=None,
               loss='cross-entropy-without-softmax-output',
               label_smoothing=0.1,
               length_task=None,
@@ -262,9 +263,10 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           word_min_count=(1, 1),
           pad_vocab_to_multiple_of=None,
           no_bucketing=False,
-          bucket_width=10,
-          no_bucket_scaling=False,
-          max_seq_len=(99, 99),
+          bucket_width=8,
+          bucket_scaling=False,
+          no_bucket_scaling=None,
+          max_seq_len=(95, 95),
           min_num_shards=1,
           num_samples_per_shard=10000000,
           seed=13,
@@ -292,9 +294,10 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           word_min_count=(1, 1),
           pad_vocab_to_multiple_of=None,
           no_bucketing=False,
-          bucket_width=10,
-          no_bucket_scaling=False,
-          max_seq_len=(99, 99),
+          bucket_width=8,
+          bucket_scaling=False,
+          no_bucket_scaling=None,
+          max_seq_len=(95, 95),
           min_num_shards=1,
           num_samples_per_shard=10000000,
           seed=13,
