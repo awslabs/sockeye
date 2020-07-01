@@ -102,6 +102,15 @@ def load_args(fname: str) -> argparse.Namespace:
         return argparse.Namespace(**yaml.safe_load(inp))
 
 
+class Removed(argparse.Action):
+    """
+    When this argument is specified, raise an error with the argument's help
+    message.  This is used to notify users when arguments are removed.
+    """
+    def __call__(self, parser, namespace, values, option_string=None):
+        raise RuntimeError(self.help)
+
+
 def regular_file() -> Callable:
     """
     Returns a method that can be used in argument parsing to check the argument is a regular file or a symbolic link,
@@ -473,6 +482,11 @@ def add_bucketing_args(params):
                         action='store_true',
                         help='Scale source/target buckets based on length ratio to reduce padding. Default: '
                              '%(default)s.')
+    params.add_argument('--no-bucket-scaling',
+                        action=Removed,
+                        nargs=0,
+                        help='Removed: The argument "--no-bucket-scaling" has been removed because this is now the '
+                             'default behavior. To activate bucket scaling, use the argument "--bucket-scaling".')
 
     params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
@@ -736,6 +750,10 @@ def add_batch_args(params, default_batch_size=4096):
                         help='For word and max-word batching, guarantee that each batch contains a multiple of X '
                              'sentences. For word batching, round up or down to nearest multiple. For max-word '
                              'batching, always round down. Default: %(default)s.')
+    params.add_argument('--round-batch-sizes-to-multiple-of',
+                        action=Removed,
+                        help='Removed: The argument "--round-batch-sizes-to-multiple-of" has been renamed to '
+                             '"--batch-sentences-multiple-of".')
     params.add_argument('--update-interval',
                         type=int,
                         default=1,
