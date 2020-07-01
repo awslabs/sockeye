@@ -16,6 +16,7 @@ CLI to rerank an nbest list of translations.
 """
 
 import argparse
+from functools import partial
 import json
 import logging
 from typing import Any, Dict, List
@@ -42,7 +43,10 @@ class Reranker:
     def __init__(self, metric: str,
                  return_score: bool = False) -> None:
         if metric == C.RERANK_BLEU:
-            self.scoring_function = sacrebleu.sentence_bleu
+            # "add-k" smoothing is the best-performing method implemented in
+            # sacrebleu.  See "Method 2" results from Chen and Cherry
+            # (http://aclweb.org/anthology/W14-3346)
+            self.scoring_function = partial(sacrebleu.sentence_bleu, smooth_method='add-k')
         elif metric == C.RERANK_CHRF:
             self.scoring_function = sacrebleu.sentence_chrf
         else:
@@ -69,6 +73,10 @@ class Reranker:
     @staticmethod
     def _sort_by_ranking(hypotheses: Dict[str, Any], ranking: List[int]) -> Dict[str, Any]:
         def ranksort(l):
+            # Sort lists in hypotheses object (translations, scores) and return
+            # non-lists (sentence_id, score, translation) unchanged.
+            if not isinstance(l, list):
+                return l
             return [l[i] for i in ranking]
 
         return {key: ranksort(value) for key, value in hypotheses.items()}

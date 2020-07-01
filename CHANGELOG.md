@@ -11,7 +11,7 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [2.1.999]
+## [2.1.12]
 
 ### Added
 
@@ -22,6 +22,16 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 - Default bucketing settings changed to width 8, max sequence length 95 (96 including BOS/EOS tokens), and no bucket scaling.
 - Argument `--no-bucket-scaling` replaced with `--bucket-scaling` which is False by default.
+
+## [2.1.11]
+
+### Changed
+
+- Updated `sockeye.rerank` module to use "add-k" smoothing for sentence-level BLEU.
+
+### Fixed
+
+- Updated `sockeye.rerank` module to use current N-best format.
 
 ## [2.1.10]
 
