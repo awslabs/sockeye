@@ -44,7 +44,9 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         self.argument_definitions = {}  # type: Dict[Tuple, Dict]
         self.argument_actions = []  # type: List[Any]
         self._overwrite_add_argument(self)
-        self.add_argument("--config", help="Config file in YAML format.", type=str)
+        self.add_argument("--config", help="Path to CLI arguments in yaml format "
+                                           "(as saved in Sockeye model directories as 'args.yaml'). "
+                                           "Commandline arguments have precedence over values in this file.", type=str)
         # Note: not FileType so that we can get the path here
 
     def _register_argument(self, _action, *args, **kwargs):
