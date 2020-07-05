@@ -16,6 +16,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
 
 - Training option `--quiet-secondary-workers` that suppresses console output for secondary workers when training with Horovod/MPI.
+- Set version of isort to `<5.0.0` in requirements.dev.txt to avoid incompatibility between newer versions of isort and pylint.
 
 ## [2.1.12]
 
