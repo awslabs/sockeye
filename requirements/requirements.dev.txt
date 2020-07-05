@@ -5,6 +5,7 @@ check-manifest
 matplotlib
 mypy==0.610
 pylint==2.3.0
+isort<5.0.0
 setuptools>=38.6.0
 twine>=1.11.0
 wheel>=0.31.0
