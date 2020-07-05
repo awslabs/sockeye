@@ -375,6 +375,10 @@ def add_logging_args(params):
                                 default=False,
                                 action="store_true",
                                 help='Suppress console logging.')
+    logging_params.add_argument('--quiet-secondary-workers', '-qsw',
+                                default=False,
+                                action="store_true",
+                                help='Suppress console logging for secondary workers when training with Horovod/MPI.')
     logging_params.add_argument('--no-logfile',
                                 default=False,
                                 action="store_true",
