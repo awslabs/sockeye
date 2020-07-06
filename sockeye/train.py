@@ -820,6 +820,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_mpi.hvd.rank()))
             # Do not keep redundant copies of the checkpoint history
             args.keep_last_params = 1
+            # If requested, suppress console output for secondary workers
+            if args.quiet_secondary_workers:
+                args.quiet = True
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)

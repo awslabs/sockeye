@@ -70,6 +70,7 @@ def test_io_args(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(quiet=False,
+              quiet_secondary_workers=False,
               loglevel='INFO',
               no_logfile=False)),
 ])
@@ -272,6 +273,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           seed=13,
           output='train_data',
           quiet=False,
+          quiet_secondary_workers=False,
           loglevel='INFO',
           no_logfile=False,
           max_processes=1
@@ -303,6 +305,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           seed=13,
           output='prepared_data',
           quiet=False,
+          quiet_secondary_workers=False,
           loglevel='INFO',
           no_logfile=False,
           max_processes=1
