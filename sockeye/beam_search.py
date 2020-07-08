@@ -471,6 +471,8 @@ class BeamSearch(mx.gluon.Block):
                  output_vocab_size: int,
                  scorer: CandidateScorer,
                  num_source_factors: int,
+                 num_diverse_groups: int,
+                 diversity_penalty: float,
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
@@ -485,7 +487,13 @@ class BeamSearch(mx.gluon.Block):
         self._inference = inference
         self.beam_search_stop = beam_search_stop
         self.num_source_factors = num_source_factors
+        self.num_diverse_groups = num_diverse_groups
         self.global_avoid_trie = global_avoid_trie
+
+        utils.check_condition(self.beam_size % self.num_diverse_groups == 0,
+                              "beam_size must be a multiple of num_diverse_groups.")
+        self.diverse_group_size = self.beam_size // self.num_diverse_groups
+        self.diversity_penalty_strength = diversity_penalty
 
         with self.name_scope():
             self._sort_states = SortStates(state_structure=self._inference.state_structure(),
@@ -504,7 +512,7 @@ class BeamSearch(mx.gluon.Block):
             if sample is not None:
                 self._sample = SampleK(sample)
             else:
-                self._top = TopK(self.beam_size)
+                self._top = TopK(self.diverse_group_size)
 
     def forward(self,
                 source: mx.nd.NDArray,
@@ -558,9 +566,9 @@ class BeamSearch(mx.gluon.Block):
                                            dtype='int32', ctx=self.context), self.beam_size)
 
         # locations of each batch item when first dimension is (batch * beam)
-        batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
+        group_indices = mx.nd.arange(0, batch_size * self.beam_size, self.diverse_group_size, dtype='int32', ctx=self.context)
         first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
-        first_step_mask[batch_indices] = 1.0
+        first_step_mask[group_indices] = 1.0
         pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
                               ctx=self.context, dtype=self.dtype)
         eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
@@ -670,7 +678,45 @@ class BeamSearch(mx.gluon.Block):
                 if t == 1:
                     scores *= first_step_mask
 
-                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
+                vocab_size = scores.shape[1]
+
+                # Groupwise shape: (batch_size, num_diverse_groups, diverse_group_size[, vocab_size])
+                groupwise_scores = scores.reshape(shape=(batch_size, self.num_diverse_groups, self.diverse_group_size, vocab_size))
+                groupwise_offset = offset.reshape(shape=(batch_size, self.num_diverse_groups, self.diverse_group_size))
+                groupwise_best_hyp_indices = mx.nd.zeros(shape=(batch_size, self.num_diverse_groups, self.diverse_group_size), ctx=self.context, dtype='int32')
+                groupwise_best_word_indices = mx.nd.zeros(shape=(batch_size, self.num_diverse_groups, self.diverse_group_size), ctx=self.context, dtype='int32')
+                groupwise_scores_accumulated = mx.nd.zeros(shape=(batch_size, self.num_diverse_groups, self.diverse_group_size), ctx=self.context, dtype=self.dtype)
+                groupwise_scores_accumulated = mx.nd.zeros(shape=(batch_size, self.num_diverse_groups, self.diverse_group_size), ctx=self.context, dtype=self.dtype)
+                diversity_penalty = mx.nd.zeros(shape=(batch_size, self.diverse_group_size, vocab_size), ctx=self.context, dtype=self.dtype)
+
+                # Diverse beam search: apply beam search to each diverse group separately, add diversity penalty
+                for g in range(self.num_diverse_groups):
+                    group_scores = groupwise_scores[:, g, :, :] + diversity_penalty
+                    group_scores = group_scores.reshape((batch_size * self.diverse_group_size, vocab_size))
+                    group_offset = groupwise_offset[:, g, :]
+                    group_offset = group_offset.reshape((batch_size * self.diverse_group_size))
+
+                    group_best_hyp_indices, group_best_word_indices, group_scores_accumulated = self._top(group_scores, group_offset)
+                    group_best_hyp_indices = (group_best_hyp_indices + g * self.diverse_group_size)
+
+                    group_best_hyp_indices = group_best_hyp_indices.reshape(batch_size, self.diverse_group_size)
+                    group_best_word_indices = group_best_word_indices.reshape(batch_size, self.diverse_group_size)
+                    group_scores_accumulated = group_scores_accumulated.reshape(batch_size, self.diverse_group_size)
+
+                    groupwise_best_hyp_indices[:, g, :] = group_best_hyp_indices
+                    groupwise_best_word_indices[:, g, :] = group_best_word_indices
+                    groupwise_scores_accumulated[:, g, :] = group_scores_accumulated
+
+                    # Penalize the chosen words in all following groups
+                    add_diversity_penalty = mx.nd.sum(mx.nd.one_hot(group_best_word_indices, depth=vocab_size), axis=1)
+                    # Don't penalize EOS and padding
+                    add_diversity_penalty[:, [C.EOS_ID, C.PAD_ID]] = 0
+                    diversity_penalty += mx.nd.expand_dims(add_diversity_penalty, axis=1) * self.diversity_penalty_strength
+
+                # Back to original shape: (batch_size * beam_size)
+                best_hyp_indices = groupwise_best_hyp_indices.reshape((-1,))
+                best_word_indices = groupwise_best_word_indices.reshape((-1,))
+                scores_accumulated = groupwise_scores_accumulated.reshape((-1, 1))
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
@@ -740,6 +786,8 @@ class BeamSearch(mx.gluon.Block):
 
 def get_beam_search(models: List[SockeyeModel],
                     beam_size: int,
+                    num_diverse_groups: int,
+                    diversity_penalty: float,
                     context: Union[mx.Context, List[mx.Context]],
                     vocab_target: vocab.Vocab,
                     output_scores: bool,
@@ -775,6 +823,8 @@ def get_beam_search(models: List[SockeyeModel],
         scorer=scorer,
         sample=sample,
         num_source_factors=models[0].num_source_factors,
+        num_diverse_groups=num_diverse_groups,
+        diversity_penalty=diversity_penalty,
         global_avoid_trie=global_avoid_trie,
         inference=inference
     )

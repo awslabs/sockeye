@@ -1132,7 +1132,16 @@ def add_inference_args(params):
                                type=int_greater_or_equal(1),
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
-
+    decode_params.add_argument('--num-diverse-groups',
+                               type=int_greater_or_equal(1),
+                               default=1,
+                               help='Number of groups for diverse beam search. Default: %(default)s.')
+    decode_params.add_argument('--diversity-penalty',
+                               type=float,
+                               default=0.5,
+                               help='Penalty strength for diverse beam search (only takes effect when --num-diverse-groups > 1). '
+                                    'With a higher value, undiverse hypotheses will be penalized more strongly. '
+                                    'Default: %(default)s.')
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
                                default=C.BEAM_SEARCH_STOP_ALL,

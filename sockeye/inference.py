@@ -673,6 +673,8 @@ class Translator:
                  target_vocab: vocab.Vocab,
                  beam_size: int = 5,
                  nbest_size: int = 1,
+                 num_diverse_groups: int = 1,
+                 diversity_penalty: float = 0.5,
                  restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
                  avoid_list: Optional[str] = None,
                  strip_unknown_words: bool = False,
@@ -715,9 +717,16 @@ class Translator:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
 
+        self.num_diverse_groups = num_diverse_groups
+        self.diversity_penalty = diversity_penalty
+        utils.check_condition(self.beam_size % self.num_diverse_groups == 0,
+                              "beam_size must be a multiple of num_diverse_groups")
+
         self._beam_search = get_beam_search(
             models=self.models,
             beam_size=self.beam_size,
+            num_diverse_groups=self.num_diverse_groups,
+            diversity_penalty=self.diversity_penalty,
             context=self.context,
             vocab_target=target_vocab,
             output_scores=output_scores,

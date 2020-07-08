@@ -133,6 +133,8 @@ def run_translate(args: argparse.Namespace):
                                           beam_size=args.beam_size,
                                           beam_search_stop=args.beam_search_stop,
                                           nbest_size=args.nbest_size,
+                                          num_diverse_groups=args.num_diverse_groups,
+                                          diversity_penalty=args.diversity_penalty,
                                           models=models,
                                           source_vocabs=source_vocabs,
                                           target_vocab=target_vocab,

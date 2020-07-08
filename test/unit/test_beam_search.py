@@ -273,22 +273,21 @@ class _TestInference(sockeye.beam_search._Inference):
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         batch_beam_size = step_input.shape[0]
-        print('step_input', step_input.asnumpy())
-
         internal_lengths, num_decode_step_calls = states
-        num_decode_step_calls = num_decode_step_calls.asscalar()
-        if num_decode_step_calls == 0:  # first call to decode_step, we expect step input to be all <bos>
-            assert (step_input.asnumpy() == C.BOS_ID).all()
+        scores = mx.nd.zeros((batch_beam_size, self.output_vocab_size))
+        for beam_idx in range(batch_beam_size):
+            if num_decode_step_calls[beam_idx] == 0:  # first call to decode_step, we expect step input to be all <bos>
+                assert (step_input.asnumpy() == C.BOS_ID).all()
 
-        if step_input.asscalar() == C.BOS_ID:
-            # predict word id 4 given <bos>
-            scores = mx.nd.array([0, 0, 0, 0, 1])
-        elif step_input.asscalar() == C.EOS_ID:
-            # predict pad given <eos>
-            scores = mx.nd.array([1, 0, 0, 0, 0])
-        else:
-            # otherwise always predict pad
-            scores = mx.nd.array([0, 0, 0, 0, 1])
+            if step_input[beam_idx].asscalar() == C.BOS_ID:
+                # predict word id 4 given <bos>
+                scores[beam_idx] = mx.nd.array([0, 0, 0, 0, 1, 0.7, 0.3])
+            elif step_input[beam_idx].asscalar() == C.EOS_ID:
+                # predict pad given <eos>
+                scores[beam_idx] = mx.nd.array([1, 0, 0, 0, 0, 0, 0])
+            else:
+                # otherwise predict 5
+                scores[beam_idx] = mx.nd.array([0, 0, 0, 0, 0.2, 1, 0.5])
 
         # topk is minimizing
         scores *= -1
@@ -298,7 +297,7 @@ class _TestInference(sockeye.beam_search._Inference):
         internal_lengths += 1
         num_decode_step_calls += 1
 
-        self.states = states = [internal_lengths, mx.nd.array([num_decode_step_calls], dtype='int32')]
+        self.states = states = [internal_lengths, mx.nd.array(num_decode_step_calls, dtype='int32')]
         return scores, states
 
 
@@ -306,16 +305,20 @@ class _TestInference(sockeye.beam_search._Inference):
 # TODO: add vocabulary selection test
 def test_beam_search():
     context = mx.cpu()
-    dtype='float32'
+    dtype = 'float32'
     num_source_factors = 1
-    vocab_size = len(C.VOCAB_SYMBOLS) + 1  # 1 actual word: word id 4
+    vocab_size = len(C.VOCAB_SYMBOLS) + 3  # 3 actual words: word ids 4-6
     beam_size = 1
+    num_diverse_groups = 1  # no diverse beam search
+    diversity_penalty = 0
     bos_id = 2
     eos_id = 3
 
     inference = _TestInference(output_vocab_size=vocab_size)
     bs = sockeye.beam_search.BeamSearch(
         beam_size=beam_size,
+        num_diverse_groups=num_diverse_groups,
+        diversity_penalty=diversity_penalty,
         dtype=dtype,
         bos_id=bos_id,
         eos_id=eos_id,
@@ -350,3 +353,64 @@ def test_beam_search():
     print(best_hyp_indices)
     print(best_word_indices)
 
+
+def test_diverse_beam_search():
+    context = mx.cpu()
+    dtype = 'float32'
+    num_source_factors = 1
+    vocab_size = len(C.VOCAB_SYMBOLS) + 3  # 3 actual words: word ids 4-6
+    beam_size = 3
+    num_diverse_groups = 3
+    diversity_penalty = 99999  # enforce a different word for each group
+
+    inference = _TestInference(output_vocab_size=vocab_size)
+    bs = sockeye.beam_search.BeamSearch(
+        beam_size=beam_size,
+        num_diverse_groups=num_diverse_groups,
+        diversity_penalty=diversity_penalty,
+        dtype=dtype,
+        bos_id=C.BOS_ID,
+        eos_id=C.EOS_ID,
+        context=context,
+        output_vocab_size=vocab_size,
+        scorer=sockeye.beam_search.CandidateScorer(),
+        num_source_factors=num_source_factors,
+        inference=inference,
+        beam_search_stop=C.BEAM_SEARCH_STOP_ALL,
+        global_avoid_trie=None,
+        sample=None)
+
+    # inputs
+    batch_size = 1
+    max_length = 10
+    source = mx.nd.array([[C.BOS_ID, 4, 5, 6, C.EOS_ID, C.PAD_ID, C.PAD_ID]], ctx=context, dtype=dtype).reshape((0, -1, 1))
+    source_length = (source != C.PAD_ID).sum(axis=1).reshape((-1,))  # (batch_size,)
+
+    restrict_lexicon = None
+    raw_constraints = [None] * batch_size
+    raw_avoid_list = [None] * batch_size
+    max_output_lengths = mx.nd.array([max_length], ctx=context, dtype='int32')
+
+    bs_out = bs(source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths)
+    best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
+
+    print('best_hyp_indices')
+    print(best_hyp_indices)
+    print('best_word_indices')
+    print(best_word_indices)
+    for t in range(max_length - 1):
+        # Every group (i.e. every beam in this case) should select a different word
+        assert len(np.unique(best_word_indices[:, t])) == beam_size
+
+    # Disable diversity penalty
+    bs.diversity_penalty_strength = 0
+    bs_out = bs(source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths)
+    best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
+
+    print('best_hyp_indices')
+    print(best_hyp_indices)
+    print('best_word_indices')
+    print(best_word_indices)
+    for t in range(max_length - 1):
+        # Every group (i.e. every beam in this case) should select the same word
+        assert len(np.unique(best_word_indices[:, t])) == 1

@@ -134,6 +134,8 @@ def test_model_parameters(test_params, expected_params):
                       models=['model'],
                       beam_size=5,
                       nbest_size=1,
+                      num_diverse_groups=1,
+                      diversity_penalty=0.5,
                       batch_size=1,
                       chunk_size=None,
                       ensemble_mode='linear',
