@@ -710,7 +710,7 @@ class BeamSearch(mx.gluon.Block):
                     # Penalize the chosen words in all following groups
                     add_diversity_penalty = mx.nd.sum(mx.nd.one_hot(group_best_word_indices, depth=vocab_size), axis=1)
                     # Don't penalize EOS and padding
-                    add_diversity_penalty[:, [C.EOS_ID, C.PAD_ID]] = 0
+                    add_diversity_penalty[:, [C.EOS_ID, C.PAD_ID]] = 0  # pylint: disable=unsupported-assignment-operation
                     diversity_penalty += mx.nd.expand_dims(add_diversity_penalty, axis=1) * self.diversity_penalty_strength
 
                 # Back to original shape: (batch_size * beam_size)
