@@ -341,9 +341,14 @@ def add_rerank_args(params):
                                choices=C.RERANK_METRICS,
                                help="Sentence-level metric used to compare each nbest translation to the reference."
                                     "Default: %(default)s.")
+    rerank_params.add_argument("--output", "-o", default=None, help="File to write output to. Default: STDOUT.")
     rerank_params.add_argument("--output-best",
                                action="store_true",
                                help="Output only the best hypothesis from each nbest list.")
+    rerank_params.add_argument("--output-reference-instead-of-blank",
+                               action="store_true",
+                               help="When outputting only the best hypothesis (--output-best) and the best hypothesis "
+                                    "is a blank line, output the reference instead.")
     rerank_params.add_argument("--return-score",
                                action="store_true",
                                help="Returns the reranking scores as scores in output JSON objects.")
