@@ -119,6 +119,9 @@ def rerank(args: argparse.Namespace):
             else:
                 print(json.dumps(reranked_hypotheses, sort_keys=True), file=output_stream)
 
+    if output_stream is not sys.stdout:
+        output_stream.close()
+
 
 def main():
     """
