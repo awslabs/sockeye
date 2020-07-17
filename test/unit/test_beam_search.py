@@ -403,7 +403,7 @@ def test_diverse_beam_search():
         assert len(np.unique(best_word_indices[:, t])) == beam_size
 
     # Disable diversity penalty
-    bs.diversity_penalty_strength = 0
+    bs._top.penalty_strength = 0
     bs_out = bs(source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths)
     best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
 
