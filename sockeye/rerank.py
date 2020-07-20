@@ -19,6 +19,7 @@ import argparse
 from functools import partial
 import json
 import logging
+import sys
 from typing import Any, Dict, List
 
 import numpy as np
@@ -26,6 +27,7 @@ import sacrebleu
 
 from . import arguments
 from . import constants as C
+from .data_io import smart_open
 from . import log
 from . import utils
 
@@ -90,6 +92,7 @@ def rerank(args: argparse.Namespace):
     :param args: Namespace object holding CLI arguments.
     """
     reranker = Reranker(args.metric, args.return_score)
+    output_stream = sys.stdout if args.output is None else smart_open(args.output, mode='w')
 
     with utils.smart_open(args.reference) as reference, utils.smart_open(args.hypotheses) as hypotheses:
         for i, (reference_line, hypothesis_line) in enumerate(zip(reference, hypotheses), 1):
@@ -108,12 +111,16 @@ def rerank(args: argparse.Namespace):
                 reranked_hypotheses = reranker.rerank(hypotheses, reference)
 
             if args.output_best:
-                if not num_hypotheses:
-                    print()
-                else:
-                    print(reranked_hypotheses['translations'][0])
+                best_hypothesis = reranked_hypotheses['translations'][0] if num_hypotheses else ''
+                if not best_hypothesis and args.output_reference_instead_of_blank:
+                    logger.warning('Line %d: replacing blank hypothesis with reference.', i)
+                    best_hypothesis = reference
+                print(best_hypothesis, file=output_stream)
             else:
-                print(json.dumps(reranked_hypotheses, sort_keys=True))
+                print(json.dumps(reranked_hypotheses, sort_keys=True), file=output_stream)
+
+    if output_stream is not sys.stdout:
+        output_stream.close()
 
 
 def main():

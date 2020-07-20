@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.14]
+
+### Added
+
+- Added `sockeye.rerank` option `--output` to specify output file.
+- Added `sockeye.rerank` option `--output-reference-instead-of-blank` to output reference line instead of best hypothesis when best hypothesis is blank.
+
 ## [2.1.13]
 
 ### Added
