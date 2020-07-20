@@ -26,6 +26,7 @@ import sockeye.checkpoint_decoder
 import sockeye.evaluate
 import sockeye.extract_parameters
 from sockeye import constants as C
+from sockeye.config import Config
 from sockeye.model import load_model
 from sockeye.test_utils import run_train_translate, tmp_digits_dataset
 from test.common import check_train_translate
@@ -176,6 +177,7 @@ def test_other_clis(train_params: str, translate_params: str):
                                    max_seq_len=_LINE_MAX_LENGTH)
 
         _test_checkpoint_decoder(data['dev_source'], data['dev_target'], data['model'])
+        _test_mc_dropout(data['model'])
         _test_parameter_averaging(data['model'])
         _test_extract_parameters_cli(data['model'])
         _test_evaluate_cli(data['test_outputs'], data['test_target'])
@@ -252,3 +254,16 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
     assert 'bleu' in cp_metrics
     assert 'chrf' in cp_metrics
     assert 'decode-walltime' in cp_metrics
+
+
+def _test_mc_dropout(model_path: str):
+    """
+    Check that loading a model with MC Dropoout returns a model with dropout layers.
+    """
+    model, _, _ = load_model(model_folder=model_path, context=[mx.cpu()], mc_dropout=True, inference_only=True, hybridize=True)
+
+    # Ensure the model has some dropout turned on
+    config_blocks = [block for _, block in model.config.__dict__.items() if isinstance(block, Config)] 
+    dropout_settings = {setting: val for block in config_blocks for setting, val in block.__dict__.items()
+            if "dropout" in setting}
+    assert any(s > 0.0 for s in dropout_settings.values())
