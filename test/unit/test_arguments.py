@@ -153,6 +153,7 @@ def test_model_parameters(test_params, expected_params):
                       brevity_penalty_type='none',
                       strip_unknown_words=False,
                       dtype=None,
+                      mc_dropout=False,
                       sample=None,
                       seed=None)),
 ])

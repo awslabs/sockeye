@@ -1157,6 +1157,10 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
+    decode_params.add_argument('--mc-dropout',
+                               default=False,
+                               action='store_true',
+                               help='Turn on dropout during inference (Monte Carlo dropout). This will make translations non-deterministic and might slow down translation speed.')
     decode_params.add_argument('--sample',
                                type=int_greater_or_equal(0),
                                default=None,

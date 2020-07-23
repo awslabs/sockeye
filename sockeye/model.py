@@ -100,11 +100,17 @@ class SockeyeModel(mx.gluon.Block):
     :param prefix: Name prefix for all parameters of this model.
     """
 
-    def __init__(self, config: ModelConfig, inference_only: bool = False, prefix: str = '', **kwargs) -> None:
+    def __init__(self,
+                 config: ModelConfig,
+                 inference_only: bool = False,
+                 mc_dropout: bool = False,
+                 prefix: str = '',
+                 **kwargs) -> None:
         super().__init__(prefix=prefix, **kwargs)
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
         self.dtype = config.dtype
+        self.mc_dropout = mc_dropout
 
         with self.name_scope():
             # source & target embeddings
@@ -178,6 +184,9 @@ class SockeyeModel(mx.gluon.Block):
         predicted_output_length : NDArray
             Predicted output length of shape (batch_size,), 0 if not available.
         """
+        if self.mc_dropout:
+            # Turn on training mode so mxnet knows to add dropout
+            _ = mx.autograd.set_training(True)
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
 
@@ -208,6 +217,10 @@ class SockeyeModel(mx.gluon.Block):
         step_additional_outputs : list
             Additional outputs of the step, e.g, the attention weights
         """
+        if self.mc_dropout:
+            # Turn on training mode so mxnet knows to add dropout
+            _ = mx.autograd.set_training(True)
+
         # TODO: do we need valid length!?
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
         # target_embed: (batch_size, num_hidden)
@@ -454,6 +467,7 @@ def load_model(model_folder: str,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
                inference_only: bool = False,
+               mc_dropout: bool = False,
                for_disk_saving: Optional[str] = None,
                allow_missing: bool = False,
                set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
@@ -466,6 +480,7 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param mc_dropout: Turn on dropout during inference.
     :param for_disk_saving: For saving quantized models to disk.
            None: load as usual and the model will work.
            int8: The model loaded into RAM will not work, but is suitable for
@@ -483,9 +498,12 @@ def load_model(model_folder: str,
     utils.check_version(model_version)
     model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
-    logger.info("Disabling dropout layers for performance reasons")
-    if inference_only:
+    if inference_only and not mc_dropout:
+        logger.info("Disabling dropout layers for performance reasons")
         model_config.disable_dropout()
+
+    if mc_dropout:
+        logger.info("Monte Carlo dropout enabled, inference output will be non-deterministic.")
 
     if checkpoint is None:
         params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
@@ -509,7 +527,7 @@ def load_model(model_folder: str,
     if quantizing:
         model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
 
-    model = SockeyeModel(model_config, inference_only=inference_only)
+    model = SockeyeModel(model_config, inference_only=inference_only, mc_dropout=mc_dropout)
     model.initialize(ctx=context)
     if model_config.dtype != C.DTYPE_INT8:
         # If model_config.dtype is int8, then the above model construction
@@ -573,6 +591,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 dtype: Optional[str] = C.DTYPE_FP32,
                 hybridize: bool = True,
                 inference_only: bool = False,
+                mc_dropout: bool = False,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
     """
@@ -584,6 +603,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param mc_dropout: Turn on dropout during inference.
     :param allow_missing: Allow missing parameters in the loaded models.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
@@ -606,6 +626,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                                               checkpoint=checkpoint,
                                               hybridize=hybridize,
                                               inference_only=inference_only,
+                                              mc_dropout=mc_dropout,
                                               allow_missing=allow_missing,
                                               set_grad_req_null=set_grad_req_null)
         models.append(model)
