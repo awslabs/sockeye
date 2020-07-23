@@ -1988,4 +1988,7 @@ def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArr
 
     labels = {C.TARGET_LABEL_NAME: label, C.LENRATIO_LABEL_NAME: length_ratio}
 
+    # num_samples, source_len, num_factors
+    target = mx.nd.expand_dims(target, axis=2)
+
     return Batch(source, source_length, target, target_length, labels, samples, tokens)

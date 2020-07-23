@@ -130,19 +130,16 @@ class Embedding(Encoder):
 
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
-    :param is_source: Whether this is the source embedding instance. Default: False.
     :param dtype: Data type. Default: 'float32'.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
-                 is_source: bool = False,
                  embed_weight: Optional[mx.gluon.Parameter] = None,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
-        self.is_source = is_source
         self._dtype = dtype
 
         with self.name_scope():
@@ -170,29 +167,28 @@ class Embedding(Encoder):
         average_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         concat_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         sum_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
-        if self.is_source:
-            if self.config.num_factors > 1 and self.config.factor_configs is not None:
-                data, *data_factors = F.split(data=data,
-                                              num_outputs=self.config.num_factors,
-                                              axis=2,
-                                              squeeze_axis=True)
-                for i, (factor_data, factor_config) in enumerate(zip(data_factors,
-                                                                     self.config.factor_configs)):
-                    factor_weight = kwargs['factor%d_weight' % i]
-                    factor_embedding = F.Embedding(data=factor_data,
-                                                   input_dim=factor_config.vocab_size,
-                                                   weight=factor_weight,
-                                                   output_dim=factor_config.num_embed)
-                    if factor_config.combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-                        concat_factors_embeds.append(factor_embedding)
-                    elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_SUM:
-                        sum_factors_embeds.append(factor_embedding)
-                    elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_AVERAGE:
-                        average_factors_embeds.append(factor_embedding)
-                    else:
-                        raise ValueError("Unknown combine value for source factors: %s" % factor_config.combine)
-            else:
-                data = F.squeeze(data, axis=2)
+        if self.config.num_factors > 1 and self.config.factor_configs is not None:
+            data, *data_factors = F.split(data=data,
+                                          num_outputs=self.config.num_factors,
+                                          axis=2,
+                                          squeeze_axis=True)
+            for i, (factor_data, factor_config) in enumerate(zip(data_factors,
+                                                                 self.config.factor_configs)):
+                factor_weight = kwargs['factor%d_weight' % i]
+                factor_embedding = F.Embedding(data=factor_data,
+                                               input_dim=factor_config.vocab_size,
+                                               weight=factor_weight,
+                                               output_dim=factor_config.num_embed)
+                if factor_config.combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+                    concat_factors_embeds.append(factor_embedding)
+                elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_SUM:
+                    sum_factors_embeds.append(factor_embedding)
+                elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_AVERAGE:
+                    average_factors_embeds.append(factor_embedding)
+                else:
+                    raise ValueError("Unknown combine value for source factors: %s" % factor_config.combine)
+        else:
+            data = F.squeeze(data, axis=2)
 
         embed = F.Embedding(data,
                             weight=embed_weight,

@@ -129,7 +129,7 @@ class Scorer:
             total_time += batch_time
 
             for sentno, (source, target, score) in enumerate(zip(batch.source.astype('int32')[:, :, 0].asnumpy(),
-                                                                 batch.target.astype('int32').asnumpy(),
+                                                                 batch.target.astype('int32')[:, :, 0].asnumpy(),
                                                                  scores.asnumpy()), 1):
                 sentence_no += 1
 

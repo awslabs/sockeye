@@ -542,7 +542,8 @@ def test_get_training_data_iters():
                 batch = train_iter.next()
                 assert isinstance(batch, data_io.Batch)
                 source = batch.source.asnumpy()
-                target = batch.target.asnumpy()
+                target = batch.target.asnumpy()  # shape: (batch, length, num_factors)
+                target = target.squeeze(axis=2)
                 label = batch.labels[C.TARGET_LABEL_NAME].asnumpy()
                 length_ratio_label = batch.labels[C.LENRATIO_LABEL_NAME].asnumpy()
                 assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size

@@ -118,11 +118,9 @@ class SockeyeModel(mx.gluon.Block):
 
             self.embedding_source = encoder.Embedding(config.config_embed_source,
                                                       prefix=self.prefix,
-                                                      is_source=True,
                                                       embed_weight=self.source_embed_weight)
             self.embedding_target = encoder.Embedding(config.config_embed_target,
                                                       prefix=self.prefix,
-                                                      is_source=False,
                                                       embed_weight=self.target_embed_weight)
 
             # encoder & decoder first (to know the decoder depth)
@@ -221,10 +219,9 @@ class SockeyeModel(mx.gluon.Block):
             # Turn on training mode so mxnet knows to add dropout
             _ = mx.autograd.set_training(True)
 
-        # TODO: do we need valid length!?
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
-        # target_embed: (batch_size, num_hidden)
-        target_embed, _ = self.embedding_target(step_input, valid_length=valid_length)
+        target_embed, _ = self.embedding_target(step_input.reshape((0, 1, 1)), valid_length=valid_length)
+        target_embed = target_embed.squeeze(axis=1)
 
         # TODO: add step_additional_outputs
         step_additional_outputs = []
