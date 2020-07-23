@@ -489,7 +489,7 @@ def load_model(model_folder: str,
     :return: List of models, source vocabularies, target vocabulary.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
-    target_vocab = vocab.load_target_vocab(model_folder)
+    target_vocab = vocab.load_target_vocabs(model_folder)[0]  # TODO: target factors
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
     logger.info("Model version: %s", model_version)
     utils.check_version(model_version)

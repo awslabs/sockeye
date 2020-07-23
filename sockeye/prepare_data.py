@@ -64,12 +64,13 @@ def prepare_data(args: argparse.Namespace):
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-    source_vocabs, target_vocab = vocab.load_or_create_vocabs(
+    source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
         source_paths=source_paths,
-        factor_vocab_same_as_source=args.source_factors_use_source_vocab,
-        target_path=args.target,
+        source_factor_vocab_same_as_source=args.source_factors_use_source_vocab,
+        target_factor_vocab_same_as_target=[False],  # TODO target factors
+        target_paths=[args.target],  # TODO target factors
         source_vocab_paths=source_vocab_paths,
-        target_vocab_path=args.target_vocab,
+        target_vocab_paths=[args.target_vocab],  # TODO target factors
         shared_vocab=args.shared_vocab,
         num_words_source=num_words_source,
         word_min_count_source=word_min_count_source,
@@ -78,11 +79,11 @@ def prepare_data(args: argparse.Namespace):
         pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
     data_io.prepare_data(source_fnames=source_paths,
-                         target_fname=args.target,
+                         target_fnames=[args.target],  # TODO target factors
                          source_vocabs=source_vocabs,
-                         target_vocab=target_vocab,
+                         target_vocabs=target_vocabs,
                          source_vocab_paths=source_vocab_paths,
-                         target_vocab_path=args.target_vocab,
+                         target_vocab_paths=[args.target_vocab],
                          shared_vocab=args.shared_vocab,
                          max_seq_len_source=max_seq_len_source,
                          max_seq_len_target=max_seq_len_target,

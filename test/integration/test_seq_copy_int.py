@@ -243,7 +243,7 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
                                                               inputs=[dev_source_path],
                                                               references=dev_target_path,
                                                               source_vocabs=source_vocabs,
-                                                              target_vocab=target_vocab,
+                                                              target_vocabs=[target_vocab],  # TODO: target factors
                                                               model=model,
                                                               model_folder=model_path,
                                                               sample_size=sample_size,

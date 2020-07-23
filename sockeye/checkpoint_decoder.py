@@ -44,7 +44,7 @@ class CheckpointDecoder:
     :param inputs: Path(s) to file containing input sentences (and their factors).
     :param references: Path to file containing references.
     :param source_vocabs: The source vocabularies.
-    :param target_vocab: The target vocabulary.
+    :param target_vocabs: The target vocabularies.
     :param context: The devices to use for decoding.
     :param model: The translation model.
     :param max_input_len: Maximum input length.
@@ -65,7 +65,7 @@ class CheckpointDecoder:
                  inputs: List[str],
                  references: str,
                  source_vocabs: List[vocab.Vocab],
-                 target_vocab: vocab.Vocab,
+                 target_vocabs: List[vocab.Vocab],
                  model: sockeye.model.SockeyeModel,
                  context: mx.Context,
                  max_input_len: Optional[int] = None,
@@ -136,7 +136,7 @@ class CheckpointDecoder:
             nbest_size=self.nbest_size,
             models=[self.model],
             source_vocabs=source_vocabs,
-            target_vocab=target_vocab,
+            target_vocab=target_vocabs[0],  # TODO: target factors
             restrict_lexicon=None,
             hybridize=hybridize)
 

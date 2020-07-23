@@ -60,6 +60,7 @@ def score(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
+        # TODO target factors
         model, source_vocabs, target_vocab = load_model(args.model, context=context, dtype=args.dtype)
 
         max_seq_len_source = model.max_supported_len_source
@@ -72,13 +73,14 @@ def score(args: argparse.Namespace):
 
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
-        target = os.path.abspath(args.target)
+        targets = [args.target]
+        targets = [str(os.path.abspath(target)) for target in targets]
 
         score_iter = data_io.get_scoring_data_iters(
             sources=sources,
-            target=target,
+            targets=targets,
             source_vocabs=source_vocabs,
-            target_vocab=target_vocab,
+            target_vocabs=[target_vocab],  # TODO target factors
             batch_size=args.batch_size,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target)
