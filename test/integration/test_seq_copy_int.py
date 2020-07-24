@@ -237,13 +237,13 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
         num_dev_sent = sum(1 for _ in dev_fd)
     sample_size = min(1, int(num_dev_sent * 0.1))
 
-    model, source_vocabs, target_vocab = load_model(model_folder=model_path, context=[mx.cpu()])
+    model, source_vocabs, target_vocabs = load_model(model_folder=model_path, context=[mx.cpu()])
 
     cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
                                                               inputs=[dev_source_path],
                                                               references=dev_target_path,
                                                               source_vocabs=source_vocabs,
-                                                              target_vocabs=[target_vocab],  # TODO: target factors
+                                                              target_vocabs=target_vocabs,
                                                               model=model,
                                                               model_folder=model_path,
                                                               sample_size=sample_size,
@@ -260,7 +260,8 @@ def _test_mc_dropout(model_path: str):
     """
     Check that loading a model with MC Dropoout returns a model with dropout layers.
     """
-    model, _, _ = load_model(model_folder=model_path, context=[mx.cpu()], mc_dropout=True, inference_only=True, hybridize=True)
+    model, _, _ = load_model(model_folder=model_path, context=[mx.cpu()],
+                             mc_dropout=True, inference_only=True, hybridize=True)
 
     # Ensure the model has some dropout turned on
     config_blocks = [block for _, block in model.config.__dict__.items() if isinstance(block, Config)] 

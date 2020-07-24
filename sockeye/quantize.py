@@ -36,13 +36,13 @@ def annotate_model_params(model_dir: str):
                         'File "%s" exists, indicating this model has already been quantized.' % fname)
 
     # Load model and compute scaling factors
-    model = sockeye.model.load_model(model_dir, for_disk_saving='float32', dtype='int8')
+    model, _, __ = sockeye.model.load_model(model_dir, for_disk_saving='float32', dtype='int8')
     # Move original params and config files
     os.rename(params_best, params_best_float32)
     os.rename(config, config_float32)
     # Write new params and config files with annotated scaling factors
-    model[0].save_parameters(params_best)
-    model[0].save_config(model_dir)
+    model.save_parameters(params_best)
+    model.save_config(model_dir)
 
 
 def main():

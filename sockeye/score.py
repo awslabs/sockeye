@@ -61,7 +61,7 @@ def score(args: argparse.Namespace):
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
         # TODO target factors
-        model, source_vocabs, target_vocab = load_model(args.model, context=context, dtype=args.dtype)
+        model, source_vocabs, target_vocabs = load_model(args.model, context=context, dtype=args.dtype)
 
         max_seq_len_source = model.max_supported_len_source
         max_seq_len_target = model.max_supported_len_target
@@ -80,7 +80,7 @@ def score(args: argparse.Namespace):
             sources=sources,
             targets=targets,
             source_vocabs=source_vocabs,
-            target_vocabs=[target_vocab],  # TODO target factors
+            target_vocabs=target_vocabs,
             batch_size=args.batch_size,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target)
@@ -104,7 +104,7 @@ def score(args: argparse.Namespace):
         scorer = scoring.Scorer(model=model,
                                 batch_scorer=batch_scorer,
                                 source_vocabs=source_vocabs,
-                                target_vocab=target_vocab,
+                                target_vocab=target_vocabs[0],  # TODO: target factors
                                 context=context)
 
         scorer.score(score_iter=score_iter,

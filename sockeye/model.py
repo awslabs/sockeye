@@ -426,6 +426,11 @@ class SockeyeModel(mx.gluon.Block):
         return self.config.config_data.num_source_factors
 
     @property
+    def num_target_factors(self) -> int:
+        """ Returns the number of target factors of this model (at least 1). """
+        return self.config.config_data.num_target_factors
+
+    @property
     def training_max_observed_len_source(self) -> int:
         """ The maximum sequence length on the source side observed during training. This includes the <eos> token. """
         return self.config.config_data.data_statistics.max_observed_len_source
@@ -467,7 +472,7 @@ def load_model(model_folder: str,
                mc_dropout: bool = False,
                for_disk_saving: Optional[str] = None,
                allow_missing: bool = False,
-               set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
+               set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Load a model from model_folder.
 
@@ -486,10 +491,10 @@ def load_model(model_folder: str,
                for writing to disk as float32 with precomputed scaling factors.
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
-    :return: List of models, source vocabularies, target vocabulary.
+    :return: List of models, source vocabularies, target vocabularies.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
-    target_vocab = vocab.load_target_vocabs(model_folder)[0]  # TODO: target factors
+    target_vocabs = vocab.load_target_vocabs(model_folder)
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
     logger.info("Model version: %s", model_version)
     utils.check_version(model_version)
@@ -579,7 +584,11 @@ def load_model(model_folder: str,
                           "Number of loaded source vocabularies (%d) does not match "
                           "number of source factors for model '%s' (%d)" % (len(source_vocabs), model_folder,
                                                                             model.num_source_factors))
-    return model, source_vocabs, target_vocab
+    utils.check_condition(model.num_target_factors == len(target_vocabs),
+                          "Number of loaded target vocabularies (%d) does not match "
+                          "number of target factors for model '%s' (%d)" % (len(target_vocabs), model_folder,
+                                                                            model.num_target_factors))
+    return model, source_vocabs, target_vocabs
 
 
 def load_models(context: Union[List[mx.context.Context], mx.context.Context],
@@ -590,7 +599,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 inference_only: bool = False,
                 mc_dropout: bool = False,
                 allow_missing: bool = False,
-                set_grad_req_null: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
+                set_grad_req_null: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Loads a list of models for inference.
 
@@ -609,7 +618,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     load_time_start = time.time()
     models = []  # type: List[SockeyeModel]
     source_vocabs = []  # type: List[List[vocab.Vocab]]
-    target_vocabs = []  # type: List[vocab.Vocab]
+    target_vocabs = []  # type: List[List[vocab.Vocab]]
 
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
@@ -617,24 +626,27 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
         utils.check_condition(len(checkpoints) == len(model_folders), "Must provide checkpoints for each model")
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
-        model, src_vcbs, trg_vcb = load_model(model_folder,
-                                              context=context,
-                                              dtype=dtype,
-                                              checkpoint=checkpoint,
-                                              hybridize=hybridize,
-                                              inference_only=inference_only,
-                                              mc_dropout=mc_dropout,
-                                              allow_missing=allow_missing,
-                                              set_grad_req_null=set_grad_req_null)
+        model, src_vcbs, trg_vcbs = load_model(model_folder,
+                                               context=context,
+                                               dtype=dtype,
+                                               checkpoint=checkpoint,
+                                               hybridize=hybridize,
+                                               inference_only=inference_only,
+                                               mc_dropout=mc_dropout,
+                                               allow_missing=allow_missing,
+                                               set_grad_req_null=set_grad_req_null)
         models.append(model)
         source_vocabs.append(src_vcbs)
-        target_vocabs.append(trg_vcb)
+        target_vocabs.append(trg_vcbs)
 
-    utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
     first_model_vocabs = source_vocabs[0]
     for fi in range(len(first_model_vocabs)):
         utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
                               "Source vocabulary ids do not match. Factor %d" % fi)
+    first_model_vocabs = target_vocabs[0]
+    for fi in range(len(first_model_vocabs)):
+        utils.check_condition(vocab.are_identical(*[target_vocabs[i][fi] for i in range(len(target_vocabs))]),
+                              "Target vocabulary ids do not match. Factor %d" % fi)
 
     load_time = time.time() - load_time_start
     logger.info("%d model(s) loaded in %.4fs", len(models), load_time)
