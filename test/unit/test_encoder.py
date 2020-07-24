@@ -23,7 +23,7 @@ import sockeye.transformer
     (0.1, [sockeye.encoder.FactorConfig(vocab_size=5,
                                         num_embed=5,
                                         combine=C.FACTORS_COMBINE_SUM,
-                                        share_source_embedding=False)]),
+                                        share_embedding=False)]),
 ])
 def test_embedding_encoder(dropout, factor_configs):
     config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, factor_configs=factor_configs)

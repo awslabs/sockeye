@@ -97,12 +97,12 @@ class FactorConfig(config.Config):
                  vocab_size: int,
                  num_embed: int,
                  combine: str,  # From C.FACTORS_COMBINE_CHOICES
-                 share_source_embedding: bool) -> None:
+                 share_embedding: bool) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.combine = combine
-        self.share_source_embedding = share_source_embedding
+        self.share_embedding = share_embedding
 
 
 class EmbeddingConfig(config.Config):
@@ -158,7 +158,7 @@ class Embedding(Encoder):
             if self.config.factor_configs is not None:
                 for i, fc in enumerate(self.config.factor_configs, 1):
                     factor_weight_name = self._factor_weight_format_string % i
-                    factor_weight = embed_weight if fc.share_source_embedding else \
+                    factor_weight = embed_weight if fc.share_embedding else \
                         self.params.get(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
                     # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
                     setattr(self, factor_weight_name, factor_weight)

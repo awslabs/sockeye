@@ -111,6 +111,7 @@ class SockeyeModel(mx.gluon.Block):
         logger.info("%s", self.config)
         self.dtype = config.dtype
         self.mc_dropout = mc_dropout
+        self._output_layer_factor_format_string = 'output_layer_factor%i'
 
         with self.name_scope():
             # source & target embeddings
@@ -130,7 +131,20 @@ class SockeyeModel(mx.gluon.Block):
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight, dtype=config.dtype)
+                                                   weight=self.output_weight, dtype=config.dtype,
+                                                   prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+
+            # Optional target factor output layers
+            for i, factor_config in enumerate(self.target_factor_configs, 1):
+                # Each target stream has its own, independent output layer
+                # TODO also consider weight tying with target factor input embeddings
+                output_layer = layers.OutputLayer(hidden_size=factor_config.num_embed,
+                                                  vocab_size=factor_config.vocab_size,
+                                                  weight=None,
+                                                  dtype=config.dtype,
+                                                  prefix=self.prefix + C.TARGET_FACTOR_OUTPUT_LAYER_PREFIX % i)
+                # Register the layer as child block
+                setattr(self, self._output_layer_factor_format_string % i, output_layer)
 
             self.length_ratio = None
             if self.config.config_length_task is not None:
@@ -231,6 +245,8 @@ class SockeyeModel(mx.gluon.Block):
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
 
+        # TODO target factors
+
         return step_output, new_states, step_additional_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
@@ -242,6 +258,9 @@ class SockeyeModel(mx.gluon.Block):
         target = self.decoder.decode_seq(target_embed, states=states)
 
         output = self.output_layer(target, None)
+
+        for factor_output_layer in self.factor_output_layers:
+            pass
 
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)
@@ -431,6 +450,20 @@ class SockeyeModel(mx.gluon.Block):
         return self.config.config_data.num_target_factors
 
     @property
+    def target_factor_configs(self) -> List[encoder.FactorConfig]:
+        """ Returns the factor configs for target factors. """
+        factor_configs = []  # type: List[encoder.FactorConfig]
+        if self.config.config_embed_target.factor_configs:
+            factor_configs = self.config.config_embed_target.factor_configs
+        return factor_configs
+
+    @property
+    def factor_output_layers(self) -> List[layers.OutputLayer]:
+        """ Returns the list of factor output layers. """
+        return [getattr(self, self._output_layer_factor_format_string % i) for i, _ in
+                enumerate(self.target_factor_configs, 1)]
+
+    @property
     def training_max_observed_len_source(self) -> int:
         """ The maximum sequence length on the source side observed during training. This includes the <eos> token. """
         return self.config.config_data.data_statistics.max_observed_len_source
@@ -460,7 +493,7 @@ class SockeyeModel(mx.gluon.Block):
 
     @property
     def output_layer_vocab_size(self) -> int:
-        return self.output_layer.vocab_size
+        return getattr(self, 'output_layer').vocab_size
 
 
 def load_model(model_folder: str,

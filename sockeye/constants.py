@@ -49,6 +49,7 @@ ATTENTION_PREFIX = "att_"
 COVERAGE_PREFIX = "cov_"
 TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
 DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
+TARGET_FACTOR_OUTPUT_LAYER_PREFIX = "target_output_factor%d_"
 LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
 
 # embedding prefixes
