@@ -96,7 +96,7 @@ class FactorConfig(config.Config):
     def __init__(self,
                  vocab_size: int,
                  num_embed: int,
-                 combine: str, # From C.SOURCE_FACTORS_COMBINE_CHOICES
+                 combine: str,  # From C.FACTORS_COMBINE_CHOICES
                  share_source_embedding: bool) -> None:
         super().__init__()
         self.vocab_size = vocab_size
@@ -141,6 +141,7 @@ class Embedding(Encoder):
         super().__init__(prefix=prefix)
         self.config = config
         self._dtype = dtype
+        self._factor_weight_format_string = 'factor%d_weight'
 
         with self.name_scope():
             if embed_weight is None:
@@ -155,10 +156,10 @@ class Embedding(Encoder):
                 self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
             if self.config.factor_configs is not None:
-                for i, fc in enumerate(self.config.factor_configs):
-                    factor_weight_name = 'factor%d_weight' % i
+                for i, fc in enumerate(self.config.factor_configs, 1):
+                    factor_weight_name = self._factor_weight_format_string % i
                     factor_weight = embed_weight if fc.share_source_embedding else \
-                        self.params.get('factor%d_weight' % i, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
+                        self.params.get(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
                     # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
                     setattr(self, factor_weight_name, factor_weight)
 
@@ -173,20 +174,20 @@ class Embedding(Encoder):
                                           axis=2,
                                           squeeze_axis=True)
             for i, (factor_data, factor_config) in enumerate(zip(data_factors,
-                                                                 self.config.factor_configs)):
-                factor_weight = kwargs['factor%d_weight' % i]
+                                                                 self.config.factor_configs), 1):
+                factor_weight = kwargs[self._factor_weight_format_string % i]
                 factor_embedding = F.Embedding(data=factor_data,
                                                input_dim=factor_config.vocab_size,
                                                weight=factor_weight,
                                                output_dim=factor_config.num_embed)
-                if factor_config.combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+                if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
                     concat_factors_embeds.append(factor_embedding)
-                elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_SUM:
+                elif factor_config.combine == C.FACTORS_COMBINE_SUM:
                     sum_factors_embeds.append(factor_embedding)
-                elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_AVERAGE:
+                elif factor_config.combine == C.FACTORS_COMBINE_AVERAGE:
                     average_factors_embeds.append(factor_embedding)
                 else:
-                    raise ValueError("Unknown combine value for source factors: %s" % factor_config.combine)
+                    raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
         else:
             data = F.squeeze(data, axis=2)
 

@@ -117,10 +117,10 @@ class SockeyeModel(mx.gluon.Block):
             self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
 
             self.embedding_source = encoder.Embedding(config.config_embed_source,
-                                                      prefix=self.prefix,
+                                                      prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
                                                       embed_weight=self.source_embed_weight)
             self.embedding_target = encoder.Embedding(config.config_embed_target,
-                                                      prefix=self.prefix,
+                                                      prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
                                                       embed_weight=self.target_embed_weight)
 
             # encoder & decoder first (to know the decoder depth)

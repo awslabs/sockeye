@@ -104,7 +104,7 @@ def test_device_args(test_params, expected_params):
               num_layers=(6, 6),
               num_embed=(None, None),
               source_factors_num_embed=[],
-              source_factors_combine=[C.SOURCE_FACTORS_COMBINE_CONCAT],
+              source_factors_combine=[C.FACTORS_COMBINE_CONCAT],
               source_factors_share_embedding=[False],
               weight_tying_type="src_trg_softmax",
               transformer_attention_heads=(8, 8),

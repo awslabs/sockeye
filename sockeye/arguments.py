@@ -404,14 +404,27 @@ def add_training_data_args(params, required=False):
                         nargs='+',
                         type=regular_file(),
                         default=[],
-                        help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
+                        help='File(s) containing additional token-parallel source-side factors. Default: %(default)s.')
     params.add_argument('--source-factors-use-source-vocab',
                         required=False,
                         nargs='+',
                         type=bool_str(),
                         default=[],
-                        help='List of bools signaling wether to use the source vocabulary for the source factors. '
+                        help='List of bools signaling whether to use the source vocabulary for the source factors. '
                         'If empty (default) each factor has its own vocabulary.')
+    params.add_argument('--target-factors', '-tf',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='File(s) containing additional token-parallel target-side factors. Default: %(default)s.')
+    params.add_argument('--target-factors-use-target-vocab',
+                        required=False,
+                        nargs='+',
+                        type=bool_str(),
+                        default=[],
+                        help='List of bools signaling whether to use the target vocabulary for the target factors. '
+                             'If empty (default) each factor has its own vocabulary.')
     params.add_argument(C.TRAINING_ARG_TARGET, '-t',
                         required=required,
                         type=regular_file(),
@@ -434,6 +447,13 @@ def add_validation_data_params(params):
                         required=True,
                         type=regular_file(),
                         help='Target side of validation data.')
+    params.add_argument('--validation-target-factors', '-vtf',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='File(s) containing additional token-parallel validation target side factors. '
+                             'Default: %(default)s.')
 
 
 def add_prepared_data_args(params):
@@ -587,6 +607,12 @@ def add_vocab_args(params):
                         type=regular_file(),
                         default=[],
                         help='Existing source factor vocabulary (-ies) (JSON).')
+    params.add_argument('--target-factor-vocabs',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='Existing target factor vocabulary (-ies) (JSON).')
     params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
                         action='store_true',
                         default=False,
@@ -712,18 +738,41 @@ def add_model_parameters(params):
                               help='Embedding size for additional source factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) source factor files. Default: %(default)s.')
+    model_params.add_argument('--target-factors-num-embed',
+                              type=int,
+                              nargs='+',
+                              default=[],
+                              help='Embedding size for additional target factors. '
+                                   'You must provide as many dimensions as '
+                                   '(validation) target factor files. Default: %(default)s.')
+    # TODO: join arguments to support s:s specification
+    # TODO target factors
     model_params.add_argument('--source-factors-combine', '-sfc',
-                              choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
-                              default=[C.SOURCE_FACTORS_COMBINE_CONCAT],
+                              choices=C.FACTORS_COMBINE_CHOICES,
+                              default=[C.FACTORS_COMBINE_CONCAT],
                               nargs='+',
                               help='How to combine source factors. Can be either one value which will be applied to all '
-                              'source factors, or a list of values. Default: %(default)s.')
+                                   'source factors, or a list of values. Default: %(default)s.')
+    model_params.add_argument('--target-factors-combine', '-tfc',
+                              choices=C.FACTORS_COMBINE_CHOICES,
+                              default=[C.FACTORS_COMBINE_CONCAT],
+                              nargs='+',
+                              help='How to combine target factors. Can be either one value which will be applied to all '
+                                   'target factors, or a list of values. Default: %(default)s.')
     model_params.add_argument('--source-factors-share-embedding',
                               type=bool_str(),
                               nargs='+',
                               default=[False],
-                              help='Share the embeddings with the source language. Can be either one value which will be '
-                              'applied to all source factors, or a list of values. Default: do not share.')
+                              help='Share the embeddings with the source language. '
+                                   'Can be either one value which will be applied '
+                                   'to all source factors, or a list of values. Default: %(default)s.')
+    model_params.add_argument('--target-factors-share-embedding',
+                              type=bool_str(),
+                              nargs='+',
+                              default=[False],
+                              help='Share the embeddings with the target language. '
+                                   'Can be either one value which will be applied '
+                                   'to all target factors, or a list of values. Default: %(default)s.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,

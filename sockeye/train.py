@@ -110,6 +110,23 @@ def check_arg_compatibility(args: argparse.Namespace):
         # Length 1: expand the list to the appropriate length
         args.source_factors_share_embedding = args.source_factors_share_embedding * n_source_factors
 
+    # Check and possibly adapt the parameters for target factors
+    n_target_factors = len(args.validation_target_factors)
+    if len(args.target_factors_combine) > 1:
+        check_condition(n_target_factors == len(args.target_factors_combine),
+                        'The number of combination strategies for target '
+                        'factors does not match the number of target factors.')
+    else:
+        # Length 1: expand the list to the appropriate length
+        args.target_factors_combine = args.target_factors_combine * n_target_factors
+    if len(args.target_factors_share_embedding) > 1:
+        check_condition(n_target_factors == len(args.target_factors_share_embedding),
+                        'The number of vocabulary sharing flags for target '
+                        'factors does not match the number of target factors.')
+    else:
+        # Length 1: expand the list to the appropriate length
+        args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -266,7 +283,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
-    validation_targets = [args.validation_source] # TODO + args.validation_source_factors
+    validation_targets = [args.validation_source] + args.validation_target_factors
     validation_targets = [str(os.path.abspath(source)) for source in validation_targets]
 
     if args.horovod:
@@ -293,7 +310,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_num_devices=batch_num_devices,
             batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
-        check_condition(all([combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]
+        check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])
                         or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
@@ -341,10 +358,12 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
                                          else None for i in range(len(args.source_factors))]
             source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
-            target_vocab_paths = [args.target_vocab] # TODO target factors
+            target_factor_vocab_paths = [args.target_factor_vocabs[i] if i < len(args.target_factor_vocabs)
+                                         else None for i in range(len(args.target_factors))]
+            target_vocab_paths = [args.target_vocab] + target_factor_vocab_paths
             source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
                 source_paths=[args.source] + args.source_factors,
-                target_paths=[args.target],  # TODO target factors,
+                target_paths=[args.target] + args.target_factors,
                 source_vocab_paths=source_vocab_paths,
                 source_factor_vocab_same_as_source=args.source_factors_share_embedding,
                 target_vocab_paths=target_vocab_paths,
@@ -356,21 +375,28 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
-        check_condition(all([combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]
+        check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])
                         or len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
                             len(args.source_factors), len(args.source_factors_num_embed)))
-        # TODO target factors
+        check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
+                             for combine in args.target_factors_combine])
+                        or len(args.target_factors) == len(args.target_factors_num_embed),
+                        "Number of target factor data (%d) differs from provided source factor dimensions (%d)" % (
+                            len(args.target_factors), len(args.target_factors_num_embed)))
 
         sources = [args.source] + args.source_factors
-        sources = [str(os.path.abspath(source)) for source in sources]
-        targets = [args.target]  # TODO target factors
+        sources = [str(os.path.abspath(s)) for s in sources]
+        targets = [args.target] + args.target_factors
+        targets = [str(os.path.abspath(t)) for t in targets]
 
         check_condition(len(sources) == len(validation_sources),
-                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
-                            len(source_vocabs), len(validation_sources)))
-        # TODO target factors
+                        'Training and validation data must have the same number of source factors, '
+                        'but found %d and %d.' % (len(source_vocabs), len(validation_sources)))
+        check_condition(len(targets) == len(validation_targets),
+                        'Training and validation data must have the same number of target factors, '
+                        'but found %d and %d.' % (len(source_vocabs), len(validation_sources)))
 
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
@@ -416,11 +442,11 @@ def create_encoder_config(args: argparse.Namespace,
 
     encoder_transformer_preprocess, _ = args.transformer_preprocess
     encoder_transformer_postprocess, _ = args.transformer_postprocess
-    encoder_transformer_model_size = args.transformer_model_size[0]
+    encoder_transformer_model_size, _ = args.transformer_model_size
 
     total_source_factor_size = 0
     for factor_combine, factor_size in zip(args.source_factors_combine, args.source_factors_num_embed):
-        if factor_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+        if factor_combine == C.FACTORS_COMBINE_CONCAT:
             total_source_factor_size += factor_size
     if total_source_factor_size > 0:
         logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
@@ -447,8 +473,11 @@ def create_encoder_config(args: argparse.Namespace,
     return config_encoder, encoder_num_hidden
 
 
-def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
-                          max_seq_len_source: int, max_seq_len_target: int) -> decoder.DecoderConfig:
+def create_decoder_config(args: argparse.Namespace,
+                          encoder_num_hidden: int,
+                          max_seq_len_source: int,
+                          max_seq_len_target: int,
+                          num_embed_target: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
@@ -456,6 +485,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     :param encoder_num_hidden: Number of hidden units of the Encoder.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
+    :param num_embed_target: The size of the target embedding.
     :return: The config for the decoder.
     """
     # TODO: target factors and adjustment of model size as in create_encoder_config
@@ -463,8 +493,19 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
 
     _, decoder_transformer_preprocess = args.transformer_preprocess
     _, decoder_transformer_postprocess = args.transformer_postprocess
+    _, decoder_transformer_model_size = args.transformer_model_size
+
+    total_target_factor_size = 0
+    for factor_combine, factor_size in zip(args.target_factors_combine, args.target_factors_num_embed):
+        if factor_combine == C.FACTORS_COMBINE_CONCAT:
+            total_target_factor_size += factor_size
+    if total_target_factor_size > 0:
+        logger.info("Decoder transformer-model-size adjusted to account for target factor embeddings: %d -> %d" % (
+            decoder_transformer_model_size, num_embed_target + total_target_factor_size))
+        decoder_transformer_model_size = num_embed_target + total_target_factor_size
+
     config_decoder = transformer.TransformerConfig(
-        model_size=args.transformer_model_size[1],
+        model_size=decoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[1],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
         act_type=args.transformer_activation_type[1],
@@ -498,7 +539,7 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
 
         total_source_factor_size = 0
         for factor_combine, factor_size in zip(args.source_factors_combine, args.source_factors_num_embed):
-            if factor_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+            if factor_combine == C.FACTORS_COMBINE_CONCAT:
                 total_source_factor_size += factor_size
         if total_source_factor_size > 0:
             adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
@@ -520,18 +561,17 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
                             "Target embedding size must match transformer model size: %s vs. %s"
                             % (args.transformer_model_size[1], num_embed_target))
 
-        # TODO target factors
-        # total_target_factor_size = 0
-        # for factor_combine, factor_size in zip(args.target_factors_combine, args.target_factors_num_embed):
-        #     if factor_combine == C.TARGET_FACTORS_COMBINE_CONCAT:
-        #         total_target_factor_size += factor_size
-        # if total_target_factor_size > 0:
-        #     adjusted_transformer_encoder_model_size = num_embed_target + total_target_factor_size
-        #     check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
-        #                     adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
-        #                     "Sum of target factor sizes, i.e. num-embed plus target-factors-num-embed, (%d) "
-        #                     "has to be even and a multiple of encoder attention heads (%d)" % (
-        #                         adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
+        total_target_factor_size = 0
+        for factor_combine, factor_size in zip(args.target_factors_combine, args.target_factors_num_embed):
+            if factor_combine == C.FACTORS_COMBINE_CONCAT:
+                total_target_factor_size += factor_size
+        if total_target_factor_size > 0:
+            adjusted_transformer_decoder_model_size = num_embed_target + total_target_factor_size
+            check_condition(adjusted_transformer_decoder_model_size % 2 == 0 and
+                            adjusted_transformer_decoder_model_size % args.transformer_attention_heads[0] == 0,
+                            "Sum of target factor sizes, i.e. num-embed plus target-factors-num-embed, (%d) "
+                            "has to be even and a multiple of encoder attention heads (%d)" % (
+                                adjusted_transformer_decoder_model_size, args.transformer_attention_heads[0]))
 
     if not num_embed_source:
         num_embed_source = C.DEFAULT_NUM_EMBED
@@ -566,7 +606,8 @@ def create_model_config(args: argparse.Namespace,
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
                                                                num_embed_source)
-    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
+                                           num_embed_target)
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
@@ -580,10 +621,10 @@ def create_model_config(args: argparse.Namespace,
         else:
             # Check each individual factor
             for i, combine in enumerate(args.source_factors_combine):
-                if combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]:
-                    logger.info("Setting embedding size of factor %d to `num_embed` ('%d') for %s",
+                if combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]:
+                    logger.info("Setting embedding size of source factor %d to `num_embed` ('%d') for %s",
                                 i + 1, num_embed_source,
-                                "summing" if combine == C.SOURCE_FACTORS_COMBINE_SUM else "averaging")
+                                "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     source_factors_num_embed[i] = num_embed_source
 
         source_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
@@ -592,30 +633,29 @@ def create_model_config(args: argparse.Namespace,
                                                                       args.source_factors_combine,
                                                                       args.source_factors_share_embedding)]
 
-    # TODO target factors
     target_factor_configs = None
-    # if len(target_vocab_sizes) > 1:
-    #     target_factors_num_embed = args.target_factors_num_embed
-    #     if not target_factors_num_embed:
-    #         # This happens if the combination method is sum or average. We then
-    #         # set the dimension to num_embed_source for all factors
-    #         logger.info("Setting all target factor embedding sizes to `num_embed` ('%d')",
-    #                     num_embed_target)
-    #         target_factors_num_embed = [num_embed_target] * len(target_factor_vocab_sizes)
-    #     else:
-    #         # Check each individual factor
-    #         for i, combine in enumerate(args.target_factors_combine):
-    #             if combine in [C.TARGET_FACTORS_COMBINE_SUM, C.TARGET_FACTORS_COMBINE_AVERAGE]:
-    #                 logger.info("Setting embedding size of factor %d to `num_embed` ('%d') for %s",
-    #                             i + 1, num_embed_target,
-    #                             "summing" if combine == C.TARGET_FACTORS_COMBINE_SUM else "averaging")
-    #                 target_factors_num_embed[i] = num_embed_target
-    #
-    #     target_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
-    #                              for size, dim, combine, share in zip(target_factor_vocab_sizes,
-    #                                                                   target_factors_num_embed,
-    #                                                                   args.target_factors_combine,
-    #                                                                   args.target_factors_share_embedding)]
+    if len(target_vocab_sizes) > 1:
+        target_factors_num_embed = args.target_factors_num_embed
+        if not target_factors_num_embed:
+            # This happens if the combination method is sum or average. We then
+            # set the dimension to num_embed_target for all factors
+            logger.info("Setting all target factor embedding sizes to `num_embed` ('%d')",
+                        num_embed_target)
+            target_factors_num_embed = [num_embed_target] * len(target_factor_vocab_sizes)
+        else:
+            # Check each individual factor
+            for i, combine in enumerate(args.target_factors_combine):
+                if combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]:
+                    logger.info("Setting embedding size of target factor %d to `num_embed` ('%d') for %s",
+                                i + 1, num_embed_target,
+                                "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
+                    target_factors_num_embed[i] = num_embed_target
+
+        target_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
+                                 for size, dim, combine, share in zip(target_factor_vocab_sizes,
+                                                                      target_factors_num_embed,
+                                                                      args.target_factors_combine,
+                                                                      args.target_factors_share_embedding)]
 
     allow_sparse_grad = args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
 

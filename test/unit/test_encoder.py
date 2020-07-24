@@ -22,7 +22,7 @@ import sockeye.transformer
     (0., None),
     (0.1, [sockeye.encoder.FactorConfig(vocab_size=5,
                                         num_embed=5,
-                                        combine=C.SOURCE_FACTORS_COMBINE_SUM,
+                                        combine=C.FACTORS_COMBINE_SUM,
                                         share_source_embedding=False)]),
 ])
 def test_embedding_encoder(dropout, factor_configs):

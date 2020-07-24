@@ -218,7 +218,7 @@ def save_target_vocabs(target_vocabs: List[Vocab], folder: str):
     :param folder: Destination folder.
     """
     for i, vocab in enumerate(target_vocabs):
-        vocab_to_json(vocab, os.path.join(folder, C.VOCAB_TRG_NAME % 0))
+        vocab_to_json(vocab, os.path.join(folder, C.VOCAB_TRG_NAME % i))
 
 
 def _get_sorted_source_vocab_fnames(folder) -> List[str]:
