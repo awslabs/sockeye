@@ -719,7 +719,7 @@ def get_data_statistics(source_readers: Optional[Sequence[Iterable]],
             buck_idx, buck = get_parallel_bucket(buckets, len(sources[0]), len(targets[0]))
             data_stats_accumulator.sequence_pair(sources[0], targets[0], buck_idx)
     else:  # Allow stats for target only data
-        for target in target_readers:
+        for targets in target_readers:
             buck_idx, buck = get_target_bucket(buckets, len(targets[0]))
             data_stats_accumulator.sequence_pair([], targets[0], buck_idx)
 
@@ -2000,16 +2000,17 @@ def create_target_and_shifted_label_sequences(target_and_label: mx.nd.NDArray) -
     """
     target = target_and_label[:, :-1, :]  # skip last column (for longest-possible sequence, this already removes <eos>)
     target = mx.nd.where(target == C.EOS_ID, mx.nd.zeros_like(target), target)  # replace other <eos>'s with <pad>
-    # TODO this takes only primary label, fix it!
-    # TODO target factors
-    label = target_and_label[:, 1:, 0]  # label skips <bos>
-
+    label = target_and_label[:, 1:, :]  # label skips <bos>
     return target, label
 
 
 def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArray, label: mx.nd.NDArray) -> Batch:
     """
     Creates a Batch instance from parallel data.
+
+    :param source: Source array. Shape: (batch, source_length, num_source_factors).
+    :param target: Target array. Shape: (batch, target_length, num_target_factors).
+    :param label: Time-shifted label array. Shape: (batch, target_length, num_target_factors).
     """
     source_words = mx.nd.squeeze(mx.nd.slice(source, begin=(None, None, 0), end=(None, None, 1)), axis=2)
     source_length = mx.nd.sum(source_words != C.PAD_ID, axis=1)
@@ -2020,6 +2021,13 @@ def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArr
     samples = source.shape[0]
     tokens = source.shape[1] * samples
 
-    labels = {C.TARGET_LABEL_NAME: label, C.LENRATIO_LABEL_NAME: length_ratio}
+    labels = {C.LENRATIO_LABEL_NAME: length_ratio}
+
+    if label.shape[2] == 1:
+        labels[C.TARGET_LABEL_NAME] = mx.nd.squeeze(label, axis=2)
+    else:
+        primary_label, *factor_labels = mx.nd.split(label, num_outputs=label.shape[2], axis=2, squeeze_axis=True)
+        labels[C.TARGET_LABEL_NAME] = primary_label
+        labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
     return Batch(source, source_length, target, target_length, labels, samples, tokens)

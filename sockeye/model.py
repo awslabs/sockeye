@@ -257,17 +257,18 @@ class SockeyeModel(mx.gluon.Block):
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length)
         target = self.decoder.decode_seq(target_embed, states=states)
 
-        output = self.output_layer(target, None)
+        forward_output = dict()
 
-        for factor_output_layer in self.factor_output_layers:
-            pass
+        forward_output[C.LOGITS_NAME] = self.output_layer(target, None)
+
+        for i, factor_output_layer in enumerate(self.factor_output_layers, 1):
+            forward_output[C.FACTOR_LOGITS_NAME % i] = factor_output_layer(target, None)
 
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)
-            predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
-            return {C.LOGITS_NAME: output, C.LENRATIO_NAME: predicted_length_ratio}
-        else:
-            return {C.LOGITS_NAME: output}
+            forward_output[C.LENRATIO_NAME] = self.length_ratio(source_encoded, source_encoded_length)
+
+        return forward_output
 
     def predict_output_length(self,
                               source_encoded: mx.nd.NDArray,

@@ -690,25 +690,34 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_losses(args: argparse.Namespace, num_classes: int = 0) -> List[loss.Loss]:
+def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss.Loss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
-    if args.loss == C.CROSS_ENTROPY:
-        losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
-                                        weight=softmax_output_grad_scale,
-                                        label_smoothing=args.label_smoothing,
-                                        dtype=args.dtype,
-                                        output_name=C.LOGITS_NAME,
-                                        label_name=C.TARGET_LABEL_NAME)]
-    elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
-        losses = [loss.CrossEntropyLossWithoutSoftmaxOutput(name=C.CROSS_ENTROPY,
-                                                            weight=softmax_output_grad_scale,
-                                                            label_smoothing=args.label_smoothing,
-                                                            dtype=args.dtype,
-                                                            output_name=C.LOGITS_NAME,
-                                                            label_name=C.TARGET_LABEL_NAME,
-                                                            num_labels=num_classes)]
-    else:
-        raise ValueError('Unknown loss %s', args.loss)
+
+    losses = []  # type: List[loss.Loss]
+
+    # Cross-Entropy losses for all target streams/factors
+    for i, num_classes in enumerate(all_num_classes):
+        name = C.CROSS_ENTROPY
+        output_name = C.LOGITS_NAME if i == 0 else C.FACTOR_LOGITS_NAME % i
+        label_name = C.TARGET_LABEL_NAME if i == 0 else C.TARGET_FACTOR_LABEL_NAME % i
+
+        if args.loss == C.CROSS_ENTROPY:
+            losses.append(loss.CrossEntropyLoss(name=name,
+                                                weight=softmax_output_grad_scale,
+                                                label_smoothing=args.label_smoothing,
+                                                dtype=args.dtype,
+                                                output_name=output_name,
+                                                label_name=label_name))
+        elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
+            losses.append(loss.CrossEntropyLossWithoutSoftmaxOutput(name=name,
+                                                                    weight=softmax_output_grad_scale,
+                                                                    label_smoothing=args.label_smoothing,
+                                                                    dtype=args.dtype,
+                                                                    output_name=output_name,
+                                                                    label_name=label_name,
+                                                                    num_labels=num_classes))
+        else:
+            raise ValueError('Unknown loss %s', args.loss)
     if args.length_task is not None:
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:
@@ -1067,7 +1076,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # we set them immediately after calling init.
             gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
 
-        losses = create_losses(args, num_classes=target_vocab_sizes[0])
+        losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
         hybridize = not args.no_hybridization
         if hybridize:
