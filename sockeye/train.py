@@ -283,8 +283,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
-    validation_targets = [args.validation_source] + args.validation_target_factors
-    validation_targets = [str(os.path.abspath(source)) for source in validation_targets]
+    validation_targets = [args.validation_target] + args.validation_target_factors
+    validation_targets = [str(os.path.abspath(target)) for target in validation_targets]
 
     if args.horovod:
         horovod_data_error_msg = "Horovod training requires prepared training data.  Use `python -m " \
