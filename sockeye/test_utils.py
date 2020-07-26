@@ -25,6 +25,7 @@ import numpy as np
 
 import sockeye.average
 import sockeye.checkpoint_decoder
+import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.extract_parameters
 import sockeye.lexicon
@@ -60,22 +61,32 @@ def generate_digits_file(source_path: str,
             all_digits.append([])
         random_gen.shuffle(all_digits)
         for digits in all_digits:
-            print(" ".join(digits), file=source_out)
+            print(C.TOKEN_SEPARATOR.join(digits), file=source_out)
             if sort_target:
                 digits.sort()
-            print(" ".join(digits), file=target_out)
+            print(C.TOKEN_SEPARATOR.join(digits), file=target_out)
 
 
-def generate_low_high_factors(source_path: str,
-                              output_path: str):
+def generate_low_high_factors(input_path: str, output_path: str):
     """
-    Writes low/high factor file given a source file of digit sequences.
+    Writes low/high factor file given a file of digit sequences.
     """
-    with open(source_path, 'r') as fin, open(output_path, 'w') as fout:
+    with open(input_path, 'r') as fin, open(output_path, 'w') as fout:
         for line in fin:
             digits = map(int, line.rstrip().split())
             factors = ("l" if digit < _MID else "h" for digit in digits)
-            print(" ".join(factors), file=fout)
+            print(C.TOKEN_SEPARATOR.join(factors), file=fout)
+
+
+def generate_odd_even_factors(input_path: str, output_path: str):
+    """
+    Writes odd/even factor file given a file of digit sequences.
+    """
+    with open(input_path, 'r') as fin, open(output_path, 'w') as fout:
+        for line in fin:
+            digits = map(int, line.rstrip().split())
+            factors = ("e" if digit % 2 == 0 else "o" for digit in digits)
+            print(C.TOKEN_SEPARATOR.join(factors), file=fout)
 
 
 def generate_fast_align_lex(lex_path: str):
@@ -99,7 +110,8 @@ def tmp_digits_dataset(prefix: str,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
-                       with_n_source_factors: int = 0) -> Dict[str, Any]:
+                       with_n_source_factors: int = 0,
+                       with_n_target_factors: int = 0) -> Dict[str, Any]:
     """
     Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
     files.
@@ -140,6 +152,17 @@ def tmp_digits_dataset(prefix: str,
                 data['train_source_factors'].append(train_factor_path)
                 data['dev_source_factors'].append(dev_factor_path)
                 data['test_source_factors'].append(test_factor_path)
+
+        if with_n_target_factors > 0:
+            data['train_target_factors'] = []
+            data['dev_target_factors'] = []
+            for i in range(with_n_target_factors):
+                train_factor_path = train_target_path + ".factors%d" % i
+                dev_factor_path = dev_target_path + ".factors%d" % i
+                generate_odd_even_factors(train_target_path, train_factor_path)
+                generate_odd_even_factors(dev_target_path, dev_factor_path)
+                data['train_target_factors'].append(train_factor_path)
+                data['dev_target_factors'].append(dev_factor_path)
 
         yield data
 
