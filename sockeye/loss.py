@@ -45,7 +45,7 @@ class Loss(mx.gluon.HybridBlock):
         self._output_name = output_name
         self._label_name = label_name
         self._weight = weight
-        self._metric = None
+        self._metric = None  # type: Optional[LossMetric]
         self._metric_prefix = metric_prefix
         logger.info("Loss: %s | weight=%.2f | metric: %s (%s) | output_name: '%s' | label_name: '%s'",
                     self._name, self.weight, self.metric.name, self.metric.short_name,
@@ -249,7 +249,7 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
 
 class PerplexityMetric(LossMetric):
 
-    def __init__(self, prefix: str = '', name: str = C.PERPLEXITY, short_name: str = C.PERPLEXITY_SHORT_NAME):
+    def __init__(self, prefix: str = '', name: str = C.PERPLEXITY, short_name: str = C.PERPLEXITY_SHORT_NAME) -> None:
         super().__init__(prefix=prefix, name=name, short_name=short_name)
 
     def update(self, batch_cross_entropy: float, batch_num_valid: float):

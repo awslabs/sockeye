@@ -315,7 +315,11 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                         or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
                             len(source_vocabs), len(args.source_factors_num_embed) + 1))
-        # TODO: target factors
+        check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
+                             for combine in args.target_factors_combine])
+                        or len(target_vocabs) == len(args.target_factors_num_embed) + 1,
+                        "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
+                            len(target_vocabs), len(args.target_factors_num_embed) + 1))
 
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
@@ -367,7 +371,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 source_vocab_paths=source_vocab_paths,
                 source_factor_vocab_same_as_source=args.source_factors_share_embedding,
                 target_vocab_paths=target_vocab_paths,
-                target_factor_vocab_same_as_target=[False],  # TODO target factors
+                target_factor_vocab_same_as_target=args.target_factors_share_embedding,
                 shared_vocab=shared_vocab,
                 num_words_source=num_words_source,
                 num_words_target=num_words_target,
@@ -488,7 +492,6 @@ def create_decoder_config(args: argparse.Namespace,
     :param num_embed_target: The size of the target embedding.
     :return: The config for the decoder.
     """
-    # TODO: target factors and adjustment of model size as in create_encoder_config
     _, decoder_num_layers = args.num_layers
 
     _, decoder_transformer_preprocess = args.transformer_preprocess

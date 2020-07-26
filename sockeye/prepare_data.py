@@ -51,6 +51,10 @@ def prepare_data(args: argparse.Namespace):
     source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
                                  else None for i in range(len(args.source_factors))]
     source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
+    target_paths = [args.target] + args.target_factors
+    target_factor_vocab_paths = [args.target_factor_vocabs[i] if i < len(args.target_factor_vocabs)
+                                 else None for i in range(len(args.target_factors))]
+    target_vocab_paths = [args.target_vocab] + target_factor_vocab_paths
 
     num_words_source, num_words_target = args.num_words
     num_words_source = num_words_source if num_words_source > 0 else None
@@ -67,10 +71,10 @@ def prepare_data(args: argparse.Namespace):
     source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
         source_paths=source_paths,
         source_factor_vocab_same_as_source=args.source_factors_use_source_vocab,
-        target_factor_vocab_same_as_target=[False],  # TODO target factors
-        target_paths=[args.target],  # TODO target factors
+        target_factor_vocab_same_as_target=args.target_factors_use_target_vocab,
+        target_paths=target_paths,
         source_vocab_paths=source_vocab_paths,
-        target_vocab_paths=[args.target_vocab],  # TODO target factors
+        target_vocab_paths=target_vocab_paths,
         shared_vocab=args.shared_vocab,
         num_words_source=num_words_source,
         word_min_count_source=word_min_count_source,
@@ -79,7 +83,7 @@ def prepare_data(args: argparse.Namespace):
         pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
     data_io.prepare_data(source_fnames=source_paths,
-                         target_fnames=[args.target],  # TODO target factors
+                         target_fnames=target_paths,
                          source_vocabs=source_vocabs,
                          target_vocabs=target_vocabs,
                          source_vocab_paths=source_vocab_paths,

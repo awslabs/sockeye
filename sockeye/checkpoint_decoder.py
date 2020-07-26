@@ -136,7 +136,7 @@ class CheckpointDecoder:
             nbest_size=self.nbest_size,
             models=[self.model],
             source_vocabs=source_vocabs,
-            target_vocab=target_vocabs[0],  # TODO: target factors
+            target_vocab=target_vocabs[0],  # TODO target factors
             restrict_lexicon=None,
             hybridize=hybridize)
 

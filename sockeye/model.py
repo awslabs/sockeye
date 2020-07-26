@@ -199,6 +199,7 @@ class SockeyeModel(mx.gluon.Block):
         if self.mc_dropout:
             # Turn on training mode so mxnet knows to add dropout
             _ = mx.autograd.set_training(True)
+
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
 
@@ -234,6 +235,7 @@ class SockeyeModel(mx.gluon.Block):
             _ = mx.autograd.set_training(True)
 
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
+        # TODO target factors: tmp reshape
         target_embed, _ = self.embedding_target(step_input.reshape((0, 1, 1)), valid_length=valid_length)
         target_embed = target_embed.squeeze(axis=1)
 
