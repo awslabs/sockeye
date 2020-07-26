@@ -698,26 +698,31 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
     # Cross-Entropy losses for all target streams/factors
     for i, num_classes in enumerate(all_num_classes):
         name = C.CROSS_ENTROPY
+        metric_prefix = '' if i == 0 else 'f%i-' % i
         output_name = C.LOGITS_NAME if i == 0 else C.FACTOR_LOGITS_NAME % i
         label_name = C.TARGET_LABEL_NAME if i == 0 else C.TARGET_FACTOR_LABEL_NAME % i
+        label_smoothing = args.label_smoothing if i == 0 else .0  # Note: No label smoothing for target factor losses.
 
         if args.loss == C.CROSS_ENTROPY:
             losses.append(loss.CrossEntropyLoss(name=name,
                                                 weight=softmax_output_grad_scale,
-                                                label_smoothing=args.label_smoothing,
+                                                label_smoothing=label_smoothing,
                                                 dtype=args.dtype,
                                                 output_name=output_name,
-                                                label_name=label_name))
+                                                label_name=label_name,
+                                                metric_prefix=metric_prefix))
         elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
             losses.append(loss.CrossEntropyLossWithoutSoftmaxOutput(name=name,
                                                                     weight=softmax_output_grad_scale,
-                                                                    label_smoothing=args.label_smoothing,
+                                                                    label_smoothing=label_smoothing,
                                                                     dtype=args.dtype,
                                                                     output_name=output_name,
                                                                     label_name=label_name,
-                                                                    num_labels=num_classes))
+                                                                    num_labels=num_classes,
+                                                                    metric_prefix=metric_prefix))
         else:
             raise ValueError('Unknown loss %s', args.loss)
+
     if args.length_task is not None:
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:

@@ -310,7 +310,9 @@ OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
 
 # metrics
 ACCURACY = 'accuracy'
+ACCURACY_SHORT_NAME = 'acc'
 PERPLEXITY = 'perplexity'
+PERPLEXITY_SHORT_NAME = 'ppl'
 LENRATIO_MSE = 'length-ratio-mse'
 BLEU = 'bleu'
 CHRF = 'chrf'
