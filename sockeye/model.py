@@ -138,7 +138,7 @@ class SockeyeModel(mx.gluon.Block):
             for i, factor_config in enumerate(self.target_factor_configs, 1):
                 # Each target stream has its own, independent output layer
                 # TODO also consider weight tying with target factor input embeddings
-                output_layer = layers.OutputLayer(hidden_size=factor_config.num_embed,
+                output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                   vocab_size=factor_config.vocab_size,
                                                   weight=None,
                                                   dtype=config.dtype,
