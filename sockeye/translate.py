@@ -91,8 +91,8 @@ def run_translate(args: argparse.Namespace):
         if args.restrict_lexicon is not None:
             logger.info(str(args.restrict_lexicon))
             if len(args.restrict_lexicon) == 1:
-                # Single lexicon used for all inputs
-                restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocabs[0])  # TODO target factors
+                # Single lexicon used for all inputs.
+                restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocabs[0])
                 # Handle a single arg of key:path or path (parsed as path:path)
                 restrict_lexicon.load(args.restrict_lexicon[0][1], k=args.restrict_lexicon_topk)
             else:
@@ -101,7 +101,7 @@ def run_translate(args: argparse.Namespace):
                 # Multiple lexicons with specified names
                 restrict_lexicon = dict()
                 for key, path in args.restrict_lexicon:
-                    lexicon = TopKLexicon(source_vocabs[0], target_vocabs[0])  # TODO target factors
+                    lexicon = TopKLexicon(source_vocabs[0], target_vocabs[0])
                     lexicon.load(path, k=args.restrict_lexicon_topk)
                     restrict_lexicon[key] = lexicon
 
@@ -136,7 +136,7 @@ def run_translate(args: argparse.Namespace):
                                           nbest_size=args.nbest_size,
                                           models=models,
                                           source_vocabs=source_vocabs,
-                                          target_vocab=target_vocabs[0],  # TODO target factors
+                                          target_vocabs=target_vocabs,
                                           restrict_lexicon=restrict_lexicon,
                                           avoid_list=args.avoid_list,
                                           strip_unknown_words=args.strip_unknown_words,

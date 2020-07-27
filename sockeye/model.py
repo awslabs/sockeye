@@ -218,7 +218,7 @@ class SockeyeModel(mx.gluon.Block):
         Parameters
         ----------
         step_input : NDArray
-            Shape (batch_size,)
+            Shape (batch_size, num_target_factors)
         states : list of NDArrays
         vocab_slice_ids : NDArray or None
 
@@ -227,29 +227,29 @@ class SockeyeModel(mx.gluon.Block):
         step_output : NDArray
             Shape (batch_size, C_out)
         states : list
-        step_additional_outputs : list
-            Additional outputs of the step, e.g, the attention weights
+        target_factor_outputs : list
+            Optional target factor predictions.
         """
         if self.mc_dropout:
             # Turn on training mode so mxnet knows to add dropout
             _ = mx.autograd.set_training(True)
 
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
-        # TODO target factors: tmp reshape
-        target_embed, _ = self.embedding_target(step_input.reshape((0, 1, 1)), valid_length=valid_length)
+        target_embed, _ = self.embedding_target(step_input.reshape((0, 1, -1)), valid_length=valid_length)
         target_embed = target_embed.squeeze(axis=1)
 
-        # TODO: add step_additional_outputs
-        step_additional_outputs = []
-        # TODO: add support for states from the decoder
         decoder_out, new_states = self.decoder(target_embed, states)
 
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
 
-        # TODO target factors
+        # Target factor outputs are currently stored in additional outputs.
+        target_factor_outputs = []
+        # TODO: consider a dictionary mapping as return value
+        for i, factor_output_layer in enumerate(self.factor_output_layers, 1):
+            target_factor_outputs.append(factor_output_layer(decoder_out, None))
 
-        return step_output, new_states, step_additional_outputs
+        return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
         source_embed, source_embed_length = self.embedding_source(source, source_length)
@@ -496,7 +496,7 @@ class SockeyeModel(mx.gluon.Block):
 
     @property
     def output_layer_vocab_size(self) -> int:
-        return getattr(self, 'output_layer').vocab_size
+        return self.output_layer.vocab_size
 
 
 def load_model(model_folder: str,

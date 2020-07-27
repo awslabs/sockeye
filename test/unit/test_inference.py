@@ -51,7 +51,7 @@ def mock_translator(batch_size: int = 1,
                                                   nbest_size=None,
                                                   models=None,
                                                   source_vocabs=None,
-                                                  target_vocab=None,
+                                                  target_vocabs=None,
                                                   restrict_lexicon=None,
                                                   strip_unknown_words=None)
 
@@ -398,10 +398,10 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
                                  [2, 3, 2, 3],
                                  [2, 3, 3, 2]],
                                 dtype='int32')
-    best_word_indices = np.array([[3, 3, 0],
-                                  [4, 4, 3],
-                                  [3, 3, 0],
-                                  [4, 5, 3]],
+    best_word_indices = np.array([[[3, 3, 0]],
+                                  [[4, 4, 3]],
+                                  [[3, 3, 0]],
+                                  [[4, 5, 3]]],
                                  dtype='int32')
     seq_scores = np.array([[3.8197377],
                            [5.081118 ],
@@ -413,7 +413,7 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
     translator = mock_translator(beam_size=2, batch_size=2)
 
     expected_result = [sockeye.inference.Translator._assemble_translation(*x) for x in zip(
-                            best_word_indices[expected_best_indices, np.arange(expected_best_indices.shape[1])],
+                            best_word_indices[expected_best_indices, :, np.arange(expected_best_indices.shape[1])],
                             lengths[expected_best_ids],
                             seq_scores[expected_best_ids],
                             beam_histories,
