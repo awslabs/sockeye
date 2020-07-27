@@ -19,7 +19,7 @@ import itertools
 import json
 import logging
 from functools import partial
-from typing import Any, Callable, Dict, Generator, List, Optional, NamedTuple, Set, Tuple, Union
+from typing import Any, Callable, Dict, Generator, Iterator, List, Optional, NamedTuple, Set, Tuple, Union
 
 import mxnet as mx
 import numpy as np
@@ -974,8 +974,8 @@ class Translator:
         all_target_tokens = []  # type: List[List[str]]
         all_target_strings = []  # type: List[str]
         # Strip any position where primary factor token is to be stripped
-        target_ids = (tokens for tokens in target_ids if not tokens[0] in self.strip_ids)
-        for factor_index, factor_sequence in enumerate(zip(*target_ids)):
+        pruned_target_ids = (tokens for tokens in target_ids if not tokens[0] in self.strip_ids)
+        for factor_index, factor_sequence in enumerate(zip(*pruned_target_ids)):
             vocab_target_inv = self.vocab_targets_inv[factor_index]
             target_tokens = [vocab_target_inv[target_id] for target_id in factor_sequence]
             target_string = C.TOKEN_SEPARATOR.join(

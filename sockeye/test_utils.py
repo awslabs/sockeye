@@ -156,13 +156,17 @@ def tmp_digits_dataset(prefix: str,
         if with_n_target_factors > 0:
             data['train_target_factors'] = []
             data['dev_target_factors'] = []
+            data['test_target_factors'] = []
             for i in range(with_n_target_factors):
                 train_factor_path = train_target_path + ".factors%d" % i
                 dev_factor_path = dev_target_path + ".factors%d" % i
+                test_factor_path = test_target_path + ".factors%d" % i
                 generate_odd_even_factors(train_target_path, train_factor_path)
                 generate_odd_even_factors(dev_target_path, dev_factor_path)
+                generate_odd_even_factors(test_target_path, test_factor_path)
                 data['train_target_factors'].append(train_factor_path)
                 data['dev_target_factors'].append(dev_factor_path)
+                data['test_target_factors'].append(dev_factor_path)
 
         yield data
 
@@ -174,23 +178,26 @@ TRAIN_PARAMS_COMMON = "--use-cpu --max-seq-len {max_len} --source {train_source}
 PREPARE_DATA_COMMON = " --max-seq-len {max_len} --source {train_source} --target {train_target}" \
                        " --output {output} --pad-vocab-to-multiple-of 16"
 
-TRAIN_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
-DEV_WITH_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
+TRAIN_WITH_SOURCE_FACTORS_COMMON = " --source-factors {source_factors}"
+DEV_WITH_SOURCE_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
+TRAIN_WITH_TARGET_FACTORS_COMMON = " --target-factors {target_factors}"
+DEV_WITH_TARGET_FACTORS_COMMON = " --validation-target-factors {dev_target_factors}"
 
 TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
                                      " --validation-source {dev_source} --validation-target {dev_target} " \
                                      "--output {model}"
 
 TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} " \
-                           "--output-type translation_with_score"
+                           "--output-type json"
 
 TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
-SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output}"
+SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output} "
 
-SCORE_WITH_FACTORS_COMMON = " --source-factors {source_factors}"
+SCORE_WITH_SOURCE_FACTORS_COMMON = " --source-factors {source_factors}"
+SCORE_WITH_TARGET_FACTORS_COMMON = " --target-factors {source_factors}"
 
 
 def run_train_translate(train_params: str,
@@ -222,7 +229,9 @@ def run_train_translate(train_params: str,
                                                                    output=data['train_prepared'],
                                                                    max_len=max_seq_len))
         if 'train_source_factors' in data:
-            prepare_params += TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
+            prepare_params += TRAIN_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
+        if 'train_target_factors' in data:
+            prepare_params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(data['train_target_factors']))
 
         if '--weight-tying-type src_trg' in train_params:
             prepare_params += ' --shared-vocab'
@@ -240,7 +249,9 @@ def run_train_translate(train_params: str,
                                    train_params)
 
         if 'dev_source_factors' in data:
-            params += DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
+            params += DEV_WITH_SOURCE_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
+        if 'dev_target_factors' in data:
+            params += DEV_WITH_TARGET_FACTORS_COMMON.format(dev_target_factors=" ".join(data['dev_target_factors']))
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
@@ -258,9 +269,13 @@ def run_train_translate(train_params: str,
                                    train_params)
 
         if 'train_source_factors' in data:
-            params += TRAIN_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
+            params += TRAIN_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
+        if 'train_target_factors' in data:
+            params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(data['train_target_factors']))
         if 'dev_source_factors' in data:
-            params += DEV_WITH_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
+            params += DEV_WITH_SOURCE_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
+        if 'dev_target_factors' in data:
+            params += DEV_WITH_TARGET_FACTORS_COMMON.format(dev_target_factors=" ".join(data['dev_target_factors']))
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
@@ -303,8 +318,8 @@ def run_train_translate(train_params: str,
         data['test_targets'] = [line.strip() for line in ref]
 
     # Collect test translate outputs and scores
-    data['test_outputs'], data['test_scores'] = collect_translate_output_and_scores(data['test_output'])
-    assert len(data['test_inputs']) == len(data['test_targets']) == len(data['test_outputs']) == len(data['test_scores'])
+    data['test_outputs'] = collect_translate_output_and_scores(data['test_output'])
+    assert len(data['test_inputs']) == len(data['test_targets']) == len(data['test_outputs'])
     return data
 
 
@@ -327,7 +342,7 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str) -> Dict[
         sockeye.translate.main()
 
     # Collect test translate outputs and scores
-    data['test_outputs_restricted'], data['test_scores_restricted'] = collect_translate_output_and_scores(out_path)
+    data['test_outputs_restricted'] = collect_translate_output_and_scores(out_path)
     assert len(data['test_outputs_restricted']) == len(data['test_outputs'])
     return data
 
@@ -340,32 +355,15 @@ def create_reference_constraints(translate_inputs: List[str], translate_outputs:
     return constrained_inputs
 
 
-def collect_translate_output_and_scores(out_path: str) -> Tuple[List[str], List[float]]:
+def collect_translate_output_and_scores(out_path: str) -> List[Dict]:
     """
-    Collects translation outputs and scores from an output file
-    produced with the 'translation_and_score' or nbest output handler.
+    Collects json outputs from an output file, produced with the 'json' or nbest output handler.
     """
     logger.debug("collect_translate_output_and_scores(%s)", out_path)
-    translations = []  # type: List[str]
-    scores = []  # type: List[float]
+    outputs = []
     with open(out_path) as out_fh:
         for line in out_fh:
-            logger.debug(" line: %s", line.strip())
-            output = line.strip()
-            translation = ''
-            score = -np.inf
-            try:
-                json_output = json.loads(output)
-                try:
-                    translation = json_output['translation']
-                    score = json_output['score']
-                except IndexError:
-                    pass
-            except:
-                try:
-                    score, translation = output.split('\t', 1)
-                except ValueError:
-                    pass
-            translations.append(translation)
-            scores.append(float(score))
-    return translations, scores
+            line = line.strip()
+            logger.debug(" line: %s", line)
+            outputs.append(json.loads(line))
+    return outputs
