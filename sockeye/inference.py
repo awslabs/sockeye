@@ -969,9 +969,12 @@ class Translator:
                                                                                         List[str]]:
         """
         Separates surface translation from other factors. Creates token list and strings for each factor.
+        Ensures that secondary factor strings are of the same length as the primary factor string.
         """
         all_target_tokens = []  # type: List[List[str]]
         all_target_strings = []  # type: List[str]
+        # Strip any position where primary factor token is to be stripped
+        target_ids = (tokens for tokens in target_ids if not tokens[0] in self.strip_ids)
         for factor_index, factor_sequence in enumerate(zip(*target_ids)):
             vocab_target_inv = self.vocab_targets_inv[factor_index]
             target_tokens = [vocab_target_inv[target_id] for target_id in factor_sequence]

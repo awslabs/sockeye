@@ -552,17 +552,25 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
                             "has to be even and a multiple of encoder attention heads (%d)" % (
                                 adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
 
+    if not num_embed_source:
+        num_embed_source = C.DEFAULT_NUM_EMBED
+
     if args.decoder == C.TRANSFORMER_TYPE:
         transformer_model_size_target = args.transformer_model_size[1]
+        total_target_factor_size = 0
+        for factor_combine, factor_size in zip(args.target_factors_combine, args.target_factors_num_embed):
+            if factor_combine == C.FACTORS_COMBINE_CONCAT:
+                total_target_factor_size += factor_size
+
         if not num_embed_target:
             logger.info("Target embedding size was not set it will automatically be adjusted to match the "
                         "Transformer target model size (%d).", transformer_model_size_target)
             num_embed_target = transformer_model_size_target
         else:
             # Make sure that if the user sets num_embed it matches the Transformer model size
-            check_condition(args.transformer_model_size[1] == num_embed_target,
+            check_condition(args.transformer_model_size[1] == num_embed_target + total_target_factor_size,
                             "Target embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size[1], num_embed_target))
+                            % (args.transformer_model_size[1], num_embed_target + total_target_factor_size))
 
         total_target_factor_size = 0
         for factor_combine, factor_size in zip(args.target_factors_combine, args.target_factors_num_embed):
@@ -575,9 +583,15 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
                             "Sum of target factor sizes, i.e. num-embed plus target-factors-num-embed, (%d) "
                             "has to be even and a multiple of encoder attention heads (%d)" % (
                                 adjusted_transformer_decoder_model_size, args.transformer_attention_heads[0]))
+            # Whenever an input embedding weight is used for the output layer, we cannot use
+            # 'concatenation' as the method of combining target factors to the regular target input embedding:
+            # num_embed_target + factor_sizes = transformer_model_size
+            # output layer input: transformer_model_size, its parameters are however of size num_embed_target
+            check_condition(C.WEIGHT_TYING_SOFTMAX not in args.weight_tying_type,
+                            "Cannot use weight tying of target input and output embeddings when target factors "
+                            "are defined and to be combined via 'concat'. Use 'sum' instead or disable "
+                            "weight tying")
 
-    if not num_embed_source:
-        num_embed_source = C.DEFAULT_NUM_EMBED
     if not num_embed_target:
         num_embed_target = C.DEFAULT_NUM_EMBED
 

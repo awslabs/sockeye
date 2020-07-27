@@ -72,8 +72,12 @@ def score(args: argparse.Namespace):
 
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
-        targets = [args.target]
+        targets = [args.target] + args.target_factors
         targets = [str(os.path.abspath(target)) for target in targets]
+
+        check_condition(len(targets) == model.num_target_factors,
+                        "Number of target inputs/factors provided (%d) does not match number of target factors "
+                        "required by the model (%d)" % (len(targets), model.num_target_factors))
 
         score_iter = data_io.get_scoring_data_iters(
             sources=sources,
