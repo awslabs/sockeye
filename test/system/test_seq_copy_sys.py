@@ -145,7 +145,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
-     " --transformer-feed-forward-num-hidden 64"
+     " --transformer-feed-forward-num-hidden 64 --target-factors-weight 1.0"
      " --target-factors-num-embed 32 --target-factors-combine sum"
      " --source-factors-num-embed 2 2 2" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",

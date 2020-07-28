@@ -182,6 +182,7 @@ def test_inference_args(test_params, expected_params):
               length_task=None,
               length_task_layers=1,
               length_task_weight=1.0,
+              target_factors_weight=[1.0],
               optimized_metric=C.PERPLEXITY,
               checkpoint_interval=4000,
               max_num_checkpoint_not_improved=None,

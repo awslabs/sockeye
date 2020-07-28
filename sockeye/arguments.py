@@ -855,6 +855,14 @@ def add_training_args(params):
                               default=1,
                               help='Number of fully-connected layers for predicting the length ratio. Default %(default)s.')
 
+    train_params.add_argument('--target-factors-weight',
+                              type=float,
+                              nargs='+',
+                              default=[1.0],
+                              help='Weights of target factor losses. If one value is given, it applies to all '
+                                   'secondary target factors. For multiple values, the number of weights given has '
+                                   'to match the number of target factors. Default: (%default)s.')
+
     train_params.add_argument('--optimized-metric',
                               default=C.PERPLEXITY,
                               choices=C.METRICS,

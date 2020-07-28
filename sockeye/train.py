@@ -710,10 +710,19 @@ def create_model_config(args: argparse.Namespace,
 def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss.Loss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
 
+    # loss weights per factor
+    if len(args.target_factors_weight) != len(all_num_classes) - 1:
+        check_condition(len(args.target_factors_weight) == 1,
+                        "Must provide the same number of target factor weights as secondary target factors, or one.")
+        factor_weights = args.target_factors_weight * (len(all_num_classes) - 1)
+    else:
+        factor_weights = args.target_factors_weight
+    loss_weights = [softmax_output_grad_scale] + factor_weights
+
     losses = []  # type: List[loss.Loss]
 
     # Cross-Entropy losses for all target streams/factors
-    for i, num_classes in enumerate(all_num_classes):
+    for i, (num_classes, weight) in enumerate(zip(all_num_classes, loss_weights)):
         name = C.CROSS_ENTROPY
         metric_prefix = '' if i == 0 else 'f%i-' % i
         output_name = C.LOGITS_NAME if i == 0 else C.FACTOR_LOGITS_NAME % i
@@ -722,7 +731,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
 
         if args.loss == C.CROSS_ENTROPY:
             losses.append(loss.CrossEntropyLoss(name=name,
-                                                weight=softmax_output_grad_scale,
+                                                weight=weight,
                                                 label_smoothing=label_smoothing,
                                                 dtype=args.dtype,
                                                 output_name=output_name,
@@ -730,7 +739,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
                                                 metric_prefix=metric_prefix))
         elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
             losses.append(loss.CrossEntropyLossWithoutSoftmaxOutput(name=name,
-                                                                    weight=softmax_output_grad_scale,
+                                                                    weight=weight,
                                                                     label_smoothing=label_smoothing,
                                                                     dtype=args.dtype,
                                                                     output_name=output_name,
