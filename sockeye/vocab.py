@@ -14,6 +14,7 @@
 import argparse
 import json
 import logging
+import multiprocessing as mp
 import os
 from collections import Counter
 from contextlib import ExitStack
@@ -107,8 +108,12 @@ def build_pruned_vocab(raw_vocab: Counter, num_words: Optional[int] = None, min_
     return word_to_id
 
 
-def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count: int = 1,
-                pad_to_multiple_of: Optional[int] = None) -> Vocab:
+def build_vocab(data: Iterable[str],
+                num_words: Optional[int] = None, 
+                min_count: int = 1,
+                pad_to_multiple_of: Optional[int] = None,
+                num_processes: int = mp.cpu_count(),
+                chunk_size: int = 10000) -> Vocab:
     """
     Creates a vocabulary mapping from words to ids. Increasing integer ids are assigned by word frequency,
     using lexical sorting as a tie breaker. The only exception to this are special symbols such as the padding symbol
@@ -120,7 +125,11 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
     :param pad_to_multiple_of: If not None, pads the vocabulary to a size that is the next multiple of this int.
     :return: Word-to-id mapping.
     """
-    raw_vocab = build_raw_vocab(data) - Counter(set(C.VOCAB_SYMBOLS))
+    logger.info("Starting vocabulary building with {} processes".format(num_processes))
+    p = mp.Pool(processes=num_processes)
+    raw_vocabs = p.imap_unordered(build_raw_vocab, utils.partition_all(chunk_size, data), chunksize=4)
+    p.close()
+    raw_vocab = sum(raw_vocabs, Counter()) - Counter(set(C.VOCAB_SYMBOLS))
     return build_pruned_vocab(raw_vocab=raw_vocab,
                               num_words=num_words,
                               min_count=min_count,

@@ -27,7 +27,8 @@ import random
 import sys
 import time
 from contextlib import contextmanager, ExitStack
-from functools import reduce
+from functools import partial, reduce
+from itertools import islice
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import mxnet as mx
@@ -195,6 +196,17 @@ def chunks(some_list: List, n: int) -> Iterable[List]:
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(some_list), n):
         yield some_list[i:i + n]
+
+
+def take(n: int, iterable: Iterable[Any]) -> Iterable[Any]:
+    """Return first `n` items of the iterable as a list"""
+    return list(islice(iterable, n))
+
+
+def partition_all(n: int, iterable: Iterable[Any]) -> Iterable[List[Any]]:
+    """Return chunks of size `n` from `iterable`. The last chunk may be smaller
+    than `n` if a full chunk cannot be made."""
+    return iter(partial(take, n, iter(iterable)), [])
 
 
 def get_tokens(line: str) -> Iterator[str]:
