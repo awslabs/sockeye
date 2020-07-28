@@ -745,20 +745,18 @@ def add_model_parameters(params):
                               help='Embedding size for additional target factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) target factor files. Default: %(default)s.')
-    # TODO: join arguments to support s:s specification
-    # TODO target factors
     model_params.add_argument('--source-factors-combine', '-sfc',
                               choices=C.FACTORS_COMBINE_CHOICES,
-                              default=[C.FACTORS_COMBINE_CONCAT],
+                              default=[C.FACTORS_COMBINE_SUM],
                               nargs='+',
-                              help='How to combine source factors. Can be either one value which will be applied to all '
-                                   'source factors, or a list of values. Default: %(default)s.')
+                              help='How to combine source factors. Can be either one value which will be applied to '
+                                   'all source factors, or a list of values. Default: %(default)s.')
     model_params.add_argument('--target-factors-combine', '-tfc',
                               choices=C.FACTORS_COMBINE_CHOICES,
-                              default=[C.FACTORS_COMBINE_CONCAT],
+                              default=[C.FACTORS_COMBINE_SUM],
                               nargs='+',
-                              help='How to combine target factors. Can be either one value which will be applied to all '
-                                   'target factors, or a list of values. Default: %(default)s.')
+                              help='How to combine target factors. Can be either one value which will be applied to '
+                                   'all target factors, or a list of values. Default: %(default)s.')
     model_params.add_argument('--source-factors-share-embedding',
                               type=bool_str(),
                               nargs='+',
