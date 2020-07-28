@@ -197,7 +197,7 @@ TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-top
 SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {target} --output {output} "
 
 SCORE_WITH_SOURCE_FACTORS_COMMON = " --source-factors {source_factors}"
-SCORE_WITH_TARGET_FACTORS_COMMON = " --target-factors {source_factors}"
+SCORE_WITH_TARGET_FACTORS_COMMON = " --target-factors {target_factors}"
 
 
 def run_train_translate(train_params: str,

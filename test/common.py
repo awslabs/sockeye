@@ -64,6 +64,10 @@ def check_train_translate(train_params: str,
     if '--max-input-length' not in translate_params and _translate_output_is_valid(data['test_outputs']):
         test_scoring(data, translate_params, compare_output)
 
+    # Test correct prediction of target factors if enabled
+    if compare_output and 'train_target_factors' in data:
+        test_odd_even_target_factors(data)
+
     return data
 
 
@@ -199,3 +203,24 @@ def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
             # There must be no bad tokens
             return False
     return found_valid_output
+
+
+def test_odd_even_target_factors(data: Dict):
+    num_target_factors = len(data['train_target_factors'])
+    for json in data['test_outputs']:
+        factor_keys = [k for k in json.keys() if k.startswith("factor")]
+        assert len(factor_keys) == num_target_factors
+        primary_tokens = json['translation'].split()
+        secondary_factor_tokens = [json[factor_key].split() for factor_key in factor_keys]
+        for factor_tokens in secondary_factor_tokens:
+            assert len(factor_tokens) == len(primary_tokens)
+            print(primary_tokens, factor_tokens)
+            for primary_token, factor_token in zip(primary_tokens, factor_tokens):
+                try:
+                    if int(primary_token) % 2 == 0:
+                        assert factor_token == 'e'
+                    else:
+                        assert factor_token == 'o'
+                except ValueError:
+                    logger.warning("primary token cannot be converted to int, skipping")
+                    continue
