@@ -621,7 +621,7 @@ def _concat_translations(translations: List[Translation],
         if idx == len(translations) - 1:
             target_ids.extend(translation.target_ids)
         else:
-            if translation.target_ids[-1] in stop_ids:
+            if translation.target_ids[-1][0] in stop_ids:
                 target_ids.extend(translation.target_ids[:-1])
             else:
                 target_ids.extend(translation.target_ids)

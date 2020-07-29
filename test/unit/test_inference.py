@@ -82,7 +82,7 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     beam_history2 = {"id": [2]}
     beam_history3 = {"id": [3]}
     expected_beam_histories = [beam_history1, beam_history2, beam_history3]
-    expected_target_ids = [0, 1, 2, 0, 8, 9, 0, 3, 4, 5, -1]
+    expected_target_ids = [[0], [1], [2], [0], [8], [9], [0], [3], [4], [5], [-1]]
 
     scorer = sockeye.beam_search.CandidateScorer(lp_alpha, lp_beta, bp_weight)
 
@@ -92,18 +92,18 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     expected_score = scorer(raw_score, length, reference_length)
     # expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids)) - \
     #                  brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
-    translations = [sockeye.inference.Translation([0, 1, 2, -1],
+    translations = [sockeye.inference.Translation([[0], [1], [2], [-1]],
                                                   scorer(1.0, 4, 10),
                                                   [beam_history1],
                                                   None,
                                                   10),
                     # Translation without EOS
-                    sockeye.inference.Translation([0, 8, 9],
+                    sockeye.inference.Translation([[0], [8], [9]],
                                                   scorer(2.0, 3, 11),
                                                   [beam_history2],
                                                   None,
                                                   11),
-                    sockeye.inference.Translation([0, 3, 4, 5, -1],
+                    sockeye.inference.Translation([[0], [3], [4], [5], [-1]],
                                                   scorer(3.0, 5, 12),
                                                   [beam_history3],
                                                   None,
