@@ -212,13 +212,11 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
             # Max number of sequences without exceeding batch size
             batch_size_seq = batch_size // padded_seq_len
             # Round down to closest multiple
-            batch_size_seq = (batch_size_seq // batch_sentences_multiple_of) * batch_sentences_multiple_of
+            batch_size_seq = (batch_size_seq // min_batch_step) * min_batch_step
         elif batch_type == C.BATCH_TYPE_SENTENCE:
             batch_size_seq = batch_size
         else:
             raise ValueError('Unknown batch type: %s' % batch_type)
-        # Batch size is per device
-        batch_size_seq *= batch_num_devices
         # Number of words here is an average of non-padding tokens
         batch_size_word = batch_size_seq * average_seq_len
 

@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.16]
+
+### Fixed
+
+- Fixed batch sizing error introduced in version 2.1.12 (c00da52) that caused batch sizes to be multiplied by the number of devices. Batch sizing now works as documented (same as pre-2.1.12 versions).
+- Fixed `max-word` batching to properly size batches to a multiple of both `--batch-sentences-multiple-of` and the number of devices.
+
 ## [2.1.15]
 
 ### Added
