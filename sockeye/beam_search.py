@@ -77,13 +77,13 @@ class _SingleModelInference(_Inference):
             logits = logits.log_softmax(axis=-1)
         scores = -logits
 
+        target_factors = None  # type: Optional[mx.nd.NDArray]
         if target_factor_outputs:
             # target factors are greedily 'decoded'.
-            target_factors = mx.nd.concat(
-                *(mx.nd.cast(tfo.argmax(axis=-1, keepdims=True), dtype='int32') for tfo in target_factor_outputs),
-                dim=1)
-        else:
-            target_factors = None
+            factor_predictions = [mx.nd.cast(tfo.argmax(axis=-1, keepdims=True), dtype='int32') for tfo in
+                                  target_factor_outputs]
+            target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
+                else mx.nd.concat(*factor_predictions, dim=1)
         return scores, states, target_factors
 
 
@@ -138,13 +138,15 @@ class _EnsembleInference(_Inference):
             new_states += model_states
         scores = self._interpolation(outputs)
 
+        target_factors = None  # type: Optional[mx.nd.NDArray]
+
         if factor_outputs:
             # target factors are greedily 'decoded'.
-            target_factors = mx.nd.concat(
-                *[mx.nd.cast(self._interpolation(factor).argmin(axis=-1, keepdims=True), dtype='int32') for factor in
-                  zip(*factor_outputs)], dim=1)
-        else:
-            target_factors = None
+            factor_predictions = [mx.nd.cast(self._interpolation(fs).argmin(axis=-1, keepdims=True), dtype='int32')
+                                  for fs in zip(*factor_outputs)]
+            if factor_predictions:
+                target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
+                    else mx.nd.concat(*factor_predictions, dim=1)
         return scores, new_states, target_factors
 
     @staticmethod
@@ -724,14 +726,12 @@ class BeamSearch(mx.gluon.Block):
 
             # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
+            _sort_inputs = [best_hyp_indices, best_word_indices, finished, scores_accumulated, lengths,
+                            estimated_reference_lengths]
+            if target_factors is not None:
+                _sort_inputs.append(target_factors)
             best_word_indices, finished, scores_accumulated, lengths, estimated_reference_lengths = \
-                self._sort_norm_and_update_finished(best_hyp_indices,
-                                                    best_word_indices,
-                                                    finished,
-                                                    scores_accumulated,
-                                                    lengths,
-                                                    estimated_reference_lengths,
-                                                    target_factors)
+                self._sort_norm_and_update_finished(*_sort_inputs)
 
             # Collect best hypotheses, best word indices
             best_word_indices_list.append(best_word_indices)
