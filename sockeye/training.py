@@ -803,7 +803,7 @@ class Speedometer:
         self.auto_reset = auto_reset
         self.samples = 0
         self.tokens = 0
-        self.msg = 'Epoch[%d] Batch [%d]\t%.2f samples/sec %.2f tokens/sec %.2f updates/sec'
+        self.msg = 'E=%d B=%d\ts/sec=%.2f tok/sec=%.2f u/sec=%.2f\t'
 
     def __call__(self, epoch: int, batches: int, updates: int, samples: int,
                  tokens: int, metrics: Optional[Iterable[loss.LossMetric]] = None):
@@ -830,7 +830,7 @@ class Speedometer:
                         metric_values.append((metric.short_name, metric.get()))
                         if self.auto_reset:
                             metric.reset()
-                    logger.info(self.msg + '\t%s=%f' * len(metric_values),
+                    logger.info(self.msg + '%s=%f ' * len(metric_values),
                                 epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(metric_values, ()))
 
                 else:
