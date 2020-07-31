@@ -229,7 +229,7 @@ def create_checkpoint_decoder(
 
     return checkpoint_decoder.CheckpointDecoder(model_folder=args.output,
                                                 inputs=[args.validation_source] + args.validation_source_factors,
-                                                references=args.validation_target,
+                                                references=[args.validation_target] + args.validation_target_factors,
                                                 sample_size=sample_size,
                                                 model=sockeye_model,
                                                 source_vocabs=source_vocabs,

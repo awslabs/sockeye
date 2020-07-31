@@ -374,7 +374,7 @@ class GluonEarlyStoppingTrainer:
 
         # Optionally run the checkpoint decoder
         if checkpoint_decoder is not None:
-            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME % checkpoint)
+            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
             decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
             for metric_name, metric_value in decoder_metrics.items():
                 assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
