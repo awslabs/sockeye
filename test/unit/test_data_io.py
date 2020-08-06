@@ -264,16 +264,18 @@ def test_word_based_define_bucket_batch_sizes(batch_num_devices, length_ratio, b
     assert last_bbs_num_words >= max_num_words
 
 
-@pytest.mark.parametrize("batch_num_devices,length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
+@pytest.mark.parametrize("batch_num_devices,length_ratio,batch_sentences_multiple_of,batch_size,expected_batch_sizes", [
         # Reference batch sizes manually inspected for sanity.
-        (1, 0.5, 1, [200, 100, 66, 50, 40, 33, 28, 25, 22, 20]),
-        (2, 0.5, 1, [200, 100, 66, 50, 40, 32, 28, 24, 22, 20]),
-        (8, 0.5, 1, [200, 96, 64, 48, 40, 32, 24, 24, 16, 16]),
-        (1, 1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
-        (1, 1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
-def test_max_word_based_define_bucket_batch_sizes(batch_num_devices, length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
+        (1, 0.5, 1, 1000, [200, 100, 66, 50, 40, 33, 28, 25, 22, 20]),
+        (2, 0.5, 1, 1000, [200, 100, 66, 50, 40, 32, 28, 24, 22, 20]),
+        (8, 0.5, 1, 1000, [200, 96, 64, 48, 40, 32, 24, 24, 16, 16]),
+        (1, 1.5, 1, 1000, [100, 50, 33, 25, 20, 20, 20, 20]),
+        (1, 1.5, 8, 1000, [96, 48, 32, 24, 16, 16, 16, 16]),
+        (1, 1.5, 8, 100,  [8, 8, 8, 8, 8, 8, 8, 8]),
+])
+def test_max_word_based_define_bucket_batch_sizes(batch_num_devices, length_ratio, batch_sentences_multiple_of,
+                                                  batch_size, expected_batch_sizes):
     batch_type = C.BATCH_TYPE_MAX_WORD
-    batch_size = 1000
     max_seq_len = 50
     buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, True, length_ratio)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,

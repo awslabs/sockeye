@@ -212,7 +212,7 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
             # Max number of sequences without exceeding batch size
             batch_size_seq = batch_size // padded_seq_len
             # Round down to closest multiple
-            batch_size_seq = (batch_size_seq // min_batch_step) * min_batch_step
+            batch_size_seq = max(1, batch_size_seq // min_batch_step) * min_batch_step
         elif batch_type == C.BATCH_TYPE_SENTENCE:
             batch_size_seq = batch_size
         else:
