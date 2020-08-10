@@ -741,8 +741,7 @@ def add_model_parameters(params):
                               help='Attempt to increase loss scale after this many updates without overflow. '
                                    'Default: %(default)s.')
 
-
-def add_batch_args(params, default_batch_size=4096):
+def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',
                         type=int_greater_or_equal(1),
                         default=default_batch_size,
@@ -751,7 +750,7 @@ def add_batch_args(params, default_batch_size=4096):
                              'update_interval. Default: %(default)s.')
     params.add_argument('--batch-type',
                         type=str,
-                        default=C.BATCH_TYPE_WORD,
+                        default=default_batch_type,
                         choices=C.BATCH_TYPES,
                         help='sentence: each batch contains exactly X sentences. '
                              'word: each batch contains approximately X target words. '
@@ -870,7 +869,6 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of epochs (passes through the training data) Default: %(default)s.')
-
     train_params.add_argument('--embed-dropout',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
@@ -1053,7 +1051,7 @@ def add_score_cli_args(params):
     add_training_data_args(params, required=False)
     add_vocab_args(params)
     add_device_args(params)
-    add_batch_args(params, default_batch_size=500)
+    add_batch_args(params, default_batch_size=56, default_batch_type=C.BATCH_TYPE_SENTENCE)
     add_hybridization_arg(params)
 
     params = params.add_argument_group("Scoring parameters")
