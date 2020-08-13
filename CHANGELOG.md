@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.2.0]
+
+### Changed
+
+- Updated to MXNet 1.7 (TODO: Currently using nightly builds. Update when official 1.7.0 build is available)
+
 ## [2.1.16]
 
 ### Fixed
