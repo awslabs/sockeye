@@ -327,7 +327,7 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, best_hyp_indices, best_word_indices,
                        finished, scores_accumulated, lengths, reference_lengths,
-                       secondary_factors=None):
+                       factors=None):
 
         # Reorder fixed-size beam data according to best_hyp_indices (ascending)
         finished = F.take(finished, best_hyp_indices)
@@ -349,8 +349,8 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
         best_word_indices = F.expand_dims(best_word_indices, axis=1)
 
-        if secondary_factors is not None:
-            secondary_factors = F.take(secondary_factors, best_hyp_indices)
+        if factors is not None:
+            secondary_factors = F.take(factors, best_hyp_indices)
             best_word_indices = F.concat(best_word_indices, secondary_factors)
 
         return best_word_indices, finished, scores_accumulated, lengths, reference_lengths

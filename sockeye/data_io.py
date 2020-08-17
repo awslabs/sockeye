@@ -1000,7 +1000,7 @@ def get_scoring_data_iters(sources: List[str],
     are truncated.
 
     :param sources: Path to source training data (with optional factor data paths).
-    :param targets: Path to source training data (with optional factor data paths).
+    :param targets: Path to target training data (with optional factor data paths).
     :param source_vocabs: Source vocabulary and optional factor vocabularies.
     :param target_vocabs: Target vocabulary and optional factor vocabularies.
     :param batch_size: Batch size.
