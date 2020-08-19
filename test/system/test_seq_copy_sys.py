@@ -46,9 +46,10 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
                          " --decode-and-evaluate 0 --label-smoothing 0.0" \
                          " --optimized-metric perplexity --loss cross-entropy --weight-tying-type src_trg_softmax"
 
-SEQCOPY_TRAINING_PARAMS_TEMPLATES = [
-    ("Copy:transformer:{decoder}",
-     "--encoder transformer --decoder {decoder}"
+
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
+    ("Copy:transformer:transformer",
+     "--encoder transformer --decoder transformer"
      " --max-updates 4000"
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
@@ -57,8 +58,8 @@ SEQCOPY_TRAINING_PARAMS_TEMPLATES = [
      False,
      1.02,
      0.98),
-    ("Copy:transformer:{decoder}:length_task_learned",
-     "--encoder transformer --decoder {decoder}"
+    ("Copy:transformer:transformer:length_task_learned",
+     "--encoder transformer --decoder transformer"
      " --max-updates 4000"
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
@@ -69,8 +70,8 @@ SEQCOPY_TRAINING_PARAMS_TEMPLATES = [
      True,
      1.02,
      0.96),
-    ("Copy:transformer:{decoder}:length_task_constant",
-     "--encoder transformer --decoder {decoder}"
+    ("Copy:transformer:transformer:length_task_constant",
+     "--encoder transformer --decoder transformer"
      " --max-updates 4000"
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
@@ -81,15 +82,7 @@ SEQCOPY_TRAINING_PARAMS_TEMPLATES = [
      False,
      1.02,
      0.94)
-]
-
-SEQCOPY_TRAINING_PARAMS = [(name.format(decoder=decoder), train_params.format(decoder=decoder), *other_params)
-                           for decoder in C.DECODERS
-                           for (name, train_params, *other_params) in SEQCOPY_TRAINING_PARAMS_TEMPLATES]
-
-
-@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh",
-                         SEQCOPY_TRAINING_PARAMS)
+])
 def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset(prefix="test_seq_copy",
@@ -130,9 +123,10 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
         assert bleu_restrict >= bleu_thresh
 
 
-SEQSORT_TRAINING_PARAMS_TEMPLATES = [
-    ("Sort:transformer:{decoder}:batch_word",
-     "--encoder transformer --decoder {decoder}"
+@pytest.mark.parametrize(
+    "name, train_params, translate_params, use_prepared_data, n_source_factors, perplexity_thresh, bleu_thresh", [
+    ("Sort:transformer:transformer:batch_word",
+     "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
@@ -142,8 +136,8 @@ SEQSORT_TRAINING_PARAMS_TEMPLATES = [
      True, 0,
      1.03,
      0.97),
-    ("Sort:transformer:{decoder}_with_source_factor:batch_max_word",
-     "--encoder transformer --decoder {decoder}"
+    ("Sort:transformer:transformer_with_source_factor:batch_max_word",
+     "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 70 --update-interval 2 --batch-type max-word --batch-sentences-multiple-of 1"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
@@ -153,17 +147,19 @@ SEQSORT_TRAINING_PARAMS_TEMPLATES = [
      "--beam-size 1",
      True, 3,
      1.03,
-     0.96)
-]
-
-SEQSORT_TRAINING_PARAMS = [(name.format(decoder=decoder), train_params.format(decoder=decoder), *other_params)
-                           for decoder in C.DECODERS
-                           for (name, train_params, *other_params) in SEQSORT_TRAINING_PARAMS_TEMPLATES]
-
-
-@pytest.mark.parametrize(
-    "name, train_params, translate_params, use_prepared_data, n_source_factors, perplexity_thresh, bleu_thresh",
-    SEQSORT_TRAINING_PARAMS)
+     0.96),
+    ("Sort:transformer:ssru_transformer:batch_word",
+     "--encoder transformer --decoder ssru_transformer"
+     " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
+     " --max-updates 6000"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
+     " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
+     " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1",
+     True, 0,
+     1.03,
+     0.97)
+])
 def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                   n_source_factors, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
