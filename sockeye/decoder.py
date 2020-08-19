@@ -208,9 +208,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         batch_size = encoder_outputs.shape[0]
         autoregr_state_shape = self.layers[0].get_states_shape(batch_size)
         dummy_autoregr_states = [mx.nd.zeros(autoregr_state_shape,
-                                                 ctx=encoder_outputs.context,
-                                                 dtype=encoder_outputs.dtype)
-                                      for _ in range(self.config.num_layers * self.layers[0].num_state_tensors)]
+                                             ctx=encoder_outputs.context,
+                                             dtype=encoder_outputs.dtype)
+                                 for _ in range(self.config.num_layers * self.layers[0].num_state_tensors)]
 
         states += dummy_autoregr_states
 
@@ -314,11 +314,11 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         new_autoregr_states = []
         for layer, layer_autoregr_state, (enc_att_k, enc_att_v) in zip(self.layers, autoregr_states, enc_att_kv):
             target, new_layer_autoregr_state = layer(target,
-                                                      mask,
-                                                      source_encoded,
-                                                      source_mask,
-                                                      layer_autoregr_state,
-                                                      enc_att_k, enc_att_v)
+                                                     mask,
+                                                     source_encoded,
+                                                     source_mask,
+                                                     layer_autoregr_state,
+                                                     enc_att_k, enc_att_v)
 
             new_autoregr_states += [*new_layer_autoregr_state]
             # NOTE: the list expansion is needed in order to handle both a tuple (of Symbols) and a Symbol as a new state

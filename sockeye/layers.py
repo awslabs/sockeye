@@ -23,7 +23,6 @@ from . import config
 from . import constants as C
 from . import quantization
 from . import utils
-from .constants import SSRU_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -824,7 +823,7 @@ class SSRU(AutoregressiveLayer):
     def __init__(self,
                  model_size: int,
                  inference_only: bool,
-                 prefix: str = SSRU_PREFIX,
+                 prefix: str = C.SSRU_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         super(SSRU, self).__init__(prefix=prefix)
 
