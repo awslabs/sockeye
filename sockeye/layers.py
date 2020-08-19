@@ -901,7 +901,7 @@ class SSRU(AutoregressiveLayer):
     @staticmethod
     def _inference_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
         """Update SSRU cell at inference time"""
-        new_step_state = forget_rates * previous_cell_state * weighted_inputs  # (batch, 1, input_depth)
+        new_step_state = forget_rates * previous_cell_state + weighted_inputs  # (batch, 1, input_depth)
         return new_step_state, new_step_state
 
     def hybrid_forward(self, F, inputs: mx.sym.Symbol, previous_states: mx.sym.Symbol, *args) -> Tuple:
