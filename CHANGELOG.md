@@ -15,7 +15,9 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Added
 
-- Added `layers.SSRU`, which implements a Simpler Simple Recurrent Unit as described by Kim et al, 2019.
+- Added `layers.SSRU`, which implements a Simpler Simple Recurrent Unit as described in 
+Kim et al, "From Research to Production and Back: Ludicrously Fast Neural Machine Translation" WNGT 2019.
+
 - Added `ssru_transformer` option to `--decoder`, which enables the usage of SSRUs as a replacement for the decoder-side self-attention layers.
 
 ### Changed

@@ -206,11 +206,14 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             states = [step, encoder_outputs, source_mask]
 
         batch_size = encoder_outputs.shape[0]
-        autoregr_state_shape = self.layers[0].get_states_shape(batch_size)
-        dummy_autoregr_states = [mx.nd.zeros(autoregr_state_shape,
+        autoregr_layers_state_shapes = [layer.get_states_shape(batch_size) for layer in self.layers]
+        autoregr_layers_num_states = [layer.num_state_tensors for layer in self.layers]
+
+        dummy_autoregr_states = [mx.nd.zeros(autoregr_layers_state_shapes[layer_idx],
                                              ctx=encoder_outputs.context,
                                              dtype=encoder_outputs.dtype)
-                                 for _ in range(self.config.num_layers * self.layers[0].num_state_tensors)]
+                                 for layer_idx in range(self.config.num_layers)
+                                 for _ in range(autoregr_layers_num_states[layer_idx])]
 
         states += dummy_autoregr_states
 
@@ -297,7 +300,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             steps, source_encoded, source_mask, *autoregr_states = states
             enc_att_kv = [(None, None) for _ in range(self.config.num_layers)]
 
-        if any(layer.num_state_tensors != 1 for layer in self.layers):
+        if any(layer.num_state_tensors > 1 for layer in self.layers):
             # separates autoregressive states by layer
             states_iter = iter(autoregr_states)
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]

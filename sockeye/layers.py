@@ -799,7 +799,9 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
 
 class SSRU(AutoregressiveLayer):
     """
-    Simpler Simple Recurrent Unit (Kim et al, 2019)
+    Simpler Simple Recurrent Unit
+
+    Kim et al, "From Research to Production and Back: Ludicrously Fast Neural Machine Translation" WNGT 2019
 
     Variant of an LSTM cell aimed at reducing computational dependency across time steps.
     Formally described as:
