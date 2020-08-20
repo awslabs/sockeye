@@ -634,7 +634,9 @@ def add_model_parameters(params):
     model_params.add_argument('--decoder',
                               choices=C.DECODERS,
                               default=C.TRANSFORMER_TYPE,
-                              help="Type of encoder. Default: %(default)s.")
+                              help="Type of decoder. Default: %(default)s. "
+                                   "'ssru_transformer' uses Simpler Simple Recurrent Units (Kim et al, 2019) "
+                                   "as replacement for self-attention layers.")
 
     model_params.add_argument('--num-layers',
                               type=multiple_values(num_values=2, greater_or_equal=1),

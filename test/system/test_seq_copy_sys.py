@@ -147,7 +147,18 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      "--beam-size 1",
      True, 3,
      1.03,
-     0.96)
+     0.96),
+    ("Sort:transformer:ssru_transformer:batch_word",
+     "--encoder transformer --decoder ssru_transformer"
+     " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
+     " --max-updates 6000"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
+     " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
+     " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1",
+     True, 0,
+     1.03,
+     0.97)
 ])
 def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                   n_source_factors, perplexity_thresh, bleu_thresh):
