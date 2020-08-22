@@ -1452,7 +1452,7 @@ class ParallelDataSet:
                 if num_sentences > 0:
                     num_copies = math.ceil(total_splits / num_sentences)
                     if num_copies > 1:
-                        logger.info('Replicating bucket of %d sentences %d times to cover %d splits.',
+                        logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
                                     num_sentences, num_copies, total_splits)
                         source[k] = mx.nd.concat(*[source[k] for _ in range(num_copies)], dim=0)
                         target[k] = mx.nd.concat(*[target[k] for _ in range(num_copies)], dim=0)
