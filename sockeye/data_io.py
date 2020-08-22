@@ -1446,7 +1446,8 @@ class ParallelDataSet:
             # For each bucket, check if there are more splits (workers) than
             # sentences.  If so, replicate that bucket's sentences N times where
             # N is the minimum number required so that each split has at least
-            # one sentence.
+            # one sentence.  This is not required for empty buckets since all
+            # splits will contain zero sentences.
             for k in range(len(source)):
                 num_sentences = len(source[k])
                 if num_sentences > 0:
