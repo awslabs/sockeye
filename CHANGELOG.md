@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.18]
+
+### Fixed
+
+- When loading a shard in Horovod mode, there is now a check that each bucket contains enough sentences to cover each worker's slice. If not, the bucket's sentences are replicated to guarantee coverage.
+
 ## [2.1.17]
 
 ### Added
