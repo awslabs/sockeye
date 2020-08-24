@@ -15,7 +15,7 @@ import copy
 import time
 import logging
 import os
-from typing import cast, Optional, Tuple, Union, List
+from typing import cast, Dict, Optional, Tuple, Union, List
 
 import mxnet as mx
 from sockeye import __version__
@@ -26,6 +26,7 @@ from . import data_io
 from . import decoder
 from . import encoder
 from . import layers
+from . import quantization
 from . import utils
 from . import vocab
 
@@ -49,6 +50,8 @@ class ModelConfig(Config):
     :param weight_tying_type: Determines which weights get tied.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
+    :param intgemm_custom_lib: Path to intgemm custom operator library used for dtype is int8.  Default: libintgemm.so
+                               in the same directory as this script.
     """
 
     def __init__(self,
@@ -62,7 +65,8 @@ class ModelConfig(Config):
                  config_length_task: layers.LengthRatioConfig= None,
                  weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
                  lhuc: bool = False,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 dtype: str = C.DTYPE_FP32,
+                 intgemm_custom_lib: str = os.path.join(os.path.dirname(__file__), "libintgemm.so")) -> None:
         super().__init__()
         self.config_data = config_data
         self.vocab_source_size = vocab_source_size
@@ -75,6 +79,7 @@ class ModelConfig(Config):
         self.weight_tying_type = weight_tying_type
         self.lhuc = lhuc
         self.dtype = dtype
+        self.intgemm_custom_lib = intgemm_custom_lib
 
 
 class SockeyeModel(mx.gluon.Block):
@@ -95,11 +100,17 @@ class SockeyeModel(mx.gluon.Block):
     :param prefix: Name prefix for all parameters of this model.
     """
 
-    def __init__(self, config: ModelConfig, inference_only: bool = False, prefix: str = '', **kwargs) -> None:
+    def __init__(self,
+                 config: ModelConfig,
+                 inference_only: bool = False,
+                 mc_dropout: bool = False,
+                 prefix: str = '',
+                 **kwargs) -> None:
         super().__init__(prefix=prefix, **kwargs)
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
         self.dtype = config.dtype
+        self.mc_dropout = mc_dropout
 
         with self.name_scope():
             # source & target embeddings
@@ -115,12 +126,13 @@ class SockeyeModel(mx.gluon.Block):
                                                       embed_weight=self.target_embed_weight)
 
             # encoder & decoder first (to know the decoder depth)
-            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, prefix=self.prefix)
+            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
+            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
+                                               prefix=self.prefix, dtype=config.dtype)
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight)
+                                                   weight=self.output_weight, dtype=config.dtype)
 
             self.length_ratio = None
             if self.config.config_length_task is not None:
@@ -133,6 +145,9 @@ class SockeyeModel(mx.gluon.Block):
     def cast(self, dtype):
         self.dtype = dtype
         super().cast(dtype)
+
+    def state_structure(self):
+        return self.decoder.state_structure()
 
     def encode(self, inputs, valid_length=None):
         """Encode the input sequence.
@@ -169,6 +184,9 @@ class SockeyeModel(mx.gluon.Block):
         predicted_output_length : NDArray
             Predicted output length of shape (batch_size,), 0 if not available.
         """
+        if self.mc_dropout:
+            # Turn on training mode so mxnet knows to add dropout
+            _ = mx.autograd.set_training(True)
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
 
@@ -199,6 +217,10 @@ class SockeyeModel(mx.gluon.Block):
         step_additional_outputs : list
             Additional outputs of the step, e.g, the attention weights
         """
+        if self.mc_dropout:
+            # Turn on training mode so mxnet knows to add dropout
+            _ = mx.autograd.set_training(True)
+
         # TODO: do we need valid length!?
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
         # target_embed: (batch_size, num_hidden)
@@ -275,7 +297,7 @@ class SockeyeModel(mx.gluon.Block):
         Saves model parameters to file.
         :param fname: Path to save parameters to.
         """
-        super().save_parameters(fname)
+        super().save_parameters(fname, deduplicate=True)
         logging.info('Saved params to "%s"', fname)
 
     def load_parameters(self,
@@ -316,6 +338,35 @@ class SockeyeModel(mx.gluon.Block):
         super().load_parameters(filename, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra,
                                 cast_dtype=cast_dtype, dtype_source=dtype_source)
         logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
+
+    def set_parameters(self,
+                       new_params: Dict[str, mx.gluon.parameter.Parameter],
+                       allow_missing: bool = True,
+                       ignore_extra: bool = False):
+        """
+        Update model params on all contexts of the model with new values from a dictionary.
+
+        :param new_params: Dictionary containing the new parameters.
+        :param allow_missing: Whether to skip setting parameters not represented in the dictionary.
+        :param ignore_extra: Whether to ignore parameters from new_params that are not present in this model.
+        """
+        model_params = self.collect_params()
+        if not allow_missing:
+            for k in model_params.keys():
+                assert k in new_params.keys(), "Parameter '%s' is missing in new_params dictionary. " \
+                                               "Set allow_missing=True to ignore missing parameters." % k
+        for k in new_params:
+            assert new_params[k]._data is not None, "Parameter '%s' is not initialized in new_params dictionary." % k
+            if not ignore_extra and k not in model_params:
+                raise ValueError("Parameter '%s' in new_params dictionary is not preset in ParameterDict. "
+                                 "Set ignore_extra=True to ignore." % k)
+            if k in model_params:
+                assert model_params[k]._data is not None, "Parameter '%s' must be initialized before it can be reset " \
+                                                          "using set_parameters." % k
+                assert model_params[k].shape == new_params[k].shape, \
+                    "Parameter '%s' has shape '%s' in the model but shape '%s' in the new_params dictionary." % \
+                    (k, model_params[k].shape, new_params[k].shape)
+                model_params[k].set_data(new_params[k].data())
 
     @staticmethod
     def save_version(folder: str):
@@ -415,7 +466,11 @@ def load_model(model_folder: str,
                dtype: Optional[str] = None,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
-               inference_only: bool = False) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
+               inference_only: bool = False,
+               mc_dropout: bool = False,
+               for_disk_saving: Optional[str] = None,
+               allow_missing: bool = False,
+               set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
     """
     Load a model from model_folder.
 
@@ -425,6 +480,15 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param mc_dropout: Turn on dropout during inference.
+    :param for_disk_saving: For saving quantized models to disk.
+           None: load as usual and the model will work.
+           int8: The model loaded into RAM will not work, but is suitable for
+               writing to disk in quantized format (including scaling factors).
+           float32: The model loaded into RAM will not work, but is suitable
+               for writing to disk as float32 with precomputed scaling factors.
+    :param allow_missing: Allow missing parameters in the loaded model.
+    :param set_grad_req_null: Set grad_req to null for model parameters.
     :return: List of models, source vocabularies, target vocabulary.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -434,37 +498,82 @@ def load_model(model_folder: str,
     utils.check_version(model_version)
     model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
-    logger.info("Disabling dropout layers for performance reasons")
-    if inference_only:
+    if inference_only and not mc_dropout:
+        logger.info("Disabling dropout layers for performance reasons")
         model_config.disable_dropout()
+
+    if mc_dropout:
+        logger.info("Monte Carlo dropout enabled, inference output will be non-deterministic.")
 
     if checkpoint is None:
         params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    model = SockeyeModel(model_config, inference_only=inference_only)
-    model.initialize(ctx=context)
-    model.cast(model_config.dtype)
+    if (dtype == C.DTYPE_INT8 or
+        model_config.dtype == C.DTYPE_INT8 or
+        for_disk_saving is not None) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
+        # We're going to use int8 but it's not compiled into mxnet.
+        path = os.path.abspath(model_config.intgemm_custom_lib)
+        try:
+            mx.library.load(path)
+        except mx.base.MXNetError:
+            raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a "
+                                      "custom operator library was not found in `%s`.  Compile the custom "
+                                      "operator then set the path using intgemm_custom_lib in the config file." % path)
 
-    if dtype is None:
+    # Are we converting the model to 8-bit?
+    quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
+    if quantizing:
+        model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
+
+    model = SockeyeModel(model_config, inference_only=inference_only, mc_dropout=mc_dropout)
+    model.initialize(ctx=context)
+    if model_config.dtype != C.DTYPE_INT8:
+        # If model_config.dtype is int8, then the above model construction
+        # (which also used model_config) already set everything to the correct
+        # mix of float32 and int8.  Cast would try to make everything int8.
+        model.cast(model_config.dtype)
+
+    if quantizing:
+        logger.info("Model dtype: quantizing from float32 to int8")
+        allow_missing = True  # The scaling factors are missing
+        cast_dtype = True
+        dtype_source = 'saved'
+    elif dtype is None or dtype == model_config.dtype:
         logger.info("Model dtype: %s" % model_config.dtype)
+        allow_missing = allow_missing
         cast_dtype = False
         dtype_source = 'saved'
     else:
         logger.info("Model dtype: overridden to %s" % dtype)
         model.cast(dtype)
+        allow_missing = allow_missing
         cast_dtype = True
         dtype_source = 'current'
 
     model.load_parameters(filename=params_fname,
                           ctx=context,
-                          allow_missing=False,
-                          ignore_extra=False,
+                          allow_missing=allow_missing,
+                          ignore_extra=True,  # Scaling factors may be present in float32 models.
                           cast_dtype=cast_dtype,
                           dtype_source=dtype_source)
-    for param in model.collect_params().values():
-        param.grad_req = 'null'
+
+    params = model.collect_params()
+    if set_grad_req_null:
+        for param in params.values():
+            param.grad_req = 'null'
+
+    if for_disk_saving is not None:
+        # Saving scaling factors and possibly int8 values to disk.
+        if not quantizing:
+            raise RuntimeError("Model is already quantized and for_disk_saving is set.")
+        quantization.convert_weights_disk_format(params, for_disk_saving)
+        model.config.dtype = for_disk_saving
+        # TODO: check for missing parameters somehow (we allowed scaling to be missing)
+    if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
+        # Disk format to CPU-dependent format.
+        quantization.convert_weights_cpu_dependent(params)
 
     if hybridize:
         model.hybridize(static_alloc=True)
@@ -481,7 +590,10 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 checkpoints: Optional[List[int]] = None,
                 dtype: Optional[str] = C.DTYPE_FP32,
                 hybridize: bool = True,
-                inference_only: bool = False) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
+                inference_only: bool = False,
+                mc_dropout: bool = False,
+                allow_missing: bool = False,
+                set_grad_req_null: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -491,6 +603,9 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param mc_dropout: Turn on dropout during inference.
+    :param allow_missing: Allow missing parameters in the loaded models.
+    :param set_grad_req_null: Set grad_req to null for model parameters.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -510,7 +625,10 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                                               dtype=dtype,
                                               checkpoint=checkpoint,
                                               hybridize=hybridize,
-                                              inference_only=inference_only)
+                                              inference_only=inference_only,
+                                              mc_dropout=mc_dropout,
+                                              allow_missing=allow_missing,
+                                              set_grad_req_null=set_grad_req_null)
         models.append(model)
         source_vocabs.append(src_vcbs)
         target_vocabs.append(trg_vcb)

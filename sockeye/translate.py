@@ -84,7 +84,8 @@ def run_translate(args: argparse.Namespace):
                                                           checkpoints=args.checkpoints,
                                                           dtype=args.dtype,
                                                           hybridize=hybridize,
-                                                          inference_only=True)
+                                                          inference_only=True,
+                                                          mc_dropout=args.mc_dropout)
 
         restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
         if args.restrict_lexicon is not None:

@@ -51,6 +51,9 @@ TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
 DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
 LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
 
+# SSRU
+SSRU_PREFIX = "ssru_"
+
 # embedding prefixes
 SOURCE_EMBEDDING_PREFIX = "source_" + EMBEDDING_PREFIX
 SOURCE_POSITIONAL_EMBEDDING_PREFIX = "source_pos_" + EMBEDDING_PREFIX
@@ -72,8 +75,10 @@ TRANSFORMER_TYPE = "transformer"
 # available encoders
 ENCODERS = [TRANSFORMER_TYPE]
 
-# available decoder
-DECODERS = [TRANSFORMER_TYPE]
+# TODO replace options list (e.g ENCODERS, DECODERS, ...) with Enum classes
+# available decoders
+SSRU_TRANSFORMER = SSRU_PREFIX + TRANSFORMER_TYPE
+DECODERS = [TRANSFORMER_TYPE, SSRU_TRANSFORMER]
 
 # positional embeddings
 NO_POSITIONAL_EMBEDDING = "none"
@@ -116,6 +121,7 @@ WEIGHT_TYING_TYPES = [WEIGHT_TYING_NONE, WEIGHT_TYING_SRC_TRG_SOFTMAX, WEIGHT_TY
 
 # default decoder prefixes
 TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
+TRANSFORMER_SSRU_DECODER_PREFIX = DECODER_PREFIX + SSRU_TRANSFORMER
 
 # Activation types
 RELU = "relu"
@@ -166,6 +172,12 @@ CHUNK_SIZE_PER_BATCH_SEGMENT = 500
 BEAM_SEARCH_STOP_FIRST = 'first'
 BEAM_SEARCH_STOP_ALL = 'all'
 
+# State structure constants
+STEP_STATE = 's'
+BIAS_STATE = 'b'
+ENCODER_STATE = 'e'
+DECODER_STATE = 'd'
+
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
@@ -179,6 +191,7 @@ BANK_ADJUSTMENT = 'even'
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
+CONFIG_NAME_FLOAT32 = CONFIG_NAME + ".float32"
 LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_PREFIX = "vocab.src"
@@ -189,6 +202,7 @@ VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
+PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
 DECODE_OUT_NAME = "decode.output.%05d"
 DECODE_IN_NAME = "decode.source.%d"
 DECODE_REF_NAME = "decode.target"
@@ -243,6 +257,8 @@ DEFAULT_FACTOR_DELIMITER = '|'
 
 BATCH_TYPE_SENTENCE = "sentence"
 BATCH_TYPE_WORD = "word"
+BATCH_TYPE_MAX_WORD = "max-word"
+BATCH_TYPES = [BATCH_TYPE_SENTENCE, BATCH_TYPE_WORD, BATCH_TYPE_MAX_WORD]
 
 KVSTORE_DEVICE = "device"
 KVSTORE_LOCAL = "local"
@@ -316,6 +332,7 @@ EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT = 'cross-entropy-without-softmax-output'
 LENRATIO_REGRESSION = 'length-ratio-regression'
 
 LINK_NORMAL = 'normal'
@@ -329,6 +346,7 @@ LOSS_NORM_VALID = "valid"
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
+DTYPE_INT8 = 'int8'
 DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
 LARGE_POSITIVE_VALUE = 99999999.

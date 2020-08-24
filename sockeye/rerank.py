@@ -16,8 +16,10 @@ CLI to rerank an nbest list of translations.
 """
 
 import argparse
+from functools import partial
 import json
 import logging
+import sys
 from typing import Any, Dict, List
 
 import numpy as np
@@ -25,6 +27,7 @@ import sacrebleu
 
 from . import arguments
 from . import constants as C
+from .data_io import smart_open
 from . import log
 from . import utils
 
@@ -42,7 +45,10 @@ class Reranker:
     def __init__(self, metric: str,
                  return_score: bool = False) -> None:
         if metric == C.RERANK_BLEU:
-            self.scoring_function = sacrebleu.sentence_bleu
+            # "add-k" smoothing is the best-performing method implemented in
+            # sacrebleu.  See "Method 2" results from Chen and Cherry
+            # (http://aclweb.org/anthology/W14-3346)
+            self.scoring_function = partial(sacrebleu.sentence_bleu, smooth_method='add-k')
         elif metric == C.RERANK_CHRF:
             self.scoring_function = sacrebleu.sentence_chrf
         else:
@@ -69,6 +75,10 @@ class Reranker:
     @staticmethod
     def _sort_by_ranking(hypotheses: Dict[str, Any], ranking: List[int]) -> Dict[str, Any]:
         def ranksort(l):
+            # Sort lists in hypotheses object (translations, scores) and return
+            # non-lists (sentence_id, score, translation) unchanged.
+            if not isinstance(l, list):
+                return l
             return [l[i] for i in ranking]
 
         return {key: ranksort(value) for key, value in hypotheses.items()}
@@ -82,6 +92,7 @@ def rerank(args: argparse.Namespace):
     :param args: Namespace object holding CLI arguments.
     """
     reranker = Reranker(args.metric, args.return_score)
+    output_stream = sys.stdout if args.output is None else smart_open(args.output, mode='w')
 
     with utils.smart_open(args.reference) as reference, utils.smart_open(args.hypotheses) as hypotheses:
         for i, (reference_line, hypothesis_line) in enumerate(zip(reference, hypotheses), 1):
@@ -100,12 +111,16 @@ def rerank(args: argparse.Namespace):
                 reranked_hypotheses = reranker.rerank(hypotheses, reference)
 
             if args.output_best:
-                if not num_hypotheses:
-                    print()
-                else:
-                    print(reranked_hypotheses['translations'][0])
+                best_hypothesis = reranked_hypotheses['translations'][0] if num_hypotheses else ''
+                if not best_hypothesis and args.output_reference_instead_of_blank:
+                    logger.warning('Line %d: replacing blank hypothesis with reference.', i)
+                    best_hypothesis = reference
+                print(best_hypothesis, file=output_stream)
             else:
-                print(json.dumps(reranked_hypotheses, sort_keys=True))
+                print(json.dumps(reranked_hypotheses, sort_keys=True), file=output_stream)
+
+    if output_stream is not sys.stdout:
+        output_stream.close()
 
 
 def main():

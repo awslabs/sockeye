@@ -1,4 +1,5 @@
 # Changelog
+
 All notable changes to the project are documented in this file.
 
 Version numbers are of the form `1.0.0`.
@@ -10,10 +11,155 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.17]
+
+### Added
+
+- Added `layers.SSRU`, which implements a Simpler Simple Recurrent Unit as described in 
+Kim et al, "From Research to Production and Back: Ludicrously Fast Neural Machine Translation" WNGT 2019.
+
+- Added `ssru_transformer` option to `--decoder`, which enables the usage of SSRUs as a replacement for the decoder-side self-attention layers.
+
+### Changed
+
+- Reduced the number of arguments for `MultiHeadSelfAttention.hybrid_forward()`. 
+ `previous_keys` and `previous_values` should now be input together as `previous_states`, a list containing two symbols.
+
+
+## [2.1.16]
+
+### Fixed
+
+- Fixed batch sizing error introduced in version 2.1.12 (c00da52) that caused batch sizes to be multiplied by the number of devices. Batch sizing now works as documented (same as pre-2.1.12 versions).
+- Fixed `max-word` batching to properly size batches to a multiple of both `--batch-sentences-multiple-of` and the number of devices.
+
+## [2.1.15]
+
+### Added
+
+- Inference option `--mc-dropout` to use dropout during inference, leading to non-deterministic output. This option uses the same dropout parameters present in the model config file.
+
+## [2.1.14]
+
+### Added
+
+- Added `sockeye.rerank` option `--output` to specify output file.
+- Added `sockeye.rerank` option `--output-reference-instead-of-blank` to output reference line instead of best hypothesis when best hypothesis is blank.
+
+
+## [2.1.13]
+
+### Added
+
+- Training option `--quiet-secondary-workers` that suppresses console output for secondary workers when training with Horovod/MPI.
+- Set version of isort to `<5.0.0` in requirements.dev.txt to avoid incompatibility between newer versions of isort and pylint.
+
+## [2.1.12]
+
+### Added
+
+- Batch type option `max-word` for max number of words including padding tokens (more predictable memory usage than `word`).
+- Batching option `--batch-sentences-multiple-of` that is similar to `--round-batch-sizes-to-multiple-of` but always rounds down (more predictable memory usage).
+
+### Changed
+
+- Default bucketing settings changed to width 8, max sequence length 95 (96 including BOS/EOS tokens), and no bucket scaling.
+- Argument `--no-bucket-scaling` replaced with `--bucket-scaling` which is False by default.
+
+## [2.1.11]
+
+### Changed
+
+- Updated `sockeye.rerank` module to use "add-k" smoothing for sentence-level BLEU.
+
+### Fixed
+
+- Updated `sockeye.rerank` module to use current N-best format.
+
+## [2.1.10]
+
+### Changed
+
+- Changed to a cross-entropy loss implementation that avoids the use of SoftmaxOutput.
+
+## [2.1.9]
+
+### Added
+
+- Added training argument `--ignore-extra-params` to ignore extra parameters when loading models.  The primary use case is continuing training with a model that has already been annotated with scaling factors (`sockeye.quantize`).
+
+### Fixed
+
+- Properly pass `allow_missing` flag to `model.load_parameters()`
+
+## [2.1.8]
+
+### Changed
+
+- Update to sacrebleu=1.4.10
+
+## [2.1.7]
+
+### Changed
+
+- Optimize prepare_data by saving the shards in parallel. The prepare_data script accepts a new parameter `--max-processes` to control the level of parallelism with which shards are written to disk.
+
+## [2.1.6]
+
+### Changed
+
+- Updated Dockerfiles optimized for CPU (intgemm int8 inference, full MKL support) and GPU (distributed training with Horovod).  See [sockeye_contrib/docker](sockeye_contrib/docker).
+
+### Added
+
+- Official support for int8 quantization with [intgemm](https://github.com/kpu/intgemm):
+  - This requires the "intgemm" fork of MXNet ([kpuatamazon/incubator-mxnet/intgemm](https://github.com/kpuatamazon/incubator-mxnet/tree/intgemm)).  This is the version of MXNet used in the Sockeye CPU docker image (see [sockeye_contrib/docker](sockeye_contrib/docker)).
+  - Use `sockeye.translate --dtype int8` to quantize a trained float32 model at runtime.
+  - Use the `sockeye.quantize` CLI to annotate a float32 model with int8 scaling factors for fast runtime quantization.
+
+## [2.1.5]
+
+### Changed
+
+- Changed state caching for transformer models during beam search to cache states with attention heads already separated out. This avoids repeated transpose operations during decoding, leading to faster inference.
+
+## [2.1.4]
+
+### Added
+
+- Added Dockerfiles that build an experimental CPU-optimized Sockeye image:
+  - Uses the latest versions of [kpuatamazon/incubator-mxnet](https://github.com/kpuatamazon/incubator-mxnet) (supports [intgemm](https://github.com/kpu/intgemm) and makes full use of Intel MKL) and [kpuatamazon/sockeye](https://github.com/kpuatamazon/sockeye) (supports int8 quantization for inference).
+  - See [sockeye_contrib/docker](sockeye_contrib/docker).
+
+## [2.1.3]
+
+### Changed
+
+- Performance optimizations to beam search inference
+  - Remove unneeded take ops on encoder states
+  - Gathering input data before sending to GPU, rather than sending each batch element individually
+  - All of beam search can be done in fp16, if specified by the model
+  - Other small miscellaneous optimizations
+- Model states are now a flat list in ensemble inference, structure of states provided by `state_structure()`
+
+## [2.1.2]
+
+### Changed
+
+- Updated to [MXNet 1.6.0](https://github.com/apache/incubator-mxnet/tree/1.6.0)
+
+### Added
+
+- Added support for CUDA 10.2
+
+### Removed
+
+- Removed support for CUDA<9.1 / CUDNN<7.5
+
 ## [2.1.1]
 
 ### Added
-- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can 
+- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can
   configure MXNet as such: `--env "OMP_NUM_THREADS=1;MXNET_ENGINE_TYPE=NaiveEngine"`
 
 ## [2.1.0]
@@ -53,7 +199,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Added
 
-- Added distributed training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added distributed training support with Horovod/MPI.  Use `horovodrun` and the `--horovod` training flag.
 - Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
 - Added `none` learning rate scheduler (use a fixed rate throughout training)
 - Added `linear-decay` learning rate scheduler

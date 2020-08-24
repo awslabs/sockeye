@@ -17,6 +17,7 @@ import logging
 import os
 from collections import Counter
 from contextlib import ExitStack
+from functools import reduce
 from itertools import chain, islice
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -50,22 +51,28 @@ def build_from_paths(paths: List[str], num_words: Optional[int] = None, min_coun
         return build_vocab(chain(*files), num_words, min_count, pad_to_multiple_of)
 
 
-def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count: int = 1,
-                pad_to_multiple_of: Optional[int] = None) -> Vocab:
+def build_raw_vocab(data: Iterable[str]) -> Counter:
+    """
+    Returns a token counts in data.
+
+    :param data: Sequence of sentences containing whitespace-delimited tokens.
+    """
+    return Counter(token for line in data for token in utils.get_tokens(line))
+
+
+def build_pruned_vocab(raw_vocab: Counter, num_words: Optional[int] = None, min_count: int = 1,
+                       pad_to_multiple_of: Optional[int] = None) -> Vocab:
     """
     Creates a vocabulary mapping from words to ids. Increasing integer ids are assigned by word frequency,
     using lexical sorting as a tie breaker. The only exception to this are special symbols such as the padding symbol
     (PAD).
 
-    :param data: Sequence of sentences containing whitespace delimited tokens.
+    :param raw_vocab: Raw token counts.
     :param num_words: Optional maximum number of words in the vocabulary.
     :param min_count: Minimum occurrences of words to be included in the vocabulary.
     :param pad_to_multiple_of: If not None, pads the vocabulary to a size that is the next multiple of this int.
     :return: Word-to-id mapping.
     """
-    vocab_symbols_set = set(C.VOCAB_SYMBOLS)
-    raw_vocab = Counter(token for line in data for token in utils.get_tokens(line)
-                        if token not in vocab_symbols_set)
     # For words with the same count, they will be ordered reverse alphabetically.
     # Not an issue since we only care for consistency
     pruned_vocab = [w for c, w in sorted(((c, w) for w, c in raw_vocab.items() if c >= min_count), reverse=True)]
@@ -98,6 +105,37 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
     # Important: pad symbol becomes index 0
     assert word_to_id[C.PAD_SYMBOL] == C.PAD_ID
     return word_to_id
+
+
+def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count: int = 1,
+                pad_to_multiple_of: Optional[int] = None) -> Vocab:
+    """
+    Creates a vocabulary mapping from words to ids. Increasing integer ids are assigned by word frequency,
+    using lexical sorting as a tie breaker. The only exception to this are special symbols such as the padding symbol
+    (PAD).
+
+    :param data: Sequence of sentences containing whitespace-delimited tokens.
+    :param num_words: Optional maximum number of words in the vocabulary.
+    :param min_count: Minimum occurrences of words to be included in the vocabulary.
+    :param pad_to_multiple_of: If not None, pads the vocabulary to a size that is the next multiple of this int.
+    :return: Word-to-id mapping.
+    """
+    raw_vocab = build_raw_vocab(data) - Counter(set(C.VOCAB_SYMBOLS))
+    return build_pruned_vocab(raw_vocab=raw_vocab,
+                              num_words=num_words,
+                              min_count=min_count,
+                              pad_to_multiple_of=pad_to_multiple_of)
+
+
+def merge_raw_vocabs(*raw_vocabs: Counter) -> Counter:
+    """
+    Merges multiple raw vocabularies into a single one.
+
+    :param raw_vocabs: Raw vocabularies.
+    :return: Merged raw vocabulary.
+    """
+    raw_vocab = reduce(lambda c1, c2: c1 + c2, raw_vocabs)
+    return raw_vocab
 
 
 def vocab_to_json(vocab: Vocab, path: str):

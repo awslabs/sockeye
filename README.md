@@ -3,7 +3,6 @@
 [![PyPI version](https://badge.fury.io/py/sockeye.svg)](https://badge.fury.io/py/sockeye)
 [![GitHub license](https://img.shields.io/github/license/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/blob/master/LICENSE)
 [![GitHub issues](https://img.shields.io/github/issues/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/issues)
-[![Build Status](https://travis-ci.org/awslabs/sockeye.svg?branch=master)](https://travis-ci.org/awslabs/sockeye)
 [![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest)
 
 This package contains the Sockeye project, an open-source sequence-to-sequence framework for Neural Machine Translation based on [Apache MXNet (Incubating)](http://mxnet.incubator.apache.org/). Sockeye powers several Machine Translation use cases, including [Amazon Translate](https://aws.amazon.com/translate/). The framework implements state-of-the-art machine translation models with Transformers ([Vaswani et al, 2017](https://arxiv.org/abs/1706.03762)). Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
@@ -36,7 +35,12 @@ For information on how to use Sockeye, please visit [our documentation](https://
 
 ## Citation
 
-For technical information about Sockeye, see our paper on the arXiv ([BibTeX](sockeye.bib)):
+For more information about Sockeye 2, see our paper ([BibTeX](sockeye2.bib)):
+
+> Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar. 2020.
+> [Sockeye 2: A Toolkit for Neural Machine Translation](https://www.amazon.science/publications/sockeye-2-a-toolkit-for-neural-machine-translation). To appear in EAMT 2020, project track.
+
+For technical information about Sockeye 1, see our paper on the arXiv ([BibTeX](sockeye.bib)):
 
 > Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton and Matt Post. 2017.
 > [Sockeye: A Toolkit for Neural Machine Translation](https://arxiv.org/abs/1712.05690). ArXiv e-prints.
@@ -44,10 +48,13 @@ For technical information about Sockeye, see our paper on the arXiv ([BibTeX](so
 ## Research with Sockeye
 
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
-If you know more, please let us know or submit a pull request (last updated: January 2020).
+If you know more, please let us know or submit a pull request (last updated: April 2020).
 
 ### 2020
 
+* Dinu, Georgiana, Prashant Mathur, Marcello Federico, Stanislas Lauly, Yaser Al-Onaizan. "Joint translation and unit conversion for end-to-end localization." arXiv preprint arXiv:2004.05219 (2020)
+* Hisamoto, Sorami, Matt Post, Kevin Duh. "Membership Inference Attacks on Sequence-to-Sequence Models: Is My Data In Your Machine Translation System?" Transactions of the Association for Computational Linguistics, Volume 8 (2020)
+* Naradowsky, Jason, Xuan Zhan, Kevin Duh. "Machine Translation System Selection from Bandit Feedback." arXiv preprint arXiv:2002.09646 (2020)
 * Niu, Xing, Marine Carpuat. "Controlling Neural Machine Translation Formality with Synthetic Supervision." Proceedings of AAAI (2020)
 
 ### 2019

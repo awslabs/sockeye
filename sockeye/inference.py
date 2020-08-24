@@ -684,7 +684,7 @@ class Translator:
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None) -> None:
         self.context = context
-        self.dtype = models[0].dtype
+        self.dtype = C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
         self._scorer = scorer
         self.batch_size = batch_size
         self.beam_size = beam_size
@@ -888,9 +888,9 @@ class Translator:
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
-        source_length = mx.nd.array(lengths, ctx=self.context, dtype='float32')  # shape: (batch_size,)
+        source_length = mx.nd.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
         max_length = max(len(inp) for inp in trans_inputs)
-        source = mx.nd.zeros((batch_size, max_length, self.num_source_factors), ctx=self.context, dtype='float32')
+        source_npy = np.zeros((batch_size, max_length, self.num_source_factors), dtype=np.float32)
 
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
@@ -900,7 +900,7 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
             max_output_lengths.append(self._get_max_output_length(num_tokens))
-            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
+            source_npy[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
@@ -910,7 +910,7 @@ class Translator:
             for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                 # fill in as many factors as there are tokens
 
-                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+                source_npy[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
             # Check if vocabulary selection/restriction is enabled:
             # - First, see if the translator input provides a lexicon (used for multiple lexicons)
@@ -942,6 +942,8 @@ class Translator:
                 if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
+
+        source = mx.nd.array(source_npy, ctx=self.context)
 
         return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, \
                 mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')

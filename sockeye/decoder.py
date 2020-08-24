@@ -16,6 +16,7 @@ Decoders for sequence-to-sequence models.
 """
 import logging
 from abc import abstractmethod
+from itertools import islice
 from typing import Dict, List, Optional, Tuple, Union, Type
 
 import mxnet as mx
@@ -28,8 +29,8 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '') -> 'Decoder':
-    return Decoder.get_decoder(config, inference_only, prefix)
+def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
+    return Decoder.get_decoder(config, inference_only, prefix, dtype)
 
 
 class Decoder(mx.gluon.Block):
@@ -61,13 +62,14 @@ class Decoder(mx.gluon.Block):
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str) -> 'Decoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str, dtype: str) -> 'Decoder':
         """
         Creates decoder based on config type.
 
         :param config: Decoder config.
-        :param inference_ony: Create a decoder that is only used for inference.
+        :param inference_only: Create a decoder that is only used for inference.
         :param prefix: Prefix to prepend for decoder.
+        :param dtype: Data type for weights.
 
         :return: Decoder instance.
         """
@@ -76,11 +78,15 @@ class Decoder(mx.gluon.Block):
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls, suffix = cls.__registry[config_type]
         # TODO: move final suffix/prefix construction logic into config builder
-        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix)
+        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix, dtype=dtype)
 
     @abstractmethod
     def __init__(self):
         super().__init__()
+
+    @abstractmethod
+    def state_structure(self) -> str:
+        raise NotImplementedError()
 
     @abstractmethod
     def init_state_from_encoder(self,
@@ -109,7 +115,7 @@ class Decoder(mx.gluon.Block):
 class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
-    In training, computation scores for each position of the known target sequence are compouted in parallel,
+    In training, computation scores for each position of the known target sequence are computed in parallel,
     yielding most of the speedup.
     At inference time, the decoder block is evaluated again and again over a maximum length input sequence that is
     initially filled with zeros and grows during beam search with predicted tokens. Appropriate masking at every
@@ -123,7 +129,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_DECODER_PREFIX,
-                 inference_only: bool = False) -> None:
+                 inference_only: bool = False,
+                 dtype: str = C.DTYPE_FP32) -> None:
         Decoder.__init__(self)
         mx.gluon.HybridBlock.__init__(self, prefix=prefix)
         self.config = config
@@ -141,12 +148,29 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                                                                             name="bias")
             self.layers = mx.gluon.nn.HybridSequential()
             for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i))
+                self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i, dtype=dtype,
+                                                                    inference_only=self.inference_only))
 
             self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                      dropout=config.dropout_prepost,
                                                                      prefix="final_process_",
                                                                      num_hidden=self.config.model_size)
+
+    def state_structure(self) -> str:
+        """
+        Returns the structure of states used for manipulation of the states.
+        Each state is either labeled 's' for step, 'b' for source_mask, 'd' for decoder, or 'e' for encoder.
+        """
+        structure = ''
+        if self.inference_only:
+            structure += C.STEP_STATE + C.BIAS_STATE + C.ENCODER_STATE * self.config.num_layers * 2
+        else:
+            structure += C.STEP_STATE + C.ENCODER_STATE + C.BIAS_STATE
+
+        total_num_states = sum(layer.num_state_tensors for layer in self.layers)
+        structure += C.DECODER_STATE * total_num_states
+
+        return structure
 
     def init_state_from_encoder(self,
                                 encoder_outputs: mx.nd.NDArray,
@@ -157,7 +181,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         At inference, this method returns the following state tuple:
         valid length bias, step state,
         [projected encoder attention keys, projected encoder attention values] * num_layers,
-        [self attention dummies] * num_layers.
+        [autoregressive state dummies] * num_layers.
 
         :param encoder_outputs: Encoder outputs. Shape: (batch, source_length, encoder_dim).
         :param encoder_valid_length: Valid lengths of encoder outputs. Shape: (batch,).
@@ -173,8 +197,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             states = [step, source_mask]
 
             for layer in self.layers:
-                encoder_attention_keys = layer.enc_attention.ff_k(encoder_outputs)
-                encoder_attention_values = layer.enc_attention.ff_v(encoder_outputs)
+                encoder_attention_keys, encoder_attention_values = \
+                    layer.enc_attention.project_and_isolate_heads(mx.nd, encoder_outputs)
                 states.append(encoder_attention_keys)
                 states.append(encoder_attention_values)
         else:
@@ -182,10 +206,13 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             states = [step, encoder_outputs, source_mask]
 
         batch_size = encoder_outputs.shape[0]
-        self_att_key_value_dummies = [mx.nd.zeros((batch_size, 1, self.config.model_size),
-                                                  ctx=encoder_outputs.context,
-                                                  dtype=encoder_outputs.dtype)] * self.config.num_layers * 2
-        states += self_att_key_value_dummies
+        dummy_autoregr_states = [mx.nd.zeros(layer.get_states_shape(batch_size),
+                                             ctx=encoder_outputs.context,
+                                             dtype=encoder_outputs.dtype)
+                                 for layer in self.layers
+                                 for _ in range(layer.num_state_tensors)]
+
+        states += dummy_autoregr_states
 
         return states
 
@@ -232,7 +259,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             states = [steps] + states
 
         # run decoder op
-        target, self_attention_key_values = super().forward(step_input, states)
+        target, autoregr_states = super().forward(step_input, states)
 
         if is_inference:
             # During inference, length dimension of decoder output has size 1, squeeze it
@@ -245,11 +272,11 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             if self.inference_only:
                 # pass in cached encoder states
                 encoder_attention_keys_values = states[2:2 + self.config.num_layers * 2]
-                new_states = [step, states[1]] + encoder_attention_keys_values + self_attention_key_values
+                new_states = [step, states[1]] + encoder_attention_keys_values + autoregr_states
             else:
                 encoder_outputs = states[1]
                 source_mask = states[2]
-                new_states = [step, encoder_outputs, source_mask] + self_attention_key_values
+                new_states = [step, encoder_outputs, source_mask] + autoregr_states
 
             assert len(new_states) == len(states)
         else:
@@ -257,26 +284,23 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         return target, new_states
 
     def hybrid_forward(self, F, step_input, states):
+        mask = None
         if self.inference_only:
-            # No autoregressive mask needed for decoding
-            mask = None
-
             steps, source_mask, *other = states
-
             source_encoded = None  # use constant pre-computed key value projections from the states
             enc_att_kv = other[:self.config.num_layers * 2]
             enc_att_kv = [enc_att_kv[i:i + 2] for i in range(0, len(enc_att_kv), 2)]
-            self_att_kv = other[self.config.num_layers * 2:]
-            self_att_kv = [self_att_kv[i:i + 2] for i in range(0, len(self_att_kv), 2)]
+            autoregr_states = other[self.config.num_layers * 2:]
         else:
-            mask = self.autoregressive_bias(step_input)  # mask: (1, length, length)
-
-            steps, source_encoded, source_mask, *other = states
-
-            self_att_kv = other
-            self_att_kv = [self_att_kv[i:i + 2] for i in range(0, len(self_att_kv), 2)]
-
+            if any(layer.needs_mask for layer in self.layers):
+                mask = self.autoregressive_bias(step_input)  # mask: (1, length, length)
+            steps, source_encoded, source_mask, *autoregr_states = states
             enc_att_kv = [(None, None) for _ in range(self.config.num_layers)]
+
+        if any(layer.num_state_tensors > 1 for layer in self.layers):
+            # separates autoregressive states by layer
+            states_iter = iter(autoregr_states)
+            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
 
         # Fold the heads of source_mask (batch_size, num_heads, seq_len) -> (batch_size * num_heads, 1, seq_len)
         source_mask = F.expand_dims(F.reshape(source_mask, shape=(-3, -2)), axis=1)
@@ -287,18 +311,21 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         if self.config.dropout_prepost > 0.0:
             target = F.Dropout(data=target, p=self.config.dropout_prepost)
 
-        new_self_att_kv = []  # type: List[Tuple]
-        for layer, (self_att_k, self_att_v), (enc_att_k, enc_att_v) in zip(self.layers, self_att_kv, enc_att_kv):
-            target, new_self_att_k, new_self_att_v = layer(target,
-                                                           mask,
-                                                           source_encoded,
-                                                           source_mask,
-                                                           self_att_k, self_att_v,
-                                                           enc_att_k, enc_att_v)
-            new_self_att_kv += [new_self_att_k, new_self_att_v]
+        new_autoregr_states = []
+        for layer, layer_autoregr_state, (enc_att_k, enc_att_v) in zip(self.layers, autoregr_states, enc_att_kv):
+            target, new_layer_autoregr_state = layer(target,
+                                                     mask,
+                                                     source_encoded,
+                                                     source_mask,
+                                                     layer_autoregr_state,
+                                                     enc_att_k, enc_att_v)
+
+            new_autoregr_states += [*new_layer_autoregr_state]
+            # NOTE: the list expansion is needed in order to handle both a tuple (of Symbols) and a Symbol as a new state
+
         target = self.final_process(target, None)
 
-        return target, new_self_att_kv
+        return target, new_autoregr_states
 
     def get_num_hidden(self):
         return self.config.model_size

@@ -176,7 +176,10 @@ class CrossEntropyLoss(Loss):
 
 
 class CrossEntropyLossWithoutSoftmaxOutput(Loss):
-    """ no label smoothing supported """
+    """
+    Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
+    Uses an efficient implementation for label smoothing and avoids the obscure SoftmaxOutput op.
+    """
 
     def __init__(self,
                  name: str = C.CROSS_ENTROPY,
@@ -185,98 +188,46 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
                  dtype: str = C.DTYPE_FP32,
                  output_name: str = C.LOGITS_NAME,
                  label_name: str = C.TARGET_LABEL_NAME,
-                 ignore_label: int = C.PAD_ID) -> None:
+                 ignore_label: int = C.PAD_ID,
+                 num_labels: int = 0) -> None:  # this is needed for label smoothing
         super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
-        self.ls = None
-        if label_smoothing > 0.0:
-            with self.name_scope():
-                self.ls = LabelSmoothing(epsilon=label_smoothing, units=8230)  # TODO
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._dtype = dtype
+        self._num_labels = num_labels
 
     def hybrid_forward(self, F, logits, labels):
         pred = F.log_softmax(logits, axis=-1)
 
-        if self.ls is None:
-            # (batch, len)
-            loss = -F.pick(pred, labels, axis=-1, keepdims=False)
-        else:
-            loss = -F.sum(pred * self.ls(labels), axis=-1, keepdims=False)
+        # (batch, len)
+        neg_log_likelihood = - F.pick(pred, labels, axis=-1, keepdims=False)
+
+        # label smoothing as in
+        # https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4
+        if self._alpha > 0:
+            all_scores = pred.sum(axis=-1)
+            neg_log_likelihood = (1 - self._alpha) * neg_log_likelihood - self._alpha / self._num_labels * all_scores
 
         # (batch, len,)
         valid_mask = labels != self.ignore_label
 
         # (batch, len)
-        loss = loss * valid_mask
+        loss = neg_log_likelihood * valid_mask
+
+        # (1,)
+        num_valid = F.sum(valid_mask)
 
         # (1,)
         ce = F.sum(loss) * self.weight
-        return ce, F.sum(valid_mask)
+
+        # we need to divide by num_valid here to backpropagate a 'valid' normalized loss value like in SoftmaxOutput.
+        return ce / num_valid, F.ones((1,))
 
     def create_metric(self) -> 'LossMetric':
         """
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
         return PerplexityMetric()
-
-
-class LabelSmoothing(mx.gluon.HybridBlock):
-    """Applies label smoothing. See https://arxiv.org/abs/1512.00567.
-
-    Parameters
-    ----------
-    axis : int, default -1
-        The axis to smooth.
-    epsilon : float, default 0.1
-        The epsilon parameter in label smoothing
-    sparse_label : bool, default True
-        Whether input is an integer array instead of one hot array.
-    units : int or None
-        Vocabulary size. If units is not given, it will be inferred from the input.
-    prefix : str or None
-        Prefix for name of `Block`s
-        (and name of weight if params is `None`).
-    params : Parameter or None
-        Container for weight sharing between cells.
-        Created if `None`.
-    """
-    def __init__(self, axis=-1, epsilon=0.1, units=None,
-                 sparse_label=True, prefix=None, params=None):
-        super(LabelSmoothing, self).__init__(prefix=prefix, params=params)
-        self._axis = axis
-        self._epsilon = epsilon
-        self._sparse_label = sparse_label
-        self._units = units
-
-    def hybrid_forward(self, F, inputs, units=None): # pylint: disable=arguments-differ
-        """
-
-        Parameters
-        ----------
-        F
-        inputs : Symbol or NDArray
-            Shape (batch_size, length) or (batch_size, length, V)
-        units : int or None
-        Returns
-        -------
-        smoothed_label : Symbol or NDArray
-            Shape (batch_size, length, V)
-        """
-        if self._sparse_label:
-            assert units is not None or self._units is not None, \
-                'units needs to be given in function call or ' \
-                'instance initialization when sparse_label is False'
-            if units is None:
-                units = self._units
-            inputs = F.one_hot(inputs, depth=units)
-        if units is None and self._units is None:
-            return F.Custom(inputs, epsilon=self._epsilon, axis=self._axis,
-                            op_type='_smoothing_with_dim')
-        else:
-            if units is None:
-                units = self._units
-            return ((1 - self._epsilon) * inputs) + (self._epsilon / units)
 
 
 class PerplexityMetric(LossMetric):
