@@ -1455,8 +1455,8 @@ class ParallelDataSet:
                     if num_copies > 1:
                         logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
                                     num_sentences, num_copies, total_splits)
-                        source[k] = mx.nd.concat(*[source[k] for _ in range(num_copies)], dim=0)
-                        target[k] = mx.nd.concat(*[target[k] for _ in range(num_copies)], dim=0)
+                        source[k] = mx.nd.repeat(source[k], repeats=num_copies, axis=0)
+                        target[k] = mx.nd.repeat(target[k], repeats=num_copies, axis=0)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
