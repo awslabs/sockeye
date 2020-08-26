@@ -1432,6 +1432,7 @@ class ParallelDataSet:
         """
         Loads a dataset from a binary .npy file.  When running Horovod, the data
         is sliced and each worker loads a different slice based on its rank.
+        Specifically, each of N workers loads 1/N of each bucket.
         """
         data = mx.nd.load(fname)
         n = len(data) // 2
@@ -1442,6 +1443,20 @@ class ParallelDataSet:
             total_splits = horovod_mpi.hvd.size()
             i = split_index / total_splits
             j = (split_index + 1) / total_splits
+            # For each bucket, check if there are more splits (workers) than
+            # sentences.  If so, replicate that bucket's sentences N times where
+            # N is the minimum number required so that each split has at least
+            # one sentence.  This is not required for empty buckets since all
+            # splits will contain zero sentences.
+            for k in range(len(source)):
+                num_sentences = len(source[k])
+                if num_sentences > 0:
+                    num_copies = math.ceil(total_splits / num_sentences)
+                    if num_copies > 1:
+                        logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
+                                    num_sentences, num_copies, total_splits)
+                        source[k] = mx.nd.repeat(source[k], repeats=num_copies, axis=0)
+                        target[k] = mx.nd.repeat(target[k], repeats=num_copies, axis=0)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
