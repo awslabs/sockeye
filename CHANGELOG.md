@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.21]
+
+### Added
+
+- Added an optional ability to cache encoder outputs of model.
+
 ## [2.1.20]
 
 ### Fixed
