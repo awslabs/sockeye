@@ -545,7 +545,7 @@ class BeamSearch(mx.gluon.Block):
         if self._sample is not None:
             utils.check_condition(restrict_lexicon is None,
                                   "Sampling is not available when working with a restricted lexicon.")
-            sample_best_hyp_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32')
+            sample_best_hyp_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32', ctx=self.context)
 
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
