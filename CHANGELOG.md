@@ -15,6 +15,32 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 - Basic support for target factors in training.
 
+## [2.1.19]
+
+### Fixed
+
+- When loading a shard in Horovod mode, there is now a check that each non-empty bucket contains enough sentences to cover each worker's slice. If not, the bucket's sentences are replicated to guarantee coverage.
+
+## [2.1.18]
+
+### Fixed
+
+- Fixed a bug where sampling translation fails because an array is created in the wrong context.
+
+## [2.1.17]
+
+### Added
+
+- Added `layers.SSRU`, which implements a Simpler Simple Recurrent Unit as described in
+Kim et al, "From Research to Production and Back: Ludicrously Fast Neural Machine Translation" WNGT 2019.
+
+- Added `ssru_transformer` option to `--decoder`, which enables the usage of SSRUs as a replacement for the decoder-side self-attention layers.
+
+### Changed
+
+- Reduced the number of arguments for `MultiHeadSelfAttention.hybrid_forward()`.
+ `previous_keys` and `previous_values` should now be input together as `previous_states`, a list containing two symbols.
+
 ## [2.1.16]
 
 ### Fixed

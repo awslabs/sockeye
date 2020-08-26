@@ -52,6 +52,9 @@ DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
 TARGET_FACTOR_OUTPUT_LAYER_PREFIX = "target_output_factor%d_"
 LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
 
+# SSRU
+SSRU_PREFIX = "ssru_"
+
 # embedding prefixes
 SOURCE_EMBEDDING_PREFIX = "source_" + EMBEDDING_PREFIX
 SOURCE_POSITIONAL_EMBEDDING_PREFIX = "source_pos_" + EMBEDDING_PREFIX
@@ -73,8 +76,10 @@ TRANSFORMER_TYPE = "transformer"
 # available encoders
 ENCODERS = [TRANSFORMER_TYPE]
 
-# available decoder
-DECODERS = [TRANSFORMER_TYPE]
+# TODO replace options list (e.g ENCODERS, DECODERS, ...) with Enum classes
+# available decoders
+SSRU_TRANSFORMER = SSRU_PREFIX + TRANSFORMER_TYPE
+DECODERS = [TRANSFORMER_TYPE, SSRU_TRANSFORMER]
 
 # positional embeddings
 NO_POSITIONAL_EMBEDDING = "none"
@@ -117,6 +122,7 @@ WEIGHT_TYING_TYPES = [WEIGHT_TYING_NONE, WEIGHT_TYING_SRC_TRG_SOFTMAX, WEIGHT_TY
 
 # default decoder prefixes
 TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
+TRANSFORMER_SSRU_DECODER_PREFIX = DECODER_PREFIX + SSRU_TRANSFORMER
 
 # Activation types
 RELU = "relu"

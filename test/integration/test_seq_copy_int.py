@@ -42,9 +42,9 @@ _LINE_MAX_LENGTH = 9
 _TEST_MAX_LENGTH = 20
 
 # tuple format: (train_params, translate_params, use_prepared_data, use_source_factors)
-ENCODER_DECODER_SETTINGS = [
+ENCODER_DECODER_SETTINGS_TEMPLATE = [
     # Basic transformer, nbest=2 decoding
-    ("--encoder transformer --decoder transformer"
+    ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
@@ -55,7 +55,7 @@ ENCODER_DECODER_SETTINGS = [
      "--beam-size 2 --nbest-size 2",
      False, 0, 0),
     # Basic transformer w/ prepared data & greedy decoding
-    ("--encoder transformer --decoder transformer"
+    ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
@@ -66,7 +66,7 @@ ENCODER_DECODER_SETTINGS = [
      "--beam-size 1",
      True, 0, 0),
     # Basic transformer with source factor, beam-search-stop first decoding
-    ("--encoder transformer --decoder transformer"
+    ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
@@ -80,7 +80,7 @@ ENCODER_DECODER_SETTINGS = [
      "--beam-size 2 --beam-search-stop first",
      True, 3, 1),
     # Basic transformer with LHUC
-    ("--encoder transformer --decoder transformer"
+    ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
@@ -91,7 +91,7 @@ ENCODER_DECODER_SETTINGS = [
      "--beam-size 2",
      False, 0, 0),
     # Basic transformer and length ratio prediction, and learned brevity penalty during inference
-    ("--encoder transformer --decoder transformer"
+    ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
@@ -104,7 +104,7 @@ ENCODER_DECODER_SETTINGS = [
      " --brevity-penalty-type learned --brevity-penalty-weight 1.0",
      True, 0, 0),
     # Basic transformer and absolute length prediction, and constant brevity penalty during inference
-    ("--encoder transformer --decoder transformer"
+    ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
@@ -117,6 +117,10 @@ ENCODER_DECODER_SETTINGS = [
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
      False, 0, 0),
 ]
+
+ENCODER_DECODER_SETTINGS = [(train_params.format(decoder=decoder), *other_params)
+                            for decoder in C.DECODERS
+                            for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
 
 
 @pytest.mark.parametrize("train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors",
@@ -268,7 +272,7 @@ def _test_mc_dropout(model_path: str):
                              mc_dropout=True, inference_only=True, hybridize=True)
 
     # Ensure the model has some dropout turned on
-    config_blocks = [block for _, block in model.config.__dict__.items() if isinstance(block, Config)] 
+    config_blocks = [block for _, block in model.config.__dict__.items() if isinstance(block, Config)]
     dropout_settings = {setting: val for block in config_blocks for setting, val in block.__dict__.items()
             if "dropout" in setting}
     assert any(s > 0.0 for s in dropout_settings.values())
