@@ -96,9 +96,9 @@ class TrainState:
 
     _pickle_slots = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
                      'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic', '_tic_last_time_elapsed',
-                     '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_metric_history', 
+                     '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_metric_history',
                      'best_checkpoint', 'converged', 'diverged']
- 
+
     __slots__ = _pickle_slots + ['gradients']
 
     def __init__(self, early_stopping_metric: str) -> None:
@@ -129,6 +129,7 @@ class TrainState:
         Saves this training state to fname.
         """
         self.update_time_elapsed()
+        assert len(self.metrics) == self.checkpoint
         with open(fname, "wb") as fp:
             pickle.dump(self, fp)
 
@@ -140,6 +141,7 @@ class TrainState:
         with open(fname, "rb") as fp:
             state = pickle.load(fp)
             state._tic_last_time_elapsed = time.time()
+            assert len(state.metrics) == state.checkpoint
             return state
 
     def update_time_elapsed(self):
@@ -158,6 +160,12 @@ class TrainState:
         for k, v in state.items():
             setattr(self, k, v)
         self.gradients = {}
+
+    def __repr__(self):
+        return "TrainState: epoch=%d, checkpoint=%d batches=%d updates=%d best_metric=%.2f, " \
+               "best_checkpoint=%d time_elapsed=%d" % (
+            self.epoch, self.checkpoint, self.batches, self.updates, self.best_metric,
+            self.best_checkpoint, self.time_elapsed)
 
 
 class GluonEarlyStoppingTrainer:
@@ -272,11 +280,12 @@ class GluonEarlyStoppingTrainer:
                 if has_improved:
                     self._update_best_params()
                     self._save_trainer_states(self.best_optimizer_states_fname)
-                self._save_training_state(train_iter)
 
                 self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
                 for metric in train_metrics:
                     metric.reset()
+
+                self._save_training_state(train_iter)
 
                 if self.checkpoint_callback:
                     self.checkpoint_callback(self.state.checkpoint)
@@ -660,6 +669,8 @@ class GluonEarlyStoppingTrainer:
                 (self.trainer._amp_loss_scaler._loss_scale,
                  self.trainer._amp_loss_scaler._next_loss_scale,
                  self.trainer._amp_loss_scaler._unskipped) = pickle.load(fp)
+
+        logger.info(self.state)
 
     def _cleanup(self, keep_training_state=False):
         """
