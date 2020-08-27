@@ -161,12 +161,6 @@ class TrainState:
             setattr(self, k, v)
         self.gradients = {}
 
-    def __repr__(self):
-        return "TrainState: epoch=%d, checkpoint=%d batches=%d updates=%d best_metric=%.2f, " \
-               "best_checkpoint=%d time_elapsed=%d" % (
-            self.epoch, self.checkpoint, self.batches, self.updates, self.best_metric,
-            self.best_checkpoint, self.time_elapsed)
-
 
 class GluonEarlyStoppingTrainer:
 
@@ -670,7 +664,10 @@ class GluonEarlyStoppingTrainer:
                  self.trainer._amp_loss_scaler._next_loss_scale,
                  self.trainer._amp_loss_scaler._unskipped) = pickle.load(fp)
 
-        logger.info(self.state)
+        logger.info("Training State: epoch=%d, checkpoint=%d batches=%d updates=%d best_metric=%.2f, " \
+                    "best_checkpoint=%d time_elapsed=%d" % (
+                        self.state.epoch, self.state.checkpoint, self.state.batches, self.state.updates,
+                        self.state.best_metric, self.state.best_checkpoint, self.state.time_elapsed))
 
     def _cleanup(self, keep_training_state=False):
         """
