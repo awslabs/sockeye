@@ -39,11 +39,13 @@ class BatchScorer(mx.gluon.HybridBlock):
                  scorer: CandidateScorer,
                  score_type: str = C.SCORING_TYPE_DEFAULT,
                  constant_length_ratio: Optional[float] = None,
-                 prefix='BatchScorer_') -> None:
+                 prefix='BatchScorer_',
+                 softmax_temperature: Optional[float] = None) -> None:
         super().__init__(prefix=prefix)
         self.score_type = score_type
         self.scorer = scorer
         self.constant_length_ratio = constant_length_ratio
+        self.softmax_temperature = softmax_temperature
 
     def hybrid_forward(self, F, logits, labels, length_ratio, source_length, target_length):
         """
@@ -56,7 +58,7 @@ class BatchScorer(mx.gluon.HybridBlock):
         :param target_length: Target lengths. Shape: (batch,).
         :return: Sequence scores. Shape: (batch,).
         """
-        logprobs = F.log_softmax(logits, axis=-1)
+        logprobs = F.log_softmax(logits, axis=-1, temperature=self.softmax_temperature)
 
         # Select the label probability, then take their logs.
         # probs and scores: (batch_size, target_seq_len)
