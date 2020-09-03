@@ -55,10 +55,12 @@ class _SingleModelInference(_Inference):
     def __init__(self,
                  model: SockeyeModel,
                  skip_softmax: bool = False,
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 softmax_temperature: Optional[float] = None) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
+        self._softmax_temperature = softmax_temperature
 
     def state_structure(self) -> List:
         return [self._model.state_structure()]
@@ -74,7 +76,7 @@ class _SingleModelInference(_Inference):
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         logits, states, _ = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
-            logits = logits.log_softmax(axis=-1)
+            logits = logits.log_softmax(axis=-1, temperature=self._softmax_temperature)
         scores = -logits
         return scores, states
 
@@ -84,7 +86,8 @@ class _EnsembleInference(_Inference):
     def __init__(self,
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 softmax_temperature: Optional[float] = None) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -93,6 +96,7 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
+        self._softmax_temperature = softmax_temperature
 
     def state_structure(self) -> List:
         structure = []
@@ -122,7 +126,7 @@ class _EnsembleInference(_Inference):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
             logits, model_states, _ = model.decode_step(step_input, model_states, vocab_slice_ids)
-            probs = logits.softmax(axis=-1)
+            probs = logits.softmax(axis=-1, temperature=self._softmax_temperature)
             outputs.append(probs)
             new_states += model_states
         scores = self._interpolation(outputs)
@@ -749,7 +753,8 @@ def get_beam_search(models: List[SockeyeModel],
                     constant_length_ratio: float = 0.0,
                     avoid_list: Optional[str] = None,
                     sample: Optional[int] = None,
-                    hybridize: bool = True) -> BeamSearch:
+                    hybridize: bool = True,
+                    softmax_temperature: Optional[float] = None) -> BeamSearch:
 
     inference = None  # type: Optional[_Inference]
     if len(models) == 1:
@@ -757,11 +762,14 @@ def get_beam_search(models: List[SockeyeModel],
         if skip_softmax:
             logger.info("Enabled skipping softmax for a single model and greedy decoding.")
         inference = _SingleModelInference(model=models[0],
-                                          skip_softmax=skip_softmax, constant_length_ratio=constant_length_ratio)
+                                          skip_softmax=skip_softmax,
+                                          constant_length_ratio=constant_length_ratio,
+                                          softmax_temperature=softmax_temperature)
     else:
         inference = _EnsembleInference(models=models,
                                        ensemble_mode=ensemble_mode,
-                                       constant_length_ratio=constant_length_ratio)
+                                       constant_length_ratio=constant_length_ratio,
+                                       softmax_temperature=softmax_temperature)
 
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
     bs = BeamSearch(
