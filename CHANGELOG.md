@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.1.23]
+
+### Changed
+
+- Updated to [MXNet 1.7.0](https://github.com/apache/incubator-mxnet/tree/1.7.0).
+- Re-introduced use of softmax with length parameter in DotAttentionCell (see PR #772).
+
 ## [2.1.22]
 
 ### Added
