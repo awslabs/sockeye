@@ -16,6 +16,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 
 - Updated to [MXNet 1.7.0](https://github.com/apache/incubator-mxnet/tree/1.7.0).
+- Re-introduced use of softmax with length parameter in DotAttentionCell (see PR #772).
 
 ## [2.1.22]
 
