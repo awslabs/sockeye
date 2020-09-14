@@ -305,11 +305,9 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
 
         if bias is not None:
-            assert lengths is None, "Cannot provide both bias and lengths"
             logits = F.broadcast_add(logits, bias)
 
         if lengths is not None:
-            assert bias is None, "Cannot provide both bias and lengths"
             lengths = F.broadcast_like(F.expand_dims(lengths, axis=1), logits, lhs_axes=(1,), rhs_axes=(1,))
             probs = F.softmax(logits, axis=-1, length=F.cast(lengths, dtype='int32'), use_length=True)
         else:
