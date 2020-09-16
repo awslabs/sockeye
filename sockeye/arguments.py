@@ -44,7 +44,9 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         self.argument_definitions = {}  # type: Dict[Tuple, Dict]
         self.argument_actions = []  # type: List[Any]
         self._overwrite_add_argument(self)
-        self.add_argument("--config", help="Config file in YAML format.", type=str)
+        self.add_argument("--config", help="Path to CLI arguments in yaml format "
+                                           "(as saved in Sockeye model directories as 'args.yaml'). "
+                                           "Commandline arguments have precedence over values in this file.", type=str)
         # Note: not FileType so that we can get the path here
 
     def _register_argument(self, _action, *args, **kwargs):
@@ -100,6 +102,15 @@ def save_args(args: argparse.Namespace, fname: str):
 def load_args(fname: str) -> argparse.Namespace:
     with open(fname, 'r') as inp:
         return argparse.Namespace(**yaml.safe_load(inp))
+
+
+class Removed(argparse.Action):
+    """
+    When this argument is specified, raise an error with the argument's help
+    message.  This is used to notify users when arguments are removed.
+    """
+    def __call__(self, parser, namespace, values, option_string=None):
+        raise RuntimeError(self.help)
 
 
 def regular_file() -> Callable:
@@ -330,9 +341,14 @@ def add_rerank_args(params):
                                choices=C.RERANK_METRICS,
                                help="Sentence-level metric used to compare each nbest translation to the reference."
                                     "Default: %(default)s.")
+    rerank_params.add_argument("--output", "-o", default=None, help="File to write output to. Default: STDOUT.")
     rerank_params.add_argument("--output-best",
                                action="store_true",
                                help="Output only the best hypothesis from each nbest list.")
+    rerank_params.add_argument("--output-reference-instead-of-blank",
+                               action="store_true",
+                               help="When outputting only the best hypothesis (--output-best) and the best hypothesis "
+                                    "is a blank line, output the reference instead.")
     rerank_params.add_argument("--return-score",
                                action="store_true",
                                help="Returns the reranking scores as scores in output JSON objects.")
@@ -364,6 +380,10 @@ def add_logging_args(params):
                                 default=False,
                                 action="store_true",
                                 help='Suppress console logging.')
+    logging_params.add_argument('--quiet-secondary-workers', '-qsw',
+                                default=False,
+                                action="store_true",
+                                help='Suppress console logging for secondary workers when training with Horovod/MPI.')
     logging_params.add_argument('--no-logfile',
                                 default=False,
                                 action="store_true",
@@ -466,18 +486,24 @@ def add_bucketing_args(params):
 
     params.add_argument('--bucket-width',
                         type=int_greater_or_equal(1),
-                        default=10,
+                        default=8,
                         help='Width of buckets in tokens. Default: %(default)s.')
 
-    params.add_argument('--no-bucket-scaling',
+    params.add_argument('--bucket-scaling',
                         action='store_true',
-                        help='Disable scaling source/target buckets based on length ratio. Default: %(default)s.')
+                        help='Scale source/target buckets based on length ratio to reduce padding. Default: '
+                             '%(default)s.')
+    params.add_argument('--no-bucket-scaling',
+                        action=Removed,
+                        nargs=0,
+                        help='Removed: The argument "--no-bucket-scaling" has been removed because this is now the '
+                             'default behavior. To activate bucket scaling, use the argument "--bucket-scaling".')
 
     params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
-                        default=(99, 99),
-                        help='Maximum sequence length in tokens.'
-                             'Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
+                        default=(95, 95),
+                        help='Maximum sequence length in tokens, not counting BOS/EOS tokens (internal max sequence '
+                             'length is X+1). Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
 
 def add_prepare_data_cli_args(params):
@@ -595,6 +621,11 @@ def add_model_parameters(params):
                               default=False,
                               help="Allow missing parameters when initializing model parameters from file. "
                                    "Default: %(default)s.")
+    model_params.add_argument('--ignore-extra-params',
+                              action="store_true",
+                              default=False,
+                              help="Allow extra parameters when initializing model parameters from file. "
+                                   "Default: %(default)s.")
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,
@@ -603,7 +634,9 @@ def add_model_parameters(params):
     model_params.add_argument('--decoder',
                               choices=C.DECODERS,
                               default=C.TRANSFORMER_TYPE,
-                              help="Type of encoder. Default: %(default)s.")
+                              help="Type of decoder. Default: %(default)s. "
+                                   "'ssru_transformer' uses Simpler Simple Recurrent Units (Kim et al, 2019) "
+                                   "as replacement for self-attention layers.")
 
     model_params.add_argument('--num-layers',
                               type=multiple_values(num_values=2, greater_or_equal=1),
@@ -658,7 +691,6 @@ def add_model_parameters(params):
                                    'For example: n:drn '
                                    'Default: %(default)s.')
 
-    # LHUC
     model_params.add_argument('--lhuc',
                               nargs="+",
                               default=None,
@@ -714,25 +746,33 @@ def add_batch_args(params, default_batch_size=4096):
     params.add_argument('--batch-size', '-b',
                         type=int_greater_or_equal(1),
                         default=default_batch_size,
-                        help='Mini-batch size. Note that depending on the batch-type this either refers to '
-                             'words or sentences.'
-                             'Sentence: each batch contains X sentences, number of words varies. '
-                             'Word: each batch contains (approximately) X words, number of sentences varies. '
-                             'Default: %(default)s.')
-    params.add_argument("--batch-type",
+                        help='Mini-batch size per process. Depending on --batch-type, this either refers to words or '
+                             'sentences. The effective batch size (update size) is num_processes * batch_size * '
+                             'update_interval. Default: %(default)s.')
+    params.add_argument('--batch-type',
                         type=str,
                         default=C.BATCH_TYPE_WORD,
-                        choices=[C.BATCH_TYPE_SENTENCE, C.BATCH_TYPE_WORD],
-                        help="Sentence: each batch contains X sentences, number of words varies."
-                             "Word: each batch contains (approximately) X target words, "
-                             "number of sentences varies. Default: %(default)s.")
+                        choices=C.BATCH_TYPES,
+                        help='sentence: each batch contains exactly X sentences. '
+                             'word: each batch contains approximately X target words. '
+                             'max-word: each batch contains at most X target words. '
+                             'Default: %(default)s.')
+    params.add_argument('--batch-sentences-multiple-of',
+                        type=int,
+                        default=8,
+                        help='For word and max-word batching, guarantee that each batch contains a multiple of X '
+                             'sentences. For word batching, round up or down to nearest multiple. For max-word '
+                             'batching, always round down. Default: %(default)s.')
     params.add_argument('--round-batch-sizes-to-multiple-of',
+                        action=Removed,
+                        help='Removed: The argument "--round-batch-sizes-to-multiple-of" has been renamed to '
+                             '"--batch-sentences-multiple-of".')
+    params.add_argument('--update-interval',
                         type=int,
                         default=1,
-                        help='For word-based batches, round each bucket\'s batch size (measured in sentences) to a '
-                             'multiple of this integer. Default: %(default)s.')
-
-
+                        help='Accumulate gradients over X batches for each model update. Set a value higher than 1 to '
+                             'simulate large batches (ex: batch_size 2560 with update_interval 4 gives effective batch '
+                             'size 10240). Default: %(default)s.')
 
 def add_hybridization_arg(params):
     params.add_argument('--no-hybridization',
@@ -747,8 +787,8 @@ def add_training_args(params):
     add_batch_args(train_params)
 
     train_params.add_argument('--loss',
-                              default=C.CROSS_ENTROPY,
-                              choices=[C.CROSS_ENTROPY],
+                              default=C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT,
+                              choices=[C.CROSS_ENTROPY, C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT],
                               help='Loss to optimize. Default: %(default)s.')
     train_params.add_argument('--label-smoothing',
                               default=0.1,
@@ -775,10 +815,6 @@ def add_training_args(params):
                               choices=C.METRICS,
                               help='Metric to optimize with early stopping {%(choices)s}. Default: %(default)s.')
 
-    train_params.add_argument('--update-interval',
-                              type=int,
-                              default=1,
-                              help="Number of batch gradients to accumulate before updating. Default: %(default)s.")
     train_params.add_argument(C.TRAIN_ARGS_CHECKPOINT_INTERVAL,
                               type=int_greater_or_equal(1),
                               default=4000,
@@ -867,9 +903,11 @@ def add_training_args(params):
 
     train_params.add_argument('--horovod',
                               action='store_true',
-                              help='Use Horovod/OpenMPI for distributed training (Sergeev and Del Balso 2018, '
-                                   'arxiv.org/abs/1802.05799).  When using this option, run Sockeye with `horovodrun '
-                                   '-np ... -H ... python`.')
+                              help='Use Horovod/MPI for distributed training (Sergeev and Del Balso 2018, '
+                                   'arxiv.org/abs/1802.05799). When using this option, run Sockeye with `horovodrun '
+                                   '-np X python3 -m sockeye.train` where X is the number of processes. Increasing '
+                                   'the number of processes multiplies the effective batch size (ex: batch_size 2560 '
+                                   'with `-np 4` gives effective batch size 10240).')
 
     train_params.add_argument("--kvstore",
                               type=str,
@@ -1121,6 +1159,10 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
+    decode_params.add_argument('--mc-dropout',
+                               default=False,
+                               action='store_true',
+                               help='Turn on dropout during inference (Monte Carlo dropout). This will make translations non-deterministic and might slow down translation speed.')
     decode_params.add_argument('--sample',
                                type=int_greater_or_equal(0),
                                default=None,

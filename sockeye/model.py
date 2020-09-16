@@ -16,6 +16,7 @@ import time
 import logging
 import os
 from typing import cast, Dict, Optional, Tuple, Union, List
+from functools import lru_cache
 
 import mxnet as mx
 from sockeye import __version__
@@ -100,11 +101,22 @@ class SockeyeModel(mx.gluon.Block):
     :param prefix: Name prefix for all parameters of this model.
     """
 
-    def __init__(self, config: ModelConfig, inference_only: bool = False, prefix: str = '', **kwargs) -> None:
+    def __init__(self,
+                 config: ModelConfig,
+                 inference_only: bool = False,
+                 mc_dropout: bool = False,
+                 forward_pass_cache_size: int = 0,
+                 prefix: str = '',
+                 **kwargs) -> None:
         super().__init__(prefix=prefix, **kwargs)
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
         self.dtype = config.dtype
+        self.mc_dropout = mc_dropout
+        self.forward_pass_cache_size = forward_pass_cache_size
+        self.embed_and_encode = self._embed_and_encode
+        if self.forward_pass_cache_size > 0:
+            self.embed_and_encode = self._cache_wrapper(self._embed_and_encode)
 
         with self.name_scope():
             # source & target embeddings
@@ -178,6 +190,9 @@ class SockeyeModel(mx.gluon.Block):
         predicted_output_length : NDArray
             Predicted output length of shape (batch_size,), 0 if not available.
         """
+        if self.mc_dropout:
+            # Turn on training mode so mxnet knows to add dropout
+            _ = mx.autograd.set_training(True)
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
 
@@ -188,6 +203,23 @@ class SockeyeModel(mx.gluon.Block):
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
 
         return states, predicted_output_length
+
+    def _embed_and_encode(self, source, source_length, target, target_length):
+        """
+        Encode the input sequence, embed the target sequence, and initialize the decoder.
+        Used for training.
+
+        :param source: Source input data.
+        :param source_length: Length of source inputs.
+        :param target: Target input data.
+        :param target_length: Length of target inputs.
+        :return: encoder outputs and lengths, target embeddings, and decoder initial states
+        """
+        source_embed, source_embed_length = self.embedding_source(source, source_length)
+        target_embed, target_embed_length = self.embedding_target(target, target_length)
+        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length)
+        return source_encoded, source_encoded_length, target_embed, states
 
     def decode_step(self, step_input, states, vocab_slice_ids=None):
         """
@@ -208,6 +240,10 @@ class SockeyeModel(mx.gluon.Block):
         step_additional_outputs : list
             Additional outputs of the step, e.g, the attention weights
         """
+        if self.mc_dropout:
+            # Turn on training mode so mxnet knows to add dropout
+            _ = mx.autograd.set_training(True)
+
         # TODO: do we need valid length!?
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
         # target_embed: (batch_size, num_hidden)
@@ -224,11 +260,9 @@ class SockeyeModel(mx.gluon.Block):
         return step_output, new_states, step_additional_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
-        source_embed, source_embed_length = self.embedding_source(source, source_length)
-        target_embed, target_embed_length = self.embedding_target(target, target_length)
-        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
+                                                                                            target, target_length)
 
-        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length)
         target = self.decoder.decode_seq(target_embed, states=states)
 
         output = self.output_layer(target, None)
@@ -447,6 +481,12 @@ class SockeyeModel(mx.gluon.Block):
     def output_layer_vocab_size(self) -> int:
         return self.output_layer.vocab_size
 
+    def _cache_wrapper(self, class_func):
+        @lru_cache(maxsize=self.forward_pass_cache_size)
+        def cache_func(*args):
+            return class_func(*args)
+        return cache_func
+
 
 def load_model(model_folder: str,
                context: Union[List[mx.context.Context], mx.context.Context] = mx.cpu(),
@@ -454,9 +494,11 @@ def load_model(model_folder: str,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
                inference_only: bool = False,
+               mc_dropout: bool = False,
                for_disk_saving: Optional[str] = None,
                allow_missing: bool = False,
-               set_grad_req_null: bool = True) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
+               set_grad_req_null: bool = True,
+               forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
     """
     Load a model from model_folder.
 
@@ -466,6 +508,7 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param mc_dropout: Turn on dropout during inference.
     :param for_disk_saving: For saving quantized models to disk.
            None: load as usual and the model will work.
            int8: The model loaded into RAM will not work, but is suitable for
@@ -474,6 +517,7 @@ def load_model(model_folder: str,
                for writing to disk as float32 with precomputed scaling factors.
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
+    :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :return: List of models, source vocabularies, target vocabulary.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -483,9 +527,12 @@ def load_model(model_folder: str,
     utils.check_version(model_version)
     model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
-    logger.info("Disabling dropout layers for performance reasons")
-    if inference_only:
+    if inference_only and not mc_dropout:
+        logger.info("Disabling dropout layers for performance reasons")
         model_config.disable_dropout()
+
+    if mc_dropout:
+        logger.info("Monte Carlo dropout enabled, inference output will be non-deterministic.")
 
     if checkpoint is None:
         params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
@@ -509,7 +556,8 @@ def load_model(model_folder: str,
     if quantizing:
         model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
 
-    model = SockeyeModel(model_config, inference_only=inference_only)
+    model = SockeyeModel(model_config, inference_only=inference_only, mc_dropout=mc_dropout,
+                         forward_pass_cache_size=forward_pass_cache_size)
     model.initialize(ctx=context)
     if model_config.dtype != C.DTYPE_INT8:
         # If model_config.dtype is int8, then the above model construction
@@ -519,26 +567,25 @@ def load_model(model_folder: str,
 
     if quantizing:
         logger.info("Model dtype: quantizing from float32 to int8")
-        #The scaling factors are missing
-        allow_missing = True
+        allow_missing = True  # The scaling factors are missing
         cast_dtype = True
         dtype_source = 'saved'
     elif dtype is None or dtype == model_config.dtype:
         logger.info("Model dtype: %s" % model_config.dtype)
-        allow_missing = False
+        allow_missing = allow_missing
         cast_dtype = False
         dtype_source = 'saved'
     else:
         logger.info("Model dtype: overridden to %s" % dtype)
         model.cast(dtype)
-        allow_missing = False
+        allow_missing = allow_missing
         cast_dtype = True
         dtype_source = 'current'
 
     model.load_parameters(filename=params_fname,
                           ctx=context,
                           allow_missing=allow_missing,
-                          ignore_extra=True, #Scaling factors may be present in float32 models.
+                          ignore_extra=True,  # Scaling factors may be present in float32 models.
                           cast_dtype=cast_dtype,
                           dtype_source=dtype_source)
 
@@ -548,14 +595,14 @@ def load_model(model_folder: str,
             param.grad_req = 'null'
 
     if for_disk_saving is not None:
-        #Saving scaling factors and possibly int8 values to disk.
+        # Saving scaling factors and possibly int8 values to disk.
         if not quantizing:
             raise RuntimeError("Model is already quantized and for_disk_saving is set.")
         quantization.convert_weights_disk_format(params, for_disk_saving)
         model.config.dtype = for_disk_saving
-        #TODO: check for missing parameters somehow (we allowed scaling to be missing)
+        # TODO: check for missing parameters somehow (we allowed scaling to be missing)
     if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
-        #Disk format to CPU-dependent format.
+        # Disk format to CPU-dependent format.
         quantization.convert_weights_cpu_dependent(params)
 
     if hybridize:
@@ -574,8 +621,10 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 dtype: Optional[str] = C.DTYPE_FP32,
                 hybridize: bool = True,
                 inference_only: bool = False,
+                mc_dropout: bool = False,
                 allow_missing: bool = False,
-                set_grad_req_null: bool = True) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
+                set_grad_req_null: bool = True,
+                forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
     """
     Loads a list of models for inference.
 
@@ -585,8 +634,10 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param mc_dropout: Turn on dropout during inference.
     :param allow_missing: Allow missing parameters in the loaded models.
     :param set_grad_req_null: Set grad_req to null for model parameters.
+    :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -607,8 +658,10 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                                               checkpoint=checkpoint,
                                               hybridize=hybridize,
                                               inference_only=inference_only,
+                                              mc_dropout=mc_dropout,
                                               allow_missing=allow_missing,
-                                              set_grad_req_null=set_grad_req_null)
+                                              set_grad_req_null=set_grad_req_null,
+                                              forward_pass_cache_size=forward_pass_cache_size)
         models.append(model)
         source_vocabs.append(src_vcbs)
         target_vocabs.append(trg_vcb)

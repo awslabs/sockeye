@@ -1,0 +1,52 @@
+name: push and pull request testing
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+jobs:
+  build:
+    strategy:
+      max-parallel: 4
+      fail-fast: false
+      matrix:
+        python-version: [3.6, 3.7]
+        platform: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v1
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+    - name: Pip upgrade
+      run: python -m pip install --upgrade pip
+    - name: Sockeye requirements
+      run: pip install -r requirements/requirements.txt
+    - name: Development requirements
+      run: pip install -r requirements/requirements.dev.txt
+    - name: Unit tests
+      run: |
+        pytest --version
+        pytest
+    - name: Pylint
+      run: |
+        pylint --version
+        pylint --rcfile=pylintrc sockeye -E
+        pylint --rcfile=pylintrc test -E
+    - name: MyPy
+      run: |
+        mypy --version
+        mypy --ignore-missing-imports --follow-imports=silent @typechecked-files --no-strict-optional
+    - name: Check manifest
+      run: check-manifest --ignore sockeye/git_version.py
+    - name: System tests
+      run: |
+        pytest test/system 

@@ -104,7 +104,6 @@ RUN cd /opt && \
     git clone https://github.com/kpuatamazon/incubator-mxnet.git mxnet && \
     cd mxnet && \
     git checkout ${MXNET_COMMIT} && \
-    git checkout intgemm && \
     git submodule init && \
     git submodule update --recursive
 

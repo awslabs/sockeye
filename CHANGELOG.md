@@ -15,7 +15,124 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Changed
 
-- Replaced multi-head attention with [interleaved_matmul_encdec](https://github.com/apache/incubator-mxnet/pull/16408) operators, which removes previous needed transposes and improves performance.
+- Replaced multi-head attention with [interleaved_matmul_encdec](https://github.com/apache/incubator-mxnet/pull/16408) operators, which removes previously needed transposes and improves performance.
+
+## [2.1.22]
+
+### Changed
+
+- Updated to [MXNet 1.7.0](https://github.com/apache/incubator-mxnet/tree/1.7.0).
+
+## [2.1.21]
+
+### Added
+
+- Added an optional ability to cache encoder outputs of model.
+
+## [2.1.20]
+
+### Fixed
+
+- Fixed a bug where the training state object was saved to disk before training metrics were added to it, leading to an inconsistency between the training state object and the metrics file (see #859).
+
+## [2.1.19]
+
+### Fixed
+
+- When loading a shard in Horovod mode, there is now a check that each non-empty bucket contains enough sentences to cover each worker's slice. If not, the bucket's sentences are replicated to guarantee coverage.
+
+## [2.1.18]
+
+### Fixed
+
+- Fixed a bug where sampling translation fails because an array is created in the wrong context.
+
+## [2.1.17]
+
+### Added
+
+- Added `layers.SSRU`, which implements a Simpler Simple Recurrent Unit as described in
+Kim et al, "From Research to Production and Back: Ludicrously Fast Neural Machine Translation" WNGT 2019.
+
+- Added `ssru_transformer` option to `--decoder`, which enables the usage of SSRUs as a replacement for the decoder-side self-attention layers.
+
+### Changed
+
+- Reduced the number of arguments for `MultiHeadSelfAttention.hybrid_forward()`.
+ `previous_keys` and `previous_values` should now be input together as `previous_states`, a list containing two symbols.
+
+
+## [2.1.16]
+
+### Fixed
+
+- Fixed batch sizing error introduced in version 2.1.12 (c00da52) that caused batch sizes to be multiplied by the number of devices. Batch sizing now works as documented (same as pre-2.1.12 versions).
+- Fixed `max-word` batching to properly size batches to a multiple of both `--batch-sentences-multiple-of` and the number of devices.
+
+## [2.1.15]
+
+### Added
+
+- Inference option `--mc-dropout` to use dropout during inference, leading to non-deterministic output. This option uses the same dropout parameters present in the model config file.
+
+## [2.1.14]
+
+### Added
+
+- Added `sockeye.rerank` option `--output` to specify output file.
+- Added `sockeye.rerank` option `--output-reference-instead-of-blank` to output reference line instead of best hypothesis when best hypothesis is blank.
+
+
+## [2.1.13]
+
+### Added
+
+- Training option `--quiet-secondary-workers` that suppresses console output for secondary workers when training with Horovod/MPI.
+- Set version of isort to `<5.0.0` in requirements.dev.txt to avoid incompatibility between newer versions of isort and pylint.
+
+## [2.1.12]
+
+### Added
+
+- Batch type option `max-word` for max number of words including padding tokens (more predictable memory usage than `word`).
+- Batching option `--batch-sentences-multiple-of` that is similar to `--round-batch-sizes-to-multiple-of` but always rounds down (more predictable memory usage).
+
+### Changed
+
+- Default bucketing settings changed to width 8, max sequence length 95 (96 including BOS/EOS tokens), and no bucket scaling.
+- Argument `--no-bucket-scaling` replaced with `--bucket-scaling` which is False by default.
+
+## [2.1.11]
+
+### Changed
+
+- Updated `sockeye.rerank` module to use "add-k" smoothing for sentence-level BLEU.
+
+### Fixed
+
+- Updated `sockeye.rerank` module to use current N-best format.
+
+## [2.1.10]
+
+### Changed
+
+- Changed to a cross-entropy loss implementation that avoids the use of SoftmaxOutput.
+
+## [2.1.9]
+
+### Added
+
+- Added training argument `--ignore-extra-params` to ignore extra parameters when loading models.  The primary use case is continuing training with a model that has already been annotated with scaling factors (`sockeye.quantize`).
+
+### Fixed
+
+- Properly pass `allow_missing` flag to `model.load_parameters()`
+
+## [2.1.8]
+
+### Changed
+
+- Update to sacrebleu=1.4.10
 
 ## [2.1.7]
 
@@ -118,7 +235,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Added
 
-- Added distributed training support with Horovod/OpenMPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added distributed training support with Horovod/MPI.  Use `horovodrun` and the `--horovod` training flag.
 - Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
 - Added `none` learning rate scheduler (use a fixed rate throughout training)
 - Added `linear-decay` learning rate scheduler

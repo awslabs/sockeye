@@ -149,27 +149,33 @@ class BucketBatchSize:
 
 def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
                               batch_size: int,
-                              batch_by_words: bool,
+                              batch_type: str,
                               batch_num_devices: int,
                               data_target_average_len: List[Optional[float]],
                               batch_sentences_multiple_of: int = 1) -> List[BucketBatchSize]:
     """
-    Computes bucket-specific batch sizes (sentences, average_words).
+    Compute bucket-specific batch sizes (sentences, average_target_words).
 
-    If sentence-based batching: number of sentences is the same for each batch, determines the
-    number of words. Hence all batch sizes for each bucket are equal.
+    If sentence batching: number of sentences is the same for each batch.
 
-    If word-based batching: number of sentences for each batch is set to the multiple of number
-    of devices that produces the number of words closest to the target batch size.  Average
-    target sentence length (non-padding symbols) is used for word number calculations.
+    If word batching: number of sentences for each batch is the multiple of
+    number of devices that produces the number of words closest to the target
+    batch size. Number of sentences is finally rounded to the nearest multiple
+    of batch_sentences_multiple_of * batch_num_devices. Average target sentence
+    length (non-padding symbols) is used for word number calculations.
+
+    If max-word batching: number of sentences for each batch is set to the
+    multiple of batch_sentences_multiple_of * batch_num_devices that is closest
+    to batch_size without exceeding the value.
 
     :param buckets: Bucket list.
     :param batch_size: Batch size.
-    :param batch_by_words: Batch by words.
+    :param batch_type: Type of batching.
     :param batch_num_devices: Number of devices.
-    :param data_target_average_len: Optional average target length for each bucket.
-    :param batch_sentences_multiple_of: Round the number of sentences in each
-        bucket's batch to a multiple of this value (word-based batching only).
+    :param data_target_average_len: Optional average target length for each
+        bucket.
+    :param batch_sentences_multiple_of: Guarantee the number of sentences in
+        each bucket's batch to a multiple of this value.
     """
     check_condition(len(data_target_average_len) == len(buckets),
                     "Must provide None or average target length for each bucket")
@@ -187,26 +193,44 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
             data_target_average_len[buck_idx] = padded_seq_len
         average_seq_len = data_target_average_len[buck_idx]
 
-        # Word-based: num words determines num sentences
-        # Sentence-based: num sentences determines num words
-        if batch_by_words:
+        # Batch size for each bucket is measured in sentences:
+        # - word batching: convert average word-based size to number of
+        #       sequences
+        # - max-word batching: convert max word-based size to number of
+        #       sequences
+        # - sentence batching: use batch size directly
+        if batch_type == C.BATCH_TYPE_WORD:
             check_condition(padded_seq_len <= batch_size, "Word batch size must cover sequence lengths for all"
                                                           " buckets: (%d > %d)" % (padded_seq_len, batch_size))
             # Multiple of minimum batch step closest to target number of words,
             # assuming each sentence is of average length
             batch_size_seq = min_batch_step * max(1, round((batch_size / average_seq_len) / min_batch_step))
-            batch_size_word = batch_size_seq * average_seq_len
-        else:
+        elif batch_type == C.BATCH_TYPE_MAX_WORD:
+            check_condition(padded_seq_len <= batch_size,
+                            'Word batch size must cover sequence lengths for all buckets: (%d > %d)'
+                            % (padded_seq_len, batch_size))
+            # Max number of sequences without exceeding batch size
+            batch_size_seq = batch_size // padded_seq_len
+            # Round down to closest multiple
+            batch_size_seq = (batch_size_seq // min_batch_step) * min_batch_step
+        elif batch_type == C.BATCH_TYPE_SENTENCE:
             batch_size_seq = batch_size
-            batch_size_word = batch_size_seq * average_seq_len
+        else:
+            raise ValueError('Unknown batch type: %s' % batch_type)
+        # Number of words here is an average of non-padding tokens
+        batch_size_word = batch_size_seq * average_seq_len
+
         bucket_batch_sizes.append(BucketBatchSize(bucket, batch_size_seq, batch_size_word))
         # Track largest number of source or target word samples in a batch
         largest_total_num_words = max(largest_total_num_words, batch_size_seq * max(*bucket))
 
-    # Final step: guarantee that largest bucket by sequence length also has a batch size so that it covers any
-    # (batch_size, len_source) and (batch_size, len_target) matrix from the data iterator to allow for memory sharing.
-    # When batching by sentences, this will already be the case.
-    if batch_by_words:
+    # TODO: This is a legacy step from the bucketing module version of Sockeye.
+    #       It is no longer necessary but is preserved to keep training behavior
+    #       consistent.  Determine whether this can be safely removed.
+    # Final step for average word-based batching: guarantee that largest bucket
+    # by sequence length also has a shape that covers any (batch_size,
+    # len_source) and (batch_size, len_target).
+    if batch_type == C.BATCH_TYPE_WORD:
         padded_seq_len = max(*buckets[-1])
         average_seq_len = data_target_average_len[-1]
         while bucket_batch_sizes[-1].batch_size * padded_seq_len < largest_total_num_words:
@@ -214,6 +238,7 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
                 bucket_batch_sizes[-1].bucket,
                 bucket_batch_sizes[-1].batch_size + min_batch_step,
                 bucket_batch_sizes[-1].average_target_words_per_batch + min_batch_step * average_seq_len)
+
     return bucket_batch_sizes
 
 
@@ -538,7 +563,7 @@ def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int
 
 
 def save_shard(shard_idx: int, data_loader: RawParallelDatasetLoader,
-               shard_sources: List[str], shard_target: str, 
+               shard_sources: List[str], shard_target: str,
                shard_stats: 'DataStatistics', output_prefix: str, keep_tmp_shard_files: bool):
     """
     Load shard source and target data files into NDArrays and save to disk.
@@ -550,7 +575,7 @@ def save_shard(shard_idx: int, data_loader: RawParallelDatasetLoader,
     :param shard_target: A target file name.
     :param shard_stats: The statistics for the sources/target data.
     :param output_prefix: The prefix of the output file name.
-    :param keep_tmp_shard_files: Keep the sources/target files when it is True otherwise delete them. 
+    :param keep_tmp_shard_files: Keep the sources/target files when it is True otherwise delete them.
     """
     sources_sentences = [SequenceReader(s) for s in shard_sources]
     target_sentences = SequenceReader(shard_target)
@@ -635,7 +660,7 @@ def prepare_data(source_fnames: List[str],
         results = []
         pool = multiprocessing.pool.Pool(processes=max_processes)
         for shard_idx, (shard_sources, shard_target, shard_stats) in enumerate(shards):
-            args = (shard_idx, data_loader, shard_sources, shard_target, 
+            args = (shard_idx, data_loader, shard_sources, shard_target,
                     shard_stats, output_prefix, keep_tmp_shard_files)
             result = pool.apply_async(save_shard, args=args)
             results.append(result)
@@ -749,7 +774,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             validation_target: str,
                             shared_vocab: bool,
                             batch_size: int,
-                            batch_by_words: bool,
+                            batch_type: str,
                             batch_num_devices: int,
                             batch_sentences_multiple_of: int = 1,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
@@ -798,7 +823,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
-                                                   batch_by_words,
+                                                   batch_type,
                                                    batch_num_devices,
                                                    config_data.data_statistics.average_len_target_per_bucket,
                                                    batch_sentences_multiple_of)
@@ -840,7 +865,7 @@ def get_training_data_iters(sources: List[str],
                             target_vocab_path: Optional[str],
                             shared_vocab: bool,
                             batch_size: int,
-                            batch_by_words: bool,
+                            batch_type: str,
                             batch_num_devices: int,
                             max_seq_len_source: int,
                             max_seq_len_target: int,
@@ -864,7 +889,7 @@ def get_training_data_iters(sources: List[str],
     :param target_vocab_path: Path to target vocabulary.
     :param shared_vocab: Whether the vocabularies are shared.
     :param batch_size: Batch size.
-    :param batch_by_words: Size batches by words rather than sentences.
+    :param batch_type: Method for sizing batches.
     :param batch_num_devices: Number of devices batches will be parallelized across.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
@@ -903,7 +928,7 @@ def get_training_data_iters(sources: List[str],
 
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
-                                                   batch_by_words,
+                                                   batch_type,
                                                    batch_num_devices,
                                                    data_statistics.average_len_target_per_bucket,
                                                    batch_sentences_multiple_of)
@@ -1407,6 +1432,7 @@ class ParallelDataSet:
         """
         Loads a dataset from a binary .npy file.  When running Horovod, the data
         is sliced and each worker loads a different slice based on its rank.
+        Specifically, each of N workers loads 1/N of each bucket.
         """
         data = mx.nd.load(fname)
         n = len(data) // 2
@@ -1417,6 +1443,20 @@ class ParallelDataSet:
             total_splits = horovod_mpi.hvd.size()
             i = split_index / total_splits
             j = (split_index + 1) / total_splits
+            # For each bucket, check if there are more splits (workers) than
+            # sentences.  If so, replicate that bucket's sentences N times where
+            # N is the minimum number required so that each split has at least
+            # one sentence.  This is not required for empty buckets since all
+            # splits will contain zero sentences.
+            for k in range(len(source)):
+                num_sentences = len(source[k])
+                if num_sentences > 0:
+                    num_copies = math.ceil(total_splits / num_sentences)
+                    if num_copies > 1:
+                        logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
+                                    num_sentences, num_copies, total_splits)
+                        source[k] = mx.nd.repeat(source[k], repeats=num_copies, axis=0)
+                        target[k] = mx.nd.repeat(target[k], repeats=num_copies, axis=0)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
@@ -1750,7 +1790,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
 
             if horovod_mpi.using_horovod():
                 # Synchronize shard order across workers
-                horovod_mpi.MPI.COMM_WORLD.bcast(self.shards_fnames, root=0)
+                self.shards_fnames = horovod_mpi.MPI.COMM_WORLD.bcast(self.shards_fnames, root=0)
 
             self.shard_index = 0
             self._load_shard()

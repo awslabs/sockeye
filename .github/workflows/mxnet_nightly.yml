@@ -17,8 +17,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [3.6, 3.7]
-        platform: [ubuntu-latest, windows-latest]
-        mxnet-version: [mxnet-mkl, mxnet]
+        platform: [ubuntu-latest, macos-latest]
       
     # The type of runner that the job will run on
     runs-on: ${{ matrix.platform }}
@@ -34,14 +33,15 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     # Runs a set of commands using the runners shell:
-    - name: Install dependencies ${{ matrix.mxnet-version }}
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install --pre ${{ matrix.mxnet-version }} -f https://dist.mxnet.io/python/cpu
-        pip install -r requirements/requirements.txt
+        pip install "pyyaml>=5.1" "numpy>1.16.0,<2.0.0" "portalocker" "sacrebleu==1.4.3"
         pip install -r requirements/requirements.dev.txt
-    # Runs a single command using the runners shell
+        pip install --pre "mxnet<2" -f https://dist.mxnet.io/python
+    - name: Print mxnet build
+      run: pip list | grep mxnet
     - name: Unit tests
-      run: python3 setup.py test
+      run: pytest 
     - name: System tests
-      run: python -m pytest --maxfail=1 test/system
+      run: pytest --maxfail=1 test/system

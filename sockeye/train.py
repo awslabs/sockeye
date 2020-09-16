@@ -263,7 +263,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     word_min_count_source, word_min_count_target = args.word_min_count
     batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
-    batch_by_words = args.batch_type == C.BATCH_TYPE_WORD
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
@@ -289,9 +288,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             validation_target=validation_target,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
-            batch_by_words=batch_by_words,
+            batch_type=args.batch_type,
             batch_num_devices=batch_num_devices,
-            batch_sentences_multiple_of=args.round_batch_sizes_to_multiple_of)
+            batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
         check_condition(all([combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])
@@ -372,14 +371,14 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             target_vocab_path=target_vocab_path,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
-            batch_by_words=batch_by_words,
+            batch_type=args.batch_type,
             batch_num_devices=batch_num_devices,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
-            bucket_scaling=not args.no_bucket_scaling,
-            batch_sentences_multiple_of=args.round_batch_sizes_to_multiple_of)
+            bucket_scaling=args.bucket_scaling,
+            batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
@@ -430,7 +429,8 @@ def create_encoder_config(args: argparse.Namespace,
         postprocess_sequence=encoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc))
+        lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
+        decoder_type=args.decoder)
     encoder_num_hidden = encoder_transformer_model_size
 
     return config_encoder, encoder_num_hidden
@@ -466,7 +466,8 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
         lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
-        depth_key_value=encoder_num_hidden)
+        depth_key_value=encoder_num_hidden,
+        decoder_type=args.decoder)
 
     return config_decoder
 
@@ -598,14 +599,25 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_losses(args: argparse.Namespace) -> List[loss.Loss]:
+def create_losses(args: argparse.Namespace, num_classes: int = 0) -> List[loss.Loss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
-    losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
-                                    weight=softmax_output_grad_scale,
-                                    label_smoothing=args.label_smoothing,
-                                    dtype=args.dtype,
-                                    output_name=C.LOGITS_NAME,
-                                    label_name=C.TARGET_LABEL_NAME)]
+    if args.loss == C.CROSS_ENTROPY:
+        losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
+                                        weight=softmax_output_grad_scale,
+                                        label_smoothing=args.label_smoothing,
+                                        dtype=args.dtype,
+                                        output_name=C.LOGITS_NAME,
+                                        label_name=C.TARGET_LABEL_NAME)]
+    elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
+        losses = [loss.CrossEntropyLossWithoutSoftmaxOutput(name=C.CROSS_ENTROPY,
+                                                            weight=softmax_output_grad_scale,
+                                                            label_smoothing=args.label_smoothing,
+                                                            dtype=args.dtype,
+                                                            output_name=C.LOGITS_NAME,
+                                                            label_name=C.TARGET_LABEL_NAME,
+                                                            num_labels=num_classes)]
+    else:
+        raise ValueError('Unknown loss %s', args.loss)
     if args.length_task is not None:
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:
@@ -788,10 +800,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         amp.init()
 
     # When using Horovod, multiple workers (instances of sockeye.train) are
-    # launched via OpenMPI.  Each worker has a rank (unique among all workers in
-    # the training run) and a local rank (unique on the current host).  For
-    # example, running on 2 hosts with 4 slots each will assign ranks 0-7 and
-    # local ranks 0-3.
+    # launched via MPI.  Each worker has a rank (unique among all workers in the
+    # training run) and a local rank (unique on the current host).  For example,
+    # running on 2 hosts with 4 slots each will assign ranks 0-7 and local ranks
+    # 0-3.
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
@@ -810,6 +822,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_mpi.hvd.rank()))
             # Do not keep redundant copies of the checkpoint history
             args.keep_last_params = 1
+            # If requested, suppress console output for secondary workers
+            if args.quiet_secondary_workers:
+                args.quiet = True
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
@@ -910,6 +925,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             training_model.load_parameters(filename=args.params,
                                            ctx=context,
                                            allow_missing=args.allow_missing_params or model_config.lhuc,
+                                           ignore_extra=args.ignore_extra_params,
                                            cast_dtype=True,
                                            dtype_source='current')
         params = training_model.collect_params()
@@ -960,7 +976,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # we set them immediately after calling init.
             gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
 
-        losses = create_losses(args)
+        losses = create_losses(args, num_classes=target_vocab_size)
 
         hybridize = not args.no_hybridization
         if hybridize:
