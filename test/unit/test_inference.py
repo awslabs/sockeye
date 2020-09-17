@@ -434,3 +434,15 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
         assert expected_translation.target_ids == actual_translation.target_ids
         assert expected_translation.score == actual_translation.score
         assert expected_translation.beam_histories == actual_translation.beam_histories
+
+
+@pytest.mark.parametrize("sequence, fill_with, expected_sequence",
+                         [
+                          (np.array([1, 2, 3]), C.EOS_ID, [1, 2, 3]),
+                          (np.array([[1], [2], [3]]), C.EOS_ID, [[1], [2], [3]]),
+                          (np.array([[1, 0], [2, 1], [3, 2]]), C.EOS_ID, [(1, 1), (2, 2), (3, C.EOS_ID)]),
+                          (np.array([[1, 0], [2, 1], [3, 2]]), C.PAD_ID, [(1, 1), (2, 2), (3, C.PAD_ID)]),
+                         ])
+def test_unshift_target_factors(sequence, fill_with, expected_sequence):
+    sequence = sockeye.inference._unshift_target_factors(sequence, fill_last_with=fill_with)
+    assert sequence == expected_sequence

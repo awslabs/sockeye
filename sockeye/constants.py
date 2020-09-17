@@ -42,6 +42,8 @@ SPACE_FOR_XOS = 1
 
 ARG_SEPARATOR = ":"
 
+TARGET_FACTOR_SHIFT = True
+
 ENCODER_PREFIX = "encoder_"
 DECODER_PREFIX = "decoder_"
 EMBEDDING_PREFIX = "embed_"

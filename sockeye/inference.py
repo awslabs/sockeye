@@ -19,7 +19,7 @@ import itertools
 import json
 import logging
 from functools import partial
-from typing import Any, Callable, Dict, Generator, Iterator, List, Optional, NamedTuple, Set, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, NamedTuple, Set, Tuple, Union
 
 import mxnet as mx
 import numpy as np
@@ -981,8 +981,7 @@ class Translator:
         for factor_index, factor_sequence in enumerate(zip(*pruned_target_ids)):
             vocab_target_inv = self.vocab_targets_inv[factor_index]
             target_tokens = [vocab_target_inv[target_id] for target_id in factor_sequence]
-            target_string = C.TOKEN_SEPARATOR.join(
-                data_io.ids2tokens(factor_sequence, vocab_target_inv, self.strip_ids))
+            target_string = C.TOKEN_SEPARATOR.join(target_tokens)
             all_target_tokens.append(target_tokens)
             all_target_strings.append(target_string)
 
@@ -1010,6 +1009,8 @@ class Translator:
             self._get_translation_tokens_and_factors(translation.target_ids)
 
         if translation.nbest_translations is None:
+            primary_target_tokens, primary_translation, other_target_tokens, other_target_strings = \
+                self._get_translation_tokens_and_factors(translation.target_ids)
             return TranslatorOutput(sentence_id=trans_input.sentence_id,
                                     translation=primary_translation,
                                     tokens=primary_target_tokens,
@@ -1107,7 +1108,7 @@ class Translator:
             # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
             nbest_translations.append(
-                    [self._assemble_translation(*x) for x in
+                    [self._assemble_translation(*x, unshift_target_factors=C.TARGET_FACTOR_SHIFT) for x in
                      zip(best_word_indices[indices,
                                            :,  # get all factors
                                            np.arange(indices.shape[1])],  # pylint: disable=unsubscriptable-object
@@ -1139,7 +1140,6 @@ class Translator:
         # first index into the history of the desired hypotheses.
         pointer = all_hyp_indices[ks, -1]
         # for each column/step follow the pointer, starting from the penultimate column/step
-        num_steps = all_hyp_indices.shape[1]
         for step in range(num_steps - 2, -1, -1):
             result[:, step] = pointer
             pointer = all_hyp_indices[pointer, step]
@@ -1150,7 +1150,8 @@ class Translator:
                               length: np.ndarray,
                               seq_score: np.ndarray,
                               beam_history: Optional[BeamHistory],
-                              estimated_reference_length: Optional[float]) -> Translation:
+                              estimated_reference_length: Optional[float],
+                              unshift_target_factors: bool = False) -> Translation:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
@@ -1161,11 +1162,31 @@ class Translator:
         :param beam_history: The optional beam histories for each sentence in the batch.
         :return: A Translation object.
         """
+        if unshift_target_factors:
+            sequence = _unshift_target_factors(sequence, fill_last_with=C.EOS_ID)
+        else:
+            sequence = sequence.tolist()
         length = int(length)
-        sequence = sequence[:length].tolist()
+        sequence = sequence[:length]
         score = float(seq_score)
         estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
         beam_history_list = [beam_history] if beam_history is not None else []
         return Translation(sequence, score, beam_history_list,
                            nbest_translations=None,
                            estimated_reference_length=estimated_reference_length)
+
+
+def _unshift_target_factors(sequence: np.ndarray, fill_last_with: int = C.EOS_ID):
+    """
+    Shifts back target factors so that they re-align with the words.
+
+    :param sequence: Array of word ids. Shape: (bucketed_length, num_target_factors).
+    """
+    if len(sequence.shape) == 1 or sequence.shape[1] == 1:
+        return sequence.tolist()
+    num_factors_to_shift = sequence.shape[1] - 1
+    _fillvalue = num_factors_to_shift * [fill_last_with]
+    _words = sequence[:, 0]  # tokens from t==0 onwards
+    _next_factors = sequence[1:, 1:]  # factors from t==1 onwards
+    sequence = [(w, *fs) for w, fs in itertools.zip_longest(_words, _next_factors, fillvalue=_fillvalue)]
+    return sequence

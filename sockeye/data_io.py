@@ -478,6 +478,20 @@ class RawParallelDatasetLoader:
     :param eos_id: Unknown id.
     :param skip_blanks: Whether to skip blank lines.
     :param dtype: Data type.
+    :param shift_target_factors: If true, shift secondary target factors (i>1) to the right.
+
+    Target factor shifting:
+        Data I/O sequence:
+        f1: <BOS>   A   B   C <EOS>
+        fs: <PAD> <BOS> a   b   c
+
+        Target sequence:
+        f1: <BOS>   A   B   C
+        fs: <PAD> <BOS> a   b
+
+        Label sequence:
+        f1:   A     B   C <EOS>
+        fs: <BOS>   a   b   c
     """
 
     def __init__(self,
@@ -485,12 +499,14 @@ class RawParallelDatasetLoader:
                  eos_id: int,
                  pad_id: int,
                  skip_blanks: bool = True,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = 'float32',
+                 shift_target_factors: bool = C.TARGET_FACTOR_SHIFT) -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
         self.skip_blanks = skip_blanks
         self.dtype = dtype
+        self.shift_target_factors = shift_target_factors
 
     def load(self,
              source_iterables: Sequence[Iterable],
@@ -516,7 +532,7 @@ class RawParallelDatasetLoader:
 
         # Bucket sentences as padded np arrays
         for sentno, (sources, targets) in enumerate(parallel_iter(source_iterables,
-                                                                 target_iterables, skip_blanks=self.skip_blanks), 1):
+                                                                  target_iterables, skip_blanks=self.skip_blanks), 1):
             sources = [[] if stream is None else stream for stream in sources]
             targets = [[] if stream is None else stream for stream in targets]
             source_len = len(sources[0])
@@ -538,8 +554,14 @@ class RawParallelDatasetLoader:
             for i, s in enumerate(sources):
                 data_source[buck_index][sample_index, 0:source_len, i] = s
             for i, t in enumerate(targets):
-                t.append(self.eos_id)
-                data_target[buck_index][sample_index, 0:target_len + 1, i] = t
+                if i == 0 or not self.shift_target_factors:
+                    # sequence: <BOS> ... <EOS>
+                    t.append(self.eos_id)
+                    data_target[buck_index][sample_index, 0:target_len + 1, i] = t
+                else:
+                    # sequence: <PAD> <BOS> ...
+                    t.insert(0, C.PAD_ID)  # TODO or BOS_ID instead?
+                    data_target[buck_index][sample_index, 0:target_len + 1, i] = t
 
             bucket_sample_index[buck_index] += 1
 
