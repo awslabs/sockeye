@@ -228,20 +228,31 @@ class GluonEarlyStoppingTrainer:
                         self.config.max_updates,
                         self.config.max_checkpoints)
 
+        checkpoint_up_to_date = False
         while True:
             if self.config.max_epochs is not None and self.state.epoch == self.config.max_epochs:
                 logger.info("Maximum # of epochs (%s) reached.", self.config.max_epochs)
+                if not checkpoint_up_to_date:
+                    time_cost = time.time() - tic
+                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
                 break
 
             if self.config.max_updates is not None and self.state.updates == self.config.max_updates:
                 logger.info("Maximum # of updates (%s) reached.", self.config.max_updates)
+                if not checkpoint_up_to_date:
+                    time_cost = time.time() - tic
+                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
                 break
 
             if self.config.max_samples is not None and self.state.samples >= self.config.max_samples:
                 logger.info("Maximum # of samples (%s) reached", self.config.max_samples)
+                if not checkpoint_up_to_date:
+                    time_cost = time.time() - tic
+                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
                 break
 
-            self._step(batch=train_iter.next())
+            did_grad_step = self._step(batch=train_iter.next())
+            checkpoint_up_to_date = checkpoint_up_to_date and not did_grad_step
 
             if not train_iter.iter_next():
                 self.state.epoch += 1
@@ -250,39 +261,8 @@ class GluonEarlyStoppingTrainer:
             if self.state.updates > 0 and self.state.batches % (
                     self.config.checkpoint_interval * self.config.update_interval) == 0:
                 time_cost = time.time() - tic
-                self.state.checkpoint += 1
-
-                # (1) save parameters and evaluate on validation data
-                self._save_params()
-
-                train_metrics = [lf.metric for lf in self.loss_functions]
-
-                logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
-                            self.state.checkpoint, self.state.updates, self.state.epoch,
-                            self.state.samples, time_cost, self.config.checkpoint_interval / time_cost)
-                logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
-                            "\t".join("Train-%s" % str(metric) for metric in train_metrics))
-
-                val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
-
-                mx.nd.waitall()
-
-                has_improved = self._determine_improvement(val_metrics)
-                self.state.converged = self._determine_convergence()
-                self.state.diverged = self._determine_divergence(val_metrics)
-                self._adjust_learning_rate(has_improved)
-                if has_improved:
-                    self._update_best_params()
-                    self._save_trainer_states(self.best_optimizer_states_fname)
-
-                self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
-                for metric in train_metrics:
-                    metric.reset()
-
-                self._save_training_state(train_iter)
-
-                if self.checkpoint_callback:
-                    self.checkpoint_callback(self.state.checkpoint)
+                self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                checkpoint_up_to_date = True
 
                 if self.config.max_seconds is not None and self.state.time_elapsed >= self.config.max_seconds:
                     logger.info("Maximum # of seconds (%s) reached. Training ran for %d seconds.",
@@ -302,6 +282,37 @@ class GluonEarlyStoppingTrainer:
         # different stopping criteria
         self._cleanup(keep_training_state=True)
         return self.state
+
+    def _create_checkpoint(self, checkpoint_decoder: CheckpointDecoder, time_cost: float,
+                           train_iter: data_io.BaseParallelSampleIter, validation_iter: data_io.BaseParallelSampleIter):
+        """
+        Creates a checkpoint, which will update self.state.converged/self.state.diverged, evaluate validation
+        metrics and update the best known parameters accordingly.
+        """
+        self.state.checkpoint += 1
+        # save parameters and evaluate on validation data
+        self._save_params()
+        train_metrics = [lf.metric for lf in self.loss_functions]
+        logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
+                    self.state.checkpoint, self.state.updates, self.state.epoch,
+                    self.state.samples, time_cost, self.config.checkpoint_interval / time_cost)
+        logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
+                    "\t".join("Train-%s" % str(metric) for metric in train_metrics))
+        val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
+        mx.nd.waitall()
+        has_improved = self._determine_improvement(val_metrics)
+        self.state.converged = self._determine_convergence()
+        self.state.diverged = self._determine_divergence(val_metrics)
+        self._adjust_learning_rate(has_improved)
+        if has_improved:
+            self._update_best_params()
+            self._save_trainer_states(self.best_optimizer_states_fname)
+        self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+        for metric in train_metrics:
+            metric.reset()
+        self._save_training_state(train_iter)
+        if self.checkpoint_callback:
+            self.checkpoint_callback(self.state.checkpoint)
 
     def _forward_backward(self, batch: data_io.Batch):
         """
@@ -330,9 +341,11 @@ class GluonEarlyStoppingTrainer:
             sharded_outputs_per_loss_function]
         return output_per_loss_function
 
-    def _step(self, batch: data_io.Batch):
+    def _step(self, batch: data_io.Batch) -> bool:
         self.state.batches += 1
         loss_outputs = self._forward_backward(batch)
+
+        did_grad_step = False
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
             # `step` rescales the gradients for the number of batches in this
             # update.
@@ -343,12 +356,14 @@ class GluonEarlyStoppingTrainer:
                 # update.
                 self.model.collect_params().zero_grad()
             self.state.updates += 1
+            did_grad_step = True
 
         self.state.samples += batch.samples
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
             loss_func.metric.update(loss_value.asscalar(), num_samples.asscalar())
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
+        return did_grad_step
 
     def _evaluate(self, checkpoint: int, data_iter, checkpoint_decoder: Optional[CheckpointDecoder]) -> List[loss.LossMetric]:
         """
