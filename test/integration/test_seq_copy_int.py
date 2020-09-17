@@ -51,7 +51,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     # Note: We se the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching 
+     # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching 
      # max updates independent of the checkpoint interval
      " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2 --nbest-size 2",
