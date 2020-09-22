@@ -257,7 +257,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_size=args.batch_size,
             batch_by_words=batch_by_words,
             batch_num_devices=batch_num_devices,
-            fill_up=args.fill_up,
             curriculum_training=args.curriculum_training,
             curriculum_update_freq=args.curriculum_update_freq)
 
