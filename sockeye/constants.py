@@ -455,11 +455,6 @@ PREPARED_DATA_VERSION_FILE = "data.version"
 # TODO: with next bump remove branch over data_statistics.length_ratio_stats_per_bucket
 PREPARED_DATA_VERSION = 2
 
-FILL_UP_REPLICATE = 'replicate'
-FILL_UP_ZEROS = 'zeros'
-FILL_UP_DEFAULT = FILL_UP_REPLICATE
-FILL_UP_CHOICES = [FILL_UP_REPLICATE, FILL_UP_ZEROS]
-
 # reranking
 RERANK_BLEU = "bleu"
 RERANK_CHRF = "chrf"
