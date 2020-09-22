@@ -105,9 +105,9 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
             if config.use_lhuc:
                 self.lhuc = layers.LHUC(config.model_size)
 
-    def hybrid_forward(self, F, data: mx.sym.Symbol, lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+    def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att, _, __ = self.self_attention(self.pre_self_attention(data, None), [None, None], lengths, None)
+        data_self_att, _, __ = self.self_attention(self.pre_self_attention(data, None), [None, None], None, bias)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -215,7 +215,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                        target: mx.sym.Symbol,
                        target_bias: mx.sym.Symbol,
                        source: mx.sym.Symbol,
-                       source_att_lengths: mx.sym.Symbol,
+                       source_bias: mx.sym.Symbol,
                        autoregr_states: mx.sym.Symbol,
                        enc_att_k: Optional[mx.sym.Symbol] = None,
                        enc_att_v: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
@@ -230,8 +230,8 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         # encoder attention
         target_enc_att = self.enc_attention(self.pre_enc_attention(target, None),
                                             source,
-                                            source_att_lengths,
                                             None,
+                                            source_bias,
                                             enc_att_k,
                                             enc_att_v)
 
@@ -326,6 +326,51 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
             h = F.Dropout(h, p=self.dropout)
         y = self.ff2(h)
         return y
+
+
+class TransformerValidLengthMask(mx.gluon.HybridBlock):
+    """
+    Returns bias/mask for variable sequence lengths.
+
+    :param num_heads: Number of attention heads.
+    :param fold_heads: Whether to fold heads dimension into batch dimension.
+    :param name: Name of symbol.
+    :return: Bias symbol. Shape: (batch, seq_len)
+    """
+    def __init__(self, num_heads: Optional[int] = None, fold_heads: bool = True, name: str = '') -> None:
+        super().__init__(prefix=name)
+        self.num_heads = num_heads
+        self.fold_heads = fold_heads
+        self._dtype = 'float32'
+
+    def cast(self, dtype):
+        self._dtype = dtype
+        super().cast(dtype)
+
+    def hybrid_forward(self, F, data, lengths):
+        """
+        Returns bias/mask for variable sequence lengths.
+
+        :param F: symbolic or ndarray.
+        :param data: Input data to mask. Shape: (batch, seq_len, _).
+        :param lengths: Sequence lengths. Shape: (batch,).
+        :return:
+        """
+        # (batch, 1)
+        mask = F.reshape(F.zeros_like(lengths.astype(self._dtype)), shape=(-1, 1))
+        # (batch, seq_len)
+        mask = F.broadcast_like(mask, data, lhs_axes=(1,), rhs_axes=(1,))
+        # (batch_size, max_length)
+        mask = F.SequenceMask(data=mask,
+                              use_sequence_length=True,
+                              sequence_length=lengths,
+                              axis=1,
+                              value=-C.LARGE_VALUES[self._dtype])
+        if self.num_heads is not None:
+            # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
+            mask = layers.broadcast_to_heads(F, mask, self.num_heads, ndim=2, fold_heads=self.fold_heads)
+
+        return F.BlockGrad(mask)
 
 
 class AutoRegressiveBias(mx.gluon.HybridBlock):
