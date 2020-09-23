@@ -146,6 +146,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                 self.autoregr_layer = layers.SSRU(model_size=config.model_size,
                                                   inference_only=inference_only,
                                                   dtype=dtype)
+
             else:
                 raise ValueError("Invalid decoder type.")
 
@@ -158,6 +159,15 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                                dropout=config.dropout_prepost,
                                                                prefix=self.autoregr_layer.prefix + "post_",
                                                                num_hidden=config.model_size)
+            # TODO (tdomhan): Remove with next major version bump.
+            # For backwards compatibility with versions prior to 2.1.17 we also store the layers under to previous
+            # attribute name. This way parameters can be loaded as either decoder.layers.0.autoregr_layer.ff_out.weight
+            # or decoder.layers.0.self_attention.ff_out.weight. Parameter deduplication makes sure parameters are stored
+            # and loaded once only.
+            if self.decoder_type == C.TRANSFORMER_TYPE:
+                self.self_attention = self.autoregr_layer
+                self.pre_self_attention = self.pre_autoregr_layer
+                self.post_self_attention = self.post_autoregr_layer
 
             self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                              dropout=config.dropout_prepost,
