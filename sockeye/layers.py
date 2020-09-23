@@ -570,8 +570,6 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         """
 
         queries = self.ff_q(queries)
-
-        # TODO: check whether memory has proper shape/structure for self.ff_kv projection
         kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(memory)
 
         return self._attend(F, queries, kv, bias=bias, lengths=memory_lengths)
@@ -828,17 +826,12 @@ class SSRU(AutoregressiveLayer):
             current_step_state = forget_rate * previous_step_state + step_input
             return current_step_state, current_step_state
 
-        # TODO: remove if transpose within the SSRU layer is unneeded
-        # weighted_inputs = F.transpose(weighted_inputs, axes=(1, 0, 2))  # (max_length, batch, input_depth)
-        # forget_rates = F.transpose(forget_rates, axes=(1, 0, 2))  # (max_length, batch, input_depth)
 
         # (max_length, batch, input_depth), (batch, input_depth)
         cell_state, last_step_state = F.contrib.foreach(_time_step_update,
                                                         [weighted_inputs, forget_rates],
                                                         previous_cell_state)
 
-        # TODO: remove if transpose within the SSRU layer is unneeded
-        #return F.transpose(cell_state, axes=(1, 0, 2)), last_step_state
         return cell_state, last_step_state
 
     @staticmethod
