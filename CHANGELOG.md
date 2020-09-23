@@ -12,6 +12,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 
+## [2.1.26]
+
+### Fixed
+
+- Fixes a backwards incompatibility introduced in 2.1.17, which would prevent models trained with prior versions to be used for inference.
+
 ## [2.1.25]
 
 ### Changed
