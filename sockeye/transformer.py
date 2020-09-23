@@ -146,7 +146,6 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                 self.autoregr_layer = layers.SSRU(model_size=config.model_size,
                                                   inference_only=inference_only,
                                                   dtype=dtype)
-
             else:
                 raise ValueError("Invalid decoder type.")
 
