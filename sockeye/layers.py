@@ -805,10 +805,7 @@ class SSRU(AutoregressiveLayer):
         :param batch_size: current batch size
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
-        if self.inference_only:
-            return 1, batch_size, self.model_size
-        else:
-            return batch_size, self.model_size
+        return 1, batch_size, self.model_size
 
     @staticmethod
     def _training_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
@@ -830,22 +827,22 @@ class SSRU(AutoregressiveLayer):
         # (max_length, batch, input_depth), (batch, input_depth)
         cell_state, last_step_state = F.contrib.foreach(_time_step_update,
                                                         [weighted_inputs, forget_rates],
-                                                        previous_cell_state)
+                                                        F.squeeze(previous_cell_state, axis=0))
 
-        return cell_state, last_step_state
+        return cell_state, F.expand_dims(last_step_state, axis=0)
 
     @staticmethod
     def _inference_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
         """Update SSRU cell at inference time"""
-        new_step_state = forget_rates * previous_cell_state + weighted_inputs  # (batch, 1, input_depth)
+        new_step_state = forget_rates * previous_cell_state + weighted_inputs  # (1, batch, input_depth)
         return new_step_state, new_step_state
 
     def hybrid_forward(self, F, inputs: mx.sym.Symbol, previous_states: mx.sym.Symbol, *args) -> Tuple:
         """
         :param F: ndarray or Symbol
-        :param inputs: input data. Shape: (batch, max_length, input_depth).
-        :param previous_states: previous cell states. Shape: (batch, max_length, input_depth)
-        :return: cell output and new cell states.  Both with shape (batch, max_length, input_depth).
+        :param inputs: input data. Shape: (max_length, batch, input_depth).
+        :param previous_states: previous cell states. Shape: (max_length, batch, input_depth)
+        :return: cell output and new cell states.  Both with shape (max_length, batch, input_depth).
         """
         forget_rates = self.forget_gate(inputs)
         weighted_inputs = (1 - forget_rates) * self.linear(inputs)
