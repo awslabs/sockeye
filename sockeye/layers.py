@@ -282,31 +282,6 @@ def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_head
         return x
 
 
-def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
-    """
-    Broadcasts batch-major input of shape (batch, d1 ... dn-1) to (batch*heads, d1 ... dn-1).
-
-    :param x: Batch-major input. Shape: (batch, d1 ... dn-1).
-    :param num_heads: Number of heads.
-    :param ndim: Number of dimensions in x.
-    :param fold_heads: Whether to fold heads dimension into batch dimension.
-    :return: Tensor with each sample repeated heads-many times.
-             Shape: (batch * heads, d1 ... dn-1) if fold_heads == True, (batch, heads, d1 ... dn-1) else.
-    """
-    dims = [0] * (ndim - 1)
-    # x: (batch, 1)
-    x = F.expand_dims(x, axis=1)
-    # x: (batch, heads, dims...)
-    #x = F.broadcast_to(x, shape=[0, num_heads] + dims)
-    x = F.repeat(x, repeats=num_heads, axis=1)
-    if fold_heads:
-        # (batch * heads, dims...)
-        return F.reshape(x, shape=[-3] + dims)
-    else:
-        # x: (batch, heads, dims...)
-        return x
-
-
 class DotAttentionCell(mx.gluon.HybridBlock):
 
     def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
