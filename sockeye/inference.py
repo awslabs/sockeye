@@ -32,7 +32,6 @@ from . import utils
 from . import vocab
 from .beam_search import get_beam_search, CandidateScorer
 from .model import SockeyeModel
-from .transformer import TransformerEncoderBlock, TransformerDecoderBlock
 
 logger = logging.getLogger(__name__)
 

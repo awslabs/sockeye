@@ -295,6 +295,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, queries, key_values, heads, lengths=None, bias=None):
 
+        # (n*h, lq, lk)
         logits = F.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
         # TODO(fhieber): consider softmax with length argument once available.
@@ -315,7 +316,10 @@ class DotAttentionCell(mx.gluon.HybridBlock):
 
         probs = F.softmax(logits, axis=-1)
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
-
+        
+        # key_values: (lk, n, dv * 2)
+        # probs: (n*h, lq, lk)
+        # result: (n, lq, dv)
         return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
@@ -358,16 +362,14 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         """
         Returns context vectors of multi-head dot attention.
 
-        :param queries: Query tensor. Shape: (batch_size, heads, query_max_length, depth_per_head).
-        :param keys: Keys. Shape: (batch_size, heads, memory_max_length, depth_per_head).
-        :param values: Values. Shape: (batch_size, heads, memory_max_length, depth_per_head).
+        :param queries: Query tensor. Shape: (query_max_length, batch_size, depth).
+        :param key_values: Keys. Shape: (memory_max_length, batch_size, depth * 2).
         :param lengths: Optional lengths of keys. Shape: (batch_size,).
         :param bias: Optional 3d bias.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
         lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1,
                                      fold_heads=True) if lengths is not None else lengths
-
 
         # (query_max_length, batch, depth)
         contexts = self.dot_att(queries, key_values, self.heads, lengths, bias)
@@ -533,15 +535,14 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         Computes multi-head attention for queries given a memory tensor.
         If sequence lengths are provided, they will be used to mask the attention scores.
         A bias mask may also be used to mask the attention scores.
-        Returns a symbol of shape (batch, max_length, output_depth).
+        Returns a symbol of shape (max_length, batch, output_depth).
 
-        :param queries: Query tensor. Shape: (batch, query_max_length, input_depth).
-        :param memory: Memory data to attend to. Shape: (batch, memory_max_length, input_depth).
+        :param queries: Query tensor. Shape: (query_max_length, batch, input_depth).
+        :param memory: Memory data to attend to. Shape: (memory_max_length, batch, input_depth).
         :param memory_lengths: Optional lengths of memory to mask attention scores. Shape: (batch, 1).
         :param bias: Optional 3d bias tensor to mask attention scores.
-        :param projected_memory_keys: Optional previously projected memory keys.
-        :param projected_memory_values: Optional previously projected memory values.
-        :return: Symbol of shape (batch, query_seq_len, output_depth).
+        :param projected_memory_kv: Optional previously projected memory keys and values.
+        :return: Symbol of shape (query_seq_len, batch, output_depth).
         """
 
         queries = self.ff_q(queries)
@@ -563,14 +564,14 @@ class PlainDotAttention(mx.gluon.HybridBlock):
         """
         Returns a symbol of shape (batch, max_length, output_depth).
 
-        :param queries: Symbol of shape (batch, queries_max_length, input_depth).
-        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
+        :param queries: Symbol of shape (queries_max_length, batch, input_depth).
+        :param memory: Symbol of shape (memory_max_length, batch, input_depth).
         :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (batch, queries_max_length, output_depth).
+        :return: Symbol of shape (queries_max_length, batch, output_depth).
        """
 
-        # (batch*heads, queries_max_length, depth_per_head)
-        return self.dot_att(queries, memory, memory, memory_lengths, None)
+        # (queries_max_length, batch, output_depth)
+        return self.dot_att(queries, memory, 1, memory_lengths, None)
 
 
 class ProjectedDotAttention(mx.gluon.HybridBlock):
@@ -599,26 +600,19 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
         """
         Apply project, apply dot attention and return new context vectors.
 
-        :param queries: Symbol of shape (batch, queries_max_length, input_num_hidden).
-        :param memory: Symbol of shape (batch, memory_max_length, input_num_hidden).
+        :param queries: Symbol of shape (queries_max_length, batch, input_num_hidden).
+        :param memory: Symbol of shape (memory_max_length, batch, input_num_hidden).
         :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (batch, queries_max_length, num_hidden).
+        :return: Symbol of shape (queries_max_length, batch, num_hidden).
         """
-        # (batch, memory_max_length, num_hidden * 2)
+        # (memory_max_length, batch, num_hidden * 2)
         combined = self.kv2h(memory)
 
-        # split into keys and values
-        # pylint: disable=unbalanced-tuple-unpacking
-        keys, values = F.split(data=combined, num_outputs=2, axis=2)
-
-        # (batch, queries_max_length, num_hidden)
+        # (queries_max_length, batch, num_hidden)
         queries = self.q2h(queries)
 
-        # scale by sqrt(num_hidden)
-        queries = queries * (self.num_hidden ** -0.5)
-
-        # (batch, queries_max_length, num_hidden)
-        contexts = self.dot_att(queries, keys, values, memory_lengths, None)
+        # (queries_max_length, batch, num_hidden)
+        contexts = self.dot_att(queries, combined, 1, memory_lengths, None)
 
         return contexts
 

@@ -218,11 +218,11 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                        source_bias: mx.sym.Symbol,
                        autoregr_states: mx.sym.Symbol,
                        enc_att_kv: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
-                                                                           mx.sym.Symbol]:
-        target_autoregr, new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
-                                                                   autoregr_states,
-                                                                   None,
-                                                                   target_bias)
+                                                                            mx.sym.Symbol]:
+        target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
+                                                                    autoregr_states,
+                                                                    None,
+                                                                    target_bias)
 
         target = self.post_autoregr_layer(target_autoregr, target)
 

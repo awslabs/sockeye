@@ -311,15 +311,15 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             target = F.Dropout(data=target, p=self.config.dropout_prepost)
 
         new_autoregr_states = []
-        for layer, layer_autoregr_state, enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
+        for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
             target, new_layer_autoregr_state = layer(target,
                                                      mask,
                                                      source_encoded,
                                                      source_mask,
                                                      layer_autoregr_state,
-                                                     enc_att_kv)
+                                                     layer_enc_att_kv)
 
-            new_autoregr_states.append(new_layer_autoregr_state)
+            new_autoregr_states += [*new_layer_autoregr_state]
 
         target = self.final_process(target, None)
         target = F.transpose(target, axes=(1, 0, 2))
