@@ -560,7 +560,7 @@ class RawParallelDatasetLoader:
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
                 else:
                     # sequence: <PAD> <BOS> ...
-                    t.insert(0, C.PAD_ID)  # TODO or BOS_ID instead?
+                    t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
 
             bucket_sample_index[buck_index] += 1
