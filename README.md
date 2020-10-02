@@ -48,14 +48,19 @@ For technical information about Sockeye 1, see our paper on the arXiv ([BibTeX](
 ## Research with Sockeye
 
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
-If you know more, please let us know or submit a pull request (last updated: April 2020).
+If you know more, please let us know or submit a pull request (last updated: September 2020).
 
 ### 2020
 
 * Dinu, Georgiana, Prashant Mathur, Marcello Federico, Stanislas Lauly, Yaser Al-Onaizan. "Joint translation and unit conversion for end-to-end localization." arXiv preprint arXiv:2004.05219 (2020)
 * Hisamoto, Sorami, Matt Post, Kevin Duh. "Membership Inference Attacks on Sequence-to-Sequence Models: Is My Data In Your Machine Translation System?" Transactions of the Association for Computational Linguistics, Volume 8 (2020)
 * Naradowsky, Jason, Xuan Zhan, Kevin Duh. "Machine Translation System Selection from Bandit Feedback." arXiv preprint arXiv:2002.09646 (2020)
+* Niu, Xing, Prashant Mathur, Georgiana Dinu, Yaser Al-Onaizan. "Evaluating Robustness to Input Perturbations for Neural Machine Translation". arXiv preprint 	arXiv:2005.00580 (2020)
 * Niu, Xing, Marine Carpuat. "Controlling Neural Machine Translation Formality with Synthetic Supervision." Proceedings of AAAI (2020)
+* Sokolov, Alex, Tracy Rohlin, Ariya Rastrow. "Neural Machine Translation for Multilingual Grapheme-to-Phoneme Conversion." arXiv preprint arXiv:2006.14194 (2020)
+* Stojanovski, Dario, Alexander Fraser. "Addressing Zero-Resource Domains Using Document-Level Context in Neural Machine Translation." arXiv preprint arXiv preprint arXiv:2004.14927 (2020)
+* Zhang, Xuan, Kevin Duh. "Reproducible and Efficient Benchmarks for Hyperparameter Optimization of Neural Machine Translation Systems." Transactions of the Association for Computational Linguistics, Volume 8 (2020)
+
 
 ### 2019
 
