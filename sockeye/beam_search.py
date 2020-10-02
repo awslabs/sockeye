@@ -565,7 +565,7 @@ class BeamSearch(mx.gluon.Block):
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
         first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
-        first_step_mask[batch_indices] = 1.0
+        first_step_mask[batch_indices] = 0.0
         pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
                               ctx=self.context, dtype=self.dtype)
         eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
@@ -673,7 +673,7 @@ class BeamSearch(mx.gluon.Block):
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
                 # of the first row only by setting all other rows to inf
                 if t == 1:
-                    scores *= first_step_mask
+                    scores += first_step_mask
 
                 best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
 
