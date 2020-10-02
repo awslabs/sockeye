@@ -60,6 +60,8 @@ If you know more, please let us know or submit a pull request (last updated: Sep
 * Sokolov, Alex, Tracy Rohlin, Ariya Rastrow. "Neural Machine Translation for Multilingual Grapheme-to-Phoneme Conversion." arXiv preprint arXiv:2006.14194 (2020)
 * Stojanovski, Dario, Alexander Fraser. "Addressing Zero-Resource Domains Using Document-Level Context in Neural Machine Translation." arXiv preprint arXiv preprint arXiv:2004.14927 (2020)
 * Zhang, Xuan, Kevin Duh. "Reproducible and Efficient Benchmarks for Hyperparameter Optimization of Neural Machine Translation Systems." Transactions of the Association for Computational Linguistics, Volume 8 (2020)
+* Swe Zin Moe, Ye Kyaw Thu, Hnin Aye Thant, Nandar Win Min, and Thepchai Supnithi, "Unsupervised Neural Machine Translation between Myanmar Sign Language and Myanmar Language", Journal of Intelligent Informatics and Smart Technology, April 1st Issue, 2020, pp. 53-61. (Submitted December 21, 2019; accepted March 6, 2020; revised March 16, 2020; published online April 30, 2020)
+* Thazin Myint Oo, Ye Kyaw Thu, Khin Mar Soe and Thepchai Supnithi, "Neural Machine Translation between Myanmar (Burmese) and Dawei (Tavoyan)", In Proceedings of the 18th International Conference on Computer Applications (ICCA 2020), Feb 27-28, 2020, Yangon, Myanmar, pp. 219-227
 
 
 ### 2019
@@ -72,6 +74,7 @@ If you know more, please let us know or submit a pull request (last updated: Sep
 * Rosendahl, Jan, Christian Herold, Yunsu Kim, Miguel Graça,Weiyue Wang, Parnia Bahar, Yingbo Gao and Hermann Ney “The RWTH Aachen University Machine Translation Systems for WMT 2019” Proceedings of the 4th WMT: Research Papers (2019)
 * Thompson, Brian, Jeremy Gwinnup, Huda Khayrallah, Kevin Duh, and Philipp Koehn. "Overcoming catastrophic forgetting during domain adaptation of neural machine translation." Proceedings of NAACL-HLT 2019 (2019)
 * Tättar, Andre, Elizaveta Korotkova, Mark Fishel “University of Tartu’s Multilingual Multi-domain WMT19 News Translation Shared Task Submission” Proceedings of 4th WMT: Research Papers (2019)
+* Thazin Myint Oo, Ye Kyaw Thu and Khin Mar Soe, "Neural Machine Translation between Myanmar (Burmese) and Rakhine (Arakanese)", In Proceedings of the Sixth Workshop on NLP for Similar Languages, Varieties and Dialects, NAACL-2019, June 7th 2019, Minneapolis, United States, pp. 80-88
 
 ### 2018
 
@@ -90,6 +93,7 @@ If you know more, please let us know or submit a pull request (last updated: Sep
 * Vyas, Yogarshi, Xing Niu and Marine Carpuat “Identifying Semantic Divergences in Parallel Text without Annotations”. Proceedings of NAACL-HLT (2018)
 * Wang, Weiyue, Derui Zhu, Tamer Alkhouli, Zixuan Gan, and Hermann Ney. "Neural Hidden Markov Model for Machine Translation". Proceedings of 56th ACL (2018)
 * Zhang, Xuan, Gaurav Kumar, Huda Khayrallah, Kenton Murray, Jeremy Gwinnup, Marianna J Martindale, Paul McNamee, Kevin Duh, and Marine Carpuat. "An Empirical Exploration of Curriculum Learning for Neural Machine Translation." arXiv preprint arXiv:1811.00739 (2018)
+* Swe Zin Moe, Ye Kyaw Thu, Hnin Aye Thant and Nandar Win Min, "Neural Machine Translation between Myanmar Sign Language and Myanmar Written Text", In the second Regional Conference on Optical character recognition and Natural language processing technologies for ASEAN languages 2018 (ONA 2018), December 13-14, 2018, Phnom Penh, Cambodia.  
 
 ### 2017
 
