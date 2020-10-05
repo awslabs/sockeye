@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.2.1]
+## Fixed
+
+- Fixes a corner case bug by which the beam decoder can wrongly return a best hypothesis with -infinite score.
+
 ## [2.2.0]
 
 ### Changed
@@ -1105,5 +1110,3 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
-
-
