@@ -11,9 +11,65 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [2.2.0]
+## [2.3.0]
 
 - Basic support for target factors in training.
+
+## [2.2.1]
+## Fixed
+
+- Fixes a corner case bug by which the beam decoder can wrongly return a best hypothesis with -infinite score.
+
+## [2.2.0]
+
+### Changed
+
+- Replaced multi-head attention with [interleaved_matmul_encdec](https://github.com/apache/incubator-mxnet/pull/16408) operators, which removes previously needed transposes and improves performance.
+
+- Beam search states and model layers now assume time-major format.
+
+## [2.1.26]
+
+### Fixed
+
+- Fixes a backwards incompatibility introduced in 2.1.17, which would prevent models trained with prior versions to be used for inference.
+
+## [2.1.25]
+
+### Changed
+
+- Reverting PR #772 as it causes issues with `amp`.
+
+## [2.1.24]
+
+### Changed
+
+- Make sure to write a final checkpoint when stopping with `--max-updates`, `--max-samples` or `--max-num-epochs`.
+
+## [2.1.23]
+
+### Changed
+
+- Updated to [MXNet 1.7.0](https://github.com/apache/incubator-mxnet/tree/1.7.0).
+- Re-introduced use of softmax with length parameter in DotAttentionCell (see PR #772).
+
+## [2.1.22]
+
+### Added
+
+- Re-introduced `--softmax-temperature` flag for `sockeye.score` and `sockeye.translate`.
+
+## [2.1.21]
+
+### Added
+
+- Added an optional ability to cache encoder outputs of model.
+
+## [2.1.20]
+
+### Fixed
+
+- Fixed a bug where the training state object was saved to disk before training metrics were added to it, leading to an inconsistency between the training state object and the metrics file (see #859).
 
 ## [2.1.19]
 
@@ -1057,5 +1113,3 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
-
-

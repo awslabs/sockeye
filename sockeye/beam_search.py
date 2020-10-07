@@ -55,10 +55,12 @@ class _SingleModelInference(_Inference):
     def __init__(self,
                  model: SockeyeModel,
                  skip_softmax: bool = False,
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 softmax_temperature: Optional[float] = None) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
+        self._softmax_temperature = softmax_temperature
 
     def state_structure(self) -> List:
         return [self._model.state_structure()]
@@ -74,7 +76,7 @@ class _SingleModelInference(_Inference):
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
-            logits = logits.log_softmax(axis=-1)
+            logits = logits.log_softmax(axis=-1, temperature=self._softmax_temperature)
         scores = -logits
 
         target_factors = None  # type: Optional[mx.nd.NDArray]
@@ -92,7 +94,8 @@ class _EnsembleInference(_Inference):
     def __init__(self,
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 softmax_temperature: Optional[float] = None) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -101,6 +104,7 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
+        self._softmax_temperature = softmax_temperature
 
     def state_structure(self) -> List:
         structure = []
@@ -131,7 +135,7 @@ class _EnsembleInference(_Inference):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
             logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
-            probs = logits.softmax(axis=-1)
+            probs = logits.softmax(axis=-1, temperature=self._softmax_temperature)
             outputs.append(probs)
             target_factor_probs = [tfo.softmax(axis=-1) for tfo in target_factor_outputs]
             factor_outputs.append(target_factor_probs)
@@ -442,16 +446,16 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
     assert len(states) == len(flat_structure), "Number of states do not match the defined state structure"
     for state, state_format in zip(states, flat_structure):
         if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+            # Steps and source_bias have batch dimension on axis 0
             repeat_axis = 0
         elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
-            # TODO: Change repeat axis to 1 when interleaved multihead attention is implemented
-            repeat_axis = 0
+            # Decoder and encoder layer states have batch dimension on axis 1
+            repeat_axis = 1
         else:
             raise ValueError("Provided state format %s not recognized." % state_format)
         repeated_state = state.repeat(repeats=beam_size, axis=repeat_axis)
         repeated_states.append(repeated_state)
     return repeated_states
-
 
 class SortStates(mx.gluon.HybridBlock):
 
@@ -464,10 +468,11 @@ class SortStates(mx.gluon.HybridBlock):
         assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
         for state, state_format in zip(states, self.flat_structure):
             if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+                # Steps and source_bias have batch dimension on axis 0
                 sorted_state = F.take(state, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
-                # TODO: Change take axis to 1 when interleaved multihead attention is implemented
-                sorted_state = F.take(state, best_hyp_indices)
+                # Decoder and encoder layer states have batch dimension on axis 1
+                sorted_state = F.take(state, best_hyp_indices, axis=1)
             elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
                 sorted_state = state
@@ -592,7 +597,7 @@ class BeamSearch(mx.gluon.Block):
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
         first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
-        first_step_mask[batch_indices] = 1.0
+        first_step_mask[batch_indices] = 0.0
         pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
                               ctx=self.context, dtype=self.dtype)
         eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
@@ -703,7 +708,7 @@ class BeamSearch(mx.gluon.Block):
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
                 # of the first row only by setting all other rows to inf
                 if t == 1:
-                    scores *= first_step_mask
+                    scores += first_step_mask
 
                 best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
 
@@ -783,7 +788,8 @@ def get_beam_search(models: List[SockeyeModel],
                     constant_length_ratio: float = 0.0,
                     avoid_list: Optional[str] = None,
                     sample: Optional[int] = None,
-                    hybridize: bool = True) -> BeamSearch:
+                    hybridize: bool = True,
+                    softmax_temperature: Optional[float] = None) -> BeamSearch:
 
     inference = None  # type: Optional[_Inference]
     if len(models) == 1:
@@ -791,11 +797,14 @@ def get_beam_search(models: List[SockeyeModel],
         if skip_softmax:
             logger.info("Enabled skipping softmax for a single model and greedy decoding.")
         inference = _SingleModelInference(model=models[0],
-                                          skip_softmax=skip_softmax, constant_length_ratio=constant_length_ratio)
+                                          skip_softmax=skip_softmax,
+                                          constant_length_ratio=constant_length_ratio,
+                                          softmax_temperature=softmax_temperature)
     else:
         inference = _EnsembleInference(models=models,
                                        ensemble_mode=ensemble_mode,
-                                       constant_length_ratio=constant_length_ratio)
+                                       constant_length_ratio=constant_length_ratio,
+                                       softmax_temperature=softmax_temperature)
 
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
     bs = BeamSearch(

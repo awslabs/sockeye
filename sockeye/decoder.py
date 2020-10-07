@@ -163,7 +163,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         """
         structure = ''
         if self.inference_only:
-            structure += C.STEP_STATE + C.BIAS_STATE + C.ENCODER_STATE * self.config.num_layers * 2
+            structure += C.STEP_STATE + C.BIAS_STATE + C.ENCODER_STATE * self.config.num_layers
         else:
             structure += C.STEP_STATE + C.ENCODER_STATE + C.BIAS_STATE
 
@@ -197,13 +197,11 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             states = [step, source_mask]
 
             for layer in self.layers:
-                encoder_attention_keys, encoder_attention_values = \
-                    layer.enc_attention.project_and_isolate_heads(mx.nd, encoder_outputs)
-                states.append(encoder_attention_keys)
-                states.append(encoder_attention_values)
+                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs)
+                states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
         else:
             # NO encoder projection caching
-            states = [step, encoder_outputs, source_mask]
+            states = [step, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), source_mask]
 
         batch_size = encoder_outputs.shape[0]
         dummy_autoregr_states = [mx.nd.zeros(layer.get_states_shape(batch_size),
@@ -271,7 +269,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
             if self.inference_only:
                 # pass in cached encoder states
-                encoder_attention_keys_values = states[2:2 + self.config.num_layers * 2]
+                encoder_attention_keys_values = states[2:2 + self.config.num_layers]
                 new_states = [step, states[1]] + encoder_attention_keys_values + autoregr_states
             else:
                 encoder_outputs = states[1]
@@ -288,14 +286,13 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         if self.inference_only:
             steps, source_mask, *other = states
             source_encoded = None  # use constant pre-computed key value projections from the states
-            enc_att_kv = other[:self.config.num_layers * 2]
-            enc_att_kv = [enc_att_kv[i:i + 2] for i in range(0, len(enc_att_kv), 2)]
-            autoregr_states = other[self.config.num_layers * 2:]
+            enc_att_kv = other[:self.config.num_layers]
+            autoregr_states = other[self.config.num_layers:]
         else:
             if any(layer.needs_mask for layer in self.layers):
                 mask = self.autoregressive_bias(step_input)  # mask: (1, length, length)
             steps, source_encoded, source_mask, *autoregr_states = states
-            enc_att_kv = [(None, None) for _ in range(self.config.num_layers)]
+            enc_att_kv = [None for _ in range(self.config.num_layers)]
 
         if any(layer.num_state_tensors > 1 for layer in self.layers):
             # separates autoregressive states by layer
@@ -307,23 +304,25 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
+        # (length, batch_size, model_size)
+        target = F.transpose(target, axes=(1, 0, 2))
 
         if self.config.dropout_prepost > 0.0:
             target = F.Dropout(data=target, p=self.config.dropout_prepost)
 
         new_autoregr_states = []
-        for layer, layer_autoregr_state, (enc_att_k, enc_att_v) in zip(self.layers, autoregr_states, enc_att_kv):
+        for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
             target, new_layer_autoregr_state = layer(target,
                                                      mask,
                                                      source_encoded,
                                                      source_mask,
                                                      layer_autoregr_state,
-                                                     enc_att_k, enc_att_v)
+                                                     layer_enc_att_kv)
 
             new_autoregr_states += [*new_layer_autoregr_state]
-            # NOTE: the list expansion is needed in order to handle both a tuple (of Symbols) and a Symbol as a new state
 
         target = self.final_process(target, None)
+        target = F.transpose(target, axes=(1, 0, 2))
 
         return target, new_autoregr_states
 
