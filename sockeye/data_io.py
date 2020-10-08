@@ -483,11 +483,11 @@ class RawParallelDatasetLoader:
     Target factor shifting:
         Data I/O sequence:
         f1: <BOS>   A   B   C <EOS>
-        fs: <PAD> <BOS> a   b   c
+        fs: <BOS> <BOS> a   b   c
 
         Target sequence:
         f1: <BOS>   A   B   C
-        fs: <PAD> <BOS> a   b
+        fs: <BOS> <BOS> a   b
 
         Label sequence:
         f1:   A     B   C <EOS>
@@ -559,7 +559,7 @@ class RawParallelDatasetLoader:
                     t.append(self.eos_id)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
                 else:
-                    # sequence: <PAD> <BOS> ...
+                    # sequence: <BOS> <BOS> ...
                     t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
 

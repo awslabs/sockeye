@@ -42,6 +42,8 @@ SPACE_FOR_XOS = 1
 
 ARG_SEPARATOR = ":"
 
+# If true, target factors are shifted to the right by 1 at training time, and unshifted in inference.
+# TODO: make this configurable in the model, separately per target factor.
 TARGET_FACTOR_SHIFT = True
 
 ENCODER_PREFIX = "encoder_"
