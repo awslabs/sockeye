@@ -159,7 +159,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
      " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
      "--beam-size 1",
-     True, 0,
+     True, 0, 0,
      1.03,
      0.97)
 ])
