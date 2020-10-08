@@ -43,8 +43,8 @@ def test_backwards_compatibility():
         output_file = os.path.join(work_dir, "out")
         params = """{sockeye} --use-cpu --models {model} --input {input} --output {output} """.format(
             sockeye=sockeye.translate.__file__,
-            model="test/data/model_2.2.x",
-            input="test/data/model_2.2.x/model_input",
+            model="test/data/model_2.3.x",
+            input="test/data/model_2.3.x/model_input",
             output=output_file
         )
         logger.info("Translating with params %s", params)
