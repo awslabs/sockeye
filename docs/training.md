@@ -8,24 +8,23 @@ layout: default
 
 Sockeye can read the raw data at training time in two sentence-parallel files via the `--source` and `--target` command-line options.
 You can also prepare the data ahead of time and dump it to disk as MXNet NDArrays.
-This basically eliminates the data loading time when running training (since three passes over the raw data are required), and also reduces memory consumption, since prepared data is also placed into random shards (which have one million lines each, by default).
+This eliminates the data loading time when running training (since three passes over the raw data are required), and also reduces memory consumption,
+since prepared data is also placed into random shards (which have one million lines each, by default).
 To run data preparation, you can use the following command:
 
 ```bash
 > python -m sockeye.prepare_data
-usage: prepare_data.py [-h] --source SOURCE
-                       [--source-factors SOURCE_FACTORS [SOURCE_FACTORS ...]]
-                       --target TARGET [--source-vocab SOURCE_VOCAB]
-                       [--target-vocab TARGET_VOCAB]
+usage: prepare_data.py [-h] --source SOURCE [--source-factors SOURCE_FACTORS [SOURCE_FACTORS ...]]
+                       [--source-factors-use-source-vocab SOURCE_FACTORS_USE_SOURCE_VOCAB [SOURCE_FACTORS_USE_SOURCE_VOCAB ...]]
+                       [--target-factors TARGET_FACTORS [TARGET_FACTORS ...]]
+                       [--target-factors-use-target-vocab TARGET_FACTORS_USE_TARGET_VOCAB [TARGET_FACTORS_USE_TARGET_VOCAB ...]] --target
+                       TARGET [--source-vocab SOURCE_VOCAB] [--target-vocab TARGET_VOCAB]
                        [--source-factor-vocabs SOURCE_FACTOR_VOCABS [SOURCE_FACTOR_VOCABS ...]]
-                       [--shared-vocab] [--num-words NUM_WORDS]
-                       [--word-min-count WORD_MIN_COUNT]
-                       [--pad-vocab-to-multiple-of PAD_VOCAB_TO_MULTIPLE_OF]
-                       [--no-bucketing] [--bucket-width BUCKET_WIDTH]
-                       [--max-seq-len MAX_SEQ_LEN]
-                       [--num-samples-per-shard NUM_SAMPLES_PER_SHARD]
-                       [--min-num-shards MIN_NUM_SHARDS] [--seed SEED]
-                       --output OUTPUT
+                       [--target-factor-vocabs TARGET_FACTOR_VOCABS [TARGET_FACTOR_VOCABS ...]] [--shared-vocab] [--num-words NUM_WORDS]
+                       [--word-min-count WORD_MIN_COUNT] [--pad-vocab-to-multiple-of PAD_VOCAB_TO_MULTIPLE_OF] [--no-bucketing]
+                       [--bucket-width BUCKET_WIDTH] [--bucket-scaling] [--no-bucket-scaling] [--max-seq-len MAX_SEQ_LEN]
+                       [--num-samples-per-shard NUM_SAMPLES_PER_SHARD] [--min-num-shards MIN_NUM_SHARDS] [--seed SEED] --output OUTPUT
+                       [--max-processes MAX_PROCESSES] [--quiet] [--quiet-secondary-workers] [--no-logfile] [--loglevel {INFO,DEBUG}]
 prepare_data.py: error: the following arguments are required: --source/-s, --target/-t, --output/-o
 ```
 
@@ -72,13 +71,8 @@ You can specify a maximum number of updates/batches using `--max-updates`.
 
 Perplexity is the default metric to be considered for early-stopping, but you
 can also choose to optimize accuracy or BLEU using the `--optimized-metric`
-argument. In case of optimizing with respect to  BLEU, you will need to specify
-`--monitor-bleu`. For efficiency reasons, sockeye spawns a sub-processes after each
-checkpoint to decode the validation data and compute BLEU. This may introduce
-some delay in the reporting of results, i.e. there may be checkpoints with no
-BLEU results reported or with results corresponding to older checkpoints. This
-is expected behaviour and sockeye internally keeps track of the results in the
-correct order.
+argument. In case of optimizing with respect to BLEU, you will need to set `--decode-and-evaluate` > 0
+to decode validation at every checkpoint.
 
 Note that evaluation metrics for training data and held-out validation data are
 written in a tab-separated file called `metrics`.
@@ -170,6 +164,24 @@ You can also sum the embeddings (`--source-factors-combine sum`).
 In this case, you do not need to specify `--source-factors-num-embed`, since they are automatically all set to the size of the word embeddings (`--num-embed`).
 
 You then also have to apply factors for the source side [at inference time](inference.html#source-factors).
+
+## Target factors
+
+Sockeye supports target factors, i.e. alternative tokens/features to be predicted alongside the main decoding output.
+Similar to source factors, the target factor files at training time need to be token-parallel to the target side.
+For example, if you have the following line of a target sentence:
+
+> der junge aß die waff@@ el .
+
+A POS target factor could look like like this:
+
+> DET N V DET N N PUNC
+
+Internally, Sockeye will shift all target factors to the right by 1 to condition the prediction of the factors on the previously generated target word.
+During training, Sockeye will optimize multiple losses in a multi-task setting, one for each target factor. The weight of the losses can be controlled by `--target-factors-weight`.
+
+To receive the target factor predictions at inference time, use `--output-type translation_with_factors`.
+Target factors do not participate in beam search, i.e. each target factor prediction is the argmax of the corresponding output layer distribution.
 
 ## Length ratio prediction
 
