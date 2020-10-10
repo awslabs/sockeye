@@ -15,6 +15,11 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 - Basic support for target factors in training.
 
+## [2.2.2]
+
+### Fixed
+ - Fix: Guard against null division for small batch sizes.
+
 ## [2.2.1]
 ## Fixed
 
