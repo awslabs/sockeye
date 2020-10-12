@@ -1078,6 +1078,7 @@ class DataStatistics(config.Config):
 
     def log(self, bucket_batch_sizes: Optional[List[BucketBatchSize]] = None):
         logger.info("Tokens: source %d target %d", self.num_tokens_source, self.num_tokens_target)
+        logger.info("Number of <unk> tokens: source %d target %d", self.num_unks_source, self.num_unks_target)
         if self.num_tokens_source > 0 and self.num_tokens_target > 0:
             logger.info("Vocabulary coverage: source %.0f%% target %.0f%%",
                         (1 - self.num_unks_source / self.num_tokens_source) * 100,
