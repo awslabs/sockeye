@@ -277,10 +277,8 @@ class DotAttentionCell(mx.gluon.HybridBlock):
             logits = F.broadcast_add(logits, bias)
 
         if lengths is not None:
-            # before: (n*h, 1)
-            # after: (n*h, lq)
-            lengths = F.broadcast_like(F.expand_dims(lengths, axis=1), logits, lhs_axes=(1,), rhs_axes=(1,))
-            probs = F.softmax(logits, axis=-1, length=F.cast(lengths, dtype='int32'), use_length=True)
+            # required shape for lengths: (n*h, lq); required dtype: int32
+            probs = F.softmax(logits, axis=-1, length=lengths, use_length=True)
         else:
             probs = F.softmax(logits, axis=-1)
 

@@ -185,22 +185,19 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         :param encoder_valid_length: Valid lengths of encoder outputs. Shape: (batch,).
         :return: Initial states.
         """
-        # (batch, heads)
-        att_valid_length = encoder_valid_length.reshape((-1, 1)).repeat(repeats=self.config.attention_heads, axis=1)
-
         # (batch_size, 1)
         step = mx.nd.expand_dims(mx.nd.zeros_like(encoder_valid_length), axis=1)
 
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
-            states = [step, att_valid_length]
+            states = [step, encoder_valid_length]
 
             for layer in self.layers:
                 enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs)
                 states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
         else:
             # NO encoder projection caching
-            states = [step, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), att_valid_length]
+            states = [step, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
 
         batch_size = encoder_outputs.shape[0]
         dummy_autoregr_states = [mx.nd.zeros(layer.get_states_shape(batch_size),
@@ -298,8 +295,15 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             states_iter = iter(autoregr_states)
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
 
-        # Fold the heads of source_mask (batch_size, num_heads, seq_len) -> (batch_size * num_heads, seq_len)
-        att_valid_length = F.reshape(att_valid_length, shape=(-3, -2))
+        # prepare encoder attention valid length tensor
+        # (batch * heads,)
+        att_valid_length = F.repeat(att_valid_length, repeats=self.config.attention_heads, axis=0)
+        # (batch * heads, query_length)
+        att_valid_length = F.broadcast_like(F.expand_dims(att_valid_length, axis=1),
+                                            step_input,
+                                            lhs_axes=(1,),
+                                            rhs_axes=(1,))
+        att_valid_length = F.cast(att_valid_length, dtype='int32')
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
