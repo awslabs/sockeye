@@ -13,7 +13,7 @@
 
 import logging
 from abc import abstractmethod
-from typing import Optional, Union, Tuple, List
+from typing import Optional, Union, Tuple
 from functools import lru_cache
 
 import mxnet as mx
@@ -257,31 +257,6 @@ class LengthRatio(mx.gluon.HybridBlock):
         return F.squeeze(data)
 
 
-def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
-    """
-    Broadcasts batch-major input of shape (batch, d1 ... dn-1) to (batch*heads, d1 ... dn-1).
-
-    :param x: Batch-major input. Shape: (batch, d1 ... dn-1).
-    :param num_heads: Number of heads.
-    :param ndim: Number of dimensions in x.
-    :param fold_heads: Whether to fold heads dimension into batch dimension.
-    :return: Tensor with each sample repeated heads-many times.
-             Shape: (batch * heads, d1 ... dn-1) if fold_heads == True, (batch, heads, d1 ... dn-1) else.
-    """
-    dims = [0] * (ndim - 1)
-    # x: (batch, 1)
-    x = F.expand_dims(x, axis=1)
-    # x: (batch, heads, dims...)
-    #x = F.broadcast_to(x, shape=[0, num_heads] + dims)
-    x = F.repeat(x, repeats=num_heads, axis=1)
-    if fold_heads:
-        # (batch * heads, dims...)
-        return F.reshape(x, shape=[-3] + dims)
-    else:
-        # x: (batch, heads, dims...)
-        return x
-
-
 class DotAttentionCell(mx.gluon.HybridBlock):
 
     def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
@@ -298,23 +273,17 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         # (n*h, lq, lk)
         logits = F.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
-        # TODO(fhieber): consider softmax with length argument once available.
-        # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
-        if lengths is not None:
-            # mask lk dimension
-            # (lk, n, lq)
-            logits = F.transpose(logits, axes=(2, 0, 1))
-            logits = F.SequenceMask(logits,
-                                    use_sequence_length=True,
-                                    sequence_length=lengths,
-                                    value=-C.LARGE_VALUES[self._dtype])
-            # (n, lq, lk)
-            logits = F.transpose(data=logits, axes=(1, 2, 0))
-
         if bias is not None:
             logits = F.broadcast_add(logits, bias)
 
-        probs = F.softmax(logits, axis=-1)
+        if lengths is not None:
+            # before: (n*h, 1)
+            # after: (n*h, lq)
+            lengths = F.broadcast_like(F.expand_dims(lengths, axis=1), logits, lhs_axes=(1,), rhs_axes=(1,))
+            probs = F.softmax(logits, axis=-1, length=F.cast(lengths, dtype='int32'), use_length=True)
+        else:
+            probs = F.softmax(logits, axis=-1)
+
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
         
         # key_values: (lk, n, dv * 2)
@@ -364,12 +333,10 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
 
         :param queries: Query tensor. Shape: (query_max_length, batch_size, depth).
         :param key_values: Keys. Shape: (memory_max_length, batch_size, depth * 2).
-        :param lengths: Optional lengths of keys. Shape: (batch_size,).
+        :param lengths: Optional lengths of keys. Shape: (batch_size*heads,).
         :param bias: Optional 3d bias.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
-        lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1,
-                                     fold_heads=True) if lengths is not None else lengths
 
         # (query_max_length, batch, depth)
         contexts = self.dot_att(queries, key_values, self.heads, lengths, bias)
