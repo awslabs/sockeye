@@ -365,9 +365,9 @@ class TopK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
     def hybrid_forward(self, F, scores):
-        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
         # Project indices back into original shape (which is different for t==1 and t>1)
-        return F.reshape(F.cast(indices, 'int32'), shape=(-1,)), F.reshape(values, shape=(-1, 1))
+        return F.reshape(indices, shape=(-1,)), F.reshape(values, shape=(-1, 1))
 
 
 class SampleK(mx.gluon.HybridBlock):
