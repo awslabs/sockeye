@@ -11,9 +11,17 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.2.4]
+
+### Changed
+
+- Use `contrib.arange_like` in AutoRegressiveBias block to reduce number of ops. 
+
 ## [2.2.3]
+
 ### Added
- - Log the absolute number of `<unk>` tokens in source and target data
+
+- Log the absolute number of `<unk>` tokens in source and target data
 
 ## [2.2.2]
 
@@ -21,6 +29,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
  - Fix: Guard against null division for small batch sizes.
 
 ## [2.2.1]
+
 ## Fixed
 
 - Fixes a corner case bug by which the beam decoder can wrongly return a best hypothesis with -infinite score.
