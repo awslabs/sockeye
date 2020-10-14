@@ -327,7 +327,7 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
 
 
 class AutoRegressiveBias(mx.gluon.HybridBlock):
-    def __init__(self, prefix: str = '',) -> None:
+    def __init__(self, prefix: str = '') -> None:
         super().__init__(prefix=prefix)
         self._dtype = 'float32'
 
@@ -336,15 +336,12 @@ class AutoRegressiveBias(mx.gluon.HybridBlock):
         super().cast(dtype)
 
     def hybrid_forward(self, F, x):
-        # (length)
-        x = F.squeeze(F.slice(x, begin=(0, None, 0), end=(1, None, 1)))
-        # (length, 1)
-        # TODO: use F.contrib.arange_like with MXNET 1.6.0
-        length_array = F.cast(F.contrib.index_array(x, axes=(1,)), dtype=self._dtype)
+        # Shape: (length, 1)
+        length_array = F.contrib.arange_like(x, axis=1)
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         # Shape: (length, length)
-        bias = F.broadcast_greater(F.reshape(length_array, shape=(1, -1)),
-                                   length_array)
+        bias = F.broadcast_greater(F.expand_dims(length_array, axis=0),
+                                   F.expand_dims(length_array, axis=1))
         bias = bias * -C.LARGE_VALUES[self._dtype]
         bias = F.expand_dims(bias, axis=0)
         return F.BlockGrad(bias)

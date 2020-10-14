@@ -14,13 +14,14 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.2.4]
 
 ### Changed
-
 - Use softmax with length in DotAttentionCell.
+- Use `contrib.arange_like` in AutoRegressiveBias block to reduce number of ops. 
 
 ## [2.2.3]
 
 ### Added
- - Log the absolute number of `<unk>` tokens in source and target data
+
+- Log the absolute number of `<unk>` tokens in source and target data
 
 ## [2.2.2]
 
