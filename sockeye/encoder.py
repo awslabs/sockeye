@@ -325,10 +325,9 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         if self.config.dropout_prepost > 0.0:
             data = F.Dropout(data=data, p=self.config.dropout_prepost)
 
-        # (batch_size * heads,)
-        att_valid_length = F.repeat(valid_length, repeats=self.config.attention_heads, axis=0)
-        att_valid_length = F.broadcast_like(F.expand_dims(att_valid_length, axis=1), data, lhs_axes=(1,), rhs_axes=(1,))
-        att_valid_length = F.cast(att_valid_length, dtype='int32')
+        # (batch_size * heads, seq_len)
+        att_valid_length = layers.prepare_softmax_lengths(F, valid_length, data,
+                                                          num_heads=self.config.attention_heads)
 
         data = F.transpose(data, axes=(1, 0, 2))
         for block in self.layers:

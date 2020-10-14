@@ -290,6 +290,25 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
+def prepare_softmax_lengths(F, valid_length, query_data, num_heads: int):
+    """
+    Returns an int32 valid length tensor of shape (batch * num_heads, query_length) to be used in
+    the softmax operation in DotAttentionCell with the length argument.
+    Due to broadcast_like, dtypes of valid_length and query_data must be the same.
+
+    :param valid_length: Valid length information. Shape: (batch,).
+    :param query_data: Tensor from which the query_length dimension is derived.
+                       Expected shape: (X, query_length, ...).
+    :return: int32 tensor of shape (batch * num_heads, query_length).
+    """
+    # (batch * heads,)
+    att_valid_length = F.repeat(valid_length, repeats=num_heads, axis=0)
+    att_valid_length = F.broadcast_like(F.expand_dims(att_valid_length, axis=1),
+                                        query_data,
+                                        lhs_axes=(1,), rhs_axes=(1,))
+    return F.cast(att_valid_length, dtype='int32')
+
+
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):
     """
     Base class for Multi-head attention.
@@ -784,4 +803,3 @@ class SSRU(AutoregressiveLayer):
         cell_state, last_step_state = self.cell_state_transform(F, previous_states, weighted_inputs, forget_rates)
 
         return F.relu(cell_state), last_step_state
-
