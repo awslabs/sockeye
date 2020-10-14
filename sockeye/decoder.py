@@ -253,7 +253,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             # Replace the single step by multiple steps for training
             step, *states = states
             # Create steps (1, trg_seq_len,)
-            steps = mx.nd.expand_dims(mx.nd.arange(step_input.shape[1], ctx=step_input.context), axis=0)
+            steps = mx.nd.expand_dims(mx.nd.arange(input_shape[1], ctx=step_input.context), axis=0)
             states = [steps] + states
 
         # run decoder op
