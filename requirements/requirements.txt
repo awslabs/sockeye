@@ -1,6 +1,5 @@
 pyyaml>=5.1
 mxnet==1.7.0.post1
 numpy>1.16.0,<2.0.0
-typing
 portalocker
 sacrebleu==1.4.10
