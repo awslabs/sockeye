@@ -14,7 +14,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.2.4]
 
 ### Changed
-
+- Use softmax with length in DotAttentionCell.
 - Use `contrib.arange_like` in AutoRegressiveBias block to reduce number of ops. 
 
 ## [2.2.3]
@@ -26,7 +26,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.2.2]
 
 ### Fixed
- - Fix: Guard against null division for small batch sizes.
+
+- Fix: Guard against null division for small batch sizes.
 
 ## [2.2.1]
 

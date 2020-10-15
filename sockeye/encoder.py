@@ -308,9 +308,6 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX,
                                                              scale_up_input=True,
                                                              scale_down_positions=False)
-            self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
-                                                                            fold_heads=True,
-                                                                            name="bias")
 
             self.layers = mx.gluon.nn.HybridSequential()
             for i in range(config.num_layers):
@@ -328,13 +325,13 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         if self.config.dropout_prepost > 0.0:
             data = F.Dropout(data=data, p=self.config.dropout_prepost)
 
-        # (batch_size * heads, 1, seq_len)
-        bias = F.expand_dims(self.valid_length_mask(data, valid_length), axis=1)
+        # (batch_size * heads, seq_len)
+        att_valid_length = layers.prepare_source_valid_lengths(F, valid_length, data,
+                                                               num_heads=self.config.attention_heads)
+
         data = F.transpose(data, axes=(1, 0, 2))
-
         for block in self.layers:
-            data = block(data, bias)
-
+            data = block(data, att_valid_length)
         data = self.final_process(data, None)
         data = F.transpose(data, axes=(1, 0, 2))
         return data, valid_length
