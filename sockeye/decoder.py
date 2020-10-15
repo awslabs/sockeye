@@ -271,8 +271,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                 new_states = [step, states[1]] + encoder_attention_keys_values + autoregr_states
             else:
                 encoder_outputs = states[1]
-                att_valid_length = states[2]
-                new_states = [step, encoder_outputs, att_valid_length] + autoregr_states
+                encoder_valid_length = states[2]
+                new_states = [step, encoder_outputs, encoder_valid_length] + autoregr_states
 
             assert len(new_states) == len(states)
         else:
@@ -282,14 +282,14 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     def hybrid_forward(self, F, step_input, states):
         mask = None
         if self.inference_only:
-            steps, att_valid_length, *other = states
+            steps, source_valid_length, *other = states
             source_encoded = None  # use constant pre-computed key value projections from the states
             enc_att_kv = other[:self.config.num_layers]
             autoregr_states = other[self.config.num_layers:]
         else:
             if any(layer.needs_mask for layer in self.layers):
                 mask = self.autoregressive_bias(step_input)  # mask: (1, length, length)
-            steps, source_encoded, att_valid_length, *autoregr_states = states
+            steps, source_encoded, source_valid_length, *autoregr_states = states
             enc_att_kv = [None for _ in range(self.config.num_layers)]
 
         if any(layer.num_state_tensors > 1 for layer in self.layers):
@@ -298,8 +298,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
 
         # (batch_size * heads, query_length)
-        att_valid_length = layers.prepare_softmax_lengths(F, att_valid_length, step_input,
-                                                          num_heads=self.config.attention_heads)
+        source_valid_length = layers.prepare_softmax_lengths(F, source_valid_length, step_input,
+                                                             num_heads=self.config.attention_heads)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
@@ -314,7 +314,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             target, new_layer_autoregr_state = layer(target,
                                                      mask,
                                                      source_encoded,
-                                                     att_valid_length,
+                                                     source_valid_length,
                                                      layer_autoregr_state,
                                                      layer_enc_att_kv)
 
