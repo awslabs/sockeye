@@ -298,8 +298,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
 
         # (batch_size * heads, query_length)
-        source_valid_length = layers.prepare_softmax_lengths(F, source_valid_length, step_input,
-                                                             num_heads=self.config.attention_heads)
+        source_valid_length = layers.prepare_source_valid_lengths(F, source_valid_length, step_input,
+                                                                  num_heads=self.config.attention_heads)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)

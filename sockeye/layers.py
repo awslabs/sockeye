@@ -293,7 +293,7 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
-def prepare_softmax_lengths(F, valid_length, query_data, num_heads: int):
+def prepare_source_valid_lengths(F, valid_length, query_data, num_heads: int):
     """
     Returns an int32 valid length tensor of shape (batch * num_heads, query_length) to be used in
     the softmax operation in DotAttentionCell with the length argument.
@@ -302,6 +302,7 @@ def prepare_softmax_lengths(F, valid_length, query_data, num_heads: int):
     :param valid_length: Valid length information. Shape: (batch,).
     :param query_data: Tensor from which the query_length dimension is derived.
                        Expected shape: (X, query_length, ...).
+    :param num_heads: Number of attention heads.
     :return: int32 tensor of shape (batch * num_heads, query_length).
     """
     # (batch * heads,)
