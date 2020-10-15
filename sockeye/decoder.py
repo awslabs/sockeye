@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
+def get_decoder(config: DecoderConfig, inference_only: bool = False,
+                prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
     return Decoder.get_decoder(config, inference_only, prefix, dtype)
 
 
@@ -123,7 +124,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
     :param config: Transformer configuration.
     :param prefix: Name prefix for symbols of this decoder.
-    :param inference_only: Only use the model for inference enabling some optimizations, such as disabling the auto-regressive mask.
+    :param inference_only: Only use the model for inference enabling some optimizations,
+                           such as disabling the auto-regressive mask.
     """
 
     def __init__(self,
