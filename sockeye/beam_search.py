@@ -722,8 +722,7 @@ class BeamSearch(mx.gluon.Block):
         scores_accumulated_shape = scores_accumulated.shape
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
                                                                 self.beam_size * scores_accumulated_shape[-1]))
-        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores.astype('float32'),
-                                           axis=1), dtype='int32').reshape((-1,))
+        indices = mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1, dtype='int32').reshape((-1,))
         best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated_shape) + offset
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
