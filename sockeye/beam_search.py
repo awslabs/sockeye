@@ -603,20 +603,20 @@ class BeamSearch(mx.gluon.Block):
                                      mode='constant', constant_values=self.eos_id)
             vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
-            vocab_slice_ids_shape = vocab_slice_ids.shape
-            if vocab_slice_ids_shape[0] < self.beam_size + 1:
+            vocab_slice_ids_shape = vocab_slice_ids.shape[0]
+            if vocab_slice_ids_shape < self.beam_size + 1:
                 # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
                 # smaller than the beam size.
                 logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
-                               vocab_slice_ids_shape[0], self.beam_size)
-                n = self.beam_size - vocab_slice_ids_shape[0] + 1
+                               vocab_slice_ids_shape, self.beam_size)
+                n = self.beam_size - vocab_slice_ids_shape + 1
                 vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
                                                mx.nd.full((n,), val=self.eos_id, ctx=self.context, dtype='int32'),
                                                dim=0)
 
-            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape[0] - 1),
+            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape - 1),
                                   val=np.inf, ctx=self.context)
-            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape[0]),
+            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape),
                                   val=np.inf, ctx=self.context)
             eos_dist[:, C.EOS_ID] = 0
 
