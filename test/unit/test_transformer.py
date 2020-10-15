@@ -15,19 +15,23 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.transformer
+import sockeye.constants as C
 
 
 def test_auto_regressive_bias_dtype():
     block = sockeye.transformer.AutoRegressiveBias()
     block.initialize()
     length = 10
-    data = mx.nd.ones((2, length, 10), dtype='float32')
+    dtype = 'float32'
+    data = mx.nd.ones((2, length, 10), dtype=dtype)
     bias = block(data)
     assert bias.dtype == np.float32
 
-    block.cast('float16')
-    bias = block(data.astype('float16'))
+    dtype = 'float16'
+    block.cast(dtype)
+    bias = block(data.astype(dtype))
     assert bias.dtype == np.float16
+    assert bias.min().asscalar() == -C.LARGE_VALUES[dtype]
 
 
 def test_auto_regressive_bias_output():

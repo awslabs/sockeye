@@ -55,10 +55,12 @@ class _SingleModelInference(_Inference):
     def __init__(self,
                  model: SockeyeModel,
                  skip_softmax: bool = False,
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 softmax_temperature: Optional[float] = None) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
+        self._softmax_temperature = softmax_temperature
 
     def state_structure(self) -> List:
         return [self._model.state_structure()]
@@ -74,7 +76,7 @@ class _SingleModelInference(_Inference):
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         logits, states, _ = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
-            logits = logits.log_softmax(axis=-1)
+            logits = logits.log_softmax(axis=-1, temperature=self._softmax_temperature)
         scores = -logits
         return scores, states
 
@@ -84,7 +86,8 @@ class _EnsembleInference(_Inference):
     def __init__(self,
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 softmax_temperature: Optional[float] = None) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -93,6 +96,7 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
+        self._softmax_temperature = softmax_temperature
 
     def state_structure(self) -> List:
         structure = []
@@ -122,7 +126,7 @@ class _EnsembleInference(_Inference):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
             logits, model_states, _ = model.decode_step(step_input, model_states, vocab_slice_ids)
-            probs = logits.softmax(axis=-1)
+            probs = logits.softmax(axis=-1, temperature=self._softmax_temperature)
             outputs.append(probs)
             new_states += model_states
         scores = self._interpolation(outputs)
@@ -349,8 +353,8 @@ class TopK(mx.gluon.HybridBlock):
         :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices and values of the k smallest items in matrix.
         """
-        vocab_size = scores.shape[1]
-        batch_size = int(offset.shape[-1] / self.k)
+        batch_times_beam, vocab_size = scores.shape
+        batch_size = int(batch_times_beam / self.k)
         # Shape: (batch size, beam_size * vocab_size)
         batchwise_scores = scores.reshape(shape=(batch_size, self.k * vocab_size))
         indices, values = super().forward(batchwise_scores)
@@ -361,9 +365,9 @@ class TopK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
     def hybrid_forward(self, F, scores):
-        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
         # Project indices back into original shape (which is different for t==1 and t>1)
-        return F.reshape(F.cast(indices, 'int32'), shape=(-1,)), F.reshape(values, shape=(-1, 1))
+        return F.reshape(indices, shape=(-1,)), F.reshape(values, shape=(-1, 1))
 
 
 class SampleK(mx.gluon.HybridBlock):
@@ -413,10 +417,11 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
     assert len(states) == len(flat_structure), "Number of states do not match the defined state structure"
     for state, state_format in zip(states, flat_structure):
         if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+            # Steps and source_bias have batch dimension on axis 0
             repeat_axis = 0
         elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
-            # TODO: Change repeat axis to 1 when interleaved multihead attention is implemented
-            repeat_axis = 0
+            # Decoder and encoder layer states have batch dimension on axis 1
+            repeat_axis = 1
         else:
             raise ValueError("Provided state format %s not recognized." % state_format)
         repeated_state = state.repeat(repeats=beam_size, axis=repeat_axis)
@@ -435,10 +440,11 @@ class SortStates(mx.gluon.HybridBlock):
         assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
         for state, state_format in zip(states, self.flat_structure):
             if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+                # Steps and source_bias have batch dimension on axis 0
                 sorted_state = F.take(state, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
-                # TODO: Change take axis to 1 when interleaved multihead attention is implemented
-                sorted_state = F.take(state, best_hyp_indices)
+                # Decoder and encoder layer states have batch dimension on axis 1
+                sorted_state = F.take(state, best_hyp_indices, axis=1)
             elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
                 sorted_state = state
@@ -455,7 +461,7 @@ class BeamSearch(mx.gluon.Block):
     - constraints (pos & neg)
     - ensemble decoding
     - vocabulary selection
-    - sampling (TODO: check if its working correctly)
+    - sampling
 
     Not supported:
     - beam pruning
@@ -545,7 +551,7 @@ class BeamSearch(mx.gluon.Block):
         if self._sample is not None:
             utils.check_condition(restrict_lexicon is None,
                                   "Sampling is not available when working with a restricted lexicon.")
-            sample_best_hyp_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32')
+            sample_best_hyp_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32', ctx=self.context)
 
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
@@ -560,7 +566,7 @@ class BeamSearch(mx.gluon.Block):
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
         first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
-        first_step_mask[batch_indices] = 1.0
+        first_step_mask[batch_indices] = 0.0
         pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
                               ctx=self.context, dtype=self.dtype)
         eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
@@ -595,22 +601,23 @@ class BeamSearch(mx.gluon.Block):
                                        raw_constraint_list]
             # Pad to a multiple of 8.
             vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
-                                     mode='constant', constant_values = self.eos_id)
+                                     mode='constant', constant_values=self.eos_id)
             vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
-            if vocab_slice_ids.shape[0] < self.beam_size + 1:
+            vocab_slice_ids_shape = vocab_slice_ids.shape[0]
+            if vocab_slice_ids_shape < self.beam_size + 1:
                 # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
                 # smaller than the beam size.
                 logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
-                               vocab_slice_ids.shape[0], self.beam_size)
-                n = self.beam_size - vocab_slice_ids.shape[0] + 1
+                               vocab_slice_ids_shape, self.beam_size)
+                n = self.beam_size - vocab_slice_ids_shape + 1
                 vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
                                                mx.nd.full((n,), val=self.eos_id, ctx=self.context, dtype='int32'),
                                                dim=0)
 
-            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
+            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape - 1),
                                   val=np.inf, ctx=self.context)
-            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0]),
+            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape),
                                   val=np.inf, ctx=self.context)
             eos_dist[:, C.EOS_ID] = 0
 
@@ -632,7 +639,7 @@ class BeamSearch(mx.gluon.Block):
         # item on the beam for each sentence
         inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
-        for t in range(1, max_iterations + 1):  # TODO: max_iterations + 1 is the MINIMUM to get correct results right now
+        for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
             target_dists, model_states = self._inference.decode_step(best_word_indices, model_states, vocab_slice_ids)
@@ -668,7 +675,7 @@ class BeamSearch(mx.gluon.Block):
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
                 # of the first row only by setting all other rows to inf
                 if t == 1:
-                    scores *= first_step_mask
+                    scores += first_step_mask
 
                 best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
 
@@ -712,10 +719,11 @@ class BeamSearch(mx.gluon.Block):
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        scores_accumulated_shape = scores_accumulated.shape
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
-                                                                self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1), dtype='int32').reshape((-1,))
-        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + offset
+                                                                self.beam_size * scores_accumulated_shape[-1]))
+        indices = mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1, dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated_shape) + offset
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
@@ -749,7 +757,8 @@ def get_beam_search(models: List[SockeyeModel],
                     constant_length_ratio: float = 0.0,
                     avoid_list: Optional[str] = None,
                     sample: Optional[int] = None,
-                    hybridize: bool = True) -> BeamSearch:
+                    hybridize: bool = True,
+                    softmax_temperature: Optional[float] = None) -> BeamSearch:
 
     inference = None  # type: Optional[_Inference]
     if len(models) == 1:
@@ -757,11 +766,14 @@ def get_beam_search(models: List[SockeyeModel],
         if skip_softmax:
             logger.info("Enabled skipping softmax for a single model and greedy decoding.")
         inference = _SingleModelInference(model=models[0],
-                                          skip_softmax=skip_softmax, constant_length_ratio=constant_length_ratio)
+                                          skip_softmax=skip_softmax,
+                                          constant_length_ratio=constant_length_ratio,
+                                          softmax_temperature=softmax_temperature)
     else:
         inference = _EnsembleInference(models=models,
                                        ensemble_mode=ensemble_mode,
-                                       constant_length_ratio=constant_length_ratio)
+                                       constant_length_ratio=constant_length_ratio,
+                                       softmax_temperature=softmax_temperature)
 
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
     bs = BeamSearch(

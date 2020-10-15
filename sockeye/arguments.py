@@ -858,7 +858,7 @@ def add_training_args(params):
     train_params.add_argument('--checkpoint-improvement-threshold',
                               type=float,
                               default=0.,
-                              help='Improvement in <optimized-metric> over specified number of checkpoints must exceed'
+                              help='Improvement in <optimized-metric> over specified number of checkpoints must exceed '
                                    'this value to be considered actual improvement. Default: %(default)s.')
 
     train_params.add_argument('--min-num-epochs',
@@ -1083,6 +1083,11 @@ def add_score_cli_args(params):
                         choices=C.SCORING_TYPE_CHOICES,
                         default=C.SCORING_TYPE_DEFAULT,
                         help='Score type to output. Default: %(default)s')
+    params.add_argument('--softmax-temperature',
+                        type=float,
+                        default=None,
+                        help='Controls peakiness of model predictions. Values < 1.0 produce '
+                             'peaked predictions, values > 1.0 produce smoothed distributions.')
 
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                         help="Data type. Default: %(default)s infers from saved model.")
@@ -1162,7 +1167,14 @@ def add_inference_args(params):
     decode_params.add_argument('--mc-dropout',
                                default=False,
                                action='store_true',
-                               help='Turn on dropout during inference (Monte Carlo dropout). This will make translations non-deterministic and might slow down translation speed.')
+                               help='Turn on dropout during inference (Monte Carlo dropout). '
+                                    'This will make translations non-deterministic and might slow '
+                                    'down translation speed.')
+    decode_params.add_argument('--softmax-temperature',
+                               type=float,
+                               default=None,
+                               help='Controls peakiness of model predictions. Values < 1.0 produce '
+                                    'peaked predictions, values > 1.0 produce smoothed distributions.')
     decode_params.add_argument('--sample',
                                type=int_greater_or_equal(0),
                                default=None,

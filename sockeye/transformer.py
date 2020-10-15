@@ -107,7 +107,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att, _, __ = self.self_attention(self.pre_self_attention(data, None), [None, None], None, bias)
+        data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, None, bias)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -217,9 +217,8 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                        source: mx.sym.Symbol,
                        source_bias: mx.sym.Symbol,
                        autoregr_states: mx.sym.Symbol,
-                       enc_att_k: Optional[mx.sym.Symbol] = None,
-                       enc_att_v: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
-                                                                           mx.sym.Symbol]:
+                       enc_att_kv: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
+                                                                            mx.sym.Symbol]:
         target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
                                                                     autoregr_states,
                                                                     None,
@@ -232,8 +231,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                             source,
                                             None,
                                             source_bias,
-                                            enc_att_k,
-                                            enc_att_v)
+                                            enc_att_kv)
 
         target = self.post_enc_attention(target_enc_att, target)
 
@@ -374,7 +372,7 @@ class TransformerValidLengthMask(mx.gluon.HybridBlock):
 
 
 class AutoRegressiveBias(mx.gluon.HybridBlock):
-    def __init__(self, prefix: str = '',) -> None:
+    def __init__(self, prefix: str = '') -> None:
         super().__init__(prefix=prefix)
         self._dtype = 'float32'
 
@@ -383,15 +381,12 @@ class AutoRegressiveBias(mx.gluon.HybridBlock):
         super().cast(dtype)
 
     def hybrid_forward(self, F, x):
-        # (length)
-        x = F.squeeze(F.slice(x, begin=(0, None, 0), end=(1, None, 1)))
-        # (length, 1)
-        # TODO: use F.contrib.arange_like with MXNET 1.6.0
-        length_array = F.cast(F.contrib.index_array(x, axes=(1,)), dtype=self._dtype)
+        # Shape: (length, 1)
+        length_array = F.contrib.arange_like(x, axis=1)
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         # Shape: (length, length)
-        bias = F.broadcast_greater(F.reshape(length_array, shape=(1, -1)),
-                                   length_array)
+        bias = F.broadcast_greater(F.expand_dims(length_array, axis=0),
+                                   F.expand_dims(length_array, axis=1))
         bias = bias * -C.LARGE_VALUES[self._dtype]
         bias = F.expand_dims(bias, axis=0)
         return F.BlockGrad(bias)

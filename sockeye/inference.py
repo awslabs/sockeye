@@ -682,7 +682,8 @@ class Translator:
                  hybridize: bool = True,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  max_input_length: Optional[int] = None,
-                 max_output_length: Optional[int] = None) -> None:
+                 max_output_length: Optional[int] = None,
+                 softmax_temperature: Optional[float] = None) -> None:
         self.context = context
         self.dtype = C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
         self._scorer = scorer
@@ -727,14 +728,15 @@ class Translator:
             scorer=self._scorer,
             constant_length_ratio=constant_length_ratio,
             avoid_list=avoid_list,
-            hybridize=hybridize)
+            hybridize=hybridize,
+            softmax_temperature=softmax_temperature)
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,
                                             scorer=self._scorer)  # type: Callable
 
         logger.info("Translator (%d model(s) beam_size=%d beam_search_stop=%s max_input_length=%s "
-                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d avoiding=%d dtype=%s)",
+                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d avoiding=%d dtype=%s softmax_temperature=%s)",
                     len(self.models),
                     self.beam_size,
                     self.beam_search_stop,
@@ -743,7 +745,8 @@ class Translator:
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.max_batch_size,
                     0 if self._beam_search.global_avoid_trie is None else len(self._beam_search.global_avoid_trie),
-                    self.dtype)
+                    self.dtype,
+                    softmax_temperature)
 
     @property
     def max_input_length(self) -> int:

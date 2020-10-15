@@ -4,7 +4,7 @@
 
 Sockeye requires:
 - **Python3**
-- [MXNet 1.6.0](https://github.com/apache/incubator-mxnet/tree/1.6.0)
+- [MXNet 1.7.0](https://github.com/apache/incubator-mxnet/tree/1.7.0)
 - numpy
 
 ## Installation

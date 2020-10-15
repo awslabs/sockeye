@@ -13,7 +13,7 @@
 
 import logging
 from abc import abstractmethod
-from typing import Optional, Union, Tuple, List
+from typing import Optional, Union, Tuple
 from functools import lru_cache
 
 import mxnet as mx
@@ -125,7 +125,9 @@ class OutputLayer(mx.gluon.HybridBlock):
 
         with self.name_scope():
             if dtype == C.DTYPE_INT8:
-                self.scaling = self.params.get('scaling', shape=(1,), init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32, allow_deferred_init=False)
+                self.scaling = self.params.get('scaling',
+                                               shape=(1,), init=mx.initializer.Constant(-1.0),
+                                               dtype=C.DTYPE_FP32, allow_deferred_init=False)
                 # This is only for inference but MXNet tries to create an
                 # initializer anyway, then fails because most random
                 # generators don't support int8 output.
@@ -143,7 +145,8 @@ class OutputLayer(mx.gluon.HybridBlock):
             self.bias = self.params.get("bias",
                                         shape=(vocab_size,),
                                         init=bias_initializer,
-                                        dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32, # Bias stays fp32 even with int8 weights.
+                                        # Bias stays fp32 even with int8 weights.
+                                        dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32,
                                         allow_deferred_init=False)
 
     @lru_cache(maxsize=1)
@@ -173,15 +176,15 @@ class OutputLayer(mx.gluon.HybridBlock):
                                             name=C.LOGITS_NAME)
         return super().forward(data)
 
-    def hybrid_forward(self, F, data, weight, bias, scaling = None):
+    def hybrid_forward(self, F, data, weight, bias, scaling=None):
         if self.weight.dtype == C.DTYPE_INT8:
             return F.contrib.intgemm_fully_connected(data=data,
-                                    num_hidden=self.vocab_size,
-                                    weight=weight,
-                                    scaling=scaling,
-                                    bias=bias,
-                                    flatten=False,
-                                    name=C.LOGITS_NAME)
+                                                     num_hidden=self.vocab_size,
+                                                     weight=weight,
+                                                     scaling=scaling,
+                                                     bias=bias,
+                                                     flatten=False,
+                                                     name=C.LOGITS_NAME)
         else:
             return F.FullyConnected(data=data,
                                     num_hidden=self.vocab_size,
@@ -257,38 +260,6 @@ class LengthRatio(mx.gluon.HybridBlock):
         return F.squeeze(data)
 
 
-def split_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
-    """
-    Returns a symbol with heads as second dimension and channel depth / number of heads as last dimension.
-
-    :param x: Symbol of shape (batch, length, depth).
-    :param depth_per_head: Depth per head.
-    :param heads: Number of heads.
-    :return: Symbol of shape (batch, heads, length, depth_per_heads).
-    """
-    # (batch, length, heads, depth_per_head)
-    x = F.reshape(x, shape=(0, -1, heads, depth_per_head))
-    # (batch, heads, length, depth/heads)
-    return F.transpose(x, axes=(0, 2, 1, 3))
-
-
-def combine_heads(F, x: mx.sym.Symbol, depth_per_head: int, heads: int) -> mx.sym.Symbol:
-    """
-    Returns a symbol with both batch & length, and head & depth dimensions combined.
-
-    :param x: Symbol of shape (batch * heads, length, depth_per_head).
-    :param depth_per_head: Depth per head.
-    :param heads: Number of heads.
-    :return: Symbol of shape (batch, length, depth).
-    """
-    # (batch, heads, length, depth_per_head)
-    x = F.reshape(x, shape=(-4, -1, heads, 0, depth_per_head))
-    # (batch, length, heads, depth_per_head)
-    x = F.transpose(x, axes=(0, 2, 1, 3))
-    # (batch, length, depth)
-    return F.reshape(x, shape=(-1, 0, depth_per_head * heads))
-
-
 def broadcast_to_heads(F, x: mx.sym.Symbol, num_heads: int, ndim: int, fold_heads: bool = True) -> mx.sym.Symbol:
     """
     Broadcasts batch-major input of shape (batch, d1 ... dn-1) to (batch*heads, d1 ... dn-1).
@@ -325,9 +296,10 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         self._dtype = dtype
         super().cast(dtype)
 
-    def hybrid_forward(self, F, queries, keys, values, lengths=None, bias=None):
-        # (n, lq, lk)
-        logits = F.batch_dot(lhs=queries, rhs=keys, transpose_b=True)
+    def hybrid_forward(self, F, queries, key_values, heads, lengths=None, bias=None):
+
+        # (n*h, lq, lk)
+        logits = F.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
         # TODO(fhieber): consider softmax with length argument once available.
         # TODO(fhieber: Also see https://github.com/dmlc/gluon-nlp/pull/910
@@ -347,9 +319,11 @@ class DotAttentionCell(mx.gluon.HybridBlock):
 
         probs = F.softmax(logits, axis=-1)
         probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
-
-        # (n, lq, lk) x (n, lk, dv) -> (n, lq, dv)
-        return F.batch_dot(lhs=probs, rhs=values)
+        
+        # key_values: (lk, n, dv * 2)
+        # probs: (n*h, lq, lk)
+        # result: (n, lq, dv)
+        return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
 class MultiHeadAttentionBase(mx.gluon.HybridBlock):
@@ -380,40 +354,31 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
 
         with self.name_scope():
             self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
-            self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out, flatten=False, use_bias=False, prefix='h2o_', dtype = dtype)
+            self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out,
+                                                        flatten=False, use_bias=False, prefix='h2o_', dtype=dtype)
 
     def _attend(self,
                 F,
                 queries: mx.sym.Symbol,
-                keys: mx.sym.Symbol,
-                values: mx.sym.Symbol,
+                key_values: mx.sym.Symbol,
                 lengths: Optional[mx.sym.Symbol] = None,
                 bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
         """
         Returns context vectors of multi-head dot attention.
 
-        :param queries: Query tensor. Shape: (batch_size, heads, query_max_length, depth_per_head).
-        :param keys: Keys. Shape: (batch_size, heads, memory_max_length, depth_per_head).
-        :param values: Values. Shape: (batch_size, heads, memory_max_length, depth_per_head).
+        :param queries: Query tensor. Shape: (query_max_length, batch_size, depth).
+        :param key_values: Keys. Shape: (memory_max_length, batch_size, depth * 2).
         :param lengths: Optional lengths of keys. Shape: (batch_size,).
         :param bias: Optional 3d bias.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
-        # fold head dimension into batch dimension
-        # (batch*heads, length, depth/heads)
-        queries = F.reshape(queries, shape=(-3, -1, self.depth_per_head))
-        keys = F.reshape(keys, shape=(-3, -1, self.depth_per_head))
-        values = F.reshape(values, shape=(-3, -1, self.depth_per_head))
         lengths = broadcast_to_heads(F, lengths, self.heads, ndim=1,
                                      fold_heads=True) if lengths is not None else lengths
 
-        # (batch*heads, query_max_length, depth_per_head)
-        contexts = self.dot_att(queries, keys, values, lengths, bias)
+        # (query_max_length, batch, depth)
+        contexts = self.dot_att(queries, key_values, self.heads, lengths, bias)
 
-        # (batch, query_max_length, depth)
-        contexts = combine_heads(F, contexts, self.depth_per_head, self.heads)
-
-        # contexts: (batch, query_max_length, output_depth)
+        # (query_max_length, batch, output_depth)
         contexts = self.ff_out(contexts)
 
         return contexts
@@ -480,7 +445,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
 
         self.depth_att = depth_att
         with self.name_scope():
-            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
+            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3,
+                                                       flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
 
     @property
     def prefix(self) -> str:
@@ -489,7 +455,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     @property
     def num_state_tensors(self) -> int:
         """ Number of state tensors returned by the layer """
-        return 2
+        return 1
 
     @property
     def needs_mask(self) -> bool:
@@ -501,12 +467,12 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :param batch_size: current batch size
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
-        # shape: (batch, heads, length, depth_per_head)
-        return batch_size, self.heads, 1, self.depth_out // self.heads
+        # shape: (length, batch, key_depth + value_depth)
+        return 1, batch_size, self.depth_out * 2
 
     def hybrid_forward(self, F,
                        inputs: mx.sym.Symbol,
-                       previous_states: List[mx.sym.Symbol],
+                       previous_states: Optional[mx.sym.Symbol] = None,
                        input_lengths: Optional[mx.sym.Symbol] = None,
                        bias: Optional[mx.sym.Symbol] = None,
                        *args):  # mypy: ignore
@@ -524,42 +490,17 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
                                 Shape: 2 * (batch, max_length+1, depth_att).
         :return: Symbol of shape (batch, max_length, output_depth).
         """
-        # combined: (batch, max_length, depth * 3)
-        combined = self.ff_in(inputs)
-        # split into query, keys and values
-        # (batch, max_length, depth)
-        # pylint: disable=unbalanced-tuple-unpacking
-        queries, keys, values = F.split(combined, num_outputs=3, axis=2)
 
-        # scale by sqrt(depth_per_head)
-        queries = queries * (self.depth_per_head ** -0.5)
-        # (batch, heads, length, depth/heads)
-        queries = split_heads(F, queries, self.depth_per_head, self.heads)
-        keys = split_heads(F, keys, self.depth_per_head, self.heads)
-        values = split_heads(F, values, self.depth_per_head, self.heads)
+        proj = self.ff_in(inputs)
+        queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
+        states = F.concat(kv_1, kv_2, dim=2)
 
-        updated_keys = keys
+        updated_states = states
+        if previous_states is not None:
+            updated_states = F.concat(previous_states, states, dim=0)
+            states = F.slice(updated_states, begin=(1, None, None), end=(None, None, None))
 
-        previous_keys, previous_values = previous_states
-        if previous_keys is not None:
-            updated_keys = F.concat(previous_keys, keys, dim=2)
-            keys = _remove_first_step(F, updated_keys)
-
-        updated_values = values
-        if previous_values is not None:
-            updated_values = F.concat(previous_values, values, dim=2)
-            values = _remove_first_step(F, updated_values)
-
-        return self._attend(F, queries, keys, values, lengths=input_lengths, bias=bias), updated_keys, updated_values
-
-
-def _remove_first_step(F, data):
-    """
-    :param F: MXNet namespace.
-    :param data: Input data. Shape: (batch, heads, length, num_hidden).
-    :return: Output data. Shape: (batch, heads, length[1:], num_hidden
-    """
-    return F.slice(data, begin=(None, None, 1, None), end=(None, None, None, None))
+        return self._attend(F, queries, states, lengths=input_lengths, bias=bias), updated_states
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
@@ -586,57 +527,35 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
-            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
-            self.ff_k = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='k2h_', dtype=dtype)
-            self.ff_v = quantization.QuantizableDense(in_units=depth_key_value, units=depth_att, flatten=False, use_bias=False, prefix='v2h_', dtype=dtype)
-
-    def project_and_isolate_heads(self, F, memory: mx.sym.Symbol) -> Tuple[mx.sym.Symbol, mx.sym.Symbol]:
-        """
-        Projects memory into keys and values, and separates attention heads dimension.
-
-        :param memory: Memory tensor. Shape: (batch, memory_max_length, input_depth).
-        :return: Symbol of shape (batch, heads, memory_max_length, depth_per_head).
-        """
-        keys = self.ff_k(memory)
-        values = self.ff_v(memory)
-        keys = split_heads(F, keys, depth_per_head=self.depth_per_head, heads=self.heads)
-        values = split_heads(F, values, depth_per_head=self.depth_per_head, heads=self.heads)
-        return keys, values
+            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att,
+                                                      flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
+            self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att,
+                                                       flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
                        memory: mx.sym.Symbol,
                        memory_lengths: Optional[mx.sym.Symbol] = None,
                        bias: Optional[mx.sym.Symbol] = None,
-                       projected_memory_keys: Optional[mx.sym.Symbol] = None,
-                       projected_memory_values: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:  # mypy: ignore
+                       projected_memory_kv: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:  # mypy: ignore
         """
         Computes multi-head attention for queries given a memory tensor.
         If sequence lengths are provided, they will be used to mask the attention scores.
         A bias mask may also be used to mask the attention scores.
-        Returns a symbol of shape (batch, max_length, output_depth).
+        Returns a symbol of shape (max_length, batch, output_depth).
 
-        :param queries: Query tensor. Shape: (batch, query_max_length, input_depth).
-        :param memory: Memory data to attend to. Shape: (batch, memory_max_length, input_depth).
+        :param queries: Query tensor. Shape: (query_max_length, batch, input_depth).
+        :param memory: Memory data to attend to. Shape: (memory_max_length, batch, input_depth).
         :param memory_lengths: Optional lengths of memory to mask attention scores. Shape: (batch, 1).
         :param bias: Optional 3d bias tensor to mask attention scores.
-        :param projected_memory_keys: Optional previously projected memory keys.
-        :param projected_memory_values: Optional previously projected memory values.
-        :return: Symbol of shape (batch, query_seq_len, output_depth).
+        :param projected_memory_kv: Optional previously projected memory keys and values.
+        :return: Symbol of shape (query_seq_len, batch, output_depth).
         """
-        # (batch, query_max_length, depth)
+
         queries = self.ff_q(queries)
-        # scale by sqrt(depth_per_head)
-        queries = queries * (self.depth_per_head ** -0.5)
-        # (batch, heads, length, depth/heads)
-        queries = split_heads(F, queries, self.depth_per_head, self.heads)
+        kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(memory)
 
-        if projected_memory_keys is not None and projected_memory_values is not None:
-            keys, values = projected_memory_keys, projected_memory_values
-        else:
-            keys, values = self.project_and_isolate_heads(F, memory)
-
-        return self._attend(F, queries, keys, values, bias=bias, lengths=memory_lengths)
+        return self._attend(F, queries, kv, bias=bias, lengths=memory_lengths)
 
 
 class PlainDotAttention(mx.gluon.HybridBlock):
@@ -652,14 +571,14 @@ class PlainDotAttention(mx.gluon.HybridBlock):
         """
         Returns a symbol of shape (batch, max_length, output_depth).
 
-        :param queries: Symbol of shape (batch, queries_max_length, input_depth).
-        :param memory: Symbol of shape (batch, memory_max_length, input_depth).
+        :param queries: Symbol of shape (queries_max_length, batch, input_depth).
+        :param memory: Symbol of shape (memory_max_length, batch, input_depth).
         :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (batch, queries_max_length, output_depth).
+        :return: Symbol of shape (queries_max_length, batch, output_depth).
        """
 
-        # (batch*heads, queries_max_length, depth_per_head)
-        return self.dot_att(queries, memory, memory, memory_lengths, None)
+        # (queries_max_length, batch, output_depth)
+        return self.dot_att(queries, memory, 1, memory_lengths, None)
 
 
 class ProjectedDotAttention(mx.gluon.HybridBlock):
@@ -688,26 +607,19 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
         """
         Apply project, apply dot attention and return new context vectors.
 
-        :param queries: Symbol of shape (batch, queries_max_length, input_num_hidden).
-        :param memory: Symbol of shape (batch, memory_max_length, input_num_hidden).
+        :param queries: Symbol of shape (queries_max_length, batch, input_num_hidden).
+        :param memory: Symbol of shape (memory_max_length, batch, input_num_hidden).
         :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (batch, queries_max_length, num_hidden).
+        :return: Symbol of shape (queries_max_length, batch, num_hidden).
         """
-        # (batch, memory_max_length, num_hidden * 2)
+        # (memory_max_length, batch, num_hidden * 2)
         combined = self.kv2h(memory)
 
-        # split into keys and values
-        # pylint: disable=unbalanced-tuple-unpacking
-        keys, values = F.split(data=combined, num_outputs=2, axis=2)
-
-        # (batch, queries_max_length, num_hidden)
+        # (queries_max_length, batch, num_hidden)
         queries = self.q2h(queries)
 
-        # scale by sqrt(num_hidden)
-        queries = queries * (self.num_hidden ** -0.5)
-
-        # (batch, queries_max_length, num_hidden)
-        contexts = self.dot_att(queries, keys, values, memory_lengths, None)
+        # (queries_max_length, batch, num_hidden)
+        contexts = self.dot_att(queries, combined, 1, memory_lengths, None)
 
         return contexts
 
@@ -869,10 +781,7 @@ class SSRU(AutoregressiveLayer):
         :param batch_size: current batch size
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
-        if self.inference_only:
-            return batch_size, 1, self.model_size
-        else:
-            return batch_size, self.model_size
+        return 1, batch_size, self.model_size
 
     @staticmethod
     def _training_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
@@ -890,28 +799,25 @@ class SSRU(AutoregressiveLayer):
             current_step_state = forget_rate * previous_step_state + step_input
             return current_step_state, current_step_state
 
-        weighted_inputs = F.transpose(weighted_inputs, axes=(1, 0, 2))  # (max_length, batch, input_depth)
-        forget_rates = F.transpose(forget_rates, axes=(1, 0, 2))  # (max_length, batch, input_depth)
-
         # (max_length, batch, input_depth), (batch, input_depth)
         cell_state, last_step_state = F.contrib.foreach(_time_step_update,
                                                         [weighted_inputs, forget_rates],
-                                                        previous_cell_state)
+                                                        F.squeeze(previous_cell_state, axis=0))
 
-        return F.transpose(cell_state, axes=(1, 0, 2)), last_step_state
+        return cell_state, F.expand_dims(last_step_state, axis=0)
 
     @staticmethod
     def _inference_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
         """Update SSRU cell at inference time"""
-        new_step_state = forget_rates * previous_cell_state + weighted_inputs  # (batch, 1, input_depth)
+        new_step_state = forget_rates * previous_cell_state + weighted_inputs  # (1, batch, input_depth)
         return new_step_state, new_step_state
 
     def hybrid_forward(self, F, inputs: mx.sym.Symbol, previous_states: mx.sym.Symbol, *args) -> Tuple:
         """
         :param F: ndarray or Symbol
-        :param inputs: input data. Shape: (batch, max_length, input_depth).
-        :param previous_states: previous cell states. Shape: (batch, max_length, input_depth)
-        :return: cell output and new cell states.  Both with shape (batch, max_length, input_depth).
+        :param inputs: input data. Shape: (max_length, batch, input_depth).
+        :param previous_states: previous cell states. Shape: (max_length, batch, input_depth)
+        :return: cell output and new cell states.  Both with shape (max_length, batch, input_depth).
         """
         forget_rates = self.forget_gate(inputs)
         weighted_inputs = (1 - forget_rates) * self.linear(inputs)

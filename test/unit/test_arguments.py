@@ -154,6 +154,7 @@ def test_model_parameters(test_params, expected_params):
                       strip_unknown_words=False,
                       dtype=None,
                       mc_dropout=False,
+                      softmax_temperature=None,
                       sample=None,
                       seed=None)),
 ])
