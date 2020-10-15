@@ -122,8 +122,8 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
 class TransformerDecoderBlock(mx.gluon.HybridBlock):
     """
-    A transformer decoder block consists of an autoregressive attention block, encoder attention, and a feed-forward layer
-    with pre/post process blocks in between.
+    A transformer decoder block consists of an autoregressive attention block, encoder attention,
+    and a feed-forward layer with pre/post process blocks in between.
     """
 
     def __init__(self,
@@ -313,9 +313,11 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
         super().__init__(prefix=prefix)
         self.dropout = dropout
         with self.name_scope():
-            self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_', dtype = dtype)
+            self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_',
+                                                     dtype=dtype)
             self.act = layers.get_activation(act_type)
-            self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_', dtype = dtype)
+            self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_',
+                                                     dtype=dtype)
 
     def hybrid_forward(self, F, x):
         h = self.ff1(x)

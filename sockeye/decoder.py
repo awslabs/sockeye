@@ -201,10 +201,10 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             # NO encoder projection caching
             states = [step, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
 
-        batch_size = encoder_outputs.shape[0]
-        dummy_autoregr_states = [mx.nd.zeros(layer.get_states_shape(batch_size),
-                                             ctx=encoder_outputs.context,
-                                             dtype=encoder_outputs.dtype)
+        _batch_size = encoder_outputs.shape[0]
+        _ctx = encoder_outputs.context
+        _dtype = encoder_outputs.dtype
+        dummy_autoregr_states = [mx.nd.zeros(layer.get_states_shape(_batch_size), ctx=_ctx, dtype=_dtype)
                                  for layer in self.layers
                                  for _ in range(layer.num_state_tensors)]
 
