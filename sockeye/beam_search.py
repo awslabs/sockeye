@@ -353,8 +353,8 @@ class TopK(mx.gluon.HybridBlock):
         :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices and values of the k smallest items in matrix.
         """
-        vocab_size = scores.shape[1]
-        batch_size = int(offset.shape[-1] / self.k)
+        batch_times_beam, vocab_size = scores.shape
+        batch_size = int(batch_times_beam / self.k)
         # Shape: (batch size, beam_size * vocab_size)
         batchwise_scores = scores.reshape(shape=(batch_size, self.k * vocab_size))
         indices, values = super().forward(batchwise_scores)
@@ -365,9 +365,9 @@ class TopK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
     def hybrid_forward(self, F, scores):
-        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
         # Project indices back into original shape (which is different for t==1 and t>1)
-        return F.reshape(F.cast(indices, 'int32'), shape=(-1,)), F.reshape(values, shape=(-1, 1))
+        return F.reshape(indices, shape=(-1,)), F.reshape(values, shape=(-1, 1))
 
 
 class SampleK(mx.gluon.HybridBlock):
@@ -428,6 +428,7 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
         repeated_states.append(repeated_state)
     return repeated_states
 
+
 class SortStates(mx.gluon.HybridBlock):
 
     def __init__(self, state_structure, prefix):
@@ -460,7 +461,7 @@ class BeamSearch(mx.gluon.Block):
     - constraints (pos & neg)
     - ensemble decoding
     - vocabulary selection
-    - sampling (TODO: check if its working correctly)
+    - sampling
 
     Not supported:
     - beam pruning
@@ -600,22 +601,23 @@ class BeamSearch(mx.gluon.Block):
                                        raw_constraint_list]
             # Pad to a multiple of 8.
             vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
-                                     mode='constant', constant_values = self.eos_id)
+                                     mode='constant', constant_values=self.eos_id)
             vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
-            if vocab_slice_ids.shape[0] < self.beam_size + 1:
+            vocab_slice_ids_shape = vocab_slice_ids.shape[0]
+            if vocab_slice_ids_shape < self.beam_size + 1:
                 # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
                 # smaller than the beam size.
                 logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
-                               vocab_slice_ids.shape[0], self.beam_size)
-                n = self.beam_size - vocab_slice_ids.shape[0] + 1
+                               vocab_slice_ids_shape, self.beam_size)
+                n = self.beam_size - vocab_slice_ids_shape + 1
                 vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
                                                mx.nd.full((n,), val=self.eos_id, ctx=self.context, dtype='int32'),
                                                dim=0)
 
-            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
+            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape - 1),
                                   val=np.inf, ctx=self.context)
-            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0]),
+            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape),
                                   val=np.inf, ctx=self.context)
             eos_dist[:, C.EOS_ID] = 0
 
@@ -637,7 +639,7 @@ class BeamSearch(mx.gluon.Block):
         # item on the beam for each sentence
         inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
-        for t in range(1, max_iterations + 1):  # TODO: max_iterations + 1 is the MINIMUM to get correct results right now
+        for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
             target_dists, model_states = self._inference.decode_step(best_word_indices, model_states, vocab_slice_ids)
@@ -717,10 +719,11 @@ class BeamSearch(mx.gluon.Block):
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        scores_accumulated_shape = scores_accumulated.shape
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
-                                                                self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1), dtype='int32').reshape((-1,))
-        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + offset
+                                                                self.beam_size * scores_accumulated_shape[-1]))
+        indices = mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1, dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated_shape) + offset
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)

@@ -125,7 +125,9 @@ class OutputLayer(mx.gluon.HybridBlock):
 
         with self.name_scope():
             if dtype == C.DTYPE_INT8:
-                self.scaling = self.params.get('scaling', shape=(1,), init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32, allow_deferred_init=False)
+                self.scaling = self.params.get('scaling',
+                                               shape=(1,), init=mx.initializer.Constant(-1.0),
+                                               dtype=C.DTYPE_FP32, allow_deferred_init=False)
                 # This is only for inference but MXNet tries to create an
                 # initializer anyway, then fails because most random
                 # generators don't support int8 output.
@@ -143,7 +145,8 @@ class OutputLayer(mx.gluon.HybridBlock):
             self.bias = self.params.get("bias",
                                         shape=(vocab_size,),
                                         init=bias_initializer,
-                                        dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32, # Bias stays fp32 even with int8 weights.
+                                        # Bias stays fp32 even with int8 weights.
+                                        dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32,
                                         allow_deferred_init=False)
 
     @lru_cache(maxsize=1)
@@ -173,15 +176,15 @@ class OutputLayer(mx.gluon.HybridBlock):
                                             name=C.LOGITS_NAME)
         return super().forward(data)
 
-    def hybrid_forward(self, F, data, weight, bias, scaling = None):
+    def hybrid_forward(self, F, data, weight, bias, scaling=None):
         if self.weight.dtype == C.DTYPE_INT8:
             return F.contrib.intgemm_fully_connected(data=data,
-                                    num_hidden=self.vocab_size,
-                                    weight=weight,
-                                    scaling=scaling,
-                                    bias=bias,
-                                    flatten=False,
-                                    name=C.LOGITS_NAME)
+                                                     num_hidden=self.vocab_size,
+                                                     weight=weight,
+                                                     scaling=scaling,
+                                                     bias=bias,
+                                                     flatten=False,
+                                                     name=C.LOGITS_NAME)
         else:
             return F.FullyConnected(data=data,
                                     num_hidden=self.vocab_size,
@@ -337,7 +340,8 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
 
         with self.name_scope():
             self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
-            self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out, flatten=False, use_bias=False, prefix='h2o_', dtype = dtype)
+            self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out,
+                                                        flatten=False, use_bias=False, prefix='h2o_', dtype=dtype)
 
     def _attend(self,
                 F,
@@ -425,7 +429,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
 
         self.depth_att = depth_att
         with self.name_scope():
-            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3, flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
+            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3,
+                                                       flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
 
     @property
     def prefix(self) -> str:
@@ -506,8 +511,10 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         with self.name_scope():
-            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att, flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
-            self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att, flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
+            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att,
+                                                      flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
+            self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att,
+                                                       flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
@@ -775,7 +782,6 @@ class SSRU(AutoregressiveLayer):
             step_input, forget_rate = step_input_and_forget_rate  # each of shape (batch_size, model_size)
             current_step_state = forget_rate * previous_step_state + step_input
             return current_step_state, current_step_state
-
 
         # (max_length, batch, input_depth), (batch, input_depth)
         cell_state, last_step_state = F.contrib.foreach(_time_step_update,
