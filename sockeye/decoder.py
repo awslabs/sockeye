@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False, prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
+def get_decoder(config: DecoderConfig, inference_only: bool = False,
+                prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
     return Decoder.get_decoder(config, inference_only, prefix, dtype)
 
 
@@ -123,7 +124,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
     :param config: Transformer configuration.
     :param prefix: Name prefix for symbols of this decoder.
-    :param inference_only: Only use the model for inference enabling some optimizations, such as disabling the auto-regressive mask.
+    :param inference_only: Only use the model for inference enabling some optimizations,
+                           such as disabling the auto-regressive mask.
     """
 
     def __init__(self,
@@ -253,7 +255,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             # Replace the single step by multiple steps for training
             step, *states = states
             # Create steps (1, trg_seq_len,)
-            steps = mx.nd.expand_dims(mx.nd.arange(step_input.shape[1], ctx=step_input.context), axis=0)
+            steps = mx.nd.expand_dims(mx.nd.arange(input_shape[1], ctx=step_input.context), axis=0)
             states = [steps] + states
 
         # run decoder op
