@@ -428,6 +428,7 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
         repeated_states.append(repeated_state)
     return repeated_states
 
+
 class SortStates(mx.gluon.HybridBlock):
 
     def __init__(self, state_structure, prefix):
@@ -460,7 +461,7 @@ class BeamSearch(mx.gluon.Block):
     - constraints (pos & neg)
     - ensemble decoding
     - vocabulary selection
-    - sampling (TODO: check if its working correctly)
+    - sampling
 
     Not supported:
     - beam pruning
@@ -638,7 +639,7 @@ class BeamSearch(mx.gluon.Block):
         # item on the beam for each sentence
         inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
-        for t in range(1, max_iterations + 1):  # TODO: max_iterations + 1 is the MINIMUM to get correct results right now
+        for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
             target_dists, model_states = self._inference.decode_step(best_word_indices, model_states, vocab_slice_ids)
@@ -721,7 +722,8 @@ class BeamSearch(mx.gluon.Block):
         scores_accumulated_shape = scores_accumulated.shape
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
                                                                 self.beam_size * scores_accumulated_shape[-1]))
-        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1), dtype='int32').reshape((-1,))
+        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores.astype('float32'),
+                                           axis=1), dtype='int32').reshape((-1,))
         best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated_shape) + offset
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
