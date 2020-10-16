@@ -2001,8 +2001,9 @@ def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArr
     target_length = mx.nd.sum(target != C.PAD_ID, axis=1)
     length_ratio = source_length / target_length
 
-    samples = source.shape[0]
-    tokens = source.shape[1] * samples
+    source_shape = source.shape
+    samples = source_shape[0]
+    tokens = source_shape[1] * samples
 
     labels = {C.TARGET_LABEL_NAME: label, C.LENRATIO_LABEL_NAME: length_ratio}
 
