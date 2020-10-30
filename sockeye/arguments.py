@@ -396,7 +396,7 @@ def add_logging_args(params):
     logging_params.add_argument('--loglevel-secondary-workers',
                                 default='ERROR',
                                 choices=log_levels,
-                                help='Log level for secondary workers. Default: %(default)s.')
+                                help='Console log level for secondary workers. Default: %(default)s.')
 
 
 def add_training_data_args(params, required=False):
