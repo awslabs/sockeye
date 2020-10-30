@@ -825,6 +825,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # If requested, suppress console output for secondary workers
             if args.quiet_secondary_workers:
                 args.quiet = True
+            args.loglevel = args.loglevel_secondary_workers
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)

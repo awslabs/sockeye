@@ -388,10 +388,15 @@ def add_logging_args(params):
                                 default=False,
                                 action="store_true",
                                 help='Suppress file logging')
+    log_levels = ['INFO', 'DEBUG', 'ERROR']
     logging_params.add_argument('--loglevel',
                                 default='INFO',
-                                choices=['INFO', 'DEBUG'],
+                                choices=log_levels,
                                 help='Log level. Default: %(default)s.')
+    logging_params.add_argument('--loglevel-secondary-workers',
+                                default='ERROR',
+                                choices=log_levels,
+                                help='Log level for secondary workers. Default: %(default)s.')
 
 
 def add_training_data_args(params, required=False):
