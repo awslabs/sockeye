@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.2.6]
+
+### Fixed
+- Avoid a crash due to an edge case when no model improvement has been observed by the time the learning rate gets reduced for the first time.
+
 ## [2.2.5]
 
 ### Fixed
