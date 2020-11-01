@@ -277,7 +277,7 @@ class FactoredStringOutputHandler(OutputHandler):
         :param t_walltime: Total walltime for translation.
         """
         factored_string = C.TOKEN_SEPARATOR.join(C.DEFAULT_FACTOR_DELIMITER.join(factors) for factors in
-                                                 zip(*chain([t_output.tokens], t_output.other_factor_tokens)))
+                                                 zip(*chain([t_output.tokens], t_output.factor_tokens)))
         print(factored_string, file=self.stream, flush=True)
 
     def reports_score(self) -> bool:

@@ -403,8 +403,8 @@ class TranslatorOutput:
     :param nbest_translations: List of nbest translations as strings.
     :param nbest_tokens: List of nbest translations as lists of tokens.
     :param nbest_scores: List of nbest scores, one for each nbest translation.
-    :param other_factors: List of secondary factor outputs.
-    :param other_factor_tokens: List of list of secondary factor tokens.
+    :param factor_translations: List of factor outputs.
+    :param factor_tokens: List of list of secondary factor tokens.
     """
     __slots__ = ('sentence_id',
                  'translation',
@@ -415,8 +415,8 @@ class TranslatorOutput:
                  'nbest_translations',
                  'nbest_tokens',
                  'nbest_scores',
-                 'other_factors',
-                 'other_factor_tokens')
+                 'factor_translations',
+                 'factor_tokens')
 
     def __init__(self,
                  sentence_id: SentenceId,
@@ -428,8 +428,8 @@ class TranslatorOutput:
                  nbest_translations: Optional[List[str]] = None,
                  nbest_tokens: Optional[List[Tokens]] = None,
                  nbest_scores: Optional[List[float]] = None,
-                 other_factors: Optional[List[str]] = None,
-                 other_factor_tokens: Optional[List[Tokens]] = None) -> None:
+                 factor_translations: Optional[List[str]] = None,
+                 factor_tokens: Optional[List[Tokens]] = None) -> None:
         self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
@@ -439,8 +439,8 @@ class TranslatorOutput:
         self.nbest_translations = nbest_translations
         self.nbest_tokens = nbest_tokens
         self.nbest_scores = nbest_scores
-        self.other_factors = other_factors
-        self.other_factor_tokens = other_factor_tokens
+        self.factor_translations = factor_translations
+        self.factor_tokens = factor_tokens
 
     def json(self) -> Dict:
         """
@@ -461,8 +461,8 @@ class TranslatorOutput:
             _d['translations'] = self.nbest_translations
             _d['scores'] = self.nbest_scores
 
-        if self.other_factors is not None:
-            for i, factor in enumerate(self.other_factors, 1):
+        if self.factor_translations is not None:
+            for i, factor in enumerate(self.factor_translations, 1):
                 _d['factor%d' % i] = factor
         return _d
 
@@ -971,8 +971,8 @@ class Translator:
                                                                                         List[List[str]],
                                                                                         List[str]]:
         """
-        Separates surface translation from other factors. Creates token list and strings for each factor.
-        Ensures that secondary factor strings are of the same length as the primary factor string.
+        Separates surface translation from factors. Creates token list and strings for each factor.
+        Ensures that factor strings are of the same length as the translation string.
         """
         all_target_tokens = []  # type: List[List[str]]
         all_target_strings = []  # type: List[str]
@@ -1017,12 +1017,12 @@ class Translator:
                                     score=translation.score,
                                     pass_through_dict=trans_input.pass_through_dict,
                                     beam_histories=translation.beam_histories,
-                                    other_factors=other_target_strings,
-                                    other_factor_tokens=other_target_tokens)
+                                    factor_translations=other_target_strings,
+                                    factor_tokens=other_target_tokens)
         else:
             nbest_target_tokens, nbest_target_strings = [], []
             for nbest_target_ids in translation.nbest_translations.target_ids_list:
-                # TODO: for now do not store other target factors for nbest translations
+                # TODO: for now do not store target factors for nbest translations
                 primary_target_tokens, primary_translation, _, _ = \
                     self._get_translation_tokens_and_factors(nbest_target_ids)
                 nbest_target_tokens.append(primary_target_tokens)
@@ -1039,8 +1039,8 @@ class Translator:
                                     nbest_translations=nbest_target_strings,
                                     nbest_tokens=nbest_target_tokens,
                                     nbest_scores=nbest_scores,
-                                    other_factors=other_target_strings,
-                                    other_factor_tokens=other_target_tokens)
+                                    factor_translations=other_target_strings,
+                                    factor_tokens=other_target_tokens)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
@@ -1112,7 +1112,7 @@ class Translator:
                     [self._assemble_translation(*x, unshift_target_factors=C.TARGET_FACTOR_SHIFT) for x in
                      zip(best_word_indices[indices,
                                            :,  # get all factors
-                                           np.arange(indices.shape_1)],  # pylint: disable=unsubscriptable-object
+                                           np.arange(indices_shape_1)],  # pylint: disable=unsubscriptable-object
                          lengths[best_ids],
                          seq_scores[best_ids],
                          histories,

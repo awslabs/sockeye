@@ -151,7 +151,7 @@ class CheckpointDecoder:
         """
         Decodes data set and evaluates given a checkpoint.
 
-        :param output_name: Filename to write translations to. Defaults to /dev/null.
+        :param output_name: Filename to write translations to. If None, will not write outputs.
         :return: Mapping of metric names to scores.
         """
 
@@ -170,8 +170,8 @@ class CheckpointDecoder:
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
                 output_strings = [trans_output.translation]
-                if trans_output.other_factors is not None and len(outputs) > 1:
-                    output_strings += trans_output.other_factors
+                if trans_output.factor_translations is not None and len(outputs) > 1:
+                    output_strings += trans_output.factor_translations
                 translations.append(output_strings)
                 for output_string, output_file in zip(output_strings, outputs):
                     if output_file is not None:

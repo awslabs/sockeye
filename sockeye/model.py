@@ -269,7 +269,7 @@ class SockeyeModel(mx.gluon.Block):
         # Target factor outputs are currently stored in additional outputs.
         target_factor_outputs = []
         # TODO: consider a dictionary mapping as return value
-        for i, factor_output_layer in enumerate(self.factor_output_layers, 1):
+        for factor_output_layer in self.factor_output_layers:
             target_factor_outputs.append(factor_output_layer(decoder_out, None))
 
         return step_output, new_states, target_factor_outputs
