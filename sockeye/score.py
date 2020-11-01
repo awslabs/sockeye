@@ -38,6 +38,7 @@ def main():
     params = arguments.ConfigArgumentParser(description='Score data with an existing model.')
     arguments.add_score_cli_args(params)
     args = params.parse_args()
+    check_condition(args.batch_type == C.BATCH_TYPE_SENTENCE, "Batching by number of words is not supported")
     score(args)
 
 

@@ -527,7 +527,8 @@ class GluonEarlyStoppingTrainer:
                             self.state.best_checkpoint)
                 adjusted_lr = self.trainer.optimizer.lr_scheduler.lr
                 # trainer.load_states also reloads the parameters
-                self._load_trainer_states(self.best_optimizer_states_fname)
+                if os.path.exists(self.best_optimizer_states_fname):
+                    self._load_trainer_states(self.best_optimizer_states_fname)
                 # state loading replaces the lr_scheduler instance which then contains the old learning rate,
                 # overwriting here. TODO: make this better...
                 self.trainer.optimizer.lr_scheduler.lr = adjusted_lr

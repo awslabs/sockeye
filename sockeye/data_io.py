@@ -1112,6 +1112,7 @@ class DataStatistics(config.Config):
 
     def log(self, bucket_batch_sizes: Optional[List[BucketBatchSize]] = None):
         logger.info("Tokens: source %d target %d", self.num_tokens_source, self.num_tokens_target)
+        logger.info("Number of <unk> tokens: source %d target %d", self.num_unks_source, self.num_unks_target)
         if self.num_tokens_source > 0 and self.num_tokens_target > 0:
             logger.info("Vocabulary coverage: source %.0f%% target %.0f%%",
                         (1 - self.num_unks_source / self.num_tokens_source) * 100,
@@ -1743,12 +1744,12 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
             source_len = 0 if sources[0] is None else len(sources[0])
             target_len = 0 if targets[0] is None else len(targets[0])
             if source_len > self.max_len_source:
-                logger.info("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read,
+                logger.debug("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read,
                                                                             source_len,
                                                                             self.max_len_source))
                 sources = [source[0: self.max_len_source] for source in sources]
             if target_len > self.max_len_target:
-                logger.info("Trimming target sentence {} ({} -> {})".format(self.sentno + num_read,
+                logger.debug("Trimming target sentence {} ({} -> {})".format(self.sentno + num_read,
                                                                             target_len,
                                                                             self.max_len_target))
                 targets = [target[0: self.max_len_target] for target in targets]
@@ -1760,7 +1761,10 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
             if num_read == self.batch_size:
                 break
 
+        aux = int(self.sentno / 1_000_000)
         self.sentno += num_read
+        if int(self.sentno / 1_000_000) != aux:
+            logger.info("Processed {} lines".format(self.sentno))
 
         if num_read == 0:
             self.next_batch = None
