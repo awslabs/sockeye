@@ -28,13 +28,21 @@ We welcome Pull Requests if you would like to help with adding back features whe
 
 ## Citation
 
-For more information about Sockeye 2, see our paper ([BibTeX](sockeye2.bib)):
+For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
 
-> Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar. 2020.
-> [Sockeye 2: A Toolkit for Neural Machine Translation](https://www.amazon.science/publications/sockeye-2-a-toolkit-for-neural-machine-translation). To appear in EAMT 2020, project track.
+##### Sockeye 2.x
 
-For technical information about Sockeye 1, see our paper on the arXiv ([BibTeX](sockeye.bib)):
+> Tobias Domhan, Michael Denkowski, David Vilar, Xing Niu, Felix Hieber, Kenneth Heafield.
+> [The Sockeye 2 Neural Machine Translation Toolkit at AMTA 2020](https://www.aclweb.org/anthology/2020.amta-research.10/). Proceedings of the 14th Conference of the Association for Machine Translation in the Americas (AMTA'20).
 
+> Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar.
+> [Sockeye 2: A Toolkit for Neural Machine Translation](https://www.amazon.science/publications/sockeye-2-a-toolkit-for-neural-machine-translation). Proceedings of the 22nd Annual Conference of the European Association for Machine Translation, Project Track (EAMT'20).
+
+##### Sockeye 1.x
+
+> Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton, Matt Post.
+> [The Sockeye Neural Machine Translation Toolkit at AMTA 2018](https://www.aclweb.org/anthology/W18-1820/). Proceedings of the 13th Conference of the Association for Machine Translation in the Americas  (AMTA'18).
+>
 > Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton and Matt Post. 2017.
 > [Sockeye: A Toolkit for Neural Machine Translation](https://arxiv.org/abs/1712.05690). ArXiv e-prints.
 
