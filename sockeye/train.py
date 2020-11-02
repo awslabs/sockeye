@@ -318,7 +318,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
                              for combine in args.target_factors_combine])
                         or len(target_vocabs) == len(args.target_factors_num_embed) + 1,
-                        "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
+                        "Data was prepared with %d target factors, but only provided %d target factor dimensions." % (
                             len(target_vocabs), len(args.target_factors_num_embed) + 1))
 
         if resume_training:

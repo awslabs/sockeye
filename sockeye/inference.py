@@ -1005,9 +1005,6 @@ class Translator:
         :param translation: The translation and score.
         :return: TranslatorOutput.
         """
-        primary_target_tokens, primary_translation, other_target_tokens, other_target_strings = \
-            self._get_translation_tokens_and_factors(translation.target_ids)
-
         if translation.nbest_translations is None:
             primary_target_tokens, primary_translation, other_target_tokens, other_target_strings = \
                 self._get_translation_tokens_and_factors(translation.target_ids)
@@ -1020,13 +1017,15 @@ class Translator:
                                     factor_translations=other_target_strings,
                                     factor_tokens=other_target_tokens)
         else:
+            primary_target_tokens, primary_translation, other_target_tokens, other_target_strings = \
+                self._get_translation_tokens_and_factors(translation.target_ids)
             nbest_target_tokens, nbest_target_strings = [], []
             for nbest_target_ids in translation.nbest_translations.target_ids_list:
                 # TODO: for now do not store target factors for nbest translations
-                primary_target_tokens, primary_translation, _, _ = \
+                target_tokens_n, primary_translation_n, _, _ = \
                     self._get_translation_tokens_and_factors(nbest_target_ids)
-                nbest_target_tokens.append(primary_target_tokens)
-                nbest_target_strings.append(primary_translation)
+                nbest_target_tokens.append(target_tokens_n)
+                nbest_target_strings.append(primary_translation_n)
 
             nbest_scores = translation.nbest_translations.scores
 
