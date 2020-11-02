@@ -188,7 +188,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         :return: Initial states.
         """
         # (batch_size, 1)
-        step = mx.nd.expand_dims(mx.nd.zeros_like(encoder_valid_length), axis=1)
+        step = mx.nd.zeros_like(encoder_valid_length).expand_dims(axis=1, inplace=True)
 
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
@@ -245,13 +245,13 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         if is_inference:
             # Just add the length dimension:
             # (batch, num_hidden) -> (batch, 1, num_hidden)
-            step_input = mx.nd.expand_dims(step_input, axis=1)
+            step_input = step_input.expand_dims(axis=1, inplace=True)
         else:
             assert not self.inference_only, "Decoder created with inference_only=True but used during training."
             # Replace the single step by multiple steps for training
             step, *states = states
-            # Create steps (1, trg_seq_len,)
-            steps = mx.nd.expand_dims(mx.nd.arange(input_shape[1], ctx=step_input.context), axis=0)
+            # Create steps (1, trg_seq_len)
+            steps = mx.nd.contrib.arange_like(step_input, axis=1).expand_dims(axis=0, inplace=True)
             states = [steps] + states
 
         # run decoder op

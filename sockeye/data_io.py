@@ -1999,13 +1999,14 @@ def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArr
     """
     Creates a Batch instance from parallel data.
     """
-    source_words = mx.nd.squeeze(mx.nd.slice(source, begin=(None, None, 0), end=(None, None, 1)), axis=2)
+    source_words = mx.nd.slice(source, begin=(None, None, 0), end=(None, None, 1)).squeeze(axis=2, inplace=True)
     source_length = mx.nd.sum(source_words != C.PAD_ID, axis=1)
     target_length = mx.nd.sum(target != C.PAD_ID, axis=1)
     length_ratio = source_length / target_length
 
-    samples = source.shape[0]
-    tokens = source.shape[1] * samples
+    source_shape = source.shape
+    samples = source_shape[0]
+    tokens = source_shape[1] * samples
 
     labels = {C.TARGET_LABEL_NAME: label, C.LENRATIO_LABEL_NAME: length_ratio}
 
