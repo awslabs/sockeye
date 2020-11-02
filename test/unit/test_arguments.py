@@ -72,7 +72,7 @@ def test_io_args(test_params, expected_params):
     ('', dict(quiet=False,
               quiet_secondary_workers=False,
               loglevel='INFO',
-              loglevel_secondary_workers='ERROR',
+              loglevel_secondary_workers='INFO',
               no_logfile=False)),
 ])
 def test_logging_args(test_params, expected_params):
@@ -278,7 +278,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           quiet=False,
           quiet_secondary_workers=False,
           loglevel='INFO',
-          loglevel_secondary_workers='ERROR',
+          loglevel_secondary_workers='INFO',
           no_logfile=False,
           max_processes=1
           ))
@@ -311,7 +311,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           quiet=False,
           quiet_secondary_workers=False,
           loglevel='INFO',
-          loglevel_secondary_workers='ERROR',
+          loglevel_secondary_workers='INFO',
           no_logfile=False,
           max_processes=1
           ))
