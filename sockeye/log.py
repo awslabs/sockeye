@@ -103,7 +103,8 @@ LOGGING_CONFIGS = {
 }
 
 
-def setup_main_logger(file_logging=True, console=True, path: Optional[str] = None, level=logging.INFO):
+def setup_main_logger(file_logging=True, console=True, path: Optional[str] = None, level=logging.INFO,
+                      console_level=None):
     """
     Configures logging for the main application.
 
@@ -111,6 +112,7 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     :param console: Whether to log to the console.
     :param path: Optional path to write logfile to.
     :param level: Log level. Default: INFO.
+    :param console_level: Optionally specify a separate log level for the console.
     """
     if file_logging and console:
         log_config = LOGGING_CONFIGS["file_console"]  # type: ignore
@@ -127,6 +129,9 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
 
     for _, handler_config in log_config['handlers'].items():  # type: ignore
         handler_config['level'] = level
+
+    if 'console' in log_config['handlers'] and console_level is not None:  # type: ignore
+        log_config['handlers']['console']['level'] = console_level  # type: ignore
 
     logging.config.dictConfig(log_config)  # type: ignore
 

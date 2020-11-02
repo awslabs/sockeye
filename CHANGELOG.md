@@ -14,6 +14,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.3.0]
 
 ### Added
+
 - Added support for target factors.
   If provided with additional target-side tokens/features (token-parallel to the regular target-side) at training time,
   the model can now learn to predict these in a multi-task setting. You can provide target factor data similar to source
@@ -23,6 +24,12 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
   The predicted factor at each time step is the argmax over its separate output
   layer distribution. To receive the target factor predictions at inference time, use
   `--output-type translation_with_factors`. 
+
+## [2.2.7]
+
+### Added
+
+- Added an argument to specify the log level of secondary workers. Defaults to ERROR to hide any logs except for exceptions.
 
 ## [2.2.6]
 
