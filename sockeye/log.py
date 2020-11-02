@@ -130,8 +130,8 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     for _, handler_config in log_config['handlers'].items():  # type: ignore
         handler_config['level'] = level
 
-    if 'console' in log_config['handlers'] and console_level is not None:
-        log_config['handlers']['console']['level'] = console_level
+    if 'console' in log_config['handlers'] and console_level is not None:  # type: ignore
+        log_config['handlers']['console']['level'] = console_level  # type: ignore
 
     logging.config.dictConfig(log_config)  # type: ignore
 
