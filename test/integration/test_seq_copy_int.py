@@ -80,7 +80,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      "--beam-size 2 --beam-search-stop first",
      True, 3),
     # Basic transformer with LHUC
-    ("--encoder transformer --decoder {decoder}"
+    ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
@@ -266,7 +266,8 @@ def _test_mc_dropout(model_path: str):
     """
     Check that loading a model with MC Dropoout returns a model with dropout layers.
     """
-    model, _, _ = load_model(model_folder=model_path, context=[mx.cpu()], mc_dropout=True, inference_only=True, hybridize=True)
+    model, _, _ = load_model(model_folder=model_path, context=[mx.cpu()], mc_dropout=True,
+                             inference_only=True, hybridize=True)
 
     # Ensure the model has some dropout turned on
     config_blocks = [block for _, block in model.config.__dict__.items() if isinstance(block, Config)]
