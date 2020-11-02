@@ -13,7 +13,16 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [2.3.0]
 
-- Basic support for target factors in training.
+### Added
+- Added support for target factors.
+  If provided with additional target-side tokens/features (token-parallel to the regular target-side) at training time,
+  the model can now learn to predict these in a multi-task setting. You can provide target factor data similar to source
+  factors: `--target-factors <factor_file1> [<factor_fileN>]`. During training, Sockeye optimizes one loss per factor
+  in a multi-task setting. The weight of the losses can be controlled by `--target-factors-weight`.
+  At inference, target factors are decoded greedily, they do not participate in beam search.
+  The predicted factor at each time step is the argmax over its separate output
+  layer distribution. To receive the target factor predictions at inference time, use
+  `--output-type translation_with_factors`. 
 
 ## [2.2.6]
 
