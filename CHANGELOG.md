@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.2.7]
+
+### Added
+- Added an argument to specify the log level of secondary workers. Defaults to ERROR to hide any logs except for exceptions.
+
+
 ## [2.2.6]
 
 ### Fixed

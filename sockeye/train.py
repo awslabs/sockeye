@@ -804,6 +804,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # training run) and a local rank (unique on the current host).  For example,
     # running on 2 hosts with 4 slots each will assign ranks 0-7 and local ranks
     # 0-3.
+    console_level = None
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
@@ -825,6 +826,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # If requested, suppress console output for secondary workers
             if args.quiet_secondary_workers:
                 args.quiet = True
+            console_level = args.loglevel_secondary_workers
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
@@ -833,7 +835,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     setup_main_logger(file_logging=not args.no_logfile,
                       console=not args.quiet,
                       path=os.path.join(output_folder, C.LOG_NAME),
-                      level=args.loglevel)
+                      level=args.loglevel,
+                      console_level=console_level)
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
