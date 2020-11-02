@@ -35,20 +35,28 @@ For information on how to use Sockeye, please visit [our documentation](https://
 
 ## Citation
 
-For more information about Sockeye 2, see our paper ([BibTeX](sockeye2.bib)):
+For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
 
-> Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar. 2020.
-> [Sockeye 2: A Toolkit for Neural Machine Translation](https://www.amazon.science/publications/sockeye-2-a-toolkit-for-neural-machine-translation). To appear in EAMT 2020, project track.
+##### Sockeye 2.x
 
-For technical information about Sockeye 1, see our paper on the arXiv ([BibTeX](sockeye.bib)):
+> Tobias Domhan, Michael Denkowski, David Vilar, Xing Niu, Felix Hieber, Kenneth Heafield.
+> [The Sockeye 2 Neural Machine Translation Toolkit at AMTA 2020](https://www.aclweb.org/anthology/2020.amta-research.10/). Proceedings of the 14th Conference of the Association for Machine Translation in the Americas (AMTA'20).
 
+> Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar.
+> [Sockeye 2: A Toolkit for Neural Machine Translation](https://www.amazon.science/publications/sockeye-2-a-toolkit-for-neural-machine-translation). Proceedings of the 22nd Annual Conference of the European Association for Machine Translation, Project Track (EAMT'20).
+
+##### Sockeye 1.x
+
+> Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton, Matt Post.
+> [The Sockeye Neural Machine Translation Toolkit at AMTA 2018](https://www.aclweb.org/anthology/W18-1820/). Proceedings of the 13th Conference of the Association for Machine Translation in the Americas  (AMTA'18).
+>
 > Felix Hieber, Tobias Domhan, Michael Denkowski, David Vilar, Artem Sokolov, Ann Clifton and Matt Post. 2017.
 > [Sockeye: A Toolkit for Neural Machine Translation](https://arxiv.org/abs/1712.05690). ArXiv e-prints.
 
 ## Research with Sockeye
 
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
-If you know more, please let us know or submit a pull request (last updated: September 2020).
+If you know more, please let us know or submit a pull request (last updated: October 2020).
 
 ### 2020
 
@@ -57,7 +65,11 @@ If you know more, please let us know or submit a pull request (last updated: Sep
 * Naradowsky, Jason, Xuan Zhan, Kevin Duh. "Machine Translation System Selection from Bandit Feedback." arXiv preprint arXiv:2002.09646 (2020)
 * Niu, Xing, Prashant Mathur, Georgiana Dinu, Yaser Al-Onaizan. "Evaluating Robustness to Input Perturbations for Neural Machine Translation". arXiv preprint 	arXiv:2005.00580 (2020)
 * Niu, Xing, Marine Carpuat. "Controlling Neural Machine Translation Formality with Synthetic Supervision." Proceedings of AAAI (2020)
+* Keung, Phillip, Julian Salazar, Yichao Liu, Noah A. Smith. "Unsupervised Bitext Mining and Translation
+via Self-Trained Contextual Embeddings." arXiv preprint arXiv:2010.07761 (2020).
 * Sokolov, Alex, Tracy Rohlin, Ariya Rastrow. "Neural Machine Translation for Multilingual Grapheme-to-Phoneme Conversion." arXiv preprint arXiv:2006.14194 (2020)
+* Stafanovičs, Artūrs, Toms Bergmanis, Mārcis Pinnis. "Mitigating Gender Bias in Machine Translation with Target Gender
+Annotations." arXiv preprint arXiv:2010.06203 (2020)
 * Stojanovski, Dario, Alexander Fraser. "Addressing Zero-Resource Domains Using Document-Level Context in Neural Machine Translation." arXiv preprint arXiv preprint arXiv:2004.14927 (2020)
 * Zhang, Xuan, Kevin Duh. "Reproducible and Efficient Benchmarks for Hyperparameter Optimization of Neural Machine Translation Systems." Transactions of the Association for Computational Linguistics, Volume 8 (2020)
 * Swe Zin Moe, Ye Kyaw Thu, Hnin Aye Thant, Nandar Win Min, and Thepchai Supnithi, "Unsupervised Neural Machine Translation between Myanmar Sign Language and Myanmar Language", Journal of Intelligent Informatics and Smart Technology, April 1st Issue, 2020, pp. 53-61. (Submitted December 21, 2019; accepted March 6, 2020; revised March 16, 2020; published online April 30, 2020)

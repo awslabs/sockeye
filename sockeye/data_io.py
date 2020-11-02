@@ -1698,12 +1698,12 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
             source_len = 0 if sources[0] is None else len(sources[0])
             target_len = 0 if target is None else len(target)
             if source_len > self.max_len_source:
-                logger.info("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read,
+                logger.debug("Trimming source sentence {} ({} -> {})".format(self.sentno + num_read,
                                                                             source_len,
                                                                             self.max_len_source))
                 sources = [source[0: self.max_len_source] for source in sources]
             if target_len > self.max_len_target:
-                logger.info("Trimming target sentence {} ({} -> {})".format(self.sentno + num_read,
+                logger.debug("Trimming target sentence {} ({} -> {})".format(self.sentno + num_read,
                                                                             target_len,
                                                                             self.max_len_target))
                 target = target[0: self.max_len_target]
@@ -1714,7 +1714,10 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
             if num_read == self.batch_size:
                 break
 
+        aux = int(self.sentno / 1_000_000)
         self.sentno += num_read
+        if int(self.sentno / 1_000_000) != aux:
+            logger.info("Processed {} lines".format(self.sentno))
 
         if num_read == 0:
             self.next_batch = None
