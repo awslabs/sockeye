@@ -1053,7 +1053,7 @@ def add_translate_cli_args(params):
 
 
 def add_score_cli_args(params):
-    add_training_data_args(params, required=False)
+    add_training_data_args(params, required=True)
     add_vocab_args(params)
     add_device_args(params)
     add_batch_args(params, default_batch_size=56, default_batch_type=C.BATCH_TYPE_SENTENCE)
