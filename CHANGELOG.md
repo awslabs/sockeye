@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.2.8]
+
+### Changed
+- Make source/target data parameters required for the scoring CLI to avoid cryptic error messages.
+
+
 ## [2.2.7]
 
 ### Added
