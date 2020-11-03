@@ -971,8 +971,11 @@ class Translator:
                                                                                         List[List[str]],
                                                                                         List[str]]:
         """
-        Separates surface translation from factors. Creates token list and strings for each factor.
-        Ensures that factor strings are of the same length as the translation string.
+        Separates surface translation from factors. Input is a nested list of target ids.
+        Creates tokens and output string for surface translation and for each factor, using the inverted target-side
+        vocabularies. Ensures that factor strings are of the same length as the translation string.
+
+        :param target_ids: Nested list of target ids.
         """
         all_target_tokens = []  # type: List[List[str]]
         all_target_strings = []  # type: List[str]
@@ -989,10 +992,10 @@ class Translator:
             all_target_tokens = [[] for _ in range(len(self.vocab_targets_inv))]
             all_target_strings = ['' for _ in range(len(self.vocab_targets_inv))]
 
-        primary_target_tokens, *other_target_tokens = all_target_tokens
-        primary_target_string, *other_target_strings = all_target_strings
+        tokens, *factor_tokens = all_target_tokens
+        translation, *factor_translations = all_target_strings
 
-        return primary_target_tokens, primary_target_string, other_target_tokens, other_target_strings
+        return tokens, translation, factor_tokens, factor_translations
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -1005,41 +1008,34 @@ class Translator:
         :param translation: The translation and score.
         :return: TranslatorOutput.
         """
+        primary_tokens, primary_translation, factor_tokens, factor_translations = \
+            self._get_translation_tokens_and_factors(translation.target_ids)
+
         if translation.nbest_translations is None:
-            primary_target_tokens, primary_translation, other_target_tokens, other_target_strings = \
-                self._get_translation_tokens_and_factors(translation.target_ids)
-            return TranslatorOutput(sentence_id=trans_input.sentence_id,
-                                    translation=primary_translation,
-                                    tokens=primary_target_tokens,
-                                    score=translation.score,
-                                    pass_through_dict=trans_input.pass_through_dict,
-                                    beam_histories=translation.beam_histories,
-                                    factor_translations=other_target_strings,
-                                    factor_tokens=other_target_tokens)
+            nbest_translations = None
+            nbest_tokens = None
+            nbest_scores = None
         else:
-            primary_target_tokens, primary_translation, other_target_tokens, other_target_strings = \
-                self._get_translation_tokens_and_factors(translation.target_ids)
-            nbest_target_tokens, nbest_target_strings = [], []
+            nbest_tokens, nbest_translations = [], []
             for nbest_target_ids in translation.nbest_translations.target_ids_list:
-                # TODO: for now do not store target factors for nbest translations
+                # TODO: also extract target factors for nbest translations
                 target_tokens_n, primary_translation_n, _, _ = \
                     self._get_translation_tokens_and_factors(nbest_target_ids)
-                nbest_target_tokens.append(target_tokens_n)
-                nbest_target_strings.append(primary_translation_n)
-
+                nbest_tokens.append(target_tokens_n)
+                nbest_translations.append(primary_translation_n)
             nbest_scores = translation.nbest_translations.scores
 
-            return TranslatorOutput(sentence_id=trans_input.sentence_id,
-                                    translation=primary_translation,
-                                    tokens=primary_target_tokens,
-                                    score=translation.score,
-                                    pass_through_dict=trans_input.pass_through_dict,
-                                    beam_histories=translation.beam_histories,
-                                    nbest_translations=nbest_target_strings,
-                                    nbest_tokens=nbest_target_tokens,
-                                    nbest_scores=nbest_scores,
-                                    factor_translations=other_target_strings,
-                                    factor_tokens=other_target_tokens)
+        return TranslatorOutput(sentence_id=trans_input.sentence_id,
+                                translation=primary_translation,
+                                tokens=primary_tokens,
+                                score=translation.score,
+                                pass_through_dict=trans_input.pass_through_dict,
+                                beam_histories=translation.beam_histories,
+                                nbest_translations=nbest_translations,
+                                nbest_tokens=nbest_tokens,
+                                nbest_scores=nbest_scores,
+                                factor_translations=factor_translations,
+                                factor_tokens=factor_tokens)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
