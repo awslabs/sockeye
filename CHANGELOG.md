@@ -25,6 +25,11 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
   layer distribution. To receive the target factor predictions at inference time, use
   `--output-type translation_with_factors`. 
 
+## [2.2.8]
+
+### Changed
+- Make source/target data parameters required for the scoring CLI to avoid cryptic error messages.
+
 ## [2.2.7]
 
 ### Added
