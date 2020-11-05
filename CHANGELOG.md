@@ -24,6 +24,13 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
   The predicted factor at each time step is the argmax over its separate output
   layer distribution. To receive the target factor predictions at inference time, use
   `--output-type translation_with_factors`. 
+  
+### Changed
+
+- `load_model(s)` now returns a list of target vocabs.
+- Default source factor combination changed to `sum` (was `concat` before).
+- `SockeyeModel` class has three new properties: `num_target_factors`, `target_factor_configs`,
+  and `factor_output_layers`.
 
 ## [2.2.8]
 
