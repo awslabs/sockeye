@@ -205,9 +205,9 @@ def create_checkpoint_decoder(
     """
     sample_size = args.decode_and_evaluate
     if args.optimized_metric in C.METRICS_REQUIRING_DECODER and sample_size == 0:
-        logger.info("You chose %s as the optimized metric, will turn on BLEU monitoring during training. "
+        logger.info("You chose %s as the optimized metric, will turn on %s monitoring during training. "
                     "To control how many validation sentences are used for calculating bleu use "
-                    "the --decode-and-evaluate argument.", args.optimized_metric)
+                    "the --decode-and-evaluate argument.", args.optimized_metric, args.optimized_metric)
         sample_size = -1
 
     if sample_size == 0:
