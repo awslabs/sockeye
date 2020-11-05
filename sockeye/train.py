@@ -204,16 +204,16 @@ def create_checkpoint_decoder(
     :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
     sample_size = args.decode_and_evaluate
-    if args.optimized_metric == C.BLEU and sample_size == 0:
-        logger.info("You chose BLEU as the optimized metric, will turn on BLEU monitoring during training. "
-                    "To control how many validation sentences are used for calculating bleu use "
-                    "the --decode-and-evaluate argument.")
+    if args.optimized_metric in C.METRICS_REQUIRING_DECODER and sample_size == 0:
+        logger.info(f"You chose {args.optimized_metric} as the optimized metric, will turn on BLEU monitoring during training. "
+                     "To control how many validation sentences are used for calculating bleu use "
+                     "the --decode-and-evaluate argument.")
         sample_size = -1
 
     if sample_size == 0:
         return None
 
-    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0 and args.optimized_metric not in C.METRICS_REQUIRING_DECODER:
         logger.info("This is a secondary worker, not creating a checkpoint decoder for this training instance")
         return None
 
