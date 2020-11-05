@@ -88,17 +88,17 @@ class Scorer:
     :param model: The model to score with.
     :param batch_scorer: BatchScorer block to score each batch.
     :param source_vocabs: The source vocabularies.
-    :param target_vocab: The target vocabulary.
+    :param target_vocabs: The target vocabularies.
     :param context: Context.
     """
     def __init__(self,
                  model: SockeyeModel,
                  batch_scorer: BatchScorer,
                  source_vocabs: List[vocab.Vocab],
-                 target_vocab: vocab.Vocab,
+                 target_vocabs: List[vocab.Vocab],
                  context: Union[List[mx.context.Context], mx.context.Context]) -> None:
         self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
-        self.target_vocab_inv = vocab.reverse_vocab(target_vocab)
+        self.target_vocab_inv = vocab.reverse_vocab(target_vocabs[0])
         self.model = model
         self.batch_scorer = batch_scorer
         self.context = context
@@ -131,7 +131,7 @@ class Scorer:
             total_time += batch_time
 
             for sentno, (source, target, score) in enumerate(zip(batch.source.astype('int32')[:, :, 0].asnumpy(),
-                                                                 batch.target.astype('int32').asnumpy(),
+                                                                 batch.target.astype('int32')[:, :, 0].asnumpy(),
                                                                  scores.asnumpy()), 1):
                 sentence_no += 1
 
@@ -139,8 +139,8 @@ class Scorer:
                 source_ids = source.tolist()
                 source_tokens = list(data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
                 target_ids = target.tolist()
-                target_string = C.TOKEN_SEPARATOR.join(
-                    data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
+                target_tokens = list(data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
+                target_string = C.TOKEN_SEPARATOR.join(target_tokens)
 
                 # Report a score of -inf for invalid sentence pairs (empty source and/or target)
                 if source[0] == C.PAD_ID or target[0] == C.PAD_ID:
@@ -148,7 +148,8 @@ class Scorer:
 
                 # Output handling routines require us to make use of inference classes.
                 output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),
-                                      inference.TranslatorOutput(sentence_no, target_string, None, score),
+                                      inference.TranslatorOutput(sentence_no, target_string,
+                                                                 target_tokens, score),
                                       batch_time)
 
         if sentence_no != 0:

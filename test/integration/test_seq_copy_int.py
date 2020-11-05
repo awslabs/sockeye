@@ -55,7 +55,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      # max updates independent of the checkpoint interval
      " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2 --nbest-size 2",
-     False, 0),
+     False, 0, 0),
     # Basic transformer w/ prepared data & greedy decoding
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -66,7 +66,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 1",
-     True, 0),
+     True, 0, 0),
     # Basic transformer with source factor, beam-search-stop first decoding
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -76,9 +76,11 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --source-factors-combine sum concat average --source-factors-share-embedding true false true"
-     " --source-factors-num-embed 8 2 8",
+     " --source-factors-num-embed 8 2 8"
+     " --target-factors-combine sum --target-factors-share-embedding false"
+     " --target-factors-num-embed 8",
      "--beam-size 2 --beam-search-stop first",
-     True, 3),
+     True, 3, 1),
     # Basic transformer with LHUC
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -89,7 +91,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
-     False, 0),
+     False, 0, 0),
     # Basic transformer and length ratio prediction, and learned brevity penalty during inference
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -102,7 +104,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --length-task ratio --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
      " --brevity-penalty-type learned --brevity-penalty-weight 1.0",
-     True, 0),
+     True, 0, 0),
     # Basic transformer and absolute length prediction, and constant brevity penalty during inference
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -115,7 +117,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --length-task length --length-task-weight 1.0 --length-task-layers 2",
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
-     False, 0),
+     False, 0, 0),
 ]
 
 ENCODER_DECODER_SETTINGS = [(train_params.format(decoder=decoder), *other_params)
@@ -123,12 +125,13 @@ ENCODER_DECODER_SETTINGS = [(train_params.format(decoder=decoder), *other_params
                             for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
 
 
-@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, n_source_factors",
+@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors",
                          ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
-                  n_source_factors: int):
+                  n_source_factors: int,
+                  n_target_factors: int):
     """
     Task: copy short sequences of digits
     """
@@ -143,7 +146,8 @@ def test_seq_copy(train_params: str,
                             test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
-                            with_n_source_factors=n_source_factors) as data:
+                            with_n_source_factors=n_source_factors,
+                            with_n_target_factors=n_target_factors) as data:
 
         # TODO: Here we temporarily switch off comparing translation and scoring scores, which
         # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).
@@ -243,13 +247,13 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
         num_dev_sent = sum(1 for _ in dev_fd)
     sample_size = min(1, int(num_dev_sent * 0.1))
 
-    model, source_vocabs, target_vocab = load_model(model_folder=model_path, context=[mx.cpu()])
+    model, source_vocabs, target_vocabs = load_model(model_folder=model_path, context=[mx.cpu()])
 
     cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
                                                               inputs=[dev_source_path],
-                                                              references=dev_target_path,
+                                                              references=[dev_target_path],
                                                               source_vocabs=source_vocabs,
-                                                              target_vocab=target_vocab,
+                                                              target_vocabs=target_vocabs,
                                                               model=model,
                                                               model_folder=model_path,
                                                               sample_size=sample_size,

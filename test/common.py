@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 from typing import Any, Dict, List
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import numpy as np
@@ -23,7 +24,7 @@ import sockeye.translate
 from sockeye import constants as C
 from sockeye.test_utils import run_train_translate, run_translate_restrict, TRANSLATE_PARAMS_COMMON, \
     TRANSLATE_WITH_FACTORS_COMMON, collect_translate_output_and_scores, create_reference_constraints, \
-    SCORE_PARAMS_COMMON, SCORE_WITH_FACTORS_COMMON
+    SCORE_PARAMS_COMMON, SCORE_WITH_SOURCE_FACTORS_COMMON, SCORE_WITH_TARGET_FACTORS_COMMON
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,10 @@ def check_train_translate(train_params: str,
     if '--max-input-length' not in translate_params and _translate_output_is_valid(data['test_outputs']):
         test_scoring(data, translate_params, compare_output)
 
+    # Test correct prediction of target factors if enabled
+    if compare_output and 'train_target_factors' in data:
+        test_odd_even_target_factors(data)
+
     return data
 
 
@@ -82,14 +87,15 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()
     # Collect translate outputs and scores
-    translate_outputs_equiv, translate_scores_equiv = collect_translate_output_and_scores(out_path)
+    translate_outputs_equiv = collect_translate_output_and_scores(out_path)
 
-    assert 'test_outputs' in data and 'test_scores' in data
+    assert 'test_outputs' in data
     assert len(data['test_outputs']) == len(translate_outputs_equiv)
-    assert len(data['test_scores']) == len(translate_scores_equiv)
     if compare_output:
-        assert all(a == b for a, b in zip(data['test_outputs'], translate_outputs_equiv))
-        assert all(abs(a - b) < 0.01 or np.isnan(a - b) for a, b in zip(data['test_scores'], translate_scores_equiv))
+        for json_output, json_output_equiv in zip(data['test_outputs'], translate_outputs_equiv):
+            assert json_output['translation'] == json_output_equiv['translation']
+            assert abs(json_output['score'] - json_output_equiv['score']) < 0.01 or \
+                   np.isnan(json_output['score'] - json_output_equiv['score'])
 
 
 def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params: str):
@@ -107,15 +113,14 @@ def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params
         translate_params)
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()
-    constrained_outputs, constrained_scores = collect_translate_output_and_scores(out_path_constrained)
+    constrained_outputs = collect_translate_output_and_scores(out_path_constrained)
     assert len(constrained_outputs) == len(data['test_outputs']) == len(constrained_inputs)
-    for json_input, constrained_out, unconstrained_out in zip(constrained_inputs, constrained_outputs, data['test_outputs']):
+    for json_input, json_constrained, json_unconstrained in zip(constrained_inputs, constrained_outputs, data['test_outputs']):
         # Make sure the constrained output is the same as we got when decoding unconstrained
-        assert constrained_out == unconstrained_out
+        assert json_constrained['translation'] == json_unconstrained['translation']
 
     data['test_constrained_inputs'] = constrained_inputs
     data['test_constrained_outputs'] = constrained_outputs
-    data['test_constrained_scores'] = constrained_scores
     return data
 
 
@@ -137,12 +142,17 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
     out_path = os.path.join(data['work_dir'], "score.out")
 
     # write translate outputs as target file for scoring and collect tokens
+    # also optionally collect factor outputs
     target_path = os.path.join(data['work_dir'], "score.target")
-    translate_tokens = []
-    with open(target_path, 'w') as target_out:
-        for output in data['test_outputs']:
-            print(output, file=target_out)
-            translate_tokens.append(output.split())
+    target_factor_paths = [os.path.join(data['work_dir'], "score.target.factor%d" % i) for i, _ in
+                           enumerate(data.get('test_target_factors', []), 1)]
+    with open(target_path, 'w') as target_out, ExitStack() as exit_stack:
+        target_factor_outs = [exit_stack.enter_context(open(p, 'w')) for p in target_factor_paths]
+        for json_output in data['test_outputs']:
+            print(json_output['translation'], file=target_out)
+            for i, factor_out in enumerate(target_factor_outs, 1):
+                factor = json_output['factor%d' % i]
+                print(factor, file=factor_out)
 
     params = "{} {} {}".format(sockeye.score.__file__,
                                SCORE_PARAMS_COMMON.format(model=data['model'],
@@ -151,7 +161,10 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
                                                           output=out_path),
                                score_params)
     if 'test_source_factors' in data:
-        params += SCORE_WITH_FACTORS_COMMON.format(source_factors=" ".join(data['test_source_factors']))
+        params += SCORE_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['test_source_factors']))
+    if target_factor_paths:
+        params += SCORE_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(target_factor_paths))
+
     logger.info("Scoring with params %s", params)
     with patch.object(sys, "argv", params.split()):
         sockeye.score.main()
@@ -161,10 +174,11 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
         score_scores = [float(line.strip()) for line in score_out]
 
     if test_similar_scores:
-        for inp, translate_tokens, translate_score, score_score in zip(data['test_inputs'],
-                                                                       translate_tokens,
-                                                                       data['test_scores'],
-                                                                       score_scores):
+        for inp, translate_json, score_score in zip(data['test_inputs'],
+                                                    data['test_outputs'],
+                                                    score_scores):
+            translate_tokens = translate_json['translation'].split()
+            translate_score = translate_json['score']
             logger.info("tokens: %s || translate score: %.4f || score score: %.4f",
                         translate_tokens, translate_score, score_score)
             assert (translate_score == -np.inf and score_score == -np.inf) or np.isclose(translate_score,
@@ -182,10 +196,31 @@ def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
     # At least one output must be non-empty
     found_valid_output = False
     bad_tokens = set(C.VOCAB_SYMBOLS)
-    for output in translate_outputs:
-        if output:
+    for json_output in translate_outputs:
+        if json_output and 'translation' in json_output:
             found_valid_output = True
-        if any(token for token in output.split() if token in bad_tokens):
+        if any(token for token in json_output['translation'].split() if token in bad_tokens):
             # There must be no bad tokens
             return False
     return found_valid_output
+
+
+def test_odd_even_target_factors(data: Dict):
+    num_target_factors = len(data['train_target_factors'])
+    for json in data['test_outputs']:
+        factor_keys = [k for k in json.keys() if k.startswith("factor")]
+        assert len(factor_keys) == num_target_factors
+        primary_tokens = json['translation'].split()
+        secondary_factor_tokens = [json[factor_key].split() for factor_key in factor_keys]
+        for factor_tokens in secondary_factor_tokens:
+            assert len(factor_tokens) == len(primary_tokens)
+            print(primary_tokens, factor_tokens)
+            for primary_token, factor_token in zip(primary_tokens, factor_tokens):
+                try:
+                    if int(primary_token) % 2 == 0:
+                        assert factor_token == 'e'
+                    else:
+                        assert factor_token == 'o'
+                except ValueError:
+                    logger.warning("primary token cannot be converted to int, skipping")
+                    continue

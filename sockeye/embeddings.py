@@ -15,7 +15,6 @@
 Command-line tool to inspect model embeddings.
 """
 import argparse
-import os
 import sys
 import logging
 from typing import Iterable, Tuple
@@ -29,7 +28,7 @@ from . import utils
 from .data_io import tokens2ids
 from .log import setup_main_logger
 from .utils import check_condition
-from .vocab import load_source_vocabs, load_target_vocab, reverse_vocab
+from .vocab import reverse_vocab
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +99,14 @@ def main():
 def embeddings(args: argparse.Namespace):
     logger.info("Arguments: %s", args)
 
-    sockeye_model, source_vocabs, target_vocab = model.load_model(args.model, checkpoint=args.checkpoint, hybridize=False)
+    sockeye_model, source_vocabs, target_vocabs = model.load_model(args.model,
+                                                                   checkpoint=args.checkpoint,
+                                                                   hybridize=False)
 
     if args.side == "source":
         vocab = source_vocabs[0]
     else:
-        vocab = target_vocab
+        vocab = target_vocabs[0]
     vocab_inv = reverse_vocab(vocab)
 
     params = sockeye_model.collect_params()

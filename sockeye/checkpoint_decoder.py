@@ -19,6 +19,7 @@ import os
 import random
 import time
 from contextlib import ExitStack
+from itertools import chain
 from typing import Any, Dict, Optional, List
 
 import mxnet as mx
@@ -42,9 +43,9 @@ class CheckpointDecoder:
 
     :param model_folder: The model folder where checkpoint decoder outputs will be written to.
     :param inputs: Path(s) to file containing input sentences (and their factors).
-    :param references: Path to file containing references.
+    :param references: Path to file containing references (and their factors).
     :param source_vocabs: The source vocabularies.
-    :param target_vocab: The target vocabulary.
+    :param target_vocabs: The target vocabularies.
     :param context: The devices to use for decoding.
     :param model: The translation model.
     :param max_input_len: Maximum input length.
@@ -63,9 +64,9 @@ class CheckpointDecoder:
     def __init__(self,
                  model_folder: str,
                  inputs: List[str],
-                 references: str,
+                 references: List[str],
                  source_vocabs: List[vocab.Vocab],
-                 target_vocab: vocab.Vocab,
+                 target_vocabs: List[vocab.Vocab],
                  model: sockeye.model.SockeyeModel,
                  context: mx.Context,
                  max_input_len: Optional[int] = None,
@@ -93,30 +94,33 @@ class CheckpointDecoder:
 
         with ExitStack() as exit_stack:
             inputs_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in inputs]
-            references_fin = exit_stack.enter_context(data_io.smart_open(references))
+            references_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in references]
 
             inputs_sentences = [f.readlines() for f in inputs_fins]
-            target_sentences = references_fin.readlines()
+            targets_sentences = [f.readlines() for f in references_fins]
 
-            utils.check_condition(all(len(l) == len(target_sentences) for l in inputs_sentences),
+            utils.check_condition(all(len(l) == len(targets_sentences[0]) for l in chain(inputs_sentences,
+                                                                                         targets_sentences)),
                                   "Sentences differ in length")
-            utils.check_condition(all(len(sentence.strip()) > 0 for sentence in target_sentences),
+            utils.check_condition(all(len(sentence.strip()) > 0 for sentence in targets_sentences[0]),
                                   "Empty target validation sentence.")
 
             if sample_size <= 0:
                 sample_size = len(inputs_sentences[0])
             if sample_size < len(inputs_sentences[0]):
-                self.target_sentences, *self.inputs_sentences = parallel_subsample(
-                    [target_sentences] + inputs_sentences, sample_size, random_seed)
+                sentences = parallel_subsample(
+                    inputs_sentences + targets_sentences, sample_size, random_seed)
+                self.inputs_sentences = sentences[0:len(inputs_sentences)]
+                self.targets_sentences = sentences[len(inputs_sentences):]
             else:
-                self.inputs_sentences, self.target_sentences = inputs_sentences, target_sentences
+                self.inputs_sentences, self.targets_sentences = inputs_sentences, targets_sentences
 
             if sample_size < self.batch_size:
                 self.batch_size = sample_size
-
-        for i, factor in enumerate(self.inputs_sentences):
-            write_to_file(factor, os.path.join(model_folder, C.DECODE_IN_NAME % i))
-        write_to_file(self.target_sentences, os.path.join(model_folder, C.DECODE_REF_NAME))
+        for factor_idx, factor in enumerate(self.inputs_sentences):
+            write_to_file(factor, os.path.join(model_folder, C.DECODE_IN_NAME.format(factor=factor_idx)))
+        for factor_idx, factor in enumerate(self.targets_sentences):
+            write_to_file(factor, os.path.join(model_folder, C.DECODE_REF_NAME.format(factor=factor_idx)))
 
         self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
 
@@ -136,27 +140,28 @@ class CheckpointDecoder:
             nbest_size=self.nbest_size,
             models=[self.model],
             source_vocabs=source_vocabs,
-            target_vocab=target_vocab,
+            target_vocabs=target_vocabs,
             restrict_lexicon=None,
             hybridize=hybridize)
 
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, num_sentences=%d)",
-                    max_input_len if max_input_len is not None else -1, beam_size, len(self.target_sentences))
+                    max_input_len if max_input_len is not None else -1, beam_size, len(self.targets_sentences[0]))
 
-    def decode_and_evaluate(self,
-                            output_name: str = os.devnull) -> Dict[str, float]:
+    def decode_and_evaluate(self, output_name: Optional[str] = None) -> Dict[str, float]:
         """
         Decodes data set and evaluates given a checkpoint.
 
-        :param output_name: Filename to write translations to. Defaults to /dev/null.
+        :param output_name: Filename to write translations to. If None, will not write outputs.
         :return: Mapping of metric names to scores.
         """
 
         # 1. Translate
         trans_wall_time = 0.0
-        translations = []
-        with data_io.smart_open(output_name, 'w') as output:
-            handler = sockeye.output_handler.StringOutputHandler(output)
+        translations = []  # type: List[List[str]]
+        with ExitStack() as exit_stack:
+            outputs = [exit_stack.enter_context(data_io.smart_open(output_name.format(factor=idx), 'w'))
+                       if output_name is not None else None for idx in range(self.model.num_target_factors)]
+
             tic = time.time()
             trans_inputs = []  # type: List[inference.TranslatorInput]
             for i, inputs in enumerate(self.inputs_sentences):
@@ -164,26 +169,42 @@ class CheckpointDecoder:
             trans_outputs = self.translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
-                handler.handle(trans_input, trans_output)
-                translations.append(trans_output.translation)
-        avg_time = trans_wall_time / len(self.target_sentences)
+                output_strings = [trans_output.translation]
+                if trans_output.factor_translations is not None and len(outputs) > 1:
+                    output_strings += trans_output.factor_translations
+                translations.append(output_strings)
+                for output_string, output_file in zip(output_strings, outputs):
+                    if output_file is not None:
+                        print(output_string, file=output_file)
+        avg_time = trans_wall_time / len(self.targets_sentences[0])
+        translations = list(zip(*translations))
 
         # 2. Evaluate
-        return {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations,
-                                                 references=self.target_sentences,
-                                                 offset=0.01),
-                C.CHRF: evaluate.raw_corpus_chrf(hypotheses=translations,
-                                                 references=self.target_sentences),
-                C.ROUGE1: evaluate.raw_corpus_rouge1(hypotheses=translations,
-                                                     references=self.target_sentences),
-                C.ROUGE2: evaluate.raw_corpus_rouge2(hypotheses=translations,
-                                                     references=self.target_sentences),
-                C.ROUGEL: evaluate.raw_corpus_rougel(hypotheses=translations,
-                                                     references=self.target_sentences),
-                C.LENRATIO: evaluate.raw_corpus_length_ratio(hypotheses=translations,
-                                                             references=self.target_sentences),
-                C.AVG_TIME: avg_time,
-                C.DECODING_TIME: trans_wall_time}
+        metrics = {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations[0],
+                                                    references=self.targets_sentences[0],
+                                                    offset=0.01),
+                   C.CHRF: evaluate.raw_corpus_chrf(hypotheses=translations[0],
+                                                    references=self.targets_sentences[0]),
+                   C.ROUGE1: evaluate.raw_corpus_rouge1(hypotheses=translations[0],
+                                                        references=self.targets_sentences[0]),
+                   C.ROUGE2: evaluate.raw_corpus_rouge2(hypotheses=translations[0],
+                                                        references=self.targets_sentences[0]),
+                   C.ROUGEL: evaluate.raw_corpus_rougel(hypotheses=translations[0],
+                                                        references=self.targets_sentences[0]),
+                   C.LENRATIO: evaluate.raw_corpus_length_ratio(hypotheses=translations[0],
+                                                                references=self.targets_sentences[0]),
+                   C.AVG_TIME: avg_time,
+                   C.DECODING_TIME: trans_wall_time}
+
+        if len(translations) > 1:  # metrics for other target factors
+            for i, _ in enumerate(translations[1:], 1):
+                # only BLEU
+                metrics.update(
+                    {'f%d-%s' % (i, C.BLEU): evaluate.raw_corpus_bleu(hypotheses=translations[i],
+                                                                      references=self.targets_sentences[i],
+                                                                      offset=0.01)}
+                )
+        return metrics
 
 
 def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:

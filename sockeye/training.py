@@ -392,7 +392,7 @@ class GluonEarlyStoppingTrainer:
 
         # Optionally run the checkpoint decoder
         if checkpoint_decoder is not None:
-            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME % checkpoint)
+            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
             decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
             for metric_name, metric_value in decoder_metrics.items():
                 assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
@@ -827,7 +827,7 @@ class Speedometer:
         self.auto_reset = auto_reset
         self.samples = 0
         self.tokens = 0
-        self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
+        self.msg = 'E=%d B=%d\ts/sec=%.2f tok/sec=%.2f u/sec=%.2f\t'
 
     def __call__(self, epoch: int, batches: int, updates: int, samples: int,
                  tokens: int, metrics: Optional[Iterable[loss.LossMetric]] = None):
@@ -851,10 +851,10 @@ class Speedometer:
                 if metrics is not None:
                     metric_values = []  # type: List[Tuple[str, float]]
                     for metric in metrics:
-                        metric_values.append((metric.name, metric.get()))
+                        metric_values.append((metric.short_name, metric.get()))
                         if self.auto_reset:
                             metric.reset()
-                    logger.info(self.msg + '\t%s=%f' * len(metric_values),
+                    logger.info(self.msg + '%s=%f ' * len(metric_values),
                                 epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(metric_values, ()))
 
                 else:

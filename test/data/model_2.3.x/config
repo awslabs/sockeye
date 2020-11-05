@@ -3,9 +3,9 @@ config_data: !DataConfig
   data_statistics: !DataStatistics
     average_len_target_per_bucket:
     - null
-    - 13.418518518518514
-    - 20.319148936170205
-    - 28.016949152542363
+    - 13.540123456790127
+    - 20.306701030927847
+    - 27.874999999999996
     - null
     - null
     - null
@@ -80,9 +80,9 @@ config_data: !DataConfig
     num_sents: 1000
     num_sents_per_bucket:
     - 0
-    - 270
-    - 376
-    - 354
+    - 324
+    - 388
+    - 288
     - 0
     - 0
     - 0
@@ -91,8 +91,8 @@ config_data: !DataConfig
     - 0
     - 0
     - 0
-    num_tokens_source: 21181
-    num_tokens_target: 21181
+    num_tokens_source: 20294
+    num_tokens_target: 20294
     num_unks_source: 0
     num_unks_target: 0
     size_vocab_source: 15
@@ -100,6 +100,7 @@ config_data: !DataConfig
   max_seq_len_source: 96
   max_seq_len_target: 96
   num_source_factors: 1
+  num_target_factors: 1
 config_decoder: !TransformerConfig
   act_type: relu
   attention_heads: 2
@@ -152,7 +153,7 @@ config_encoder: !TransformerConfig
   use_lhuc: false
 config_length_task: null
 dtype: float32
-intgemm_custom_lib: /workspace/sockeye/sockeye/libintgemm.so
+intgemm_custom_lib: libintgemm.so
 lhuc: false
 vocab_source_size: 15
 vocab_target_size: 15

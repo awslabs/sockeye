@@ -11,17 +11,37 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.0]
+
+### Added
+
+- Added support for target factors.
+  If provided with additional target-side tokens/features (token-parallel to the regular target-side) at training time,
+  the model can now learn to predict these in a multi-task setting. You can provide target factor data similar to source
+  factors: `--target-factors <factor_file1> [<factor_fileN>]`. During training, Sockeye optimizes one loss per factor
+  in a multi-task setting. The weight of the losses can be controlled by `--target-factors-weight`.
+  At inference, target factors are decoded greedily, they do not participate in beam search.
+  The predicted factor at each time step is the argmax over its separate output
+  layer distribution. To receive the target factor predictions at inference time, use
+  `--output-type translation_with_factors`. 
+  
+### Changed
+
+- `load_model(s)` now returns a list of target vocabs.
+- Default source factor combination changed to `sum` (was `concat` before).
+- `SockeyeModel` class has three new properties: `num_target_factors`, `target_factor_configs`,
+  and `factor_output_layers`.
+
 ## [2.2.8]
 
 ### Changed
 - Make source/target data parameters required for the scoring CLI to avoid cryptic error messages.
 
-
 ## [2.2.7]
 
 ### Added
-- Added an argument to specify the log level of secondary workers. Defaults to ERROR to hide any logs except for exceptions.
 
+- Added an argument to specify the log level of secondary workers. Defaults to ERROR to hide any logs except for exceptions.
 
 ## [2.2.6]
 
@@ -133,7 +153,6 @@ Kim et al, "From Research to Production and Back: Ludicrously Fast Neural Machin
 
 - Reduced the number of arguments for `MultiHeadSelfAttention.hybrid_forward()`.
  `previous_keys` and `previous_values` should now be input together as `previous_states`, a list containing two symbols.
-
 
 ## [2.1.16]
 

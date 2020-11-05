@@ -113,6 +113,7 @@ class SockeyeModel(mx.gluon.Block):
         logger.info("%s", self.config)
         self.dtype = config.dtype
         self.mc_dropout = mc_dropout
+        self._output_layer_factor_format_string = 'output_layer_factor%i'
         self.forward_pass_cache_size = forward_pass_cache_size
         self.embed_and_encode = self._embed_and_encode
         if self.forward_pass_cache_size > 0:
@@ -123,12 +124,10 @@ class SockeyeModel(mx.gluon.Block):
             self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
 
             self.embedding_source = encoder.Embedding(config.config_embed_source,
-                                                      prefix=self.prefix,
-                                                      is_source=True,
+                                                      prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
                                                       embed_weight=self.source_embed_weight)
             self.embedding_target = encoder.Embedding(config.config_embed_target,
-                                                      prefix=self.prefix,
-                                                      is_source=False,
+                                                      prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
                                                       embed_weight=self.target_embed_weight)
 
             # encoder & decoder first (to know the decoder depth)
@@ -138,7 +137,20 @@ class SockeyeModel(mx.gluon.Block):
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight, dtype=config.dtype)
+                                                   weight=self.output_weight, dtype=config.dtype,
+                                                   prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+
+            # Optional target factor output layers
+            for i, factor_config in enumerate(self.target_factor_configs, 1):
+                # Each target stream has its own, independent output layer
+                # TODO also consider weight tying with target factor input embeddings
+                output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                  vocab_size=factor_config.vocab_size,
+                                                  weight=None,
+                                                  dtype=config.dtype,
+                                                  prefix=self.prefix + C.TARGET_FACTOR_OUTPUT_LAYER_PREFIX % i)
+                # Register the layer as child block
+                setattr(self, self._output_layer_factor_format_string % i, output_layer)
 
             self.length_ratio = None
             if self.config.config_length_task is not None:
@@ -193,6 +205,7 @@ class SockeyeModel(mx.gluon.Block):
         if self.mc_dropout:
             # Turn on training mode so mxnet knows to add dropout
             _ = mx.autograd.set_training(True)
+
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
 
@@ -228,7 +241,7 @@ class SockeyeModel(mx.gluon.Block):
         Parameters
         ----------
         step_input : NDArray
-            Shape (batch_size,)
+            Shape (batch_size, num_target_factors)
         states : list of NDArrays
         vocab_slice_ids : NDArray or None
 
@@ -237,27 +250,29 @@ class SockeyeModel(mx.gluon.Block):
         step_output : NDArray
             Shape (batch_size, C_out)
         states : list
-        step_additional_outputs : list
-            Additional outputs of the step, e.g, the attention weights
+        target_factor_outputs : list
+            Optional target factor predictions.
         """
         if self.mc_dropout:
             # Turn on training mode so mxnet knows to add dropout
             _ = mx.autograd.set_training(True)
 
-        # TODO: do we need valid length!?
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
-        # target_embed: (batch_size, num_hidden)
-        target_embed, _ = self.embedding_target(step_input, valid_length=valid_length)
+        target_embed, _ = self.embedding_target(step_input.reshape((0, 1, -1)), valid_length=valid_length)
+        target_embed = target_embed.squeeze(axis=1)
 
-        # TODO: add step_additional_outputs
-        step_additional_outputs = []
-        # TODO: add support for states from the decoder
         decoder_out, new_states = self.decoder(target_embed, states)
 
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
 
-        return step_output, new_states, step_additional_outputs
+        # Target factor outputs are currently stored in additional outputs.
+        target_factor_outputs = []
+        # TODO: consider a dictionary mapping as return value
+        for factor_output_layer in self.factor_output_layers:
+            target_factor_outputs.append(factor_output_layer(decoder_out, None))
+
+        return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
         source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
@@ -265,14 +280,18 @@ class SockeyeModel(mx.gluon.Block):
 
         target = self.decoder.decode_seq(target_embed, states=states)
 
-        output = self.output_layer(target, None)
+        forward_output = dict()
+
+        forward_output[C.LOGITS_NAME] = self.output_layer(target, None)
+
+        for i, factor_output_layer in enumerate(self.factor_output_layers, 1):
+            forward_output[C.FACTOR_LOGITS_NAME % i] = factor_output_layer(target, None)
 
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)
-            predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
-            return {C.LOGITS_NAME: output, C.LENRATIO_NAME: predicted_length_ratio}
-        else:
-            return {C.LOGITS_NAME: output}
+            forward_output[C.LENRATIO_NAME] = self.length_ratio(source_encoded, source_encoded_length)
+
+        return forward_output
 
     def predict_output_length(self,
                               source_encoded: mx.nd.NDArray,
@@ -450,6 +469,25 @@ class SockeyeModel(mx.gluon.Block):
         return self.config.config_data.num_source_factors
 
     @property
+    def num_target_factors(self) -> int:
+        """ Returns the number of target factors of this model (at least 1). """
+        return self.config.config_data.num_target_factors
+
+    @property
+    def target_factor_configs(self) -> List[encoder.FactorConfig]:
+        """ Returns the factor configs for target factors. """
+        factor_configs = []  # type: List[encoder.FactorConfig]
+        if self.config.config_embed_target.factor_configs:
+            factor_configs = self.config.config_embed_target.factor_configs
+        return factor_configs
+
+    @property
+    def factor_output_layers(self) -> List[layers.OutputLayer]:
+        """ Returns the list of factor output layers. """
+        return [getattr(self, self._output_layer_factor_format_string % i) for i, _ in
+                enumerate(self.target_factor_configs, 1)]
+
+    @property
     def training_max_observed_len_source(self) -> int:
         """ The maximum sequence length on the source side observed during training. This includes the <eos> token. """
         return self.config.config_data.data_statistics.max_observed_len_source
@@ -498,7 +536,7 @@ def load_model(model_folder: str,
                for_disk_saving: Optional[str] = None,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
-               forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel, List[vocab.Vocab], vocab.Vocab]:
+               forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Load a model from model_folder.
 
@@ -518,10 +556,10 @@ def load_model(model_folder: str,
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
-    :return: List of models, source vocabularies, target vocabulary.
+    :return: List of models, source vocabularies, target vocabularies.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
-    target_vocab = vocab.load_target_vocab(model_folder)
+    target_vocabs = vocab.load_target_vocabs(model_folder)
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
     logger.info("Model version: %s", model_version)
     utils.check_version(model_version)
@@ -612,7 +650,11 @@ def load_model(model_folder: str,
                           "Number of loaded source vocabularies (%d) does not match "
                           "number of source factors for model '%s' (%d)" % (len(source_vocabs), model_folder,
                                                                             model.num_source_factors))
-    return model, source_vocabs, target_vocab
+    utils.check_condition(model.num_target_factors == len(target_vocabs),
+                          "Number of loaded target vocabularies (%d) does not match "
+                          "number of target factors for model '%s' (%d)" % (len(target_vocabs), model_folder,
+                                                                            model.num_target_factors))
+    return model, source_vocabs, target_vocabs
 
 
 def load_models(context: Union[List[mx.context.Context], mx.context.Context],
@@ -624,7 +666,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 mc_dropout: bool = False,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
-                forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel], List[vocab.Vocab], vocab.Vocab]:
+                forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel], List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Loads a list of models for inference.
 
@@ -644,7 +686,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     load_time_start = time.time()
     models = []  # type: List[SockeyeModel]
     source_vocabs = []  # type: List[List[vocab.Vocab]]
-    target_vocabs = []  # type: List[vocab.Vocab]
+    target_vocabs = []  # type: List[List[vocab.Vocab]]
 
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
@@ -652,25 +694,28 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
         utils.check_condition(len(checkpoints) == len(model_folders), "Must provide checkpoints for each model")
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
-        model, src_vcbs, trg_vcb = load_model(model_folder,
-                                              context=context,
-                                              dtype=dtype,
-                                              checkpoint=checkpoint,
-                                              hybridize=hybridize,
-                                              inference_only=inference_only,
-                                              mc_dropout=mc_dropout,
-                                              allow_missing=allow_missing,
-                                              set_grad_req_null=set_grad_req_null,
-                                              forward_pass_cache_size=forward_pass_cache_size)
+        model, src_vcbs, trg_vcbs = load_model(model_folder,
+                                               context=context,
+                                               dtype=dtype,
+                                               checkpoint=checkpoint,
+                                               hybridize=hybridize,
+                                               inference_only=inference_only,
+                                               mc_dropout=mc_dropout,
+                                               allow_missing=allow_missing,
+                                               set_grad_req_null=set_grad_req_null,
+                                               forward_pass_cache_size=forward_pass_cache_size)
         models.append(model)
         source_vocabs.append(src_vcbs)
-        target_vocabs.append(trg_vcb)
+        target_vocabs.append(trg_vcbs)
 
-    utils.check_condition(vocab.are_identical(*target_vocabs), "Target vocabulary ids do not match")
     first_model_vocabs = source_vocabs[0]
     for fi in range(len(first_model_vocabs)):
         utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
                               "Source vocabulary ids do not match. Factor %d" % fi)
+    first_model_vocabs = target_vocabs[0]
+    for fi in range(len(first_model_vocabs)):
+        utils.check_condition(vocab.are_identical(*[target_vocabs[i][fi] for i in range(len(target_vocabs))]),
+                              "Target vocabulary ids do not match. Factor %d" % fi)
 
     load_time = time.time() - load_time_start
     logger.info("%d model(s) loaded in %.4fs", len(models), load_time)

@@ -42,6 +42,10 @@ SPACE_FOR_XOS = 1
 
 ARG_SEPARATOR = ":"
 
+# If true, target factors are shifted to the right by 1 at training time, and unshifted in inference.
+# TODO: make this configurable in the model, separately per target factor.
+TARGET_FACTOR_SHIFT = True
+
 ENCODER_PREFIX = "encoder_"
 DECODER_PREFIX = "decoder_"
 EMBEDDING_PREFIX = "embed_"
@@ -49,6 +53,7 @@ ATTENTION_PREFIX = "att_"
 COVERAGE_PREFIX = "cov_"
 TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
 DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
+TARGET_FACTOR_OUTPUT_LAYER_PREFIX = "target_output_factor%d_"
 LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
 
 # SSRU
@@ -62,12 +67,12 @@ TARGET_POSITIONAL_EMBEDDING_PREFIX = "target_pos_" + EMBEDDING_PREFIX
 SHARED_EMBEDDING_PREFIX = "source_target_" + EMBEDDING_PREFIX
 
 # source factors
-SOURCE_FACTORS_COMBINE_SUM = 'sum'
-SOURCE_FACTORS_COMBINE_AVERAGE = 'average'
-SOURCE_FACTORS_COMBINE_CONCAT = 'concat'
-SOURCE_FACTORS_COMBINE_CHOICES = [SOURCE_FACTORS_COMBINE_SUM,
-                                  SOURCE_FACTORS_COMBINE_AVERAGE,
-                                  SOURCE_FACTORS_COMBINE_CONCAT]
+FACTORS_COMBINE_SUM = 'sum'
+FACTORS_COMBINE_AVERAGE = 'average'
+FACTORS_COMBINE_CONCAT = 'concat'
+FACTORS_COMBINE_CHOICES = [FACTORS_COMBINE_SUM,
+                           FACTORS_COMBINE_AVERAGE,
+                           FACTORS_COMBINE_CONCAT]
 
 # encoder names (arguments)
 TRANSFORMER_TYPE = "transformer"
@@ -136,6 +141,7 @@ SOURCE_NAME = "source"
 SOURCE_LENGTH_NAME = "source_length"
 TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
+TARGET_FACTOR_LABEL_NAME = "target_factor%d_label"
 LENRATIO_LABEL_NAME = "length_ratio_label"
 LENRATIO_LABEL_OUTPUT_NAME = "length_ratio_label" + "_output"
 LENRATIO_NAME = "length_ratio"
@@ -150,6 +156,7 @@ SOURCE_DYNAMIC_PREVIOUS_NAME = "prev_dynamic_source"
 
 LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
+FACTOR_LOGITS_NAME = "factor%d_logits"
 SOFTMAX_NAME = "softmax"
 SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
 
@@ -203,9 +210,9 @@ PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
 PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
-DECODE_OUT_NAME = "decode.output.%05d"
-DECODE_IN_NAME = "decode.source.%d"
-DECODE_REF_NAME = "decode.target"
+DECODE_OUT_NAME = "decode.output.{{factor}}.{checkpoint:05d}"
+DECODE_IN_NAME = "decode.source.{factor}"
+DECODE_REF_NAME = "decode.target.{factor}"
 SYMBOL_NAME = "symbol" + JSON_SUFFIX
 METRICS_NAME = "metrics"
 TENSORBOARD_NAME = "tensorboard"
@@ -301,11 +308,12 @@ OUTPUT_HANDLER_TRANSLATION_WITH_SCORE = "translation_with_score"
 OUTPUT_HANDLER_SCORE = "score"
 OUTPUT_HANDLER_PAIR_WITH_SCORE = "pair_with_score"
 OUTPUT_HANDLER_BENCHMARK = "benchmark"
-OUTPUT_HANDLER_BEAM_STORE = "beam_store"
 OUTPUT_HANDLER_JSON = "json"
+OUTPUT_HANDLER_TRANSLATION_WITH_FACTORS = "translation_with_factors"
 OUTPUT_HANDLERS = [OUTPUT_HANDLER_TRANSLATION,
                    OUTPUT_HANDLER_SCORE,
                    OUTPUT_HANDLER_TRANSLATION_WITH_SCORE,
+                   OUTPUT_HANDLER_TRANSLATION_WITH_FACTORS,
                    OUTPUT_HANDLER_BENCHMARK,
                    OUTPUT_HANDLER_JSON]
 OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
@@ -313,7 +321,9 @@ OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
 
 # metrics
 ACCURACY = 'accuracy'
+ACCURACY_SHORT_NAME = 'acc'
 PERPLEXITY = 'perplexity'
+PERPLEXITY_SHORT_NAME = 'ppl'
 LENRATIO_MSE = 'length-ratio-mse'
 BLEU = 'bleu'
 CHRF = 'chrf'
@@ -399,7 +409,7 @@ SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-PREPARED_DATA_VERSION = 3
+PREPARED_DATA_VERSION = 4
 
 # reranking
 RERANK_BLEU = "bleu"

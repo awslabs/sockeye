@@ -74,11 +74,19 @@ class _SingleModelInference(_Inference):
                     step_input: mx.nd.NDArray,
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
-        logits, states, _ = self._model.decode_step(step_input, states, vocab_slice_ids)
+        logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             logits = logits.log_softmax(axis=-1, temperature=self._softmax_temperature)
         scores = -logits
-        return scores, states
+
+        target_factors = None  # type: Optional[mx.nd.NDArray]
+        if target_factor_outputs:
+            # target factors are greedily 'decoded'.
+            factor_predictions = [mx.nd.cast(tfo.argmax(axis=-1, keepdims=True), dtype='int32') for tfo in
+                                  target_factor_outputs]
+            target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
+                else mx.nd.concat(*factor_predictions, dim=1)
+        return scores, states, target_factors
 
 
 class _EnsembleInference(_Inference):
@@ -121,16 +129,29 @@ class _EnsembleInference(_Inference):
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         outputs = []  # type: List[mx.nd.NDArray]
         new_states = []  # type: List[mx.nd.NDArray]
+        factor_outputs = []  # type: List[List[mx.nd.NDArray]]
         state_index = 0
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
-            logits, model_states, _ = model.decode_step(step_input, model_states, vocab_slice_ids)
+            logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
             probs = logits.softmax(axis=-1, temperature=self._softmax_temperature)
             outputs.append(probs)
+            target_factor_probs = [tfo.softmax(axis=-1) for tfo in target_factor_outputs]
+            factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
-        return scores, new_states
+
+        target_factors = None  # type: Optional[mx.nd.NDArray]
+
+        if factor_outputs:
+            # target factors are greedily 'decoded'.
+            factor_predictions = [mx.nd.cast(self._interpolation(fs).argmin(axis=-1, keepdims=True), dtype='int32')
+                                  for fs in zip(*factor_outputs)]
+            if factor_predictions:
+                target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
+                    else mx.nd.concat(*factor_predictions, dim=1)
+        return scores, new_states, target_factors
 
     @staticmethod
     def linear_interpolation(predictions):
@@ -309,7 +330,8 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         self._scorer = scorer
 
     def hybrid_forward(self, F, best_hyp_indices, best_word_indices,
-                       finished, scores_accumulated, lengths, reference_lengths):
+                       finished, scores_accumulated, lengths, reference_lengths,
+                       factors=None):
 
         # Reorder fixed-size beam data according to best_hyp_indices (ascending)
         finished = F.take(finished, best_hyp_indices)
@@ -328,7 +350,14 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
         finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
 
-        return finished, scores_accumulated, lengths, reference_lengths
+        # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
+        best_word_indices = F.expand_dims(best_word_indices, axis=1)
+
+        if factors is not None:
+            secondary_factors = F.take(factors, best_hyp_indices)
+            best_word_indices = F.concat(best_word_indices, secondary_factors)
+
+        return best_word_indices, finished, scores_accumulated, lengths, reference_lengths
 
 
 class TopK(mx.gluon.HybridBlock):
@@ -477,6 +506,7 @@ class BeamSearch(mx.gluon.Block):
                  output_vocab_size: int,
                  scorer: CandidateScorer,
                  num_source_factors: int,
+                 num_target_factors: int,
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
@@ -491,6 +521,7 @@ class BeamSearch(mx.gluon.Block):
         self._inference = inference
         self.beam_search_stop = beam_search_stop
         self.num_source_factors = num_source_factors
+        self.num_target_factors = num_target_factors
         self.global_avoid_trie = global_avoid_trie
 
         with self.name_scope():
@@ -556,7 +587,8 @@ class BeamSearch(mx.gluon.Block):
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
 
-        best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.bos_id, ctx=self.context,
+        # best word_indices (also act as input: (batch*beam, num_target_factors
+        best_word_indices = mx.nd.full((batch_size * self.beam_size, self.num_target_factors), val=self.bos_id, ctx=self.context,
                                        dtype='int32')
 
         # offset for hypothesis indices in batch decoding
@@ -628,7 +660,7 @@ class BeamSearch(mx.gluon.Block):
             avoid_states = constrained.AvoidBatch(batch_size, self.beam_size,
                                                   avoid_list=raw_avoid_list,
                                                   global_avoid_trie=self.global_avoid_trie)
-            avoid_states.consume(best_word_indices)
+            avoid_states.consume(best_word_indices[:, 0])  # constraints operate only on primary target factor
 
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
@@ -642,7 +674,9 @@ class BeamSearch(mx.gluon.Block):
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
-            target_dists, model_states = self._inference.decode_step(best_word_indices, model_states, vocab_slice_ids)
+            target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
+                                                                                     model_states,
+                                                                                     vocab_slice_ids)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
@@ -698,17 +732,16 @@ class BeamSearch(mx.gluon.Block):
 
             # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
-            finished, scores_accumulated, lengths, estimated_reference_lengths = self._sort_norm_and_update_finished(
-                best_hyp_indices,
-                best_word_indices,
-                finished,
-                scores_accumulated,
-                lengths,
-                estimated_reference_lengths)
+            _sort_inputs = [best_hyp_indices, best_word_indices, finished, scores_accumulated, lengths,
+                            estimated_reference_lengths]
+            if target_factors is not None:
+                _sort_inputs.append(target_factors)
+            best_word_indices, finished, scores_accumulated, lengths, estimated_reference_lengths = \
+                self._sort_norm_and_update_finished(*_sort_inputs)
 
             # Collect best hypotheses, best word indices
-            best_hyp_indices_list.append(best_hyp_indices)
             best_word_indices_list.append(best_word_indices)
+            best_hyp_indices_list.append(best_hyp_indices)
 
             if self._should_stop(finished, batch_size):
                 break
@@ -728,7 +761,7 @@ class BeamSearch(mx.gluon.Block):
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
         all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
-        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
+        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=2)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
         return all_best_hyp_indices.asnumpy(), \
@@ -787,6 +820,7 @@ def get_beam_search(models: List[SockeyeModel],
         scorer=scorer,
         sample=sample,
         num_source_factors=models[0].num_source_factors,
+        num_target_factors=models[0].num_target_factors,
         global_avoid_trie=global_avoid_trie,
         inference=inference
     )

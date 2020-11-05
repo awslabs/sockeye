@@ -272,7 +272,7 @@ class _TestInference(sockeye.beam_search._Inference):
                     step_input: mx.nd.NDArray,
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
-        batch_beam_size = step_input.shape[0]
+        batch_beam_size, num_target_factors = step_input.shape
         print('step_input', step_input.asnumpy())
 
         internal_lengths, num_decode_step_calls = states
@@ -280,10 +280,10 @@ class _TestInference(sockeye.beam_search._Inference):
         if num_decode_step_calls == 0:  # first call to decode_step, we expect step input to be all <bos>
             assert (step_input.asnumpy() == C.BOS_ID).all()
 
-        if step_input.asscalar() == C.BOS_ID:
+        if step_input[: ,0].asscalar() == C.BOS_ID:
             # predict word id 4 given <bos>
             scores = mx.nd.array([0, 0, 0, 0, 1])
-        elif step_input.asscalar() == C.EOS_ID:
+        elif step_input[: ,0].asscalar() == C.EOS_ID:
             # predict pad given <eos>
             scores = mx.nd.array([1, 0, 0, 0, 0])
         else:
@@ -299,7 +299,7 @@ class _TestInference(sockeye.beam_search._Inference):
         num_decode_step_calls += 1
 
         self.states = states = [internal_lengths, mx.nd.array([num_decode_step_calls], dtype='int32')]
-        return scores, states
+        return scores, states, None
 
 
 # TODO make this a useful test
@@ -308,6 +308,7 @@ def test_beam_search():
     context = mx.cpu()
     dtype='float32'
     num_source_factors = 1
+    num_target_factors = 1
     vocab_size = len(C.VOCAB_SYMBOLS) + 1  # 1 actual word: word id 4
     beam_size = 1
     bos_id = 2
@@ -323,6 +324,7 @@ def test_beam_search():
         output_vocab_size=vocab_size,
         scorer=sockeye.beam_search.CandidateScorer(),
         num_source_factors=num_source_factors,
+        num_target_factors=num_target_factors,
         inference=inference,
         beam_search_stop=C.BEAM_SEARCH_STOP_ALL,
         global_avoid_trie=None,

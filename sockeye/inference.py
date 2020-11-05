@@ -111,7 +111,7 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
 
 BeamHistory = Dict[str, List]
 Tokens = List[str]
-TokenIds = List[int]
+TokenIds = List[List[int]]  # each token id may contain multiple factors
 SentenceId = Union[int, str]
 
 
@@ -403,6 +403,8 @@ class TranslatorOutput:
     :param nbest_translations: List of nbest translations as strings.
     :param nbest_tokens: List of nbest translations as lists of tokens.
     :param nbest_scores: List of nbest scores, one for each nbest translation.
+    :param factor_translations: List of factor outputs.
+    :param factor_tokens: List of list of secondary factor tokens.
     """
     __slots__ = ('sentence_id',
                  'translation',
@@ -412,18 +414,22 @@ class TranslatorOutput:
                  'beam_histories',
                  'nbest_translations',
                  'nbest_tokens',
-                 'nbest_scores')
+                 'nbest_scores',
+                 'factor_translations',
+                 'factor_tokens')
 
     def __init__(self,
                  sentence_id: SentenceId,
                  translation: str,
                  tokens: Tokens,
                  score: float,
-                 pass_through_dict: Optional[Dict[str,Any]] = None,
+                 pass_through_dict: Optional[Dict[str, Any]] = None,
                  beam_histories: Optional[List[BeamHistory]] = None,
                  nbest_translations: Optional[List[str]] = None,
                  nbest_tokens: Optional[List[Tokens]] = None,
-                 nbest_scores: Optional[List[float]] = None) -> None:
+                 nbest_scores: Optional[List[float]] = None,
+                 factor_translations: Optional[List[str]] = None,
+                 factor_tokens: Optional[List[Tokens]] = None) -> None:
         self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
@@ -433,6 +439,8 @@ class TranslatorOutput:
         self.nbest_translations = nbest_translations
         self.nbest_tokens = nbest_tokens
         self.nbest_scores = nbest_scores
+        self.factor_translations = factor_translations
+        self.factor_tokens = factor_tokens
 
     def json(self) -> Dict:
         """
@@ -452,6 +460,10 @@ class TranslatorOutput:
         if self.nbest_translations is not None and len(self.nbest_translations) > 1:
             _d['translations'] = self.nbest_translations
             _d['scores'] = self.nbest_scores
+
+        if self.factor_translations is not None:
+            for i, factor in enumerate(self.factor_translations, 1):
+                _d['factor%d' % i] = factor
         return _d
 
 
@@ -462,7 +474,6 @@ class NBestTranslations:
     def __init__(self,
                  target_ids_list: List[TokenIds],
                  scores: List[float]) -> None:
-
         self.target_ids_list = target_ids_list
         self.scores = scores
 
@@ -610,7 +621,7 @@ def _concat_translations(translations: List[Translation],
         if idx == len(translations) - 1:
             target_ids.extend(translation.target_ids)
         else:
-            if translation.target_ids[-1] in stop_ids:
+            if translation.target_ids[-1][0] in stop_ids:
                 target_ids.extend(translation.target_ids[:-1])
             else:
                 target_ids.extend(translation.target_ids)
@@ -640,7 +651,7 @@ class Translator:
     :param beam_search_stop: The stopping criterion.
     :param models: List of models.
     :param source_vocabs: Source vocabularies.
-    :param target_vocab: Target vocabulary.
+    :param target_vocabs: Target vocabularies.
     :param nbest_size: Size of nbest list of translations.
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary selection. Can be a dict of
                              of named lexicons.
@@ -670,7 +681,7 @@ class Translator:
                  beam_search_stop: str,
                  models: List[SockeyeModel],
                  source_vocabs: List[vocab.Vocab],
-                 target_vocab: vocab.Vocab,
+                 target_vocabs: List[vocab.Vocab],
                  beam_size: int = 5,
                  nbest_size: int = 1,
                  restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
@@ -691,8 +702,8 @@ class Translator:
         self.beam_size = beam_size
         self.beam_search_stop = beam_search_stop
         self.source_vocabs = source_vocabs
-        self.vocab_target = target_vocab
-        self.vocab_target_inv = vocab.reverse_vocab(self.vocab_target)
+        self.vocab_targets = target_vocabs
+        self.vocab_targets_inv = [vocab.reverse_vocab(v) for v in self.vocab_targets]
         self.restrict_lexicon = restrict_lexicon
         assert C.PAD_ID == 0, "pad id should be 0"
         self.stop_ids = {C.EOS_ID, C.PAD_ID}  # type: Set[int]
@@ -720,7 +731,7 @@ class Translator:
             models=self.models,
             beam_size=self.beam_size,
             context=self.context,
-            vocab_target=target_vocab,
+            vocab_target=target_vocabs[0],  # only primary target factor used for constrained decoding.
             output_scores=output_scores,
             sample=sample,
             ensemble_mode=ensemble_mode,
@@ -765,6 +776,10 @@ class Translator:
     @property
     def num_source_factors(self) -> int:
         return self.models[0].num_source_factors
+
+    @property
+    def num_target_factors(self) -> int:
+        return self.models[0].num_target_factors
 
     def translate(self, trans_inputs: List[TranslatorInput], fill_up_batches: bool = True) -> List[TranslatorOutput]:
         """
@@ -936,11 +951,11 @@ class Translator:
                     restrict_lexicon = self.restrict_lexicon
 
             if trans_input.constraints is not None:
-                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_targets[0]) for phrase in
                                       trans_input.constraints]
 
             if trans_input.avoid_list is not None:
-                raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_target) for phrase in
+                raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_targets[0]) for phrase in
                                      trans_input.avoid_list]
                 if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
@@ -950,6 +965,37 @@ class Translator:
 
         return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, \
                 mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+
+    def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
+                                                                                        str,
+                                                                                        List[List[str]],
+                                                                                        List[str]]:
+        """
+        Separates surface translation from factors. Input is a nested list of target ids.
+        Creates tokens and output string for surface translation and for each factor, using the inverted target-side
+        vocabularies. Ensures that factor strings are of the same length as the translation string.
+
+        :param target_ids: Nested list of target ids.
+        """
+        all_target_tokens = []  # type: List[List[str]]
+        all_target_strings = []  # type: List[str]
+        # Strip any position where primary factor token is to be stripped
+        pruned_target_ids = (tokens for tokens in target_ids if not tokens[0] in self.strip_ids)
+        for factor_index, factor_sequence in enumerate(zip(*pruned_target_ids)):
+            vocab_target_inv = self.vocab_targets_inv[factor_index]
+            target_tokens = [vocab_target_inv[target_id] for target_id in factor_sequence]
+            target_string = C.TOKEN_SEPARATOR.join(target_tokens)
+            all_target_tokens.append(target_tokens)
+            all_target_strings.append(target_string)
+
+        if not all_target_strings:
+            all_target_tokens = [[] for _ in range(len(self.vocab_targets_inv))]
+            all_target_strings = ['' for _ in range(len(self.vocab_targets_inv))]
+
+        tokens, *factor_tokens = all_target_tokens
+        translation, *factor_translations = all_target_strings
+
+        return tokens, translation, factor_tokens, factor_translations
 
     def _make_result(self,
                      trans_input: TranslatorInput,
@@ -962,36 +1008,34 @@ class Translator:
         :param translation: The translation and score.
         :return: TranslatorOutput.
         """
-        target_ids = translation.target_ids
-        target_tokens = [self.vocab_target_inv[target_id] for target_id in target_ids]
-        target_string = C.TOKEN_SEPARATOR.join(data_io.ids2tokens(target_ids, self.vocab_target_inv, self.strip_ids))
+        primary_tokens, primary_translation, factor_tokens, factor_translations = \
+            self._get_translation_tokens_and_factors(translation.target_ids)
 
         if translation.nbest_translations is None:
-            return TranslatorOutput(sentence_id=trans_input.sentence_id,
-                                    translation=target_string,
-                                    tokens=target_tokens,
-                                    score=translation.score,
-                                    pass_through_dict=trans_input.pass_through_dict,
-                                    beam_histories=translation.beam_histories)
+            nbest_translations = None
+            nbest_tokens = None
+            nbest_scores = None
         else:
-            nbest_target_ids = translation.nbest_translations.target_ids_list
-            target_tokens_list = [[self.vocab_target_inv[id] for id in ids] for ids in nbest_target_ids]
-            target_strings = [C.TOKEN_SEPARATOR.join(
-                                data_io.ids2tokens(target_ids,
-                                                   self.vocab_target_inv,
-                                                   self.strip_ids)) for target_ids in nbest_target_ids]
+            nbest_tokens, nbest_translations = [], []
+            for nbest_target_ids in translation.nbest_translations.target_ids_list:
+                # TODO: also extract target factors for nbest translations
+                target_tokens_n, primary_translation_n, _, _ = \
+                    self._get_translation_tokens_and_factors(nbest_target_ids)
+                nbest_tokens.append(target_tokens_n)
+                nbest_translations.append(primary_translation_n)
+            nbest_scores = translation.nbest_translations.scores
 
-            scores = translation.nbest_translations.scores
-
-            return TranslatorOutput(sentence_id=trans_input.sentence_id,
-                                    translation=target_string,
-                                    tokens=target_tokens,
-                                    score=translation.score,
-                                    pass_through_dict=trans_input.pass_through_dict,
-                                    beam_histories=translation.beam_histories,
-                                    nbest_translations=target_strings,
-                                    nbest_tokens=target_tokens_list,
-                                    nbest_scores=scores)
+        return TranslatorOutput(sentence_id=trans_input.sentence_id,
+                                translation=primary_translation,
+                                tokens=primary_tokens,
+                                score=translation.score,
+                                pass_through_dict=trans_input.pass_through_dict,
+                                beam_histories=translation.beam_histories,
+                                nbest_translations=nbest_translations,
+                                nbest_tokens=nbest_tokens,
+                                nbest_scores=nbest_scores,
+                                factor_translations=factor_translations,
+                                factor_tokens=factor_tokens)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
@@ -1029,7 +1073,8 @@ class Translator:
         Return the nbest (aka n top) entries from the n-best list.
 
         :param best_hyp_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps + 1).
-        :param best_word_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps).
+        :param best_word_indices: Array of best hypotheses indices ids.
+                                  Shape: (batch * beam, num_target_factors, num_beam_search_steps).
         :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
         :param lengths: The lengths of all items in the beam. Shape: (batch * beam). Dtype: int32.
         :param estimated_reference_lengths: Predicted reference lengths.
@@ -1055,17 +1100,19 @@ class Translator:
                 filtered = filtered.reshape((batch_size, self.beam_size))
                 best_ids += np.argmin(filtered, axis=1).astype('int32')
 
-            # Obtain sequences for all best hypotheses in the batch
+            # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
             indices_shape_1 = indices.shape[1]
             nbest_translations.append(
-                    [self._assemble_translation(*x) for x in
+                    [self._assemble_translation(*x, unshift_target_factors=C.TARGET_FACTOR_SHIFT) for x in
                      zip(best_word_indices[indices,
+                                           :,  # get all factors
                                            np.arange(indices_shape_1)],  # pylint: disable=unsubscriptable-object
                          lengths[best_ids],
                          seq_scores[best_ids],
                          histories,
                          reference_lengths[best_ids])])
+
         # reorder and regroup lists
         reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]
         return reduced_translations
@@ -1089,7 +1136,6 @@ class Translator:
         # first index into the history of the desired hypotheses.
         pointer = all_hyp_indices[ks, -1]
         # for each column/step follow the pointer, starting from the penultimate column/step
-        num_steps = all_hyp_indices.shape[1]
         for step in range(num_steps - 2, -1, -1):
             result[:, step] = pointer
             pointer = all_hyp_indices[pointer, step]
@@ -1100,22 +1146,43 @@ class Translator:
                               length: np.ndarray,
                               seq_score: np.ndarray,
                               beam_history: Optional[BeamHistory],
-                              estimated_reference_length: Optional[float]) -> Translation:
+                              estimated_reference_length: Optional[float],
+                              unshift_target_factors: bool = False) -> Translation:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
-        :param sequence: Array of word ids. Shape: (batch_size, bucket_key).
+        :param sequence: Array of word ids. Shape: (bucketed_length, num_target_factors).
         :param length: The length of the translated segment.
         :param seq_score: Array of length-normalized negative log-probs.
         :param estimated_reference_length: Estimated reference length (if any).
         :param beam_history: The optional beam histories for each sentence in the batch.
         :return: A Translation object.
         """
+        if unshift_target_factors:
+            sequence = _unshift_target_factors(sequence, fill_last_with=C.EOS_ID)
+        else:
+            sequence = sequence.tolist()
         length = int(length)
-        sequence = sequence[:length].tolist()
+        sequence = sequence[:length]
         score = float(seq_score)
         estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
         beam_history_list = [beam_history] if beam_history is not None else []
         return Translation(sequence, score, beam_history_list,
                            nbest_translations=None,
                            estimated_reference_length=estimated_reference_length)
+
+
+def _unshift_target_factors(sequence: np.ndarray, fill_last_with: int = C.EOS_ID):
+    """
+    Shifts back target factors so that they re-align with the words.
+
+    :param sequence: Array of word ids. Shape: (bucketed_length, num_target_factors).
+    """
+    if len(sequence.shape) == 1 or sequence.shape[1] == 1:
+        return sequence.tolist()
+    num_factors_to_shift = sequence.shape[1] - 1
+    _fillvalue = num_factors_to_shift * [fill_last_with]
+    _words = sequence[:, 0]  # tokens from t==0 onwards
+    _next_factors = sequence[1:, 1:]  # factors from t==1 onwards
+    sequence = [(w, *fs) for w, fs in itertools.zip_longest(_words, _next_factors, fillvalue=_fillvalue)]
+    return sequence

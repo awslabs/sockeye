@@ -205,7 +205,7 @@ def create(args):
     logger.info("Creating top-k lexicon from \"%s\"", args.input)
     logger.info("Reading source and target vocab from \"%s\"", args.model)
     vocab_source = vocab.load_source_vocabs(args.model)[0]
-    vocab_target = vocab.load_target_vocab(args.model)
+    vocab_target = vocab.load_target_vocabs(args.model)[0]
     logger.info("Building top-%d lexicon", args.k)
     lexicon = TopKLexicon(vocab_source, vocab_target)
     lexicon.create(args.input, args.k)
