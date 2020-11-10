@@ -74,7 +74,8 @@ Annotations." arXiv preprint arXiv:2010.06203 (2020)
 * Zhang, Xuan, Kevin Duh. "Reproducible and Efficient Benchmarks for Hyperparameter Optimization of Neural Machine Translation Systems." Transactions of the Association for Computational Linguistics, Volume 8 (2020)
 * Swe Zin Moe, Ye Kyaw Thu, Hnin Aye Thant, Nandar Win Min, and Thepchai Supnithi, "Unsupervised Neural Machine Translation between Myanmar Sign Language and Myanmar Language", Journal of Intelligent Informatics and Smart Technology, April 1st Issue, 2020, pp. 53-61. (Submitted December 21, 2019; accepted March 6, 2020; revised March 16, 2020; published online April 30, 2020)
 * Thazin Myint Oo, Ye Kyaw Thu, Khin Mar Soe and Thepchai Supnithi, "Neural Machine Translation between Myanmar (Burmese) and Dawei (Tavoyan)", In Proceedings of the 18th International Conference on Computer Applications (ICCA 2020), Feb 27-28, 2020, Yangon, Myanmar, pp. 219-227
-
+* Müller, Mathias, Annette Rios, Rico Sennrich. "Domain Robustness in Neural Machine Translation." Proceedings of AMTA (2020)
+* Rios, Annette, Mathias Müller, Rico Sennrich. "Subword Segmentation and a Single Bridge Language Affect Zero-Shot Neural Machine Translation." Proceedings of the 5th WMT: Research Papers (2020)
 
 ### 2019
 
@@ -106,6 +107,7 @@ Annotations." arXiv preprint arXiv:2010.06203 (2020)
 * Wang, Weiyue, Derui Zhu, Tamer Alkhouli, Zixuan Gan, and Hermann Ney. "Neural Hidden Markov Model for Machine Translation". Proceedings of 56th ACL (2018)
 * Zhang, Xuan, Gaurav Kumar, Huda Khayrallah, Kenton Murray, Jeremy Gwinnup, Marianna J Martindale, Paul McNamee, Kevin Duh, and Marine Carpuat. "An Empirical Exploration of Curriculum Learning for Neural Machine Translation." arXiv preprint arXiv:1811.00739 (2018)
 * Swe Zin Moe, Ye Kyaw Thu, Hnin Aye Thant and Nandar Win Min, "Neural Machine Translation between Myanmar Sign Language and Myanmar Written Text", In the second Regional Conference on Optical character recognition and Natural language processing technologies for ASEAN languages 2018 (ONA 2018), December 13-14, 2018, Phnom Penh, Cambodia.  
+* Tang, Gongbo, Mathias Müller, Annette Rios and Rico Sennrich. "Why Self-attention? A Targeted Evaluation of Neural Machine Translation Architectures." Proceedings of EMNLP (2018)
 
 ### 2017
 
