@@ -795,7 +795,7 @@ def get_beam_search(models: List[SockeyeModel],
 
     inference = None  # type: Optional[_Inference]
     if len(models) == 1:
-        skip_softmax = beam_size == 1 and not output_scores and not sample
+        skip_softmax = beam_size == 1 and not output_scores and sample is None
         if skip_softmax:
             logger.info("Enabled skipping softmax for a single model and greedy decoding.")
         inference = _SingleModelInference(model=models[0],
