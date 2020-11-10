@@ -50,7 +50,7 @@ class Reranker:
             # (http://aclweb.org/anthology/W14-3346)
             self.scoring_function = partial(sacrebleu.sentence_bleu, smooth_method='add-k')
         elif metric == C.RERANK_CHRF:
-            self.scoring_function = sacrebleu.sentence_chrf
+            self.scoring_function = sacrebleu.sentence_chrf  # type: ignore
         else:
             raise utils.SockeyeError("Scoring metric '%s' unknown. Choices are: %s" % (metric, C.RERANK_METRICS))
 
