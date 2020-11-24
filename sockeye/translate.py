@@ -79,6 +79,8 @@ def run_translate(args: argparse.Namespace):
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
 
+        # TODO: add a check whether the source/target language arguments are required by the model and if so fail if they aren't
+
         models, source_vocabs, target_vocabs = load_models(context=context,
                                                            model_folders=args.models,
                                                            checkpoints=args.checkpoints,
@@ -153,7 +155,9 @@ def run_translate(args: argparse.Namespace):
                            chunk_size=args.chunk_size,
                            input_file=args.input,
                            input_factors=args.input_factors,
-                           input_is_json=args.json_input)
+                           input_is_json=args.json_input,
+                           source_lang=args.source_language,
+                           target_lang=args.target_language)
 
 
 def make_inputs(input_file: Optional[str],
@@ -206,7 +210,9 @@ def read_and_translate(translator: inference.Translator,
                        chunk_size: Optional[int],
                        input_file: Optional[str] = None,
                        input_factors: Optional[List[str]] = None,
-                       input_is_json: bool = False) -> None:
+                       input_is_json: bool = False,
+                       source_lang = None,
+                       target_lang = None) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
 
@@ -235,7 +241,7 @@ def read_and_translate(translator: inference.Translator,
 
     total_time, total_lines = 0.0, 0
     for chunk in grouper(make_inputs(input_file, translator, input_is_json, input_factors), size=chunk_size):
-        chunk_time = translate(output_handler, chunk, translator)
+        chunk_time = translate(output_handler, chunk, translator, source_lang, target_lang)
         total_lines += len(chunk)
         total_time += chunk_time
 
@@ -248,7 +254,9 @@ def read_and_translate(translator: inference.Translator,
 
 def translate(output_handler: OutputHandler,
               trans_inputs: List[inference.TranslatorInput],
-              translator: inference.Translator) -> float:
+              translator: inference.Translator,
+              source_lang = None,
+              target_lang = None) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.
 
@@ -258,7 +266,7 @@ def translate(output_handler: OutputHandler,
     :return: Total time taken.
     """
     tic = time.time()
-    trans_outputs = translator.translate(trans_inputs)
+    trans_outputs = translator.translate(trans_inputs, source_lang=source_lang, target_lang=target_lang)
     total_time = time.time() - tic
     batch_time = total_time / len(trans_inputs)
     for trans_input, trans_output in zip(trans_inputs, trans_outputs):

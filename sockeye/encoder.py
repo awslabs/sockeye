@@ -58,10 +58,10 @@ class Encoder(ABC, mx.gluon.HybridBlock):
     def __init__(self, **kwargs):
         mx.gluon.HybridBlock.__init__(self, **kwargs)
 
-    def forward(self, inputs, valid_length):  # pylint: disable=arguments-differ
-        return mx.gluon.HybridBlock.forward(self, inputs, valid_length)
+    def forward(self, inputs, valid_length, lang=None):  # pylint: disable=arguments-differ
+        return mx.gluon.HybridBlock.forward(self, inputs, valid_length, lang)
 
-    def __call__(self, inputs, valid_length):  #pylint: disable=arguments-differ
+    def __call__(self, inputs, valid_length, lang=None):  #pylint: disable=arguments-differ
         """
         Encodes inputs given valid lengths of individual examples.
 
@@ -69,7 +69,7 @@ class Encoder(ABC, mx.gluon.HybridBlock):
         :param valid_length: Length of inputs without padding.
         :return: Encoded versions of input data (data, data_length).
         """
-        return mx.gluon.HybridBlock.__call__(self, inputs, valid_length)
+        return mx.gluon.HybridBlock.__call__(self, inputs, valid_length, lang)
 
     @abstractmethod
     def get_num_hidden(self) -> int:
@@ -112,13 +112,15 @@ class EmbeddingConfig(config.Config):
                  num_embed: int,
                  dropout: float,
                  factor_configs: Optional[List[FactorConfig]] = None,
-                 allow_sparse_grad: bool = False) -> None:
+                 allow_sparse_grad: bool = False,
+                 num_lang_embed: int = 0) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.num_embed = num_embed
         self.dropout = dropout
         self.factor_configs = factor_configs
         self.num_factors = 1
+        self.num_lang_embed = num_lang_embed
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
         self.allow_sparse_grad = allow_sparse_grad
@@ -137,6 +139,7 @@ class Embedding(Encoder):
                  config: EmbeddingConfig,
                  prefix: str,
                  embed_weight: Optional[mx.gluon.Parameter] = None,
+                 lang_embed_weight: Optional[mx.gluon.Parameter] = None,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
@@ -163,7 +166,11 @@ class Embedding(Encoder):
                     # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
                     setattr(self, factor_weight_name, factor_weight)
 
-    def hybrid_forward(self, F, data, valid_length, embed_weight, **kwargs):  # pylint: disable=arguments-differ
+            self.lang_embed_weight = lang_embed_weight
+            if lang_embed_weight is not None:
+                self.params.update({lang_embed_weight.name: lang_embed_weight})  # adds to self.params
+
+    def hybrid_forward(self, F, data, valid_length, lang = None, embed_weight = None, **kwargs):  # pylint: disable=arguments-differ
         # We will catch the optional factor weights in kwargs
         average_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         concat_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
@@ -205,6 +212,17 @@ class Embedding(Encoder):
                 embed = F.add_n(embed, *sum_factors_embeds)
             if concat_factors_embeds:
                 embed = F.concat(embed, *concat_factors_embeds, dim=2)
+
+        if self.lang_embed_weight:
+            assert lang is not None, "Model trained with language embeddings, but no language provided."
+            # (1,) -> (1, 512,)
+            lang_embed = F.Embedding(lang,
+                                     weight=kwargs['lang_embed_weight'],
+                                     input_dim=self.config.num_lang_embed,
+                                     output_dim=self.config.num_embed,
+                                     dtype=self._dtype,)
+            # embed (batch_size, seq_len, num_embed)
+            embed = F.broadcast_add(embed, lang_embed)
 
         if self.config.dropout > 0:
             embed = F.Dropout(data=embed, p=self.config.dropout)
@@ -315,7 +333,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                                                                      prefix="final_process_",
                                                                      num_hidden=self.config.model_size)
 
-    def hybrid_forward(self, F, data, valid_length):
+    def hybrid_forward(self, F, data, valid_length, lang):
         # positional embedding
         data = self.pos_embedding(data, None)
 

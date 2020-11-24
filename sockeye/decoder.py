@@ -96,7 +96,7 @@ class Decoder(mx.gluon.Block):
         raise NotImplementedError()
 
     @abstractmethod
-    def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
+    def decode_seq(self, inputs: mx.nd.NDArray, steps: Optional[mx.nd.NDArray], states: List[mx.nd.NDArray]):
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -212,7 +212,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         return states
 
-    def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
+    def decode_seq(self, inputs: mx.nd.NDArray, steps: Optional[mx.nd.NDArray], states: List[mx.nd.NDArray]):
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -221,10 +221,10 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         :param states: List of initial states, as given by init_state_from_encoder().
         :return: Decoder output. Shape: (batch_size, target_embed_max_length, decoder_depth).
         """
-        outputs, _ = self.forward(inputs, states)
+        outputs, _ = self.forward(inputs, steps, states)
         return outputs
 
-    def forward(self, step_input, states):
+    def forward(self, step_input, steps: Optional[mx.nd.NDArray], states):
         """
         Run forward pass of the decoder.
 
@@ -246,12 +246,14 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             # Just add the length dimension:
             # (batch, num_hidden) -> (batch, 1, num_hidden)
             step_input = step_input.expand_dims(axis=1, inplace=True)
+            assert steps is None, "steps can only be provided during training not during inference."
         else:
             assert not self.inference_only, "Decoder created with inference_only=True but used during training."
             # Replace the single step by multiple steps for training
             step, *states = states
-            # Create steps (1, trg_seq_len)
-            steps = mx.nd.contrib.arange_like(step_input, axis=1).expand_dims(axis=0, inplace=True)
+            if steps is None:
+                # Create steps (1, trg_seq_len)
+                steps = mx.nd.contrib.arange_like(step_input, axis=1).expand_dims(axis=0, inplace=True)
             states = [steps] + states
 
         # run decoder op

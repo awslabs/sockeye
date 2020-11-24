@@ -30,13 +30,15 @@ BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
 PAD_SYMBOL = "<pad>"
+MASK_SYMBOL = "<mask>"
 PAD_ID = 0
 PAD_FORMAT = "<pad%d>"
 TOKEN_SEPARATOR = " "
-VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
+VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL, MASK_SYMBOL]
 UNK_ID = VOCAB_SYMBOLS.index(UNK_SYMBOL)
 BOS_ID = VOCAB_SYMBOLS.index(BOS_SYMBOL)
 EOS_ID = VOCAB_SYMBOLS.index(EOS_SYMBOL)
+MASK_ID = VOCAB_SYMBOLS.index(MASK_SYMBOL)
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
 SPACE_FOR_XOS = 1
 
@@ -149,6 +151,7 @@ LENRATIO_LOSS_NAME = LENRATIO_NAME + "_loss"
 LENRATIO_OUTPUT_NAME = LENRATIO_NAME + "_output"
 LEXICON_NAME = "lexicon"
 
+
 SOURCE_ENCODED_NAME = "encoded_source"
 TARGET_PREVIOUS_NAME = "prev_target_word_id"
 HIDDEN_PREVIOUS_NAME = "prev_hidden"
@@ -192,6 +195,8 @@ JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
+JSON_SOURCE_LANG_KEY = "source_lang"
+JSON_TARGET_LANG_KEY = "target_lang"
 
 # Lexical constraints
 BANK_ADJUSTMENT = 'even'
@@ -205,12 +210,15 @@ VOCAB_SRC_PREFIX = "vocab.src"
 VOCAB_SRC_NAME = VOCAB_SRC_PREFIX + ".%d" + JSON_SUFFIX
 VOCAB_TRG_PREFIX = "vocab.trg"
 VOCAB_TRG_NAME = VOCAB_TRG_PREFIX + ".%d" + JSON_SUFFIX
+VOCAB_MONO_PREFIX = "vocab.mono"
+VOCAB_MONO_NAME = VOCAB_MONO_PREFIX + ".%d" + JSON_SUFFIX
 VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
 PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
 DECODE_OUT_NAME = "decode.output.{{factor}}.{checkpoint:05d}"
+DECODE_OUT_NAME_BY_LANG = "decode.{source_lang}-{target_lang}.output.{{factor}}.{checkpoint:05d}"
 DECODE_IN_NAME = "decode.source.{factor}"
 DECODE_REF_NAME = "decode.target.{factor}"
 SYMBOL_NAME = "symbol" + JSON_SUFFIX
@@ -244,6 +252,7 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
 TRAINING_ARG_SOURCE = "--source"
 TRAINING_ARG_TARGET = "--target"
 TRAINING_ARG_PREPARED_DATA = "--prepared-data"
+TRAINING_ARG_PREPARED_MONO_DATA = "--prepared-mono-data"
 TRAINING_ARG_MAX_SEQ_LEN = "--max-seq-len"
 
 VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
@@ -404,6 +413,7 @@ FIXED_PARAM_STRATEGY_CHOICES = [FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
 
 # data sharding
 SHARD_NAME = "shard.%05d"
+SHARD_MONO = SHARD_NAME + ".mono"
 SHARD_SOURCE = SHARD_NAME + ".source"
 SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"

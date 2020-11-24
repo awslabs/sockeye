@@ -138,7 +138,9 @@ class TranslatorInput:
                  'restrict_lexicon',
                  'constraints',
                  'avoid_list',
-                 'pass_through_dict')
+                 'pass_through_dict',
+                 'source_lang',
+                 'target_lang')
 
     def __init__(self,
                  sentence_id: SentenceId,
@@ -147,7 +149,9 @@ class TranslatorInput:
                  restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                  constraints: Optional[List[Tokens]] = None,
                  avoid_list: Optional[List[Tokens]] = None,
-                 pass_through_dict: Optional[Dict] = None) -> None:
+                 pass_through_dict: Optional[Dict] = None,
+                 source_lang: Optional[str] = None,
+                 target_lang: Optional[str] = None) -> None:
         self.sentence_id = sentence_id
         self.tokens = tokens
         self.factors = factors
@@ -155,10 +159,12 @@ class TranslatorInput:
         self.constraints = constraints
         self.avoid_list = avoid_list
         self.pass_through_dict = pass_through_dict
+        self.source_lang = source_lang
+        self.target_lang = target_lang
 
     def __str__(self):
-        return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
-            % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list)
+        return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s, source_lang=%s, target_lang=%)' \
+            % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list, self.source_lang, self.target_lang)
 
     def __len__(self):
         return len(self.tokens)
@@ -197,7 +203,9 @@ class TranslatorInput:
                                   restrict_lexicon=self.restrict_lexicon,
                                   constraints=constraints,
                                   avoid_list=self.avoid_list,
-                                  pass_through_dict=pass_through_dict)
+                                  pass_through_dict=pass_through_dict,
+                                  source_lang=self.source_lang,
+                                  target_lang=self.target_lang)
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -210,7 +218,9 @@ class TranslatorInput:
                                restrict_lexicon=self.restrict_lexicon,
                                constraints=self.constraints,
                                avoid_list=self.avoid_list,
-                               pass_through_dict=self.pass_through_dict)
+                               pass_through_dict=self.pass_through_dict,
+                               source_lang=self.source_lang,
+                               target_lang=self.target_lang)
 
 
 class BadTranslatorInput(TranslatorInput):
@@ -282,6 +292,13 @@ def make_input_from_dict(sentence_id: SentenceId,
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
                 return _bad_input(sentence_id, reason=str(input_dict))
 
+        source_lang = None
+        if C.JSON_SOURCE_LANG_KEY in input_dict:
+            source_lang = input_dict[C.JSON_SOURCE_LANG_KEY]
+        target_lang = None
+        if C.JSON_TARGET_LANG_KEY in input_dict:
+            target_lang = input_dict[C.JSON_TARGET_LANG_KEY]
+
         # Lexicon for vocabulary selection/restriction:
         # This is only populated when using multiple lexicons, in which case the
         # restrict_lexicon key must exist and the value (name) must map to one
@@ -322,7 +339,8 @@ def make_input_from_dict(sentence_id: SentenceId,
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
                                restrict_lexicon=restrict_lexicon, constraints=constraints,
-                               avoid_list=avoid_list, pass_through_dict=input_dict)
+                               avoid_list=avoid_list, pass_through_dict=input_dict,
+                               source_lang=source_lang, target_lang=target_lang)
 
     except Exception as e:
         logger.exception(e, exc_info=True)  # type: ignore
@@ -657,7 +675,7 @@ class Translator:
                              of named lexicons.
     :param avoid_list: Global list of phrases to exclude from the output.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
-    :param sample: If True, sample from softmax multinomial instead of using topk.
+    :param sample: If not None, sample from output distribution: sample=0: full vocabulary, sample>0:  sample from topk.
     :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
            log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
            and a single model.
@@ -712,6 +730,8 @@ class Translator:
         if strip_unknown_words:
             self.strip_ids.add(self.unk_id)
         self.models = models
+        # TODO: should we check whether all lang_vocabs are identical here or do we trust this has been checked by load_models
+        self.lang_vocab = self.models[0].config.lang_vocab
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         # set a common max_output length for all models.
@@ -781,7 +801,7 @@ class Translator:
     def num_target_factors(self) -> int:
         return self.models[0].num_target_factors
 
-    def translate(self, trans_inputs: List[TranslatorInput], fill_up_batches: bool = True) -> List[TranslatorOutput]:
+    def translate(self, trans_inputs: List[TranslatorInput], fill_up_batches: bool = True, source_lang: Optional[str] = None, target_lang: Optional[str] = None) -> List[TranslatorOutput]:
         """
         Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
         Empty or bad inputs are skipped.
@@ -793,8 +813,32 @@ class Translator:
 
         :param trans_inputs: List of TranslatorInputs as returned by make_input().
         :param fill_up_batches: If True, underfilled batches are padded to Translator.max_batch_size.
+        :param source_lang: The source language.
+        :param target_lang: The target language.
         :return: List of translation results.
         """
+        # Determine the source/target language (the language can either be given in the Translator input or as a function argument, but not both. All inputs are required to use the same languages for now.)
+        if source_lang is None:
+            input_langs = [t.source_lang for t in trans_inputs]
+            if all(l is None for l in input_langs):
+                source_lang = None
+            else:
+                assert len(set(input_langs)) == 1
+                source_lang = input_langs[0]
+        else:
+            for t in trans_inputs:
+                assert t.source_lang is None
+        if target_lang is None:
+            input_langs = [t.target_lang for t in trans_inputs]
+            if all(l is None for l in input_langs):
+                source_lang = None
+            else:
+                assert len(set(input_langs)) == 1
+                target_lang = input_langs[0]
+        else:
+            for t in trans_inputs:
+                assert t.target_lang is None
+
         num_inputs = len(trans_inputs)
         translated_chunks = []  # type: List[IndexedTranslation]
 
@@ -851,7 +895,7 @@ class Translator:
                 batch = batch + [batch[0]] * rest
 
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
-            batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
+            batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs, source_lang, target_lang))
 
             # truncate to remove filler translations
             if fill_up_batches and rest > 0:
@@ -886,12 +930,17 @@ class Translator:
         return results
 
     def _get_inference_input(self,
-                             trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
-                                                                           int,
-                                                                           Optional[lexicon.TopKLexicon],
-                                                                           List[Optional[constrained.RawConstraintList]],
-                                                                           List[Optional[constrained.RawConstraintList]],
-                                                                           mx.nd.NDArray]:
+                             trans_inputs: List[TranslatorInput],
+                             source_lang: Optional[str],
+                             target_lang: Optional[str]) -> Tuple[mx.nd.NDArray,
+                                                                  int,
+                                                                  Optional[lexicon.TopKLexicon],
+                                                                  List[Optional[constrained.RawConstraintList]],
+                                                                  List[Optional[constrained.RawConstraintList]],
+                                                                  mx.nd.NDArray,
+                                                                  Optional[mx.nd.NDArray],
+                                                                  Optional[mx.nd.NDArray],
+                                                                  Optional[mx.nd.NDArray]]:
         """
         Assembles the numerical data for the batch. This comprises an NDArray for the source sentences,
         the bucket key (padded source length), and a list of raw constraint lists, one for each sentence in the batch,
@@ -904,6 +953,19 @@ class Translator:
                 lists, and list of phrases to avoid, and an NDArray of maximum output
                 lengths.
         """
+        if source_lang is not None:
+            if self.lang_vocab:
+                source_lang = mx.nd.full(shape=(1,), val=self.lang_vocab[source_lang], ctx=self.context)
+            else:
+                source_lang = None
+                logger.warning("Source language given, but model does not support passing a language. Source language will be ignored.")
+        if target_lang is not None:
+            if self.lang_vocab:
+                target_lang = mx.nd.full(shape=(1,), val=self.lang_vocab[target_lang], ctx=self.context)
+            else:
+                logger.warning("Target language given, but model does not support passing a language. Target language will be ignored.")
+                target_lang = None
+
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
         source_length = mx.nd.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
@@ -964,7 +1026,7 @@ class Translator:
         source = mx.nd.array(source_npy, ctx=self.context)
 
         return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, \
-                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32'), source_lang, target_lang,
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -1043,7 +1105,9 @@ class Translator:
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
                       raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                      max_output_lengths: mx.nd.NDArray) -> List[Translation]:
+                      max_output_lengths: mx.nd.NDArray,
+                      source_lang: Optional[mx.nd.NDArray] = None,
+                      target_lang: Optional[mx.nd.NDArray] = None) -> List[Translation]:
         """
         Translates source of source_length.
 
@@ -1059,7 +1123,9 @@ class Translator:
                                                            restrict_lexicon,
                                                            raw_constraints,
                                                            raw_avoid_list,
-                                                           max_output_lengths))
+                                                           max_output_lengths,
+                                                           source_lang,
+                                                           target_lang,))
 
     def _get_best_from_beam(self,
                             best_hyp_indices: np.ndarray,
@@ -1067,7 +1133,7 @@ class Translator:
                             seq_scores: np.ndarray,
                             lengths: np.ndarray,
                             estimated_reference_lengths: Optional[mx.nd.NDArray] = None,
-                            constraints: List[Optional[constrained.ConstrainedHypothesis]] = [],
+                            constraints: List[Optional[constrained.ConstrainedHypothesis]] = (),
                             beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
         Return the nbest (aka n top) entries from the n-best list.

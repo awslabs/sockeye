@@ -39,7 +39,10 @@ class TransformerConfig(config.Config):
                  max_seq_len_target: int,
                  decoder_type: str = C.TRANSFORMER_TYPE,
                  lhuc: bool = False,
-                 depth_key_value: int = 0) -> None:  # type: ignore
+                 depth_key_value: int = 0,
+                 # TODO: rename to something like `num_languages`
+                 num_lang_embed: int = 0,
+                 lang_specific_layers: bool = False) -> None:  # type: ignore
         super().__init__()
         self.model_size = model_size
         self.attention_heads = attention_heads
@@ -57,6 +60,8 @@ class TransformerConfig(config.Config):
         self.use_lhuc = lhuc
         self.depth_key_value = depth_key_value
         self.decoder_type = decoder_type
+        self.num_lang_embed = num_lang_embed
+        self.lang_specific_layers = lang_specific_layers
 
 
 class TransformerEncoderBlock(mx.gluon.HybridBlock):

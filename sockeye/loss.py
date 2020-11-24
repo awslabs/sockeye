@@ -39,14 +39,15 @@ class Loss(mx.gluon.HybridBlock):
                  output_name: str,
                  label_name: str,
                  weight: float = 1.0,
-                 metric_prefix: str = '') -> None:
+                 metric_base_prefix: str = '') -> None:
         super().__init__(prefix=name)
         self._name = name
         self._output_name = output_name
         self._label_name = label_name
         self._weight = weight
-        self._metric = None  # type: Optional[LossMetric]
-        self._metric_prefix = metric_prefix
+        self._metric = {}
+        self._metric_base_prefix = metric_base_prefix
+        # TODO: can we avoid creating the metric with "MT" prefix here?
         logger.info("Loss: %s | weight=%.2f | metric: %s (%s) | output_name: '%s' | label_name: '%s'",
                     self._name, self.weight, self.metric.name, self.metric.short_name,
                     self.output_name, self.label_name)
@@ -70,17 +71,24 @@ class Loss(mx.gluon.HybridBlock):
         raise NotImplementedError()
 
     @abstractmethod
-    def create_metric(self) -> 'LossMetric':
+    def create_metric(self, prefix) -> 'LossMetric':
         """
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
         raise NotImplementedError()
 
+    def prefixed_metric(self, prefix: str):
+        if prefix not in self._metric:
+            self._metric[prefix] = self.create_metric(prefix)
+        return self._metric[prefix]
+
     @property
-    def metric(self) -> 'LossMetric':
-        if self._metric is None:
-            self._metric = self.create_metric()
-        return self._metric
+    def metric(self):
+        return self.prefixed_metric(prefix='')
+
+    @property
+    def metrics(self):
+        return list(self._metric.values())
 
     @property
     def weight(self) -> float:
@@ -98,11 +106,21 @@ class Loss(mx.gluon.HybridBlock):
     def label_name(self) -> str:
         return self._label_name
 
+    def _combined_prefix(self, prefix: str):
+        """ Combines the base prefix with the given second prefix."""
+        if not self._metric_base_prefix and prefix:
+            return prefix
+        elif self._metric_base_prefix and not prefix:
+            return self._metric_base_prefix
+        else:
+            return f"{self._metric_base_prefix}-{prefix}"
+
 
 class LossMetric(ABC):
     def __init__(self, name: str, short_name: Optional[str] = None, prefix: str = '') -> None:
         self._name = prefix + name
         self._short_name = prefix + short_name if short_name else self._name
+        self._metric_name = name
         self._sum = 0.0
         self._num_inst = 0.0
 
@@ -119,6 +137,10 @@ class LossMetric(ABC):
     @property
     def short_name(self) -> str:
         return self._short_name
+
+    @property
+    def metric_name(self) -> str:
+        return self._metric_name
 
     def update(self, loss, num_samples):
         self._sum += loss
@@ -147,8 +169,8 @@ class CrossEntropyLoss(Loss):
                  label_name: str = C.TARGET_LABEL_NAME,
                  ignore_label: int = C.PAD_ID,
                  metric_prefix: str = '') -> None:
-        super().__init__(name=name, output_name=output_name, label_name=label_name,
-                         weight=weight, metric_prefix=metric_prefix)
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight,
+                         metric_base_prefix=metric_prefix)
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._normalization = "valid"
@@ -183,11 +205,11 @@ class CrossEntropyLoss(Loss):
         ce = -F.sum(pred)
         return ce, F.sum(valid_mask)
 
-    def create_metric(self) -> 'LossMetric':
+    def create_metric(self, prefix: str) -> 'LossMetric':
         """
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
-        return PerplexityMetric(prefix=self._metric_prefix)
+        return PerplexityMetric(prefix=self._combined_prefix(prefix))
 
 
 class CrossEntropyLossWithoutSoftmaxOutput(Loss):
@@ -206,8 +228,8 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
                  ignore_label: int = C.PAD_ID,
                  num_labels: int = 0,
                  metric_prefix: str = '') -> None:  # this is needed for label smoothing
-        super().__init__(name=name, output_name=output_name, label_name=label_name,
-                         weight=weight, metric_prefix=metric_prefix)
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight,
+                         metric_base_prefix=metric_prefix)
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._dtype = dtype
@@ -240,11 +262,11 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
         # we need to divide by num_valid here to backpropagate a 'valid' normalized loss value like in SoftmaxOutput.
         return ce / num_valid, F.ones((1,))
 
-    def create_metric(self) -> 'LossMetric':
+    def create_metric(self, prefix: str) -> 'LossMetric':
         """
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
-        return PerplexityMetric(prefix=self._metric_prefix)
+        return PerplexityMetric(prefix=self._combined_prefix(prefix))
 
 
 class PerplexityMetric(LossMetric):
@@ -289,8 +311,8 @@ class PoissonLoss(Loss):
         num_samples = F.sum(F.ones_like(length_predictions))
         return loss, num_samples
 
-    def create_metric(self) -> 'LossMetric':
-        return LossMetric(name=C.LENRATIO_MSE)
+    def create_metric(self, prefix: str) -> 'LossMetric':
+        return LossMetric(name=C.LENRATIO_MSE, prefix=self._combined_prefix(prefix))
 
 
 class MSELoss(Loss):
@@ -321,5 +343,5 @@ class MSELoss(Loss):
         num_samples = F.sum(F.ones_like(length_predictions))
         return loss, num_samples
 
-    def create_metric(self) -> 'LossMetric':
-        return LossMetric(name=C.LENRATIO_MSE)
+    def create_metric(self, prefix: str) -> 'LossMetric':
+        return LossMetric(name=C.LENRATIO_MSE, prefix=self._combined_prefix(prefix))

@@ -97,7 +97,9 @@ def prepare_data(args: argparse.Namespace):
                          min_num_shards=minimum_num_shards,
                          output_prefix=output_folder,
                          bucket_scaling=bucket_scaling,
-                         max_processes=args.max_processes)
+                         max_processes=args.max_processes,
+                         source_lang=args.source_language,
+                         target_lang=args.target_language)
 
 
 if __name__ == "__main__":

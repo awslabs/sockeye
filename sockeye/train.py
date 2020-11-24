@@ -14,6 +14,7 @@
 """
 Simple Training CLI.
 """
+from sockeye.vocab import Vocab
 from . import pre_mxnet
 # Called before importing mxnet or any module that imports mxnet
 pre_mxnet.init()
@@ -213,7 +214,7 @@ def create_checkpoint_decoder(
     if sample_size == 0:
         return None
 
-    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0 and args.optimized_metric not in C.METRICS_REQUIRING_DECODER:
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0 and args.optimized_metric not in C.METRICS_REQUIRING_DECODER and not args.use_bt_steps:
         logger.info("This is a secondary worker, not creating a checkpoint decoder for this training instance")
         return None
 
@@ -260,7 +261,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  shared_vocab: bool,
                                  resume_training: bool,
                                  output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
+                                                              Dict[str, 'data_io.MonoSampleIter'],
                                                               'data_io.BaseParallelSampleIter',
+                                                              vocab.Vocab,
                                                               'data_io.DataConfig',
                                                               List[vocab.Vocab], List[vocab.Vocab]]:
     """
@@ -272,7 +275,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     :param shared_vocab: Whether to create a shared vocabulary.
     :param resume_training: Whether to resume training.
     :param output_folder: Output folder.
-    :return: The data iterators (train, validation, config_data) as well as the source and target vocabularies.
+    :return: The data iterators (train, monolingual per language, validation, data_config) as well as the source and
+    target vocabularies.
     """
     num_words_source, num_words_target = args.num_words
     num_words_source = num_words_source if num_words_source > 0 else None
@@ -296,15 +300,56 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                                      C.TRAINING_ARG_PREPARED_DATA)
     if args.prepared_data is not None:
         utils.check_condition(args.source is None and args.target is None, either_raw_or_prepared_error_msg)
+        # TODO: should we check that source/target language aren't given?
         if not resume_training:
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
-        train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io.get_prepared_data_iters(
-            prepared_data_dir=args.prepared_data,
+        prepared_data_folder = data_io.PreparedDataFolder(prepared_data_dir=args.prepared_data,
+                                                          shared_vocab=shared_vocab)
+        data_config = prepared_data_folder.data_config
+        source_vocabs = prepared_data_folder.source_vocabs
+        target_vocabs = prepared_data_folder.target_vocabs
+
+        if prepared_data_folder.source_lang.name is None:
+            check_condition(args.source_language is None, "Source language given (--source-language), but data was "
+                                                          "prepared without out a source language.")
+        if prepared_data_folder.target_lang.name is None:
+            check_condition(args.target_language is None, "Source language given (--target-language), but data was "
+                                                          "prepared without out a target language.")
+
+        # Prepared monolingual data:
+        mono_data_folders = {}
+        if args.prepared_mono_data:
+            check_condition(shared_vocab, "Shared vocabulary necessary when using monolingual data.")
+            vocab_mismatch_msg = "Mismatch between the parallel and monolingual vocabularies. " \
+                                 "Make sure to create a joint vocabulary using the sockeye.vocab CLI."
+            for prepared_data_dir in args.prepared_mono_data:
+                mono_folder = data_io.PreparedMonoDataFolder(prepared_data_dir)
+                check_condition(len(mono_folder.vocabs) == len(source_vocabs), vocab_mismatch_msg)
+                for mono_vocab, other_vocab in zip(mono_folder.vocabs, source_vocabs):
+                    check_condition(vocab.are_identical(mono_vocab, other_vocab), vocab_mismatch_msg)
+                mono_lang = data_io.Language(mono_folder.data_config.lang)
+                check_condition(mono_lang not in mono_data_folders,
+                                "Only one prepared monolingual folder supported per language.")
+                mono_data_folders[mono_lang] = mono_folder
+
+        all_langs = list(mono_data_folders.keys()) + [prepared_data_folder.source_lang] + [
+            prepared_data_folder.target_lang]
+        all_langs = set(all_langs)
+        # verify either all iterators have languages or none have
+        lang_vocab = None  # type: Optional[Vocab]
+        if any(lang.name is None for lang in all_langs):
+            check_condition(len(all_langs) == 1, "Either all data iterators need to be prepared with language "
+                                                 "information or none.")
+            lang_vocab = None
+        else:
+            lang_vocab = data_io.Language.create_language_vocab(all_langs)
+
+        train_iter, validation_iter = prepared_data_folder.get_prepared_data_iters(
             validation_sources=validation_sources,
             validation_targets=validation_targets,
-            shared_vocab=shared_vocab,
+            lang_vocab=lang_vocab,
             batch_size=args.batch_size,
             batch_type=args.batch_type,
             batch_num_devices=batch_num_devices,
@@ -331,6 +376,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             for i, (v, mv) in enumerate(zip(target_vocabs, model_target_vocabs)):
                 utils.check_condition(vocab.are_identical(v, mv),
                                       "Prepared data and resumed model target vocab %d do not match." % i)
+            # TODO: add mono checks here
 
         check_condition(data_config.num_source_factors == len(validation_sources),
                         'Training and validation data must have the same number of source factors,'
@@ -341,11 +387,34 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                         ' but found %d and %d.' % (
                             data_config.num_target_factors, len(validation_targets)))
 
-        return train_iter, validation_iter, data_config, source_vocabs, target_vocabs
+        mono_data_iters = {lang: model_folder.get_prepared_mono_data_iters(
+            batch_size=args.batch_size,
+            batch_type=args.batch_type,
+            batch_num_devices=batch_num_devices,
+            batch_sentences_multiple_of=args.batch_sentences_multiple_of,
+            reset_on_init=False,
+            lang_vocab=lang_vocab,
+            masking_style=args.mono_masking_style,
+        ) for lang, model_folder in mono_data_folders.items()}
+
+        return train_iter, mono_data_iters, validation_iter, lang_vocab, data_config, source_vocabs, target_vocabs
 
     else:
-        utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
-                              either_raw_or_prepared_error_msg)
+        # TODO: support monolingual data in this case as well
+        utils.check_condition(
+            args.prepared_data is None and args.source is not None and args.target is not None and
+            args.prepared_mono_data is None, either_raw_or_prepared_error_msg)
+
+        source_language = args.source_language
+        target_language = args.target_language
+        monolingual_language = args.monolingual_language
+        # TODO: add the same all or none check as above!?
+        all_langs = list({source_language, target_language, monolingual_language})
+        lang_vocab = data_io.Language.create_language_vocab(all_langs)
+
+        # TODO: support monolingual data loading
+        # TODO: return mono iterators and the data_config
+        all_mono_iters = {}
 
         if resume_training:
             # Load the existing vocabs created when starting the training run.
@@ -412,6 +481,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             source_vocab_paths=source_vocab_paths,
             target_vocab_paths=target_vocab_paths,
             shared_vocab=shared_vocab,
+            source_lang=source_language,
+            target_lang=target_language,
+            lang_vocab=lang_vocab,
             batch_size=args.batch_size,
             batch_type=args.batch_type,
             batch_num_devices=batch_num_devices,
@@ -426,13 +498,14 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         logger.info("Writing data config to '%s'", data_info_fname)
         data_info.save(data_info_fname)
 
-        return train_iter, validation_iter, config_data, source_vocabs, target_vocabs
+        return train_iter, all_mono_iters, validation_iter, lang_vocab, config_data, source_vocabs, target_vocabs
 
 
 def create_encoder_config(args: argparse.Namespace,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          num_embed_source: int) -> Tuple[encoder.EncoderConfig, int]:
+                          num_embed_source: int,
+                          num_lang_embed: int) -> Tuple[encoder.EncoderConfig, int]:
     """
     Create the encoder config.
 
@@ -472,7 +545,11 @@ def create_encoder_config(args: argparse.Namespace,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
         lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
-        decoder_type=args.decoder)
+        decoder_type=args.decoder,
+        # TODO: implement!
+        num_lang_embed=num_lang_embed,
+        lang_specific_layers=args.encoder_lang_specific_layers,
+    )
     encoder_num_hidden = encoder_transformer_model_size
 
     return config_encoder, encoder_num_hidden
@@ -482,7 +559,8 @@ def create_decoder_config(args: argparse.Namespace,
                           encoder_num_hidden: int,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          num_embed_target: int) -> decoder.DecoderConfig:
+                          num_embed_target: int,
+                          num_lang_embed: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
@@ -524,7 +602,8 @@ def create_decoder_config(args: argparse.Namespace,
         max_seq_len_target=max_seq_len_target,
         lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         depth_key_value=encoder_num_hidden,
-        decoder_type=args.decoder)
+        decoder_type=args.decoder,
+        num_lang_embed=num_lang_embed)
 
     return config_decoder
 
@@ -600,6 +679,7 @@ def create_model_config(args: argparse.Namespace,
                         target_vocab_sizes: List[int],
                         max_seq_len_source: int,
                         max_seq_len_target: int,
+                        lang_vocab: Optional[Vocab],
                         config_data: data_io.DataConfig) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
@@ -613,15 +693,16 @@ def create_model_config(args: argparse.Namespace,
     :return: The model configuration.
     """
     num_embed_source, num_embed_target = get_num_embed(args)
+    num_lang_embed = len(lang_vocab) if lang_vocab is not None else 0
 
     embed_dropout_source, embed_dropout_target = args.embed_dropout
     source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
     target_vocab_size, *target_factor_vocab_sizes = target_vocab_sizes
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
-                                                               num_embed_source)
+                                                               num_embed_source, num_lang_embed)
     config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
-                                           num_embed_target)
+                                           num_embed_target, num_lang_embed)
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
@@ -677,13 +758,14 @@ def create_model_config(args: argparse.Namespace,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
                                                   factor_configs=source_factor_configs,
-                                                  allow_sparse_grad=allow_sparse_grad)
+                                                  allow_sparse_grad=allow_sparse_grad,
+                                                  num_lang_embed=num_lang_embed)
 
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target,
-                                                  factor_configs=target_factor_configs,
-                                                  allow_sparse_grad=allow_sparse_grad)
+                                                  allow_sparse_grad=allow_sparse_grad,
+                                                  num_lang_embed=num_lang_embed)
 
     config_length_task = None
     if args.length_task is not None:
@@ -700,6 +782,7 @@ def create_model_config(args: argparse.Namespace,
                                      config_length_task=config_length_task,
                                      weight_tying_type=args.weight_tying_type,
                                      lhuc=args.lhuc is not None,
+                                     lang_vocab=lang_vocab,
                                      dtype=args.dtype)
     return model_config
 
@@ -989,7 +1072,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         utils.seed_rngs(args.seed, ctx=context)
 
-        train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
+        train_iter, mono_iters, eval_iter, lang_vocab, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
             args=args,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
@@ -1022,6 +1105,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                            target_vocab_sizes=target_vocab_sizes,
                                            max_seq_len_source=max_seq_len_source,
                                            max_seq_len_target=max_seq_len_target,
+                                           lang_vocab=lang_vocab,
                                            config_data=config_data)
 
         training_model = model.SockeyeModel(model_config)
@@ -1130,13 +1214,17 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             dtype=args.dtype,
             using_amp=using_amp,
             custom_metrics_logger=custom_metrics_logger,
-            checkpoint_callback=checkpoint_callback
+            checkpoint_callback=checkpoint_callback,
         )
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
                                                training_model, source_vocabs, target_vocabs, hybridize=hybridize)
 
-        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
+        training_state = trainer.fit(train_iter=train_iter,
+                                     mono_iters=mono_iters,
+                                     validation_iter=eval_iter, checkpoint_decoder=cp_decoder,
+                                     mass_steps=not args.use_bt_steps,
+                                     bt_steps=args.use_bt_steps)
         return training_state
 
 

@@ -66,6 +66,7 @@ class ModelConfig(Config):
                  config_length_task: layers.LengthRatioConfig= None,
                  weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
                  lhuc: bool = False,
+                 lang_vocab: Optional[vocab.Vocab] = None,
                  dtype: str = C.DTYPE_FP32,
                  intgemm_custom_lib: str = os.path.join(os.path.dirname(__file__), "libintgemm.so")) -> None:
         super().__init__()
@@ -79,6 +80,7 @@ class ModelConfig(Config):
         self.config_length_task = config_length_task
         self.weight_tying_type = weight_tying_type
         self.lhuc = lhuc
+        self.lang_vocab = lang_vocab
         self.dtype = dtype
         self.intgemm_custom_lib = intgemm_custom_lib
 
@@ -121,19 +123,46 @@ class SockeyeModel(mx.gluon.Block):
 
         with self.name_scope():
             # source & target embeddings
-            self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
+            self.source_embed_weight, self.target_embed_weight, self.output_weight, self.lang_embed_weight = self._get_embedding_weights()
 
             self.embedding_source = encoder.Embedding(config.config_embed_source,
-                                                      prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
-                                                      embed_weight=self.source_embed_weight)
+                                                      prefix=self.prefix,
+                                                      embed_weight=self.source_embed_weight,
+                                                      lang_embed_weight=self.lang_embed_weight)
             self.embedding_target = encoder.Embedding(config.config_embed_target,
-                                                      prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
-                                                      embed_weight=self.target_embed_weight)
+                                                      prefix=self.prefix,
+                                                      embed_weight=self.target_embed_weight,
+                                                      lang_embed_weight=self.lang_embed_weight)
 
             # encoder & decoder first (to know the decoder depth)
-            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
-                                               prefix=self.prefix, dtype=config.dtype)
+            if self.config.config_encoder.lang_specific_layers:
+                self.lang_specific_encoder = True
+                self.encoders = {
+                    lang_id: encoder.get_encoder(self.config.config_encoder, prefix=f"{self.prefix}{lang}_",
+                                                 dtype=config.dtype)
+                    for lang, lang_id in self.config.lang_vocab.items()
+                }
+                for encoder_idx, enc in self.encoders.items():
+                    setattr(self, f"encoder{encoder_idx}", enc)
+            else:
+                self.lang_specific_encoder = False
+                self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
+
+            if self.config.config_decoder.lang_specific_layers:
+                self.decoders = {
+                    lang_id: decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
+                                                 prefix=f"{self.prefix}{lang}_", dtype=config.dtype)
+                    for lang, lang_id in self.config.lang_vocab.items()
+                }
+                for decoder_idx, dec in self.decoders.items():
+                    setattr(self, f"decoder{decoder_idx}", dec)
+                self.lang_specific_decoder = True
+                decoder_num_hidden = next(iter(self.decoders.values())).get_num_hidden()
+            else:
+                self.lang_specific_decoder = False
+                self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
+                                                   prefix=self.prefix, dtype=config.dtype)
+                decoder_num_hidden = self.decoder.get_num_hidden()
 
             self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                    vocab_size=self.config.vocab_target_size,
@@ -165,26 +194,34 @@ class SockeyeModel(mx.gluon.Block):
         super().cast(dtype)
 
     def state_structure(self):
-        return self.decoder.state_structure()
+        if self.lang_specific_decoder:
+            return next(iter(self.decoders.values())).state_structure()
+        else:
+            return self.decoder.state_structure()
 
-    def encode(self, inputs, valid_length=None):
+    def encode(self, inputs, valid_length=None, source_lang=None):
         """Encode the input sequence.
 
         Parameters
         ----------
         inputs : NDArray
         valid_length : NDArray or None, default None
+        source_lang : NDArray or None, default None
 
         Returns
         -------
         outputs : list
             Outputs of the encoder.
         """
-        source_embed, source_embed_length = self.embedding_source(inputs, valid_length)
-        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        source_embed, source_embed_length = self.embedding_source(inputs, valid_length, source_lang)
+        if self.lang_specific_encoder:
+            lang_id = int(source_lang.asscalar())
+            source_encoded, source_encoded_length = self.encoders[lang_id](source_embed, source_embed_length)
+        else:
+            source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
         return source_encoded, source_encoded_length
 
-    def encode_and_initialize(self, inputs, valid_length=None, constant_length_ratio=0.0):
+    def encode_and_initialize(self, inputs, valid_length=None, source_lang=None, target_lang=None, constant_length_ratio=0.0):
         """
         Encodes the input sequence and initializes decoder states (and predicted output lengths if available).
         Used for inference/decoding.
@@ -193,6 +230,8 @@ class SockeyeModel(mx.gluon.Block):
         ----------
         inputs : NDArray
         valid_length : NDArray or None, default None
+        source_lang : NDArray or None, default None
+        target_lang : NDArray or None, default None
         constant_length_ratio : float
 
         Returns
@@ -207,17 +246,21 @@ class SockeyeModel(mx.gluon.Block):
             _ = mx.autograd.set_training(True)
 
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
-        source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
+        source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length, source_lang=source_lang)
 
         predicted_output_length = self.predict_output_length(source_encoded,
                                                              source_encoded_lengths,
                                                              constant_length_ratio)
         # Decoder init states
-        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
+        if self.lang_specific_decoder:
+            lang_id = int(target_lang.asscalar())
+            states = self.decoders[lang_id].init_state_from_encoder(source_encoded, source_encoded_lengths)
+        else:
+            states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
 
         return states, predicted_output_length
 
-    def _embed_and_encode(self, source, source_length, target, target_length):
+    def _embed_and_encode(self, source, source_length, target, target_length, source_lang=None, target_lang=None):
         """
         Encode the input sequence, embed the target sequence, and initialize the decoder.
         Used for training.
@@ -228,13 +271,22 @@ class SockeyeModel(mx.gluon.Block):
         :param target_length: Length of target inputs.
         :return: encoder outputs and lengths, target embeddings, and decoder initial states
         """
-        source_embed, source_embed_length = self.embedding_source(source, source_length)
-        target_embed, target_embed_length = self.embedding_target(target, target_length)
-        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
-        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length)
+        source_embed, source_embed_length = self.embedding_source(source, source_length, source_lang)
+        target_embed, target_embed_length = self.embedding_target(target, target_length, target_lang)
+        if self.lang_specific_encoder:
+            lang_id = int(source_lang.asscalar())
+            source_encoded, source_encoded_length = self.encoders[lang_id](source_embed, source_embed_length)
+        else:
+            source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        if self.lang_specific_decoder:
+            lang_id = int(target_lang.asscalar())
+            decoder = self.decoders[lang_id]
+        else:
+            decoder = self.decoder
+        states = decoder.init_state_from_encoder(source_encoded, source_encoded_length)
         return source_encoded, source_encoded_length, target_embed, states
 
-    def decode_step(self, step_input, states, vocab_slice_ids=None):
+    def decode_step(self, step_input, states, vocab_slice_ids=None, target_lang=None):
         """
         One step decoding of the translation model.
 
@@ -244,6 +296,7 @@ class SockeyeModel(mx.gluon.Block):
             Shape (batch_size, num_target_factors)
         states : list of NDArrays
         vocab_slice_ids : NDArray or None
+        target_lang : NDArray or None
 
         Returns
         -------
@@ -258,10 +311,15 @@ class SockeyeModel(mx.gluon.Block):
             _ = mx.autograd.set_training(True)
 
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
-        target_embed, _ = self.embedding_target(step_input.reshape((0, 1, -1)), valid_length=valid_length)
+        target_embed, _ = self.embedding_target(step_input.reshape((0, 1, -1)), valid_length=valid_length, lang=target_lang)
         target_embed = target_embed.squeeze(axis=1)
 
-        decoder_out, new_states = self.decoder(target_embed, states)
+        # TODO: add support for states from the decoder
+        if self.lang_specific_decoder:
+            lang_id = int(target_lang.asscalar())
+            decoder_out, new_states = self.decoders[lang_id](target_embed, None, states)
+        else:
+            decoder_out, new_states = self.decoder(target_embed, None, states)
 
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
@@ -274,11 +332,20 @@ class SockeyeModel(mx.gluon.Block):
 
         return step_output, new_states, target_factor_outputs
 
-    def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
+    def forward(self, source, source_length, target, target_length, source_lang: Optional[mx.nd.NDArray] = None,
+                target_lang: Optional[mx.nd.NDArray]=None,
+                target_steps: Optional[mx.nd.NDArray]=None):  # pylint: disable=arguments-differ
         source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
-                                                                                            target, target_length)
+                                                                                            target, target_length,
+                                                                                            source_lang, target_lang)
 
-        target = self.decoder.decode_seq(target_embed, states=states)
+        if self.lang_specific_decoder:
+            lang_id = int(target_lang.asscalar())
+            decoder = self.decoders[lang_id]
+        else:
+            decoder = self.decoder
+
+        target = decoder.decode_seq(target_embed, steps=target_steps, states=states)
 
         forward_output = dict()
 
@@ -419,7 +486,7 @@ class SockeyeModel(mx.gluon.Block):
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _get_embedding_weights(self) -> Tuple[mx.gluon.Parameter, mx.gluon.Parameter, mx.gluon.Parameter]:
+    def _get_embedding_weights(self) -> Tuple[mx.gluon.Parameter, mx.gluon.Parameter, mx.gluon.Parameter, Optional[mx.gluon.Parameter]]:
         """
         Returns embeddings for source, target, and output layer.
         When source and target embeddings are shared, they are created here and passed in to each side,
@@ -435,6 +502,7 @@ class SockeyeModel(mx.gluon.Block):
         source_embed_name = C.SOURCE_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
         target_embed_name = C.TARGET_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
         output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
+        lang_embed_name = C.SHARED_EMBEDDING_PREFIX + "lang_weight"
 
         source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not tie_weights else 'default'
         source_embed_weight = self.params.get(source_embed_name,
@@ -461,7 +529,16 @@ class SockeyeModel(mx.gluon.Block):
                                                    self.config.config_decoder.model_size),
                                             allow_deferred_init=True)
 
-        return source_embed_weight, target_embed_weight, output_weight
+        assert self.config.config_embed_source.num_lang_embed == self.config.config_embed_target.num_lang_embed
+        if self.config.config_embed_source.num_lang_embed:
+            lang_embed_weight = self.params.get(lang_embed_name,
+                                                shape=(self.config.config_embed_source.num_lang_embed,
+                                                       self.config.config_decoder.model_size),
+                                                allow_deferred_init=True)
+        else:
+            lang_embed_weight = None
+
+        return source_embed_weight, target_embed_weight, output_weight, lang_embed_weight
 
     @property
     def num_source_factors(self) -> int:
@@ -716,6 +793,9 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     for fi in range(len(first_model_vocabs)):
         utils.check_condition(vocab.are_identical(*[target_vocabs[i][fi] for i in range(len(target_vocabs))]),
                               "Target vocabulary ids do not match. Factor %d" % fi)
+
+    all_lang_vocabs = [model.config.lang_vocab for model in models]
+    utils.check_condition(all(v is None for v in all_lang_vocabs) or vocab.are_identical(*all_lang_vocabs), "Language vocabularies do not match.")
 
     load_time = time.time() - load_time_start
     logger.info("%d model(s) loaded in %.4fs", len(models), load_time)

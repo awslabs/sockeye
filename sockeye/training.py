@@ -19,6 +19,7 @@ import logging
 import os
 import pickle
 import random
+import itertools
 import shutil
 import time
 from math import sqrt
@@ -29,7 +30,7 @@ from mxnet.contrib import amp
 import numpy as np
 
 from .checkpoint_decoder import CheckpointDecoder
-from . import constants as C
+from . import constants as C, inference
 from . import data_io
 from . import horovod_mpi
 from . import loss
@@ -38,6 +39,7 @@ from . import utils
 from . import vocab
 from . import parallel
 from .config import Config
+from .data_io import Language
 from .model import SockeyeModel
 from .optimizers import OptimizerConfig
 
@@ -162,6 +164,41 @@ class TrainState:
         self.gradients = {}
 
 
+def get_loss_prefix(prefix, source_lang, target_lang):
+    if source_lang is None and target_lang is None:
+        return prefix
+    else:
+        return f"{prefix}-{source_lang}-{target_lang}"
+
+
+def merge_metrics(all_metrics: Dict[str, List[loss.LossMetric]]) -> List[Tuple[str,float]]:
+    """
+    Merges metrics available under different prefixes.
+    Note: the order of metrics is assumed identical for each entry in the dict.
+    """
+    if len(all_metrics) == 1:
+        metrics = next(iter(all_metrics.values()))
+        prefixed_metrics = [(metric.name, metric.get()) for metric in metrics]
+        return [(metric.metric_name, metric.get()) for metric in metrics], prefixed_metrics
+    all_prefixed_metrics = []
+    metric_names = None
+    metric_values = []
+    for metrics in all_metrics.values():
+        for metric in metrics:
+            all_prefixed_metrics.append((metric.name, metric.get()))
+        # We make sure the order to metrics is identical
+        curr_metric_names = [m.metric_name for m in metrics]
+        if metric_names is None:
+            metric_names = curr_metric_names
+        else:
+            assert curr_metric_names == metric_names, (curr_metric_names, metric_names)
+        metric_values.append([m.get() for m in metrics])
+    mean_metrics = mx.nd.mean(mx.nd.array(metric_values), axis=0)
+    mean_metrics = [(name, value.asscalar()) for name, value in zip(metric_names, mean_metrics)]
+    all_prefixed_metrics.extend(mean_metrics)
+    return mean_metrics, all_prefixed_metrics
+
+
 class GluonEarlyStoppingTrainer:
 
     def __init__(self,
@@ -193,11 +230,17 @@ class GluonEarlyStoppingTrainer:
         self._custom_metrics_logger = custom_metrics_logger
         self._tflogger = TensorboardLogger(logdir=os.path.join(self.config.output_dir, C.TENSORBOARD_NAME))
         self.checkpoint_callback = checkpoint_callback
+        # With language specific layers some parameters may be stale depenending on the value of the update_interval
+        self.ignore_stale_grad = self.model.config.config_encoder.lang_specific_layers or self.model.config.config_decoder.lang_specific_layers
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
+            mono_iters: Dict[Language, data_io.MonoSampleIter],
             validation_iter: data_io.BaseParallelSampleIter,
-            checkpoint_decoder: Optional[CheckpointDecoder] = None):
+            checkpoint_decoder: Optional[CheckpointDecoder] = None,
+            # TODO: consider changing the interface for this. Should we just accept a list of steps? (where each step can be 'mt', 'mass' or 'bt'. 'mt' is on by default and 'mass' is added when monolingual data is available?)
+            mass_steps=True,
+            bt_steps=False):
         logger.info("Early stopping by optimizing '%s'", self.config.early_stopping_metric)
 
         if self.config.early_stopping_metric in C.METRICS_REQUIRING_DECODER:
@@ -216,6 +259,10 @@ class GluonEarlyStoppingTrainer:
             # self._save_trainer_states(self.best_optimizer_states_fname)  # not saving due to deferred initialization
             logger.info("Training started.")
 
+        # TODO: officially add the source/target language to the interface
+        source_lang = Language(train_iter.source_lang)  # type: Language
+        target_lang = Language(train_iter.target_lang)  # type: Language
+
         tic = time.time()
 
         if self.config.max_checkpoints is not None:
@@ -228,40 +275,141 @@ class GluonEarlyStoppingTrainer:
                         self.config.max_updates,
                         self.config.max_checkpoints)
 
+        # TODO: support en-fr and fr-en steps
+
+        # TODO: train bi-directional models whenever source/target languages are given!??
+        # Note: for now we do bi-directional updates in the presence of mono data and uni-directional updates without them we should make this more flexible... (e.g. by having mt-steps being specified on the CLI?!)
+        if mono_iters is not None and len(mono_iters) > 1:
+            steps = []
+            num_add_mt_steps = 1
+            assert mass_steps or bt_steps, "Either MASS steps or BT steps must be turned on when monolingual data is supplied"
+            for lang in mono_iters:
+                if mass_steps:
+                    steps.append(("MASS", lang))
+                if bt_steps:
+                    if lang == source_lang:
+                        bt_src_lang = target_lang
+                        bt_trg_lang = source_lang
+                    elif lang == target_lang:
+                        bt_src_lang = source_lang
+                        bt_trg_lang = target_lang
+                    else:
+                        assert False
+                    steps.append(("BT", (lang, bt_src_lang, bt_trg_lang)))
+
+            mt_steps = [
+                ("MT", (source_lang, target_lang)),
+                ("MT", (target_lang, source_lang))
+            ]
+            for _ in range(num_add_mt_steps):
+                steps.extend(mt_steps)
+        else:
+            # TODO: make the use of bidirectional models configurable
+            if source_lang is not None and target_lang is not None:
+                logger.info("Source/target languages given. Enabling bi-directional models")
+                mt_steps = [
+                    ("MT", (source_lang, target_lang)),
+                    ("MT", (target_lang, source_lang))
+                ]
+            else:
+                mt_steps = [("MT", (source_lang, target_lang))]
+            steps = mt_steps
+        loss_prefixes = set()
+
+        random.shuffle(steps)
+
+        if horovod_mpi.using_horovod():
+            # Synchronize shard order across workers
+            steps = horovod_mpi.MPI.COMM_WORLD.bcast(steps, root=0)
+
+        steps_iter = itertools.cycle(steps)
+
         checkpoint_up_to_date = False
+        did_grad_step = False
         while True:
             if self.config.max_epochs is not None and self.state.epoch == self.config.max_epochs:
                 logger.info("Maximum # of epochs (%s) reached.", self.config.max_epochs)
                 if not checkpoint_up_to_date:
                     time_cost = time.time() - tic
-                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                    self._create_checkpoint(checkpoint_decoder, loss_prefixes, mt_steps,
+                                            source_lang, target_lang, time_cost, train_iter,
+                                            validation_iter)
                 break
 
             if self.config.max_updates is not None and self.state.updates == self.config.max_updates:
                 logger.info("Maximum # of updates (%s) reached.", self.config.max_updates)
                 if not checkpoint_up_to_date:
                     time_cost = time.time() - tic
-                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                    self._create_checkpoint(checkpoint_decoder, loss_prefixes, mt_steps,
+                                            source_lang, target_lang, time_cost, train_iter,
+                                            validation_iter)
                 break
 
             if self.config.max_samples is not None and self.state.samples >= self.config.max_samples:
                 logger.info("Maximum # of samples (%s) reached", self.config.max_samples)
                 if not checkpoint_up_to_date:
                     time_cost = time.time() - tic
-                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                    self._create_checkpoint(checkpoint_decoder, loss_prefixes, mt_steps,
+                                            source_lang, target_lang, time_cost, train_iter,
+                                            validation_iter)
                 break
 
-            did_grad_step = self._step(batch=train_iter.next())
-            checkpoint_up_to_date = checkpoint_up_to_date and not did_grad_step
+            step, step_variant = next(steps_iter)
+            if step == "MT":
+                loss_prefix = get_loss_prefix("MT", step_variant[0].name, step_variant[1].name)
+                if step_variant == (source_lang, target_lang):
+                    did_grad_step = self._mt_step(batch=train_iter.next(), loss_prefix=loss_prefix)
+                elif step_variant == (target_lang, source_lang):
+                    did_grad_step = self._mt_step(batch=train_iter.next().reverse(), loss_prefix=loss_prefix)
+                else:
+                    assert False
 
-            if not train_iter.iter_next():
-                self.state.epoch += 1
-                train_iter.reset()
+                # TODO: how to define epochs with the presence of the mono iters? For now we'll just keep epochs = parllel data epochs...
+                if not train_iter.iter_next():
+                    self.state.epoch += 1
+                    train_iter.reset()
+            elif step == "MASS":
+                step_lang = step_variant
+                # TODO: support for monolingual data without a language!?
+                assert step_lang.name is not None
+                loss_prefix = f"MASS-{step_lang.name}"
+                mono_iter = mono_iters[step_lang]
+                did_grad_step = self._mass_step(batch=mono_iter.next(),
+                                                # TODO: remove the vocab (was just for print debugging...)
+                                                loss_prefix=loss_prefix)
+
+                if not mono_iter.iter_next():
+                    mono_iter.reset()
+            elif step == "BT":
+                # bubble up/expose parameters
+                sampled_bt = False
+                tagged_bt = False
+
+                step_lang, bt_src_lang, bt_trg_lang = step_variant
+                # TODO: support for monolingual data without a language!?
+                assert step_lang.name is not None
+                loss_prefix = f"BT-{step_lang.name}"
+                # TODO: how to get mono dat here!?
+                mono_iter = mono_iters[step_lang]._iter
+                did_grad_step = self._bt_step(batch=mono_iter.next(),
+                                              translator=checkpoint_decoder.translator if not sampled_bt else checkpoint_decoder.sampling_translator,
+                                              bt_src_lang=bt_src_lang, bt_trg_lang=bt_trg_lang,
+                                              loss_prefix=loss_prefix, tagged_bt=tagged_bt)
+
+                if not mono_iter.iter_next():
+                    mono_iter.reset()
+            else:
+                raise ValueError("Unknown step")
+            loss_prefixes.add(loss_prefix)
+
+            checkpoint_up_to_date = checkpoint_up_to_date and not did_grad_step
 
             if self.state.updates > 0 and self.state.batches % (
                     self.config.checkpoint_interval * self.config.update_interval) == 0:
                 time_cost = time.time() - tic
-                self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                self._create_checkpoint(checkpoint_decoder, loss_prefixes, mt_steps,
+                                        source_lang, target_lang, time_cost, train_iter,
+                                        validation_iter)
                 checkpoint_up_to_date = True
 
                 if self.config.max_seconds is not None and self.state.time_elapsed >= self.config.max_seconds:
@@ -283,33 +431,55 @@ class GluonEarlyStoppingTrainer:
         self._cleanup(keep_training_state=True)
         return self.state
 
-    def _create_checkpoint(self, checkpoint_decoder: CheckpointDecoder, time_cost: float,
-                           train_iter: data_io.BaseParallelSampleIter, validation_iter: data_io.BaseParallelSampleIter):
-        """
-        Creates a checkpoint, which will update self.state.converged/self.state.diverged, evaluate validation
-        metrics and update the best known parameters accordingly.
-        """
+    def _create_checkpoint(self, checkpoint_decoder, loss_prefixes, mt_steps,
+                           source_lang, target_lang, time_cost, train_iter, validation_iter):
+        source_lang = source_lang.name
+        target_lang = target_lang.name
+
+        # (1) save parameters and evaluate on validation data
         self.state.checkpoint += 1
-        # save parameters and evaluate on validation data
         self._save_params()
-        train_metrics = [lf.metric for lf in self.loss_functions]
+        train_metrics = [lf.prefixed_metric(loss_prefix) for lf in self.loss_functions for loss_prefix in loss_prefixes]
         logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                     self.state.checkpoint, self.state.updates, self.state.epoch,
-                    self.state.samples, time_cost, self.config.checkpoint_interval / time_cost)
+                    self.state.samples, time_cost,
+                    self.config.checkpoint_interval / time_cost if time_cost > 0 else 0.0)
         logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
                     "\t".join("Train-%s" % str(metric) for metric in train_metrics))
-        val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
+        all_val_metrics = {}
+        for _, (eval_source_lang, eval_target_lang) in mt_steps:
+            eval_source_lang = eval_source_lang.name
+            eval_target_lang = eval_target_lang.name
+            # TODO: we could even allow validation sets for each direction...
+            eval_loss_prefix = get_loss_prefix("MT", eval_source_lang, eval_target_lang)
+            assert (
+                               eval_source_lang == source_lang and eval_target_lang == target_lang) or eval_source_lang == target_lang and eval_target_lang == source_lang
+            if eval_source_lang is None or eval_target_lang is None:
+                reverse = False
+            else:
+                reverse = eval_source_lang == target_lang and eval_target_lang == source_lang
+            val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder, eval_loss_prefix,
+                                         eval_source_lang, eval_target_lang, reverse)
+            all_val_metrics[eval_loss_prefix] = val_metrics
         mx.nd.waitall()
+        val_metrics, all_prefixed_val_metrics = merge_metrics(all_val_metrics)
+
         has_improved = self._determine_improvement(val_metrics)
+        if len(all_val_metrics) > 1:
+            # Print the merged metrics as well
+            logger.info('Checkpoint [%d]\t%s',
+                        self.state.checkpoint,
+                        "\t".join(f"Validation-{m_name}={m_val}" for m_name, m_val in val_metrics))
         self.state.converged = self._determine_convergence()
         self.state.diverged = self._determine_divergence(val_metrics)
         self._adjust_learning_rate(has_improved)
         if has_improved:
             self._update_best_params()
             self._save_trainer_states(self.best_optimizer_states_fname)
-        self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+        self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=all_prefixed_val_metrics)
         for metric in train_metrics:
             metric.reset()
+        # TODO: add the monolingual iterators here as well!
         self._save_training_state(train_iter)
         if self.checkpoint_callback:
             self.checkpoint_callback(self.state.checkpoint)
@@ -341,15 +511,12 @@ class GluonEarlyStoppingTrainer:
             sharded_outputs_per_loss_function]
         return output_per_loss_function
 
-    def _step(self, batch: data_io.Batch) -> bool:
-        self.state.batches += 1
-        loss_outputs = self._forward_backward(batch)
-
+    def gradient_step(self):
         did_grad_step = False
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
             # `step` rescales the gradients for the number of batches in this
             # update.
-            self.trainer.step(batch_size=self.config.update_interval)
+            self.trainer.step(batch_size=self.config.update_interval, ignore_stale_grad=self.ignore_stale_grad)
             if self.config.update_interval > 1:
                 # Multi-batch updates sum gradients for each batch instead of
                 # overwriting, so gradients must be manually zeroed after each
@@ -357,23 +524,174 @@ class GluonEarlyStoppingTrainer:
                 self.model.collect_params().zero_grad()
             self.state.updates += 1
             did_grad_step = True
+        return did_grad_step
+
+    def _mt_step(self, batch: data_io.Batch, loss_prefix) -> bool:
+        self.state.batches += 1
+        loss_outputs = self._forward_backward(batch)
+
+        did_grad_step = self.gradient_step()
 
         self.state.samples += batch.samples
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
-            loss_func.metric.update(loss_value.asscalar(), num_samples.asscalar())
+            loss_func.prefixed_metric(loss_prefix).update(loss_value.asscalar(), num_samples.asscalar())
         self._speedometer(self.state.epoch, self.state.batches,
-                          self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
+                          self.state.updates, batch.samples, batch.tokens, (lf.prefixed_metric(loss_prefix)
+                                                                            for lf in self.loss_functions))
         return did_grad_step
 
-    def _evaluate(self, checkpoint: int, data_iter, checkpoint_decoder: Optional[CheckpointDecoder]) -> List[loss.LossMetric]:
+    # TODO: should this be combined with the MT step function?
+    def _mass_step(self, batch: data_io.Batch, loss_prefix):
+        self.state.batches += 1
+
+        assert self.model.config.vocab_source_size == self.model.config.vocab_target_size
+        # batch = mono_batch_to_parallel_batch(batch,
+        #     vocab_size=self.model.config.vocab_target_size,
+        #     vocab=vocab)
+        loss_outputs = self._forward_backward(batch)
+
+        did_grad_step = self.gradient_step()
+
+        self.state.samples += batch.samples
+        for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
+            loss_func.prefixed_metric(loss_prefix).update(loss_value.asscalar(), num_samples.asscalar())
+        self._speedometer(self.state.epoch, self.state.batches,
+                          self.state.updates, batch.samples, batch.tokens, (metric for lf in self.loss_functions for metric in lf.metrics))
+        return did_grad_step
+
+    def _bt_step(self, batch: data_io.MonoBatch, translator: inference.Translator, bt_src_lang, bt_trg_lang, loss_prefix, tagged_bt):
+        assert self.model.config.vocab_source_size == self.model.config.vocab_target_size
+
+        bt_src_lang = bt_src_lang.name
+        bt_trg_lang = bt_trg_lang.name
+
+        # 1. Run the monolingual batch through the reverse model:
+        # TODO: It would probably be better to have a version of _get_inference_input that takes the batch as input
+        max_output_lengths = []  # type: List[int]
+        for i in range(batch.data_length.shape[0]):
+            # TODO: cap at the maximum length of the model
+            max_output_lengths.append(
+                min(translator._get_max_output_length(batch.data_length[i].asscalar()), self.model.config.config_encoder.max_seq_len_source)
+            )
+        max_out_length = mx.nd.array(max_output_lengths, ctx=translator.context, dtype='int32')
+        if tagged_bt:
+            max_out_length -= 1
+
+        bt_src_lang_nd = mx.nd.full(shape=(1,), val=translator.lang_vocab[bt_src_lang], ctx=translator.context)
+        bt_trg_lang_nd = mx.nd.full(shape=(1,), val=translator.lang_vocab[bt_trg_lang], ctx=translator.context)
+
+        batch_size = batch.data.shape[0]
+        raw_constraints = [None] * batch_size
+        raw_avoid_list = [None] * batch_size
+
+        data = batch.data.as_in_context(translator.context)
+        data_length = batch.data_length.as_in_context(translator.context)
+
+        all_translations = []
+        curr_idx = 0
+        while curr_idx < data.shape[0]:
+            translations = translator._translate_nd(
+                data[curr_idx:min(curr_idx+batch_size, data.shape[0])],
+                data_length[curr_idx:min(curr_idx+batch_size, data.shape[0])],
+                None,
+                raw_constraints,
+                raw_avoid_list,
+                max_out_length,
+                # We translate from target -> source
+                source_lang=bt_trg_lang_nd,
+                target_lang=bt_src_lang_nd,
+            )
+            all_translations.extend(translations)
+            curr_idx += batch_size
+        assert len(all_translations) == data.shape[0]
+
+        max_len = max(len(translation.target_ids) for translation in all_translations)
+
+        source = mx.nd.full(shape=(data.shape[0] * max_len), val=C.PAD_ID, dtype=np.int32)
+
+        words_flat = []
+        positions_flat = []
+        for i, translation in enumerate(all_translations):
+            # words_flat.extend(translation.target_ids)
+            # TODO: properly support target factors
+            words_flat.extend([t[0] for t in translation.target_ids])
+            positions_flat.extend([i * max_len + j for j in range(0, len(translation.target_ids))])
+        words_flat = mx.nd.array(words_flat, dtype=np.int32)
+        positions_flat = mx.nd.array(positions_flat, dtype=np.int32)
+        source[positions_flat] = words_flat
+        source = source.reshape((data.shape[0], max_len, 1))
+
+        if tagged_bt:
+            # Note: we tag with the BOS_SYMBOL token because we know it's in the vocab. This is of course not optimal
+            # and ideally we'd have a special tagging token.
+            tagged = mx.nd.full(shape=(source.shape[0], 1, 1), val=C.BOS_ID, dtype=source.dtype)
+            source = mx.nd.concat(tagged, source, dim=1)
+
+        label = batch.data.squeeze().astype(np.int32)
+        target = label[:, :-1]
+        target = mx.nd.where(target == C.EOS_ID, mx.nd.zeros_like(target), target)  # replace other <eos>'s with <pad>
+        # target: (batch_size, seq_len, 1)
+        target = mx.nd.concat(mx.nd.full((target.shape[0], 1), val=C.BOS_ID, dtype=np.int32), target)
+
+        # TODO: full target factor support
+        target = mx.nd.reshape(target, shape=(0,0,1))
+        label = mx.nd.reshape(label, shape=(0, 0, 1))
+
+        # target, label = create_target_and_shifted_label_sequences(dataset.target[0])
+        mt_batch = data_io.create_batch_from_parallel_sample(source.astype(np.float32), target.astype(np.float32), label.astype(np.float32), bt_src_lang_nd, bt_trg_lang_nd)
+
+        # TODO: could/should we just call mt_step at this point?
+        # 2. Create a parallel batch and run through the model:
+        self.state.batches += 1
+        loss_outputs = self._forward_backward(mt_batch)
+
+        did_grad_step = self.gradient_step()
+
+        self.state.samples += mt_batch.samples
+        for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
+            loss_func.prefixed_metric(loss_prefix).update(loss_value.asscalar(), num_samples.asscalar())
+        self._speedometer(self.state.epoch, self.state.batches,
+                          self.state.updates, mt_batch.samples, mt_batch.tokens, (metric for lf in self.loss_functions for metric in lf.metrics))
+        return did_grad_step
+
+    def _evaluate(self, checkpoint: int, data_iter, checkpoint_decoder: Optional[CheckpointDecoder], loss_prefix,
+                  source_lang, target_lang, reverse) -> List[loss.LossMetric]:
         """
         Computes loss(es) on validation data and returns their metrics.
         :param data_iter: Validation data iterator.
         :return: List of validation metrics, same order as self.loss_functions.
         """
+        val_metrics = self._evaluate_data_iter(data_iter, loss_prefix, reverse)
+
+        # Optionally run the checkpoint decoder
+        if checkpoint_decoder is not None:
+            # TODO: make both by factor!
+            if source_lang is not None or target_lang is not None:
+                output_name = os.path.join(self.config.output_dir,
+                                           C.DECODE_OUT_NAME_BY_LANG.format(source_lang=source_lang,
+                                                                            target_lang=target_lang,
+                                                                            checkpoint=checkpoint))
+            else:
+                output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
+            decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name, source_lang=source_lang,
+                                                                     target_lang=target_lang, reverse=reverse)
+            for metric_name, metric_value in decoder_metrics.items():
+                assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
+                metric = loss.LossMetric(prefix=loss_prefix, name=metric_name)
+                metric.update(metric_value, num_samples=1)
+                val_metrics.append(metric)
+
+        logger.info('Checkpoint [%d]\t%s',
+                    self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
+
+        return val_metrics
+
+    def _evaluate_data_iter(self, data_iter, loss_prefix, reverse) -> List:
         data_iter.reset()
-        val_metrics = [lf.create_metric() for lf in self.loss_functions]
+        val_metrics = [lf.create_metric(loss_prefix) for lf in self.loss_functions]
         for batch in data_iter:
+            if reverse:
+                batch = batch.reverse()
             batch = batch.split_and_load(ctx=self.context)
             sharded_loss_outputs = []  # type: List[List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]]
             for inputs, labels in batch.shards():
@@ -385,27 +703,14 @@ class GluonEarlyStoppingTrainer:
             sharded_loss_outputs_per_loss_function = list(zip(*sharded_loss_outputs))
             # sum loss values (on the cpu) and number of samples for each loss function
             output_per_loss_function = [tuple(mx.nd.add_n(*(s.as_in_context(mx.cpu()) for s in shard))
-                                        for shard in zip(*outs)) for outs in sharded_loss_outputs_per_loss_function]
+                                              for shard in zip(*outs)) for outs in
+                                        sharded_loss_outputs_per_loss_function]
             # update validation metrics for batch
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, output_per_loss_function):
                 loss_metric.update(loss_value.asscalar(), num_samples.asscalar())
-
-        # Optionally run the checkpoint decoder
-        if checkpoint_decoder is not None:
-            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
-            decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
-            for metric_name, metric_value in decoder_metrics.items():
-                assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
-                metric = loss.LossMetric(name=metric_name)
-                metric.update(metric_value, num_samples=1)
-                val_metrics.append(metric)
-
-        logger.info('Checkpoint [%d]\t%s',
-                    self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
-
         return val_metrics
 
-    def _determine_improvement(self, val_metrics: List[loss.LossMetric]) -> bool:
+    def _determine_improvement(self, val_metrics: List[Tuple[str, float]]) -> bool:
         """
         Determines whether early stopping metric on validation data improved and updates best value and checkpoint in
         the state.
@@ -414,9 +719,9 @@ class GluonEarlyStoppingTrainer:
         """
         value = None
         value_is_better = False
-        for val_metric in val_metrics:
-            if val_metric.name == self.config.early_stopping_metric:
-                value = val_metric.get()
+        for val_metric_name, val_metric_name_value in val_metrics:
+            if val_metric_name == self.config.early_stopping_metric:
+                value = val_metric_name_value
                 # When using Horovod, the primary worker makes an authoritative
                 # check of whether metric value has improved and broadcasts the
                 # result to secondary workers.  Non-determinism in the order of
@@ -496,16 +801,19 @@ class GluonEarlyStoppingTrainer:
 
         return False
 
-    def _determine_divergence(self, val_metrics: List[loss.LossMetric]) -> bool:
+    def _determine_divergence(self, val_metrics: List[Tuple[str, float]]) -> bool:
         """
         True if last perplexity is infinite or >2*target_vocab_size.
         """
         # (5) detect divergence with respect to the perplexity value at the last checkpoint
         last_ppl = float('nan')
-        for metric in val_metrics:
-            if metric.name == C.PERPLEXITY:
-                last_ppl = metric.get()
+        perplexity_present = False
+        for metric_name, value in val_metrics:
+            if metric_name == C.PERPLEXITY:
+                last_ppl = value
+                perplexity_present = True
                 break
+        assert perplexity_present
         # using a double of uniform distribution's value as a threshold
         if not np.isfinite(last_ppl) or last_ppl > 2 * self.model.config.vocab_target_size:
             logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f", last_ppl)
@@ -533,7 +841,7 @@ class GluonEarlyStoppingTrainer:
                 # overwriting here. TODO: make this better...
                 self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
 
-    def _write_and_log_metrics(self, train_metrics: Iterable[loss.LossMetric], val_metrics: Iterable[loss.LossMetric]):
+    def _write_and_log_metrics(self, train_metrics: Iterable[loss.LossMetric], val_metrics: Iterable[Tuple[str,float]]):
         """
         Updates metrics for current checkpoint.
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
@@ -550,8 +858,8 @@ class GluonEarlyStoppingTrainer:
 
         for metric in train_metrics:
             data["%s-train" % metric.name] = metric.get()
-        for metric in val_metrics:
-            data["%s-val" % metric.name] = metric.get()
+        for metric_name, metric_value in val_metrics:
+            data["%s-val" % metric_name] = metric_value
 
         self.state.metrics.append(data)
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)

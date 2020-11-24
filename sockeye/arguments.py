@@ -399,6 +399,56 @@ def add_logging_args(params):
                                 help='Console log level for secondary workers. Default: %(default)s.')
 
 
+def add_mono_data_args(params, required=False):
+    params.add_argument('--monolingual', '-mo',
+                        required=required,
+                        type=regular_file(),
+                        help='Monolingual training data.')
+    params.add_argument('--monolingual-factors', '-mf',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='File(s) containing additional token-parallel factors for monolingual data. Default: %(default)s.')
+    params.add_argument('--mono-factors-use-mono-vocab',
+                        required=False,
+                        nargs='+',
+                        type=bool_str(),
+                        default=[],
+                        help='List of bools signaling whether to use the mono data vocabulary for the factors. '
+                        'If empty (default) each factor has its own vocabulary.')
+    params.add_argument('--monolingual-language', '-ml',
+                        required=False,
+                        type=str,
+                        default=None,
+                        help='The (optional) language of the monolingual data.')
+
+    params.add_argument('--mono-masking-style',
+                        required=False,
+                        type=str,
+                        choices=["MASS", "BART"],
+                        default="BART",
+                        help='The type of monolingual masking to use.')
+
+    params.add_argument('--use-bt-steps',
+                        required=False,
+                        type=bool,
+                        default=False)
+
+
+def add_bidirectional_language_args(params):
+    params.add_argument('--source-language', '-sl',
+                        required=False,
+                        type=str,
+                        default=None,
+                        help='The language of the source data.')
+    params.add_argument('--target-language', '-tl',
+                        required=False,
+                        type=str,
+                        default=None,
+                        help='The language of the target data.')
+
+
 def add_training_data_args(params, required=False):
     params.add_argument(C.TRAINING_ARG_SOURCE, '-s',
                         required=required,
@@ -434,6 +484,8 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Target side of parallel training data.')
+    add_bidirectional_language_args(params)
+    add_mono_data_args(params, required=False)
 
 
 def add_validation_data_params(params):
@@ -465,7 +517,10 @@ def add_prepared_data_args(params):
     params.add_argument(C.TRAINING_ARG_PREPARED_DATA, '-d',
                         type=regular_folder(),
                         help='Prepared training data directory created through python -m sockeye.prepare_data.')
-
+    params.add_argument(C.TRAINING_ARG_PREPARED_MONO_DATA, '-dm',
+                        type=regular_folder(),
+                        nargs='+',
+                        help='Prepared training data directory created through python -m sockeye.prepare_mono_data.')
 
 def add_monitoring_args(params):
     params.add_argument('--monitor-pattern',
@@ -531,11 +586,7 @@ def add_bucketing_args(params):
                              'length is X+1). Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
 
-def add_prepare_data_cli_args(params):
-    add_training_data_args(params, required=True)
-    add_vocab_args(params)
-    add_bucketing_args(params)
-
+def add_prepare_data_args(params):
     params.add_argument('--num-samples-per-shard',
                         type=int_greater_or_equal(1),
                         default=10000000,
@@ -559,6 +610,22 @@ def add_prepare_data_cli_args(params):
                         type=int_greater_or_equal(1),
                         default=1,
                         help='Process the shards in parallel using max-processes processes.')
+
+
+def add_prepare_data_cli_args(params):
+    add_training_data_args(params, required=True)
+    add_vocab_args(params)
+    add_bucketing_args(params)
+    add_prepare_data_args(params)
+
+    add_logging_args(params)
+
+
+def add_prepare_mono_data_cli_args(params):
+    add_mono_data_args(params, required=True)
+    add_mono_vocab_args(params)
+    add_bucketing_args(params)
+    add_prepare_data_args(params)
 
     add_logging_args(params)
 
@@ -635,6 +702,34 @@ def add_vocab_args(params):
                         default=(1, 1),
                         help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
     params.add_argument('--pad-vocab-to-multiple-of',
+                        type=int,
+                        default=None,
+                        help='Pad vocabulary to a multiple of this integer. Default: %(default)s.')
+
+
+def add_mono_vocab_args(params):
+    params.add_argument('--mono-vocab',
+                        required=False,
+                        default=None,
+                        help='Existing vocabulary (JSON).')
+    params.add_argument('--mono-factor-vocabs',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='Existing factor vocabulary (-ies) (JSON).')
+    params.add_argument('--mono-num-words',
+                        type=int,
+                        default=0,
+                        help='Maximum vocabulary size. '
+                             'A value of 0 indicates that the vocabulary unrestricted and determined from the data by '
+                             'creating an entry for all words that occur at least --word-min-count times.'
+                             'Default: %(default)s.')
+    params.add_argument('--mono-word-min-count',
+                        type=int,
+                        default=1,
+                        help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
+    params.add_argument('--mono-pad-vocab-to-multiple-of',
                         type=int,
                         default=None,
                         help='Pad vocabulary to a multiple of this integer. Default: %(default)s.')
@@ -792,6 +887,14 @@ def add_model_parameters(params):
     model_params.add_argument('--amp-scale-interval', type=int, default=2000,
                               help='Attempt to increase loss scale after this many updates without overflow. '
                                    'Default: %(default)s.')
+    model_params.add_argument('--encoder-lang-specific-layers',
+                              type=str,
+                              default=None,
+                              help="Specify the layers that will get language specific weights. Default: %(default)s.")
+    model_params.add_argument('--decoder-lang-specific-layers',
+                              type=str,
+                              default=None,
+                              help="Specify the layers that will get language specific weights. Default: %(default)s.")
 
 def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',
@@ -1105,6 +1208,7 @@ def add_translate_cli_args(params):
     add_device_args(params)
     add_logging_args(params)
     add_hybridization_arg(params)
+    add_bidirectional_language_args(params)
 
 
 def add_score_cli_args(params):

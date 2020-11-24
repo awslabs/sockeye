@@ -39,14 +39,16 @@ class _Inference(ABC):
     @abstractmethod
     def encode_and_initialize(self,
                               inputs: mx.nd.NDArray,
-                              valid_length: Optional[mx.nd.NDArray] = None):
+                              valid_length: Optional[mx.nd.NDArray] = None,
+                              source_lang: Optional[mx.nd.NDArray] = None):
         raise NotImplementedError()
 
     @abstractmethod
     def decode_step(self,
                     step_input: mx.nd.NDArray,
                     states: List,
-                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+                    vocab_slice_ids: Optional[mx.nd.NDArray] = None,
+                    target_lang: Optional[mx.nd.NDArray] = None):
         raise NotImplementedError()
 
 
@@ -65,16 +67,19 @@ class _SingleModelInference(_Inference):
     def state_structure(self) -> List:
         return [self._model.state_structure()]
 
-    def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
-        states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
+    def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None,
+                              source_lang: Optional[mx.nd.NDArray] = None,
+                              target_lang: Optional[mx.nd.NDArray] = None):
+        states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, constant_length_ratio=self._const_lr, source_lang=source_lang, target_lang=target_lang)
         predicted_output_length = predicted_output_length.expand_dims(axis=1, inplace=True)
         return states, predicted_output_length
 
     def decode_step(self,
                     step_input: mx.nd.NDArray,
                     states: List,
-                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
-        logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
+                    vocab_slice_ids: Optional[mx.nd.NDArray] = None,
+                    target_lang: Optional[mx.nd.NDArray] = None):
+        logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids, target_lang)
         if not self._skip_softmax:
             logits = logits.log_softmax(axis=-1, temperature=self._softmax_temperature)
         scores = -logits
@@ -112,11 +117,11 @@ class _EnsembleInference(_Inference):
             structure.append(model.state_structure())
         return structure
 
-    def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
+    def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None, source_lang: Optional[mx.nd.NDArray] = None, target_lang: Optional[mx.nd.NDArray] = None):
         model_states = []  # type: List[mx.nd.NDArray]
         predicted_output_lengths = []  # type: List[mx.nd.NDArray]
         for model in self._models:
-            states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
+            states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr, source_lang=source_lang, target_lang=target_lang)
             predicted_output_lengths.append(predicted_output_length)
             model_states += states
         # average predicted output lengths, (batch, 1)
@@ -126,7 +131,8 @@ class _EnsembleInference(_Inference):
     def decode_step(self,
                     step_input: mx.nd.NDArray,
                     states: List,
-                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+                    vocab_slice_ids: Optional[mx.nd.NDArray] = None,
+                    target_lang: Optional[mx.nd.NDArray] = None):
         outputs = []  # type: List[mx.nd.NDArray]
         new_states = []  # type: List[mx.nd.NDArray]
         factor_outputs = []  # type: List[List[mx.nd.NDArray]]
@@ -134,7 +140,7 @@ class _EnsembleInference(_Inference):
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
-            logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
+            logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids, target_lang)
             probs = logits.softmax(axis=-1, temperature=self._softmax_temperature)
             outputs.append(probs)
             target_factor_probs = [tfo.softmax(axis=-1) for tfo in target_factor_outputs]
@@ -549,7 +555,9 @@ class BeamSearch(mx.gluon.Block):
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
                 raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                 raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
+                max_output_lengths: mx.nd.NDArray,
+                source_lang: Optional[mx.nd.NDArray] = None,
+                target_lang: Optional[mx.nd.NDArray] = None) -> Tuple[np.ndarray,
                                                             np.ndarray,
                                                             np.ndarray,
                                                             np.ndarray,
@@ -663,7 +671,7 @@ class BeamSearch(mx.gluon.Block):
             avoid_states.consume(best_word_indices[:, 0])  # constraints operate only on primary target factor
 
         # (0) encode source sentence, returns a list
-        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
+        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length, source_lang, target_lang)
         # repeat states to beam_size
         model_states = _repeat_states(model_states, self.beam_size, self._inference.state_structure())
 
@@ -676,7 +684,7 @@ class BeamSearch(mx.gluon.Block):
             # target_dists: (batch_size * beam_size, target_vocab_size)
             target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
                                                                                      model_states,
-                                                                                     vocab_slice_ids)
+                                                                                     vocab_slice_ids, target_lang)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;

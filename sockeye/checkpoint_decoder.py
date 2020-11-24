@@ -20,7 +20,7 @@ import random
 import time
 from contextlib import ExitStack
 from itertools import chain
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional, List, TypeVar, Tuple
 
 import mxnet as mx
 
@@ -122,7 +122,7 @@ class CheckpointDecoder:
         for factor_idx, factor in enumerate(self.targets_sentences):
             write_to_file(factor, os.path.join(model_folder, C.DECODE_REF_NAME.format(factor=factor_idx)))
 
-        self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
+        # self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
 
         scorer = inference.CandidateScorer(
             length_penalty_alpha=length_penalty_alpha,
@@ -147,13 +147,30 @@ class CheckpointDecoder:
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, num_sentences=%d)",
                     max_input_len if max_input_len is not None else -1, beam_size, len(self.targets_sentences[0]))
 
-    def decode_and_evaluate(self, output_name: Optional[str] = None) -> Dict[str, float]:
+    def decode_and_evaluate(self,
+                            output_name: str = os.devnull,
+                            source_lang: Optional[str] = None,
+                            target_lang: Optional[str] = None,
+                            reverse = False) -> Dict[str, float]:
         """
         Decodes data set and evaluates given a checkpoint.
 
         :param output_name: Filename to write translations to. If None, will not write outputs.
         :return: Mapping of metric names to scores.
         """
+        # Note input_sentences and target_sentences are: List[factor][sent]
+        if reverse:
+            # TODO: support source factors
+            assert len(self.inputs_sentences) == len(self.targets_sentences), "Same number of source and target factors required for reversal."
+            tmp = self.inputs_sentences
+            inputs_sentences = self.targets_sentences
+            targets_sentences = tmp
+        else:
+            inputs_sentences = self.inputs_sentences
+            targets_sentences = self.targets_sentences
+
+        # Go from List[factor][sent]  to List[sent][factor]
+        inputs_sentences = list(zip(*inputs_sentences))  # type: List[List[str]]
 
         # 1. Translate
         trans_wall_time = 0.0
@@ -164,9 +181,9 @@ class CheckpointDecoder:
 
             tic = time.time()
             trans_inputs = []  # type: List[inference.TranslatorInput]
-            for i, inputs in enumerate(self.inputs_sentences):
+            for i, inputs in enumerate(inputs_sentences):
                 trans_inputs.append(sockeye.inference.make_input_from_multiple_strings(i, inputs))
-            trans_outputs = self.translator.translate(trans_inputs)
+            trans_outputs = self.translator.translate(trans_inputs, source_lang=source_lang, target_lang=target_lang)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
                 output_strings = [trans_output.translation]
@@ -176,23 +193,23 @@ class CheckpointDecoder:
                 for output_string, output_file in zip(output_strings, outputs):
                     if output_file is not None:
                         print(output_string, file=output_file)
-        avg_time = trans_wall_time / len(self.targets_sentences[0])
+        avg_time = trans_wall_time / len(targets_sentences[0])
         translations = list(zip(*translations))
 
         # 2. Evaluate
         metrics = {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations[0],
-                                                    references=self.targets_sentences[0],
+                                                    references=targets_sentences[0],
                                                     offset=0.01),
                    C.CHRF: evaluate.raw_corpus_chrf(hypotheses=translations[0],
-                                                    references=self.targets_sentences[0]),
+                                                    references=targets_sentences[0]),
                    C.ROUGE1: evaluate.raw_corpus_rouge1(hypotheses=translations[0],
-                                                        references=self.targets_sentences[0]),
+                                                        references=targets_sentences[0]),
                    C.ROUGE2: evaluate.raw_corpus_rouge2(hypotheses=translations[0],
-                                                        references=self.targets_sentences[0]),
+                                                        references=targets_sentences[0]),
                    C.ROUGEL: evaluate.raw_corpus_rougel(hypotheses=translations[0],
-                                                        references=self.targets_sentences[0]),
+                                                        references=targets_sentences[0]),
                    C.LENRATIO: evaluate.raw_corpus_length_ratio(hypotheses=translations[0],
-                                                                references=self.targets_sentences[0]),
+                                                                references=targets_sentences[0]),
                    C.AVG_TIME: avg_time,
                    C.DECODING_TIME: trans_wall_time}
 
@@ -207,7 +224,10 @@ class CheckpointDecoder:
         return metrics
 
 
-def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:
+T = TypeVar("T")
+
+
+def parallel_subsample(parallel_sequences: List[List[T]], sample_size: int, seed: int) -> List[Tuple[T, ...]]:
     # custom random number generator to guarantee the same samples across runs in order to be able to
     # compare metrics across independent runs
     random_gen = random.Random(seed)
