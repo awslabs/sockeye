@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.4]
+
+### Fixed
+
+- Fixed issue with dtype mismatch in beam search when translating with `--dtype float16`.
+
 ## [2.3.3]
 
 ### Changed
@@ -39,8 +45,8 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
   At inference, target factors are decoded greedily, they do not participate in beam search.
   The predicted factor at each time step is the argmax over its separate output
   layer distribution. To receive the target factor predictions at inference time, use
-  `--output-type translation_with_factors`. 
-  
+  `--output-type translation_with_factors`.
+
 ### Changed
 
 - `load_model(s)` now returns a list of target vocabs.

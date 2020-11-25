@@ -648,9 +648,9 @@ class BeamSearch(mx.gluon.Block):
                                                dim=0)
 
             pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape - 1),
-                                  val=np.inf, ctx=self.context)
+                                  val=np.inf, ctx=self.context, dtype=self.dtype)
             eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape),
-                                  val=np.inf, ctx=self.context)
+                                  val=np.inf, ctx=self.context, dtype=self.dtype)
             eos_dist[:, C.EOS_ID] = 0
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
