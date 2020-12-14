@@ -176,7 +176,7 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
 
     def __repr__(self):
         return "LearningRateSchedulerPlateauReduce(reduce_factor=%.2f, " \
-               "reduce_num_not_improved=%d)" % (self.reduce_factor, self.num_not_improved)
+               "reduce_num_not_improved=%d)" % (self.reduce_factor, self.reduce_num_not_improved)
 
 
 def get_lr_scheduler(scheduler_type: str,
