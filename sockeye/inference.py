@@ -1102,12 +1102,12 @@ class Translator:
 
             # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
-            indices_shape_1 = indices.shape[1]
+            indices_shape_1 = indices.shape[1]  # pylint: disable=unsubscriptable-object
             nbest_translations.append(
                     [self._assemble_translation(*x, unshift_target_factors=C.TARGET_FACTOR_SHIFT) for x in
                      zip(best_word_indices[indices,
                                            :,  # get all factors
-                                           np.arange(indices_shape_1)],  # pylint: disable=unsubscriptable-object
+                                           np.arange(indices_shape_1)],
                          lengths[best_ids],
                          seq_scores[best_ids],
                          histories,

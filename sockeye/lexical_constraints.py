@@ -229,6 +229,7 @@ class AvoidBatch:
 
         :return: Two lists of indices: the x coordinates and y coordinates.
         """
+        # TODO(FH): return boolean mask instead of list of tuples
         to_avoid = set()  # type: Set[Tuple[int, int]]
         for i, state in enumerate(self.global_avoid_states):
             for word_id in state.avoid():
