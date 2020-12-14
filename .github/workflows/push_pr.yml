@@ -31,7 +31,7 @@ jobs:
     - name: Sockeye requirements
       run: pip install -r requirements/requirements.txt
     - name: Development requirements
-      run: pip install -r requirements/requirements.dev.txt
+      run: pip install -r requirements/requirements.dev.txt --use-deprecated=legacy-resolver
     - name: Unit tests
       run: |
         pytest --version
