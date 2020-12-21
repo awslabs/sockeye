@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -124,6 +124,7 @@ def main():
     """
     Commandline interface to initialize Sockeye embedding weights with pretrained word representations.
     """
+    raise NotImplementedError()  # TODO: re-implement for sockeye 2.0 / Gluon
     setup_main_logger(console=True, file_logging=False)
     params = argparse.ArgumentParser(description='Quick usage: python3 -m sockeye.init_embedding '
                                                  '-w embed-in-src.npy embed-in-tgt.npy '
@@ -159,7 +160,7 @@ def init_embeddings(args: argparse.Namespace):
         params[name] = init_weight(weight, vocab_in, vocab_out, initializer)
 
     logger.info('Saving initialized parameters to %s', args.file)
-    utils.save_params(params, args.file)
+    #utils.save_params(params, args.file)
 
 
 if __name__ == '__main__':

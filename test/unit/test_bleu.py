@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,8 +14,7 @@
 from collections import namedtuple
 
 import pytest
-
-from sockeye_contrib import sacrebleu
+import sacrebleu
 
 EPSILON = 1e-8
 
@@ -93,7 +92,7 @@ def test_offset(hypothesis, reference, expected_with_offset, expected_without_of
 @pytest.mark.parametrize("statistics, offset, expected_score", test_case_degenerate_stats)
 def test_degenerate_statistics(statistics, offset, expected_score):
     score = sacrebleu.compute_bleu(statistics[0].common, statistics[0].total, statistics[1], statistics[2],
-                                   smooth='floor', smooth_floor=offset).score / 100
+                                   smooth_method='floor', smooth_value=offset).score / 100
     assert score == expected_score
 
 

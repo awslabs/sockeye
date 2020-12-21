@@ -1,4 +1,4 @@
-# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -15,6 +15,10 @@ import copy
 import logging
 from operator import attrgetter
 from typing import Dict, List, Optional, Tuple, Set
+
+from .data_io import read_content, tokens2ids
+from .vocab import Vocab
+from . import constants as C
 
 import mxnet as mx
 import numpy as np
@@ -95,6 +99,18 @@ class AvoidTrie:
         :return: The set of word IDs that end a constraint at this state.
         """
         return self.final_ids
+
+
+def get_avoid_trie(avoid_list: str, vocab: Vocab) -> AvoidTrie:
+    trie = AvoidTrie()
+    unk_id = vocab[C.UNK_SYMBOL]
+    for phrase in read_content(avoid_list):
+        phrase_ids = tokens2ids(phrase, vocab)
+        if unk_id in phrase_ids:
+            logger.warning("Global avoid phrase '%s' contains an %s; this may indicate improper preprocessing.",
+                           ' '.join(phrase), C.UNK_SYMBOL)
+        trie.add_phrase(phrase_ids)
+    return trie
 
 
 class AvoidState:
@@ -213,6 +229,7 @@ class AvoidBatch:
 
         :return: Two lists of indices: the x coordinates and y coordinates.
         """
+        # TODO(FH): return boolean mask instead of list of tuples
         to_avoid = set()  # type: Set[Tuple[int, int]]
         for i, state in enumerate(self.global_avoid_states):
             for word_id in state.avoid():
@@ -510,21 +527,18 @@ def topk(timestep: int,
         the updated constrained hypotheses, and the updated set of inactive hypotheses.
     """
 
-    if timestep == 1:
-        beam_size = 1
-
     for sentno in range(batch_size):
-        rows = slice(sentno * beam_size, (sentno + 1) * beam_size)
+        rows = slice(sentno * beam_size, sentno * beam_size + beam_size)
         if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
-            hypotheses[rows], inactive[rows] = _topk(timestep,
-                                                     beam_size,
-                                                     inactive[rows],
-                                                     scores[rows],
-                                                     hypotheses[rows],
-                                                     best_ids[rows] - rows.start,
-                                                     best_word_ids[rows],
-                                                     seq_scores[rows])
+                hypotheses[rows], inactive[rows] = _sequential_topk(timestep,
+                                                                    beam_size,
+                                                                    inactive[rows],
+                                                                    scores[rows],
+                                                                    hypotheses[rows],
+                                                                    best_ids[rows] - rows.start,
+                                                                    best_word_ids[rows],
+                                                                    seq_scores[rows])
 
             # offsetting since the returned smallest_k() indices were slice-relative
             best_ids[rows] += rows.start
@@ -536,15 +550,15 @@ def topk(timestep: int,
     return best_ids, best_word_ids, seq_scores, hypotheses, inactive
 
 
-def _topk(timestep: int,
-          beam_size: int,
-          inactive: mx.nd.NDArray,
-          scores: mx.nd.NDArray,
-          hypotheses: List[ConstrainedHypothesis],
-          best_ids: mx.nd.NDArray,
-          best_word_ids: mx.nd.NDArray,
-          sequence_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array,
-                                                   List[ConstrainedHypothesis], mx.nd.NDArray]:
+def _sequential_topk(timestep: int,
+                     beam_size: int,
+                     inactive: mx.nd.NDArray,
+                     scores: mx.nd.NDArray,
+                     hypotheses: List[ConstrainedHypothesis],
+                     best_ids: mx.nd.NDArray,
+                     best_word_ids: mx.nd.NDArray,
+                     sequence_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array,
+                                                              List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
@@ -569,7 +583,7 @@ def _topk(timestep: int,
     for row, col, seq_score in zip(best_ids, best_word_ids, sequence_scores):
         row = int(row.asscalar())
         col = int(col.asscalar())
-        if hypotheses[row].is_valid(col):
+        if hypotheses[row] is not None and hypotheses[row].is_valid(col):
             seq_score = float(seq_score.asscalar())
             new_item = hypotheses[row].advance(col)
             cand = ConstrainedCandidate(row, col, seq_score, new_item)
@@ -579,7 +593,7 @@ def _topk(timestep: int,
     # (3) the best item (constrained or not) in that row
     best_next = mx.nd.argmin(scores, axis=1)
     for row in range(beam_size):
-        if inactive[row] or (timestep == 1 and row > 0):
+        if inactive[row]:
             continue
 
         hyp = hypotheses[row]

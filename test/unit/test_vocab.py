@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,9 +12,26 @@
 # permissions and limitations under the License.
 
 import pytest
+from unittest import mock
+from collections import Counter
 
 import sockeye.constants as C
-from sockeye.vocab import build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab
+from sockeye.vocab import (build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab, \
+    _get_sorted_source_vocab_fnames, build_raw_vocab, merge_raw_vocabs)
+
+
+def test_build_raw_vocab():
+    data = ["a b c", "c d e"]
+    raw_vocab = build_raw_vocab(data)
+    assert raw_vocab == Counter({"a": 1, "b": 1, "c": 2, "d": 1, "e": 1})
+
+
+def test_merge_raw_vocabs():
+    v1 = build_raw_vocab(["a b c", "c d e"])
+    v2 = build_raw_vocab(["a b c", "c d g"])
+    raw_vocab = merge_raw_vocabs(v1, v2)
+    assert raw_vocab == Counter({"a": 2, "b": 2, "c": 4, "d": 2, "e": 1, "g": 1})
+
 
 test_vocab = [
         # Example 1
@@ -100,3 +117,11 @@ def test_get_ordered_tokens_from_vocab(vocab, expected_output):
 )
 def test_verify_valid_vocab(vocab, expected_result):
     assert is_valid_vocab(vocab) == expected_result
+
+
+def test_get_sorted_source_vocab_fnames():
+    expected_fnames = [C.VOCAB_SRC_NAME % i for i in [1, 2, 10]]
+    with mock.patch('os.listdir') as mocked_listdir:
+        mocked_listdir.return_value = [C.VOCAB_SRC_NAME % i for i in [2, 1, 10]]
+        fnames = _get_sorted_source_vocab_fnames(None)
+        assert fnames == expected_fnames

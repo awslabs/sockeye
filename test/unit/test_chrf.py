@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -15,7 +15,7 @@
 
 import pytest
 
-from sockeye_contrib import sacrebleu
+import sacrebleu
 
 EPSILON = 1e-8
 
@@ -40,11 +40,11 @@ test_cases_keep_whitespace = [
 
 @pytest.mark.parametrize("hypotheses, references, expected_score", test_cases)
 def test_chrf(hypotheses, references, expected_score):
-    score = sacrebleu.corpus_chrf(hypotheses, references, 6, 3)
+    score = sacrebleu.corpus_chrf(hypotheses, [references], 6, 3).score
     assert abs(score - expected_score) < EPSILON
 
 
 @pytest.mark.parametrize("hypotheses, references, expected_score", test_cases_keep_whitespace)
 def test_chrf_keep_whitespace(hypotheses, references, expected_score):
-    score = sacrebleu.corpus_chrf(hypotheses, references, 6, 3, remove_whitespace=False)
+    score = sacrebleu.corpus_chrf(hypotheses, [references], 6, 3, remove_whitespace=False).score
     assert abs(score - expected_score) < EPSILON

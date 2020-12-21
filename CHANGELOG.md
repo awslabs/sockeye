@@ -1,4 +1,5 @@
 # Changelog
+
 All notable changes to the project are documented in this file.
 
 Version numbers are of the form `1.0.0`.
@@ -9,6 +10,460 @@ e.g. due to changing the architecture or simply modifying model parameter names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+
+## [2.3.5]
+
+### Fixed
+
+- Fixed issue with LearningRateSchedulerPlateauReduce.__repr__ printing
+	out num_not_improved instead of reduce_num_not_improved.
+
+## [2.3.4]
+
+### Fixed
+
+- Fixed issue with dtype mismatch in beam search when translating with `--dtype float16`.
+
+## [2.3.3]
+
+### Changed
+
+- Upgraded `SacreBLEU` dependency of Sockeye to a newer version (`1.4.14`).
+
+## [2.3.2]
+### Fixed
+
+- Fixed edge case that unintentionally skips softmax for sampling if beam size is 1.
+
+## [2.3.1]
+### Fixed
+
+- Optimizing for BLEU/CHRF with horovod required the secondary workers to also create checkpoint decoders.
+
+## [2.3.0]
+
+### Added
+
+- Added support for target factors.
+  If provided with additional target-side tokens/features (token-parallel to the regular target-side) at training time,
+  the model can now learn to predict these in a multi-task setting. You can provide target factor data similar to source
+  factors: `--target-factors <factor_file1> [<factor_fileN>]`. During training, Sockeye optimizes one loss per factor
+  in a multi-task setting. The weight of the losses can be controlled by `--target-factors-weight`.
+  At inference, target factors are decoded greedily, they do not participate in beam search.
+  The predicted factor at each time step is the argmax over its separate output
+  layer distribution. To receive the target factor predictions at inference time, use
+  `--output-type translation_with_factors`.
+
+### Changed
+
+- `load_model(s)` now returns a list of target vocabs.
+- Default source factor combination changed to `sum` (was `concat` before).
+- `SockeyeModel` class has three new properties: `num_target_factors`, `target_factor_configs`,
+  and `factor_output_layers`.
+
+## [2.2.8]
+
+### Changed
+- Make source/target data parameters required for the scoring CLI to avoid cryptic error messages.
+
+## [2.2.7]
+
+### Added
+
+- Added an argument to specify the log level of secondary workers. Defaults to ERROR to hide any logs except for exceptions.
+
+## [2.2.6]
+
+### Fixed
+- Avoid a crash due to an edge case when no model improvement has been observed by the time the learning rate gets reduced for the first time.
+
+## [2.2.5]
+
+### Fixed
+- Enforce sentence batching for sockeye score tool, set default batch size to 56
+
+## [2.2.4]
+
+### Changed
+- Use softmax with length in DotAttentionCell.
+- Use `contrib.arange_like` in AutoRegressiveBias block to reduce number of ops.
+
+## [2.2.3]
+
+### Added
+
+- Log the absolute number of `<unk>` tokens in source and target data
+
+## [2.2.2]
+
+### Fixed
+
+- Fix: Guard against null division for small batch sizes.
+
+## [2.2.1]
+
+## Fixed
+
+- Fixes a corner case bug by which the beam decoder can wrongly return a best hypothesis with -infinite score.
+
+## [2.2.0]
+
+### Changed
+
+- Replaced multi-head attention with [interleaved_matmul_encdec](https://github.com/apache/incubator-mxnet/pull/16408) operators, which removes previously needed transposes and improves performance.
+
+- Beam search states and model layers now assume time-major format.
+
+## [2.1.26]
+
+### Fixed
+
+- Fixes a backwards incompatibility introduced in 2.1.17, which would prevent models trained with prior versions to be used for inference.
+
+## [2.1.25]
+
+### Changed
+
+- Reverting PR #772 as it causes issues with `amp`.
+
+## [2.1.24]
+
+### Changed
+
+- Make sure to write a final checkpoint when stopping with `--max-updates`, `--max-samples` or `--max-num-epochs`.
+
+## [2.1.23]
+
+### Changed
+
+- Updated to [MXNet 1.7.0](https://github.com/apache/incubator-mxnet/tree/1.7.0).
+- Re-introduced use of softmax with length parameter in DotAttentionCell (see PR #772).
+
+## [2.1.22]
+
+### Added
+
+- Re-introduced `--softmax-temperature` flag for `sockeye.score` and `sockeye.translate`.
+
+## [2.1.21]
+
+### Added
+
+- Added an optional ability to cache encoder outputs of model.
+
+## [2.1.20]
+
+### Fixed
+
+- Fixed a bug where the training state object was saved to disk before training metrics were added to it, leading to an inconsistency between the training state object and the metrics file (see #859).
+
+## [2.1.19]
+
+### Fixed
+
+- When loading a shard in Horovod mode, there is now a check that each non-empty bucket contains enough sentences to cover each worker's slice. If not, the bucket's sentences are replicated to guarantee coverage.
+
+## [2.1.18]
+
+### Fixed
+
+- Fixed a bug where sampling translation fails because an array is created in the wrong context.
+
+## [2.1.17]
+
+### Added
+
+- Added `layers.SSRU`, which implements a Simpler Simple Recurrent Unit as described in
+Kim et al, "From Research to Production and Back: Ludicrously Fast Neural Machine Translation" WNGT 2019.
+
+- Added `ssru_transformer` option to `--decoder`, which enables the usage of SSRUs as a replacement for the decoder-side self-attention layers.
+
+### Changed
+
+- Reduced the number of arguments for `MultiHeadSelfAttention.hybrid_forward()`.
+ `previous_keys` and `previous_values` should now be input together as `previous_states`, a list containing two symbols.
+
+## [2.1.16]
+
+### Fixed
+
+- Fixed batch sizing error introduced in version 2.1.12 (c00da52) that caused batch sizes to be multiplied by the number of devices. Batch sizing now works as documented (same as pre-2.1.12 versions).
+- Fixed `max-word` batching to properly size batches to a multiple of both `--batch-sentences-multiple-of` and the number of devices.
+
+## [2.1.15]
+
+### Added
+
+- Inference option `--mc-dropout` to use dropout during inference, leading to non-deterministic output. This option uses the same dropout parameters present in the model config file.
+
+## [2.1.14]
+
+### Added
+
+- Added `sockeye.rerank` option `--output` to specify output file.
+- Added `sockeye.rerank` option `--output-reference-instead-of-blank` to output reference line instead of best hypothesis when best hypothesis is blank.
+
+
+## [2.1.13]
+
+### Added
+
+- Training option `--quiet-secondary-workers` that suppresses console output for secondary workers when training with Horovod/MPI.
+- Set version of isort to `<5.0.0` in requirements.dev.txt to avoid incompatibility between newer versions of isort and pylint.
+
+## [2.1.12]
+
+### Added
+
+- Batch type option `max-word` for max number of words including padding tokens (more predictable memory usage than `word`).
+- Batching option `--batch-sentences-multiple-of` that is similar to `--round-batch-sizes-to-multiple-of` but always rounds down (more predictable memory usage).
+
+### Changed
+
+- Default bucketing settings changed to width 8, max sequence length 95 (96 including BOS/EOS tokens), and no bucket scaling.
+- Argument `--no-bucket-scaling` replaced with `--bucket-scaling` which is False by default.
+
+## [2.1.11]
+
+### Changed
+
+- Updated `sockeye.rerank` module to use "add-k" smoothing for sentence-level BLEU.
+
+### Fixed
+
+- Updated `sockeye.rerank` module to use current N-best format.
+
+## [2.1.10]
+
+### Changed
+
+- Changed to a cross-entropy loss implementation that avoids the use of SoftmaxOutput.
+
+## [2.1.9]
+
+### Added
+
+- Added training argument `--ignore-extra-params` to ignore extra parameters when loading models.  The primary use case is continuing training with a model that has already been annotated with scaling factors (`sockeye.quantize`).
+
+### Fixed
+
+- Properly pass `allow_missing` flag to `model.load_parameters()`
+
+## [2.1.8]
+
+### Changed
+
+- Update to sacrebleu=1.4.10
+
+## [2.1.7]
+
+### Changed
+
+- Optimize prepare_data by saving the shards in parallel. The prepare_data script accepts a new parameter `--max-processes` to control the level of parallelism with which shards are written to disk.
+
+## [2.1.6]
+
+### Changed
+
+- Updated Dockerfiles optimized for CPU (intgemm int8 inference, full MKL support) and GPU (distributed training with Horovod).  See [sockeye_contrib/docker](sockeye_contrib/docker).
+
+### Added
+
+- Official support for int8 quantization with [intgemm](https://github.com/kpu/intgemm):
+  - This requires the "intgemm" fork of MXNet ([kpuatamazon/incubator-mxnet/intgemm](https://github.com/kpuatamazon/incubator-mxnet/tree/intgemm)).  This is the version of MXNet used in the Sockeye CPU docker image (see [sockeye_contrib/docker](sockeye_contrib/docker)).
+  - Use `sockeye.translate --dtype int8` to quantize a trained float32 model at runtime.
+  - Use the `sockeye.quantize` CLI to annotate a float32 model with int8 scaling factors for fast runtime quantization.
+
+## [2.1.5]
+
+### Changed
+
+- Changed state caching for transformer models during beam search to cache states with attention heads already separated out. This avoids repeated transpose operations during decoding, leading to faster inference.
+
+## [2.1.4]
+
+### Added
+
+- Added Dockerfiles that build an experimental CPU-optimized Sockeye image:
+  - Uses the latest versions of [kpuatamazon/incubator-mxnet](https://github.com/kpuatamazon/incubator-mxnet) (supports [intgemm](https://github.com/kpu/intgemm) and makes full use of Intel MKL) and [kpuatamazon/sockeye](https://github.com/kpuatamazon/sockeye) (supports int8 quantization for inference).
+  - See [sockeye_contrib/docker](sockeye_contrib/docker).
+
+## [2.1.3]
+
+### Changed
+
+- Performance optimizations to beam search inference
+  - Remove unneeded take ops on encoder states
+  - Gathering input data before sending to GPU, rather than sending each batch element individually
+  - All of beam search can be done in fp16, if specified by the model
+  - Other small miscellaneous optimizations
+- Model states are now a flat list in ensemble inference, structure of states provided by `state_structure()`
+
+## [2.1.2]
+
+### Changed
+
+- Updated to [MXNet 1.6.0](https://github.com/apache/incubator-mxnet/tree/1.6.0)
+
+### Added
+
+- Added support for CUDA 10.2
+
+### Removed
+
+- Removed support for CUDA<9.1 / CUDNN<7.5
+
+## [2.1.1]
+
+### Added
+- Ability to set environment variables from training/translate CLIs before MXNet is imported. For example, users can
+  configure MXNet as such: `--env "OMP_NUM_THREADS=1;MXNET_ENGINE_TYPE=NaiveEngine"`
+
+## [2.1.0]
+
+### Changed
+
+- Version bump, which should have been included in commit b0461b due to incompatible models.
+
+## [2.0.1]
+
+### Changed
+
+- Inference defaults to using the max input length observed in training (versus scaling down based on mean length ratio and standard deviations).
+
+### Added
+
+- Additional parameter fixing strategies:
+  - `all_except_feed_forward`: Only train feed forward layers.
+  - `encoder_and_source_embeddings`: Only train the decoder (decoder layers, output layer, and target embeddings).
+  - `encoder_half_and_source_embeddings`: Train the latter half of encoder layers and the decoder.
+- Option to specify the number of CPU threads without using an environment variable (`--omp-num-threads`).
+- More flexibility for source factors combination
+
+## [2.0.0]
+
+### Changed
+
+- Update to [MXNet 1.5.0](https://github.com/apache/incubator-mxnet/tree/1.5.0)
+- Moved `SockeyeModel` implementation and all layers to [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html)
+- Removed support for Python 3.4.
+- Removed image captioning module
+- Removed outdated Autopilot module
+- Removed unused training options: Eve, Nadam, RMSProp, Nag, Adagrad, and Adadelta optimizers, `fixed-step` and `fixed-rate-inv-t` learning rate schedulers
+- Updated and renamed learning rate scheduler `fixed-rate-inv-sqrt-t` -> `inv-sqrt-decay`
+- Added script for plotting metrics files: [sockeye_contrib/plot_metrics.py](sockeye_contrib/plot_metrics.py)
+- Removed option `--weight-tying`.  Weight tying is enabled by default, disable with `--weight-tying-type none`.
+
+### Added
+
+- Added distributed training support with Horovod/MPI.  Use `horovodrun` and the `--horovod` training flag.
+- Added Dockerfiles that build a Sockeye image with all features enabled.  See [sockeye_contrib/docker](sockeye_contrib/docker).
+- Added `none` learning rate scheduler (use a fixed rate throughout training)
+- Added `linear-decay` learning rate scheduler
+- Added training option `--learning-rate-t-scale` for time-based decay schedulers
+- Added support for MXNet's [Automatic Mixed Precision](https://mxnet.incubator.apache.org/versions/master/tutorials/amp/amp_tutorial.html).  Activate with the `--amp` training flag.  For best results, make sure as many model dimensions are possible are multiples of 8.
+- Added options for making various model dimensions multiples of a given value.  For example, use `--pad-vocab-to-multiple-of 8`, `--bucket-width 8 --no-bucket-scaling`, and `--round-batch-sizes-to-multiple-of 8` with AMP training.
+- Added [GluonNLP](http://gluon-nlp.mxnet.io/)'s BERTAdam optimizer, an implementation of the Adam variant used by Devlin et al. ([2018](https://arxiv.org/pdf/1810.04805.pdf)).  Use `--optimizer bertadam`.
+- Added training option `--checkpoint-improvement-threshold` to set the amount of metric improvement required over the window of previous checkpoints to be considered actual model improvement (used with `--max-num-checkpoint-not-improved`).
+
+## [1.18.103]
+### Added
+- Added ability to score image-sentence pairs by extending the scoring feature originally implemented for machine
+  translation to the image captioning module.
+
+## [1.18.102]
+### Fixed
+- Fixed loading of more than 10 source vocabulary files to be in the right, numerical order.
+
+## [1.18.101]
+### Changed
+- Update to Sacrebleu 1.3.6
+
+## [1.18.100]
+### Fixed
+- Always initializing the multiprocessing context. This should fix issues observed when running `sockeye-train`.
+
+## [1.18.99]
+### Changed
+- Updated to [MXNet 1.4.1](https://github.com/apache/incubator-mxnet/tree/1.4.1)
+
+## [1.18.98]
+### Changed
+- Converted several transformer-related layer implementations to Gluon HybridBlocks. No functional change.
+
+## [1.18.97]
+### Changed
+- Updated to PyYAML 5.1
+
+## [1.18.96]
+### Changed
+- Extracted prepare vocab functionality in the build vocab step into its own function. This matches the pattern in prepare data and train where the main() function only has argparsing, and it invokes a separate function to do the work. This is to allow modules that import this one to circumvent the command line.
+
+## [1.18.95]
+### Changed
+- Removed custom operators from transformer models and replaced them with symbolic operators.
+  Improves Performance.
+
+## [1.18.94]
+### Added
+- Added ability to accumulate gradients over multiple batches (--update-interval). This allows simulation of large
+  batch sizes on environments with limited memory. For example: training with `--batch-size 4096 --update-interval 2`
+  should be close to training with `--batch-size 8192` at smaller memory footprint.
+
+## [1.18.93]
+### Fixed
+- Made `brevity_penalty` argument in `Translator` class optional to ensure backwards compatibility.
+
+## [1.18.92]
+### Added
+- Added sentence length (and length ratio) prediction to be able to discourage hypotheses that are too short at inference time. Can be enabled for training with `--length-task` and with `--brevity-penalty-type` during inference.
+
+## [1.18.91]
+### Changed
+- Multiple lexicons can now be specified with the `--restrict-lexicon` option:
+  - For a single lexicon: `--restrict-lexicon /path/to/lexicon`.
+  - For multiple lexicons: `--restrict-lexicon key1:/path/to/lexicon1 key2:/path/to/lexicon2 ...`.
+  - Use `--json-input` to specify the lexicon to use for each input, ex: `{"text": "some input string", "restrict_lexicon": "key1"}`.
+
+## [1.18.90]
+### Changed
+- Updated to [MXNet 1.4.0](https://github.com/apache/incubator-mxnet/tree/1.4.0)
+- Integration tests no longer check for equivalence of outputs with batch size 2
+
+## [1.18.89]
+### Fixed
+- Made the length ratios per bucket change backwards compatible.
+
+## [1.18.88]
+### Changed
+- Made sacrebleu a pip dependency and removed it from `sockeye_contrib`.
+
+## [1.18.87]
+### Added
+- Data statistics at training time now compute mean and standard deviation of length ratios per bucket.
+  This information is stored in the model's config, but not used at the moment.
+
+## [1.18.86]
+### Added
+- Added the `--fixed-param-strategy` option that allows fixing various model parameters during training via named strategies.
+  These include some of the simpler combinations from [Wuebker et al. (2018)](https://arxiv.org/abs/1811.01990) such as fixing everything except the first and last layers of the encoder and decoder (`all_except_outer_layers`).  See the help message for a full list of strategies.
+
+## [1.18.85]
+### Changed
+- Disabled dynamic batching for `Translator.translate()` by default due to increased memory usage. The default is to
+  fill-up batches to `Translator.max_batch_size`.
+  Dynamic batching can still be enabled if `fill_up_batches` is set to False.
+### Added
+- Added parameter to force training to stop after a given number of checkpoints. Useful when forced to share limited GPU resources.
+
+## [1.18.84]
+### Fixed
+- Fixed lexical constraints bugs that broke batching and caused large drop in BLEU.
+  These were introduced with sampling (1.18.64).
+
+## [1.18.83]
+### Changed
+ - The embedding size is automatically adjusted to the Transformer model size in case it is not specified on the command line.
 
 ## [1.18.82]
 ### Fixed
@@ -163,7 +618,7 @@ In case this is turned on a checkpoint decoder is launched right when training s
 
 ## [1.18.48]
 ### Changed
-- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added. 
+- Translator.max_input_length now reports correct maximum input length for TranslatorInput objects, independent of the internal representation, where an additional EOS gets added.
 
 ## [1.18.47]
 ### Changed
@@ -744,5 +1199,3 @@ sockeye.evaluate now accepts `bleu` and `chrf` as values for `--metrics`
 ### Changed
  - `--attention-*` CLI params renamed to `--rnn-attention-*`.
  - `--transformer-no-positional-encodings` generalized to `--transformer-positional-embedding-type`.
-
-

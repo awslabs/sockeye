@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -198,14 +198,14 @@ class TopKLexicon:
 
 
 def create(args):
-    setup_main_logger(console=not args.quiet, file_logging=True, path=args.output + ".log")
+    setup_main_logger(console=not args.quiet, file_logging=not args.no_logfile, path=args.output + ".log")
     global logger
     logger = logging.getLogger('create')
     log_sockeye_version(logger)
     logger.info("Creating top-k lexicon from \"%s\"", args.input)
     logger.info("Reading source and target vocab from \"%s\"", args.model)
     vocab_source = vocab.load_source_vocabs(args.model)[0]
-    vocab_target = vocab.load_target_vocab(args.model)
+    vocab_target = vocab.load_target_vocabs(args.model)[0]
     logger.info("Building top-%d lexicon", args.k)
     lexicon = TopKLexicon(vocab_source, vocab_target)
     lexicon.create(args.input, args.k)

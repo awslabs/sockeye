@@ -14,12 +14,16 @@
 """
 Translation CLI.
 """
+from . import pre_mxnet
+# Called before importing mxnet or any module that imports mxnet
+pre_mxnet.init()
+
 import argparse
+import logging
 import sys
 import time
-import logging
 from contextlib import ExitStack
-from typing import Generator, Optional, List
+from typing import Dict, Generator, List, Optional, Union
 
 from sockeye.lexicon import TopKLexicon
 from sockeye.log import setup_main_logger
@@ -30,6 +34,7 @@ from . import constants as C
 from . import data_io
 from . import inference
 from . import utils
+from .model import load_models
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +53,7 @@ def run_translate(args: argparse.Namespace):
 
     if args.output is not None:
         setup_main_logger(console=not args.quiet,
-                          file_logging=True,
+                          file_logging=not args.no_logfile,
                           path="%s.%s" % (args.output, C.LOG_NAME),
                           level=args.loglevel)
     else:
@@ -62,8 +67,8 @@ def run_translate(args: argparse.Namespace):
                            C.OUTPUT_HANDLER_JSON, args.output_type)
             args.output_type = C.OUTPUT_HANDLER_JSON
     output_handler = get_output_handler(args.output_type,
-                                        args.output,
-                                        args.sure_align_threshold)
+                                        args.output)
+    hybridize = not args.no_hybridization
 
     with ExitStack() as exit_stack:
         check_condition(len(args.device_ids) == 1, "translate only supports single device for now")
@@ -74,42 +79,75 @@ def run_translate(args: argparse.Namespace):
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
 
-        models, source_vocabs, target_vocab = inference.load_models(
-            context=context,
-            max_input_len=args.max_input_len,
-            beam_size=args.beam_size,
-            batch_size=args.batch_size,
-            model_folders=args.models,
-            checkpoints=args.checkpoints,
-            softmax_temperature=args.softmax_temperature,
-            max_output_length_num_stds=args.max_output_length_num_stds,
-            decoder_return_logit_inputs=args.restrict_lexicon is not None,
-            cache_output_layer_w_b=args.restrict_lexicon is not None,
-            override_dtype=args.override_dtype,
-            output_scores=output_handler.reports_score(),
-            sampling=args.sample)
-        restrict_lexicon = None  # type: Optional[TopKLexicon]
-        if args.restrict_lexicon:
-            restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocab)
-            restrict_lexicon.load(args.restrict_lexicon, k=args.restrict_lexicon_topk)
-        store_beam = args.output_type == C.OUTPUT_HANDLER_BEAM_STORE
+        models, source_vocabs, target_vocabs = load_models(context=context,
+                                                           model_folders=args.models,
+                                                           checkpoints=args.checkpoints,
+                                                           dtype=args.dtype,
+                                                           hybridize=hybridize,
+                                                           inference_only=True,
+                                                           mc_dropout=args.mc_dropout)
+
+        restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
+        if args.restrict_lexicon is not None:
+            logger.info(str(args.restrict_lexicon))
+            if len(args.restrict_lexicon) == 1:
+                # Single lexicon used for all inputs.
+                restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocabs[0])
+                # Handle a single arg of key:path or path (parsed as path:path)
+                restrict_lexicon.load(args.restrict_lexicon[0][1], k=args.restrict_lexicon_topk)
+            else:
+                check_condition(args.json_input,
+                                "JSON input is required when using multiple lexicons for vocabulary restriction")
+                # Multiple lexicons with specified names
+                restrict_lexicon = dict()
+                for key, path in args.restrict_lexicon:
+                    lexicon = TopKLexicon(source_vocabs[0], target_vocabs[0])
+                    lexicon.load(path, k=args.restrict_lexicon_topk)
+                    restrict_lexicon[key] = lexicon
+
+        brevity_penalty_weight = args.brevity_penalty_weight
+        if args.brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:
+            if args.brevity_penalty_constant_length_ratio > 0.0:
+                constant_length_ratio = args.brevity_penalty_constant_length_ratio
+            else:
+                constant_length_ratio = sum(model.length_ratio_mean for model in models) / len(models)
+                logger.info("Using average of constant length ratios saved in the model configs: %f",
+                            constant_length_ratio)
+        elif args.brevity_penalty_type == C.BREVITY_PENALTY_LEARNED:
+            constant_length_ratio = -1.0
+        elif args.brevity_penalty_type == C.BREVITY_PENALTY_NONE:
+            brevity_penalty_weight = 0.0
+            constant_length_ratio = -1.0
+        else:
+            raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
+
+        scorer = inference.CandidateScorer(
+            length_penalty_alpha=args.length_penalty_alpha,
+            length_penalty_beta=args.length_penalty_beta,
+            brevity_penalty_weight=brevity_penalty_weight,
+            prefix='scorer_')
+
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
-                                          bucket_source_width=args.bucket_width,
-                                          length_penalty=inference.LengthPenalty(args.length_penalty_alpha,
-                                                                                 args.length_penalty_beta),
-                                          beam_prune=args.beam_prune,
+                                          scorer=scorer,
+                                          batch_size=args.batch_size,
+                                          beam_size=args.beam_size,
                                           beam_search_stop=args.beam_search_stop,
                                           nbest_size=args.nbest_size,
                                           models=models,
                                           source_vocabs=source_vocabs,
-                                          target_vocab=target_vocab,
+                                          target_vocabs=target_vocabs,
                                           restrict_lexicon=restrict_lexicon,
                                           avoid_list=args.avoid_list,
-                                          store_beam=store_beam,
                                           strip_unknown_words=args.strip_unknown_words,
-                                          skip_topk=args.skip_topk,
-                                          sample=args.sample)
+                                          sample=args.sample,
+                                          output_scores=output_handler.reports_score(),
+                                          constant_length_ratio=constant_length_ratio,
+                                          max_output_length_num_stds=args.max_output_length_num_stds,
+                                          max_input_length=args.max_input_length,
+                                          max_output_length=args.max_output_length,
+                                          hybridize=hybridize,
+                                          softmax_temperature=args.softmax_temperature)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,
@@ -138,7 +176,9 @@ def make_inputs(input_file: Optional[str],
         check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if input_is_json:
-                yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=line)
+                yield inference.make_input_from_json_string(sentence_id=sentence_id,
+                                                            json_string=line,
+                                                            translator=translator)
             else:
                 yield inference.make_input_from_factored_string(sentence_id=sentence_id,
                                                                 factored_string=line,
@@ -154,7 +194,9 @@ def make_inputs(input_file: Optional[str],
             streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
                 if input_is_json:
-                    yield inference.make_input_from_json_string(sentence_id=sentence_id, json_string=inputs[0])
+                    yield inference.make_input_from_json_string(sentence_id=sentence_id,
+                                                                json_string=inputs[0],
+                                                                translator=translator)
                 else:
                     yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
 

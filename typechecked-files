@@ -4,8 +4,7 @@ sockeye/average.py
 sockeye/checkpoint_decoder.py
 sockeye/config.py
 sockeye/constants.py
-sockeye/convolution.py
-sockeye/coverage.py
+sockeye/beam_search.py
 sockeye/data_io.py
 sockeye/decoder.py
 sockeye/embeddings.py
@@ -13,7 +12,6 @@ sockeye/encoder.py
 sockeye/extract_parameters.py
 sockeye/inference.py
 sockeye/init_embedding.py
-sockeye/initializer.py
 sockeye/layers.py
 sockeye/lexical_constraints.py
 sockeye/lexicon.py
@@ -24,8 +22,7 @@ sockeye/model.py
 sockeye/optimizers.py
 sockeye/output_handler.py
 sockeye/prepare_data.py
-sockeye/rnn.py
-sockeye/rnn_attention.py
+sockeye/rerank.py
 sockeye/score.py
 sockeye/scoring.py
 sockeye/train.py
@@ -34,11 +31,3 @@ sockeye/transformer.py
 sockeye/translate.py
 sockeye/utils.py
 sockeye/vocab.py
-sockeye/image_captioning/__init__.py
-sockeye/image_captioning/arguments.py
-sockeye/image_captioning/captioner.py
-sockeye/image_captioning/checkpoint_decoder.py
-sockeye/image_captioning/encoder.py
-sockeye/image_captioning/extract_features.py
-sockeye/image_captioning/utils.py
-sockeye/image_captioning/visualize.py

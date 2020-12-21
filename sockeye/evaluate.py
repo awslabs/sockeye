@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -22,8 +22,9 @@ from functools import partial
 from typing import Callable, Iterable, Dict, List, Tuple, Optional
 
 import numpy as np
+import sacrebleu
 
-from sockeye_contrib import sacrebleu, rouge
+from sockeye_contrib import rouge
 from . import arguments
 from . import constants as C
 from . import data_io
@@ -42,7 +43,7 @@ def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset
     :param offset: Smoothing constant.
     :return: BLEU score as float between 0 and 1.
     """
-    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_floor=offset).score / 100.0
+    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=offset).score / 100.0
 
 
 def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -53,8 +54,7 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     :param references: Reference stream.
     :return: chrF score as float between 0 and 1.
     """
-    return sacrebleu.corpus_chrf(hypotheses, references, order=sacrebleu.CHRF_ORDER, beta=sacrebleu.CHRF_BETA,
-                                 remove_whitespace=True)
+    return sacrebleu.corpus_chrf(hypotheses, [references]).score
 
 
 def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -81,7 +81,7 @@ def raw_corpus_rouge2(hypotheses: Iterable[str], references: Iterable[str]) -> f
 
 def raw_corpus_rougel(hypotheses: Iterable[str], references: Iterable[str]) -> float:
     """
-    Simple wrapper around ROUGE-1 implementation.
+    Simple wrapper around ROUGE-L implementation.
 
     :param hypotheses: Hypotheses stream.
     :param references: Reference stream.
@@ -90,14 +90,26 @@ def raw_corpus_rougel(hypotheses: Iterable[str], references: Iterable[str]) -> f
     return rouge.rouge_l(hypotheses, references)
 
 
+def raw_corpus_length_ratio(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+    """
+    Simple wrapper around length ratio implementation.
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: Length ratio score as float.
+    """
+    ratios = [len(h.split())/len(r.split()) for h, r in zip(hypotheses, references)]
+    return sum(ratios)/len(ratios) if len(ratios) else 0.0
+
+
 def main():
-    setup_main_logger(file_logging=False)
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
                                                  'respect to a reference set. If multiple hypotheses files are given'
                                                  'the mean and standard deviation of the metrics are reported.')
     arguments.add_evaluate_args(params)
     arguments.add_logging_args(params)
     args = params.parse_args()
+    setup_main_logger(file_logging=False)
 
     if args.quiet:
         logger.setLevel(logging.ERROR)

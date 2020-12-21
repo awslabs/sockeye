@@ -32,7 +32,7 @@ When training a model, you can load a set of parameters with the `--params` argu
 Assuming the trained model resides in `ood`, a possible invocation could be
 
     python -m sockeye.train \
-        --config ood/config.yaml \
+        --config ood/args.yaml \
         -d id_data \
         -vs data/id.dev.src.bpe \
         -vt data/id.dev.trg.bpe \
@@ -50,7 +50,7 @@ The usage is very similar as the call shown above, but you have to specify an ad
 This argument accepts a (space separated) list of components where to apply the LHUC units (`encoder`, `decoder` or `state_init`) or you can specify `all` for adding it to all supported components:
 
     python -m sockeye.train \
-        --config ood/config.yaml \
+        --config ood/args.yaml \
         -d id_data \
         -vs data/id.dev.src.bpe \
         -vt data/id.dev.trg.bpe \
@@ -59,8 +59,6 @@ This argument accepts a (space separated) list of components where to apply the 
         -o id_lhuc
 
 Again it may be beneficial to adjust the learning parameters for the adaptation run.
-
-**Note:** At the moment LHUC is not supported for convolutional models.
 
 ## References
 

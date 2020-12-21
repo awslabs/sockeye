@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -24,7 +24,7 @@ from sockeye import constants as C
 from sockeye import data_io
 from sockeye import vocab
 from sockeye.utils import SockeyeError, get_tokens, seed_rngs
-from test.common import tmp_digits_dataset
+from sockeye.test_utils import tmp_digits_dataset
 
 seed_rngs(12)
 
@@ -42,28 +42,33 @@ def test_define_buckets(max_seq_len, step, expected_buckets):
     assert buckets == expected_buckets
 
 
-define_parallel_bucket_tests = [(50, 50, 10, 1.0, [(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]),
-                                (50, 50, 10, 0.5,
+define_parallel_bucket_tests = [(50, 50, 10, True, 1.0, [(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)]),
+                                (50, 50, 10, True, 0.5,
                                  [(10, 5), (20, 10), (30, 15), (40, 20), (50, 25), (50, 30), (50, 35), (50, 40),
                                   (50, 45), (50, 50)]),
-                                (10, 10, 10, 0.1,
+                                (10, 10, 10, True, 0.1,
                                  [(10, 2), (10, 3), (10, 4), (10, 5), (10, 6), (10, 7), (10, 8), (10, 9), (10, 10)]),
-                                (10, 5, 10, 0.01, [(10, 2), (10, 3), (10, 4), (10, 5)]),
-                                (50, 50, 10, 2.0,
+                                (10, 5, 10, True, 0.01, [(10, 2), (10, 3), (10, 4), (10, 5)]),
+                                (50, 50, 10, True, 2.0,
                                  [(5, 10), (10, 20), (15, 30), (20, 40), (25, 50), (30, 50), (35, 50), (40, 50),
                                   (45, 50), (50, 50)]),
-                                (5, 10, 10, 10.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
-                                (5, 10, 10, 11.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
-                                (50, 50, 50, 0.5, [(50, 25), (50, 50)]),
-                                (50, 50, 50, 1.5, [(33, 50), (50, 50)]),
-                                (75, 75, 50, 1.5, [(33, 50), (66, 75), (75, 75)])]
+                                (5, 10, 10, True, 10.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
+                                (5, 10, 10, True, 11.0, [(2, 10), (3, 10), (4, 10), (5, 10)]),
+                                (50, 50, 50, True, 0.5, [(50, 25), (50, 50)]),
+                                (50, 50, 50, True, 1.5, [(33, 50), (50, 50)]),
+                                (75, 75, 50, True, 1.5, [(33, 50), (66, 75), (75, 75)]),
+                                (50, 50, 8, False, 1.5, [(8, 8), (16, 16), (24, 24), (32, 32), (40, 40), (48, 48),
+                                                         (50, 50)]),
+                                (50, 75, 8, False, 1.5, [(8, 8), (16, 16), (24, 24), (32, 32), (40, 40), (48, 48),
+                                                         (50, 56), (50, 64), (50, 72), (50, 75)])]
 
 
-@pytest.mark.parametrize("max_seq_len_source, max_seq_len_target, bucket_width, length_ratio, expected_buckets",
-                         define_parallel_bucket_tests)
-def test_define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, length_ratio, expected_buckets):
+@pytest.mark.parametrize("max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling, length_ratio,"
+                         "expected_buckets", define_parallel_bucket_tests)
+def test_define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling, length_ratio,
+                                 expected_buckets):
     buckets = data_io.define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width=bucket_width,
-                                              length_ratio=length_ratio)
+                                              bucket_scaling=bucket_scaling, length_ratio=length_ratio)
     assert buckets == expected_buckets
 
 
@@ -142,107 +147,132 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
             assert read_sequences == expected_sequences
 
 
-@pytest.mark.parametrize("source_iterables, target_iterable",
+@pytest.mark.parametrize("source_iterables, target_iterables",
                          [
                              (
                                      [[[0], [1, 1], [2], [3, 3, 3]], [[0], [1, 1], [2], [3, 3, 3]]],
-                                     [[0], [1]]
+                                     [[[0], [1]]]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
-                                     [[0], [1, 1], [2], [3, 3, 3]]
+                                     [[[0], [1, 1], [2], [3, 3, 3]]]
                              ),
                              (
                                      [[[0], [1, 1]]],
-                                     [[0], [1, 1], [2], [3, 3, 3]]
+                                     [[[0], [1, 1], [2], [3, 3, 3]]]
                              ),
                          ])
-def test_nonparallel_iter(source_iterables, target_iterable):
+def test_nonparallel_iter(source_iterables, target_iterables):
     with pytest.raises(SockeyeError) as e:
-        list(data_io.parallel_iter(source_iterables, target_iterable))
-    assert str(e.value) == "Different number of lines in source(s) and target iterables."
+        list(data_io.parallel_iter(source_iterables, target_iterables))
+    assert str(e.value) == "Different number of lines in source(s) and target(s) iterables."
 
 
-@pytest.mark.parametrize("source_iterables, target_iterable",
+@pytest.mark.parametrize("source_iterables, target_iterables",
                          [
                              (
                                      [[[0], [1, 1]], [[0], [1]]],
-                                     [[0], [1]]
+                                     [[[0], [1]]]
                              )
                          ])
-def test_nontoken_parallel_iter(source_iterables, target_iterable):
+def test_not_source_token_parallel_iter(source_iterables, target_iterables):
     with pytest.raises(SockeyeError) as e:
-        list(data_io.parallel_iter(source_iterables, target_iterable))
+        list(data_io.parallel_iter(source_iterables, target_iterables))
     assert str(e.value).startswith("Source sequences are not token-parallel")
 
 
-@pytest.mark.parametrize("source_iterables, target_iterable, expected",
+@pytest.mark.parametrize("source_iterables, target_iterables",
+                         [
+                             (
+                                     [[[0], [1]]],
+                                     [[[0], [1, 1]], [[0], [1]]],
+                             )
+                         ])
+def test_not_target_token_parallel_iter(source_iterables, target_iterables):
+    with pytest.raises(SockeyeError) as e:
+        list(data_io.parallel_iter(source_iterables, target_iterables))
+    assert str(e.value).startswith("Target sequences are not token-parallel")
+
+
+@pytest.mark.parametrize("source_iterables, target_iterables, expected",
                          [
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
-                                     [[0], [1]],
-                                     [([[0], [0]], [0]), ([[1, 1], [1, 1]], [1])]
+                                     [[[0], [1]]],
+                                     [([[0], [0]], [[0]]), ([[1, 1], [1, 1]], [[1]])]
                              ),
                              (
                                      [[[0], None], [[0], None]],
-                                     [[0], [1]],
-                                     [([[0], [0]], [0])]
+                                     [[[0], [1]]],
+                                     [([[0], [0]], [[0]])]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
-                                     [[0], None],
-                                     [([[0], [0]], [0])]
+                                     [[[0], None]],
+                                     [([[0], [0]], [[0]])]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
-                                     [None, [1]],
-                                     [([[1, 1], [1, 1]], [1])]
+                                     [[None, [1]]],
+                                     [([[1, 1], [1, 1]], [[1]])]
+                             ),
+                             (
+                                     [[None, [1]]],
+                                     [[None, [1, 1]], [None, [1, 1]]],
+                                     [([[1]], [[1, 1], [1, 1]])]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
-                                     [None, None],
+                                     [[None, None]],
                                      []
                              )
                          ])
-def test_parallel_iter(source_iterables, target_iterable, expected):
-    assert list(data_io.parallel_iter(source_iterables, target_iterable)) == expected
+def test_parallel_iter(source_iterables, target_iterables, expected):
+    assert list(data_io.parallel_iter(source_iterables, target_iterables)) == expected
 
 
 def test_sample_based_define_bucket_batch_sizes():
-    batch_by_words = False
+    batch_type = C.BATCH_TYPE_SENTENCE
     batch_size = 32
     max_seq_len = 100
-    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1.5)
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1, 1.5)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
-                                                           batch_by_words=batch_by_words,
+                                                           batch_type=batch_type,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     for bbs in bucket_batch_sizes:
         assert bbs.batch_size == batch_size
-        assert bbs.average_words_per_batch == bbs.bucket[1] * batch_size
+        assert bbs.average_target_words_per_batch == bbs.bucket[1] * batch_size
 
 
-@pytest.mark.parametrize("length_ratio", [0.5, 1.5])
-def test_word_based_define_bucket_batch_sizes(length_ratio):
-    batch_by_words = True
-    batch_num_devices = 1
-    batch_size = 200
-    max_seq_len = 100
-    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, length_ratio)
+@pytest.mark.parametrize("batch_num_devices,length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
+        # Reference batch sizes manually inspected for sanity.  Note that for
+        # very unbalanced lengths, the last batch can be very large.  This is
+        # due to the requirement for any size batch (total elements) to fit into
+        # the same allocated space for MXNet's memory sharing.
+        (1, 0.5, 1, [200.0, 100.0, 67.0, 50.0, 40.0, 33.0, 29.0, 25.0, 22.0, 41.0]),
+        (2, 0.5, 1, [200.0, 100.0, 66.0, 50.0, 40.0, 34.0, 28.0, 24.0, 22.0, 40.0]),
+        (8, 0.5, 1, [200.0, 96.0, 64.0, 48.0, 40.0, 32.0, 32.0, 24.0, 24.0, 40.0]),
+        (1, 1.5, 1, [100.0, 50.0, 33.0, 25.0, 20.0, 20.0, 20.0, 20.0]),
+        (1, 1.5, 8, [96.0, 48.0, 32.0, 24.0, 16.0, 16.0, 16.0, 24.0])])
+def test_word_based_define_bucket_batch_sizes(batch_num_devices, length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
+    batch_type = C.BATCH_TYPE_WORD
+    batch_size = 1000
+    max_seq_len = 50
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, True, length_ratio)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
-                                                           batch_by_words=batch_by_words,
+                                                           batch_type=batch_type,
                                                            batch_num_devices=batch_num_devices,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                           data_target_average_len=[None] * len(buckets),
+                                                           batch_sentences_multiple_of=batch_sentences_multiple_of)
     max_num_words = 0
     # last bucket batch size is different
-    for bbs in bucket_batch_sizes[:-1]:
-        target_padded_seq_len = bbs.bucket[1]
-        expected_batch_size = round((batch_size / target_padded_seq_len) / batch_num_devices)
+    for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
         assert bbs.batch_size == expected_batch_size
-        expected_average_words_per_batch = expected_batch_size * bbs.bucket[1]
-        assert bbs.average_words_per_batch == expected_average_words_per_batch
+        expected_average_target_words_per_batch = expected_batch_size * bbs.bucket[1]
+        assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
         max_num_words = max(max_num_words, bbs.batch_size * max(*bbs.bucket))
 
     last_bbs = bucket_batch_sizes[-1]
@@ -250,6 +280,30 @@ def test_word_based_define_bucket_batch_sizes(length_ratio):
     assert last_bbs.batch_size >= min_expected_batch_size
     last_bbs_num_words = last_bbs.batch_size * max(*last_bbs.bucket)
     assert last_bbs_num_words >= max_num_words
+
+
+@pytest.mark.parametrize("batch_num_devices,length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
+        # Reference batch sizes manually inspected for sanity.
+        (1, 0.5, 1, [200, 100, 66, 50, 40, 33, 28, 25, 22, 20]),
+        (2, 0.5, 1, [200, 100, 66, 50, 40, 32, 28, 24, 22, 20]),
+        (8, 0.5, 1, [200, 96, 64, 48, 40, 32, 24, 24, 16, 16]),
+        (1, 1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
+        (1, 1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
+def test_max_word_based_define_bucket_batch_sizes(batch_num_devices, length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
+    batch_type = C.BATCH_TYPE_MAX_WORD
+    batch_size = 1000
+    max_seq_len = 50
+    buckets = data_io.define_parallel_buckets(max_seq_len, max_seq_len, 10, True, length_ratio)
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets=buckets,
+                                                           batch_size=batch_size,
+                                                           batch_type=batch_type,
+                                                           batch_num_devices=batch_num_devices,
+                                                           data_target_average_len=[None] * len(buckets),
+                                                           batch_sentences_multiple_of=batch_sentences_multiple_of)
+    for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
+        assert bbs.batch_size == expected_batch_size
+        expected_average_target_words_per_batch = expected_batch_size * bbs.bucket[1]
+        assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
 
 
 def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
@@ -270,17 +324,16 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
         bucket_counts = [None for _ in buckets]
     bucket_counts = [random.randint(min_count, max_count) if given_count is None else given_count
                      for given_count in bucket_counts]
-    source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0])))) for count, bucket in
+    source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0]), 1))) for count, bucket in
               zip(bucket_counts, buckets)]
-    target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[1])))) for count, bucket in
+    target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(2, bucket[1]), 1))) for count, bucket in
               zip(bucket_counts, buckets)]
-    label = target
-    return source, target, label
+    return source, target
 
 
 def test_parallel_data_set():
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
-    source, target, label = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    source, target = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
 
     def check_equal(arrays1, arrays2):
         assert len(arrays1) == len(arrays2)
@@ -288,21 +341,20 @@ def test_parallel_data_set():
             assert np.array_equal(a1.asnumpy(), a2.asnumpy())
 
     with TemporaryDirectory() as work_dir:
-        dataset = data_io.ParallelDataSet(source, target, label)
+        dataset = data_io.ParallelDataSet(source, target)
         fname = os.path.join(work_dir, 'dataset')
         dataset.save(fname)
         dataset_loaded = data_io.ParallelDataSet.load(fname)
         check_equal(dataset.source, dataset_loaded.source)
         check_equal(dataset.target, dataset_loaded.target)
-        check_equal(dataset.label, dataset_loaded.label)
 
 
 def test_parallel_data_set_fill_up():
     batch_size = 32
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
-                                                           batch_by_words=False,
+                                                           batch_type=C.BATCH_TYPE_SENTENCE,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
@@ -310,12 +362,10 @@ def test_parallel_data_set_fill_up():
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
     assert len(dataset_filled_up.target) == len(dataset.target)
-    assert len(dataset_filled_up.label) == len(dataset.label)
     for bidx in range(len(dataset)):
         bucket_batch_size = bucket_batch_sizes[bidx].batch_size
         assert dataset_filled_up.source[bidx].shape[0] == bucket_batch_size
         assert dataset_filled_up.target[bidx].shape[0] == bucket_batch_size
-        assert dataset_filled_up.label[bidx].shape[0] == bucket_batch_size
 
 
 def test_get_permutations():
@@ -342,10 +392,10 @@ def test_get_permutations():
 
 def test_parallel_data_set_permute():
     batch_size = 5
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
-                                                           batch_by_words=False,
+                                                           batch_type=C.BATCH_TYPE_SENTENCE,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
@@ -361,20 +411,18 @@ def test_parallel_data_set_permute():
         if num_samples:
             assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).asnumpy().all()
             assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).asnumpy().all()
-            assert (dataset.label[buck_idx] == dataset_restored.label[buck_idx]).asnumpy().all()
         else:
             assert not dataset_restored.source[buck_idx]
             assert not dataset_restored.target[buck_idx]
-            assert not dataset_restored.label[buck_idx]
 
 
 def test_get_batch_indices():
     max_bucket_size = 50
     batch_size = 10
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
-                                                           batch_by_words=False,
+                                                           batch_type=C.BATCH_TYPE_SENTENCE,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets=buckets,
@@ -422,30 +470,30 @@ def test_get_parallel_bucket(buckets, source_length, target_length, expected_buc
     assert bucket == expected_bucket
 
 
-@pytest.mark.parametrize("sources, target, expected_num_sents, expected_mean, expected_std",
+@pytest.mark.parametrize("sources, targets, expected_num_sents, expected_mean, expected_std",
                          [([[[1, 1, 1], [2, 2, 2], [3, 3, 3]]],
-                           [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.0, 0.0),
+                           [[[1, 1, 1], [2, 2, 2], [3, 3, 3]]], 3, 1.0, 0.0),
                           ([[[1, 1], [2, 2], [3, 3]]],
-                           [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.5, 0.0),
+                           [[[1, 1, 1], [2, 2, 2], [3, 3, 3]]], 3, 1.5, 0.0),
                           ([[[1, 1, 1], [2, 2], [3, 3, 3, 3, 3, 3, 3]]],
-                           [[1, 1, 1], [2], [3, 3, 3]], 2, 0.75, 0.25)])
-def test_calculate_length_statistics(sources, target, expected_num_sents, expected_mean, expected_std):
-    length_statistics = data_io.calculate_length_statistics(sources, target, 5, 5)
-    assert len(sources[0]) == len(target)
+                           [[[1, 1, 1], [2], [3, 3, 3]]], 2, 0.75, 0.25)])
+def test_calculate_length_statistics(sources, targets, expected_num_sents, expected_mean, expected_std):
+    length_statistics = data_io.calculate_length_statistics(sources, targets, 5, 5)
+    assert len(sources[0]) == len(targets[0])
     assert length_statistics.num_sents == expected_num_sents
     assert np.isclose(length_statistics.length_ratio_mean, expected_mean)
     assert np.isclose(length_statistics.length_ratio_std, expected_std)
 
 
-@pytest.mark.parametrize("sources, target",
+@pytest.mark.parametrize("sources, targets",
                          [
                              ([[[1, 1, 1], [2, 2, 2], [3, 3, 3]],
                                [[1, 1, 1], [2, 2], [3, 3, 3]]],
-                              [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+                              [[[1, 1, 1], [2, 2, 2], [3, 3, 3]]])
                          ])
-def test_non_parallel_calculate_length_statistics(sources, target):
+def test_non_parallel_calculate_length_statistics(sources, targets):
     with pytest.raises(SockeyeError):
-        data_io.calculate_length_statistics(sources, target, 5, 5)
+        data_io.calculate_length_statistics(sources, targets, 5, 5)
 
 
 def test_get_training_data_iters():
@@ -460,6 +508,7 @@ def test_get_training_data_iters():
     test_line_count_empty = 0
     test_max_length = 30
     batch_size = 5
+    num_source_factors = num_target_factors = 1
     with tmp_digits_dataset("tmp_corpus",
                             train_line_count, train_line_count_empty, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
@@ -470,16 +519,16 @@ def test_get_training_data_iters():
 
         train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=[data['train_source']],
-            target=data['train_target'],
+            targets=[data['train_target']],
             validation_sources=[data['dev_source']],
-            validation_target=data['dev_target'],
+            validation_targets=[data['dev_target']],
             source_vocabs=[vcb],
-            target_vocab=vcb,
+            target_vocabs=[vcb],
             source_vocab_paths=[None],
-            target_vocab_path=None,
+            target_vocab_paths=[None],
             shared_vocab=True,
             batch_size=batch_size,
-            batch_by_words=False,
+            batch_type=C.BATCH_TYPE_SENTENCE,
             batch_num_devices=1,
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
@@ -489,9 +538,9 @@ def test_get_training_data_iters():
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
         assert data_info.sources == [data['train_source']]
-        assert data_info.target == data['train_target']
+        assert data_info.targets == [data['train_target']]
         assert data_info.source_vocabs == [None]
-        assert data_info.target_vocab is None
+        assert data_info.target_vocabs == [None]
         assert config_data.data_statistics.max_observed_len_source == train_max_length
         assert config_data.data_statistics.max_observed_len_target == train_max_length
         assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
@@ -506,44 +555,48 @@ def test_get_training_data_iters():
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]
         eos_id = vcb[C.EOS_SYMBOL]
-        expected_first_target_symbols = np.full((batch_size,), bos_id, dtype='float32')
+        expected_first_target_symbols = np.full((batch_size, 1), bos_id, dtype='float32')
         for epoch in range(2):
             while train_iter.iter_next():
                 batch = train_iter.next()
-                assert len(batch.data) == 2
-                assert len(batch.label) == 1
-                assert batch.bucket_key in train_iter.buckets
-                source = batch.data[0].asnumpy()
-                target = batch.data[1].asnumpy()
-                label = batch.label[0].asnumpy()
+                assert isinstance(batch, data_io.Batch)
+                source = batch.source.asnumpy()
+                target = batch.target.asnumpy()
+                label = batch.labels[C.TARGET_LABEL_NAME].asnumpy()  # TODO: still 2-shape: (batch, length)
+                length_ratio_label = batch.labels[C.LENRATIO_LABEL_NAME].asnumpy()
                 assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size
+                assert source.shape[2] == target.shape[2] == num_source_factors == num_target_factors
                 # target first symbol should be BOS
                 # each source sequence contains one EOS symbol
                 assert np.sum(source == eos_id) == batch_size
                 assert np.array_equal(target[:, 0], expected_first_target_symbols)
                 # label first symbol should be 2nd target symbol
-                assert np.array_equal(label[:, 0], target[:, 1])
+                assert np.array_equal(label[:, 0], target[:, 1, 0])
                 # each label sequence contains one EOS symbol
                 assert np.sum(label == eos_id) == batch_size
             train_iter.reset()
 
 
-def _data_batches_equal(db1, db2):
-    # We just compare the data, should probably be enough
+def _data_batches_equal(db1: data_io.Batch, db2: data_io.Batch) -> bool:
     equal = True
-    for data1, data2 in zip(db1.data, db2.data):
-        equal = equal and np.allclose(data1.asnumpy(), data2.asnumpy())
+    equal = equal and np.allclose(db1.source.asnumpy(), db2.source.asnumpy())
+    equal = equal and np.allclose(db1.source_length.asnumpy(), db2.source_length.asnumpy())
+    equal = equal and np.allclose(db1.target.asnumpy(), db2.target.asnumpy())
+    equal = equal and np.allclose(db1.target_length.asnumpy(), db2.target_length.asnumpy())
+    equal = equal and db1.labels.keys() == db2.labels.keys()
+    equal = equal and db1.samples == db2.samples
+    equal = equal and db1.tokens == db2.tokens
     return equal
 
 
 def test_parallel_sample_iter():
     batch_size = 2
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     # The first bucket is going to be empty:
     bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
-                                                           batch_by_words=False,
+                                                           batch_type=C.BATCH_TYPE_SENTENCE,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
@@ -596,12 +649,12 @@ def test_parallel_sample_iter():
 
 def test_sharded_parallel_sample_iter():
     batch_size = 2
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     # The first bucket is going to be empty:
     bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
-                                                           batch_by_words=False,
+                                                           batch_type=C.BATCH_TYPE_SENTENCE,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
@@ -617,7 +670,7 @@ def test_sharded_parallel_sample_iter():
         dataset2.save(shard2_fname)
         shard_fnames = [shard1_fname, shard2_fname]
 
-        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes, 'replicate')
+        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
 
         # Test 1
         it.next()
@@ -626,8 +679,7 @@ def test_sharded_parallel_sample_iter():
         fname = os.path.join(work_dir, "saved_iter")
         it.save_state(fname)
 
-        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                      'replicate')
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
         it_loaded.reset()
         it_loaded.load_state(fname)
         loaded_batch = it_loaded.next()
@@ -638,8 +690,7 @@ def test_sharded_parallel_sample_iter():
         expected_batch = it.next()
         it.save_state(fname)
 
-        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                      'replicate')
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
         it_loaded.reset()
         it_loaded.load_state(fname)
 
@@ -650,8 +701,7 @@ def test_sharded_parallel_sample_iter():
         it.reset()
         expected_batch = it.next()
         it.save_state(fname)
-        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                      'replicate')
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
         it_loaded.reset()
         it_loaded.load_state(fname)
 
@@ -668,13 +718,13 @@ def test_sharded_parallel_sample_iter_num_batches():
     num_shards = 2
     batch_size = 2
     num_batches_per_bucket = 10
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
     num_batches_per_shard = num_batches_per_bucket * len(buckets)
     num_batches = num_shards * num_batches_per_shard
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
-                                                           batch_by_words=False,
+                                                           batch_type=C.BATCH_TYPE_SENTENCE,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
@@ -689,8 +739,7 @@ def test_sharded_parallel_sample_iter_num_batches():
         dataset2.save(shard2_fname)
         shard_fnames = [shard1_fname, shard2_fname]
 
-        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                               'replicate')
+        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
 
         num_batches_seen = 0
         while it.iter_next():
@@ -704,12 +753,12 @@ def test_sharded_and_parallel_iter_same_num_batches():
     using the same dataset. """
     batch_size = 2
     num_batches_per_bucket = 10
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
     bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
     num_batches = num_batches_per_bucket * len(buckets)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
-                                                           batch_by_words=False,
+                                                           batch_type=C.BATCH_TYPE_SENTENCE,
                                                            batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
@@ -721,8 +770,7 @@ def test_sharded_and_parallel_iter_same_num_batches():
         dataset.save(shard_fname)
         shard_fnames = [shard_fname]
 
-        it_sharded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                       'replicate')
+        it_sharded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
 
         it_parallel = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
 
@@ -747,3 +795,19 @@ def test_sharded_and_parallel_iter_same_num_batches():
             num_batches_seen += 1
 
         assert num_batches_seen == num_batches
+
+
+def test_create_target_and_shifted_label_sequences():
+    target_and_label = mx.nd.array([[C.BOS_ID, 4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
+                                    [C.BOS_ID, 15, 23, 23, 77, 55, 22, C.EOS_ID],
+                                    [C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]])
+    target_and_label = target_and_label.expand_dims(axis=2)
+    expected_lengths = mx.nd.array([5, 7, 2])
+
+    target, label = data_io.create_target_and_shifted_label_sequences(target_and_label)
+
+    assert target.shape[0] == label.shape[0] == target_and_label.shape[0]
+    assert target.shape[1] == label.shape[1] == target_and_label.shape[1] - 1
+    lengths = (target != C.PAD_ID).sum(axis=1).squeeze()
+    assert np.allclose(lengths.asnumpy(), expected_lengths.asnumpy())
+

@@ -26,7 +26,10 @@ import sockeye.checkpoint_decoder
 import sockeye.evaluate
 import sockeye.extract_parameters
 from sockeye import constants as C
-from test.common import check_train_translate, run_train_translate, tmp_digits_dataset
+from sockeye.config import Config
+from sockeye.model import load_model
+from sockeye.test_utils import run_train_translate, tmp_digits_dataset
+from test.common import check_train_translate
 
 logger = logging.getLogger(__name__)
 
@@ -38,128 +41,97 @@ _TEST_LINE_COUNT_EMPTY = 2
 _LINE_MAX_LENGTH = 9
 _TEST_MAX_LENGTH = 20
 
-
 # tuple format: (train_params, translate_params, use_prepared_data, use_source_factors)
-ENCODER_DECODER_SETTINGS = [
-    # "Vanilla" LSTM encoder-decoder with attention
-    ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
-     " --rnn-attention-type mlp"
-     " --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
-     " --decode-and-evaluate 0",
-     "--beam-size 2 --softmax-temperature 0.01",
-     False, False),
-    # "Vanilla" LSTM encoder-decoder with attention, greedy and skip topk
-    ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
-     " --rnn-attention-type mlp"
-     " --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
-     " --decode-and-evaluate 0",
-     "--beam-size 1 --softmax-temperature 0.01 --skip-topk",
-     False, False),
-    # "Vanilla" LSTM encoder-decoder with attention, higher nbest size
-    ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
-     " --rnn-attention-type mlp"
-     " --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --batch-type sentence "
-     " --decode-and-evaluate 0",
-     "--beam-size 2 --softmax-temperature 0.01 --nbest-size 2",
-     False, False),
-    # "Kitchen sink" LSTM encoder-decoder with attention
-    ("--encoder rnn --decoder rnn --num-layers 3:2 --rnn-cell-type lstm --rnn-num-hidden 8"
-     " --rnn-residual-connections"
-     " --num-embed 8 --rnn-attention-type coverage --rnn-attention-num-hidden 8 --weight-tying "
-     "--rnn-attention-use-prev-word --rnn-context-gating --layer-normalization --batch-size 2 "
-     "--loss cross-entropy --label-smoothing 0.1 --loss-normalization-type batch --optimized-metric perplexity"
-     " --max-updates 2 --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
-     " --rnn-dropout-inputs 0.5:0.1 --rnn-dropout-states 0.5:0.1 --embed-dropout 0.1 --rnn-decoder-hidden-dropout 0.01"
-     " --rnn-decoder-state-init avg --rnn-encoder-reverse-input --rnn-dropout-recurrent 0.1:0.0"
-     " --rnn-h2h-init orthogonal_stacked --batch-type sentence --decode-and-evaluate 0"
-     " --learning-rate-decay-param-reset --weight-normalization --source-factors-num-embed 5 --source-factors-combine concat",
+ENCODER_DECODER_SETTINGS_TEMPLATE = [
+    # Basic transformer, nbest=2 decoding
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching 
+     # max updates independent of the checkpoint interval
+     " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 2 --nbest-size 2",
+     False, 0, 0),
+    # Basic transformer w/ prepared data & greedy decoding
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
+     "--beam-size 1",
+     True, 0, 0),
+    # Basic transformer with source factor, beam-search-stop first decoding
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type trg_softmax"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --source-factors-combine sum concat average --source-factors-share-embedding true false true"
+     " --source-factors-num-embed 8 2 8"
+     " --target-factors-combine sum --target-factors-share-embedding false"
+     " --target-factors-num-embed 8",
      "--beam-size 2 --beam-search-stop first",
-     True, True),
-    # Convolutional embedding encoder + LSTM encoder-decoder with attention
-    ("--encoder rnn-with-conv-embed --decoder rnn --conv-embed-max-filter-width 3 --conv-embed-num-filters 4:4:8"
-     " --conv-embed-pool-stride 2 --conv-embed-num-highway-layers 1 --num-layers 1 --rnn-cell-type lstm"
-     " --rnn-num-hidden 8 --num-embed 4 --rnn-attention-num-hidden 8 --batch-size 2 --loss cross-entropy"
-     " --optimized-metric perplexity --max-updates 2 --checkpoint-interval 2 --optimizer adam --batch-type sentence"
-     " --initial-learning-rate 0.01 --decode-and-evaluate 0",
-     "--beam-size 2",
-     False, False),
-    # Transformer encoder, GRU decoder, mhdot attention
-    ("--encoder transformer --decoder rnn --num-layers 2:1 --rnn-cell-type gru --rnn-num-hidden 8 --num-embed 4:8"
-     " --transformer-attention-heads 2 --transformer-model-size 4"
-     " --transformer-feed-forward-num-hidden 16 --transformer-activation-type gelu"
-     " --rnn-attention-type mhdot --rnn-attention-mhdot-heads 4 --rnn-attention-num-hidden 8 --batch-size 2 "
-     " --max-updates 2 --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
-     " --weight-init-xavier-factor-type avg --weight-init-scale 3.0 --embed-weight-init normal --batch-type sentence"
-     " --decode-and-evaluate 0",
-     "--beam-size 2",
-     True, False),
-    # LSTM encoder, Transformer decoder
-    ("--encoder rnn --decoder transformer --num-layers 2:2 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 8"
-     " --transformer-attention-heads 2 --transformer-model-size 8"
-     " --transformer-feed-forward-num-hidden 16 --transformer-activation-type swish1"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
-     "--beam-size 3",
-     True, False),
-    # Full transformer
+     True, 3, 1),
+    # Basic transformer with LHUC
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
-     "--beam-size 2 --nbest-size 2",
-     False, False),
-    # Full transformer with source factor
-    ("--encoder transformer --decoder transformer"
-     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
-     " --transformer-feed-forward-num-hidden 16"
-     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --source-factors-combine sum",
-     "--beam-size 2",
-     False, True),
-    # 2-layer cnn
-    ("--encoder cnn --decoder cnn "
-     " --batch-size 2 --num-layers 2 --max-updates 2 --checkpoint-interval 2"
-     " --cnn-num-hidden 32 --cnn-positional-embedding-type fixed"
-     " --optimizer adam --initial-learning-rate 0.001 --batch-type sentence --decode-and-evaluate 0",
-     "--beam-size 2",
-     False, False),
-    # Vanilla LSTM like above but activating LHUC. In the normal case you would
-    # start with a trained system instead of a random initialized one like here.
-    ("--encoder rnn --decoder rnn --num-layers 1 --rnn-cell-type lstm --rnn-num-hidden 8 --num-embed 4 "
-     " --rnn-attention-num-hidden 8 --rnn-attention-type mlp"
-     " --batch-size 2 --batch-type sentence"
-     " --loss cross-entropy --optimized-metric perplexity --max-updates 2"
-     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
-     "--beam-size 2 --nbest-size 2",
-     False, False),
-    # Full transformer with LHUC
-    ("--encoder transformer --decoder transformer"
-     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
-     " --transformer-feed-forward-num-hidden 16"
-     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
-     " --weight-tying --weight-tying-type src_trg_softmax"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg --embed-weight-init=normal"
+     " --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
-     "--beam-size 2 --beam-prune 1",
-     False, False)]
+     "--beam-size 2",
+     False, 0, 0),
+    # Basic transformer and length ratio prediction, and learned brevity penalty during inference
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --length-task ratio --length-task-weight 1.0 --length-task-layers 1",
+     "--beam-size 2"
+     " --brevity-penalty-type learned --brevity-penalty-weight 1.0",
+     True, 0, 0),
+    # Basic transformer and absolute length prediction, and constant brevity penalty during inference
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --length-task length --length-task-weight 1.0 --length-task-layers 2",
+     "--beam-size 2"
+     " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
+     False, 0, 0),
+]
+
+ENCODER_DECODER_SETTINGS = [(train_params.format(decoder=decoder), *other_params)
+                            for decoder in C.DECODERS
+                            for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
 
 
-@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, use_source_factors",
+@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors",
                          ENCODER_DECODER_SETTINGS)
 def test_seq_copy(train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
-                  use_source_factors: bool):
+                  n_source_factors: int,
+                  n_target_factors: int):
     """
     Task: copy short sequences of digits
     """
@@ -174,7 +146,8 @@ def test_seq_copy(train_params: str,
                             test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
-                            with_source_factors=use_source_factors) as data:
+                            with_n_source_factors=n_source_factors,
+                            with_n_target_factors=n_target_factors) as data:
 
         # TODO: Here we temporarily switch off comparing translation and scoring scores, which
         # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).
@@ -182,14 +155,14 @@ def test_seq_copy(train_params: str,
                               translate_params=translate_params,
                               data=data,
                               use_prepared_data=use_prepared_data,
-                              max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS,
-                              compare_translate_vs_scoring_scores=False)
+                              max_seq_len=_LINE_MAX_LENGTH,
+                              compare_output=False)
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"
-                    " --transformer-feed-forward-num-hidden 4 --weight-tying --weight-tying-type src_trg_softmax"
+                    " --transformer-feed-forward-num-hidden 4 --weight-tying-type src_trg_softmax"
                     " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 0"
-                    " --checkpoint-frequency 4",
+                    " --checkpoint-interval 4",
                     "--beam-size 1")]
 
 
@@ -211,9 +184,10 @@ def test_other_clis(train_params: str, translate_params: str):
         data = run_train_translate(train_params=train_params,
                                    translate_params=translate_params,
                                    data=data,
-                                   max_seq_len=_LINE_MAX_LENGTH + C.SPACE_FOR_XOS)
+                                   max_seq_len=_LINE_MAX_LENGTH)
 
         _test_checkpoint_decoder(data['dev_source'], data['dev_target'], data['model'])
+        _test_mc_dropout(data['model'])
         _test_parameter_averaging(data['model'])
         _test_extract_parameters_cli(data['model'])
         _test_evaluate_cli(data['test_outputs'], data['test_target'])
@@ -243,12 +217,12 @@ def _test_extract_parameters_cli(model_path: str):
     """
     Runs parameter extraction CLI and asserts that the resulting numpy serialization contains a parameter key.
     """
-    extract_params = "--input {input} --names target_output_bias --list-all --output {output}".format(
+    extract_params = "--input {input} --names output_layer.bias --list-all --output {output}".format(
         output=os.path.join(model_path, "params.extracted"), input=model_path)
     with patch.object(sys, "argv", extract_params.split()):
         sockeye.extract_parameters.main()
     with np.load(os.path.join(model_path, "params.extracted.npz")) as data:
-        assert "target_output_bias" in data
+        assert "output_layer.bias" in data
 
 
 def _test_parameter_averaging(model_path: str):
@@ -272,15 +246,35 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
     with open(dev_source_path) as dev_fd:
         num_dev_sent = sum(1 for _ in dev_fd)
     sample_size = min(1, int(num_dev_sent * 0.1))
+
+    model, source_vocabs, target_vocabs = load_model(model_folder=model_path, context=[mx.cpu()])
+
     cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
                                                               inputs=[dev_source_path],
-                                                              references=dev_target_path,
-                                                              model=model_path,
+                                                              references=[dev_target_path],
+                                                              source_vocabs=source_vocabs,
+                                                              target_vocabs=target_vocabs,
+                                                              model=model,
+                                                              model_folder=model_path,
                                                               sample_size=sample_size,
                                                               batch_size=2,
                                                               beam_size=2)
     cp_metrics = cp_decoder.decode_and_evaluate()
     logger.info("Checkpoint decoder metrics: %s", cp_metrics)
-    assert 'bleu-val' in cp_metrics
-    assert 'chrf-val' in cp_metrics
-    assert 'decode-walltime-val' in cp_metrics
+    assert 'bleu' in cp_metrics
+    assert 'chrf' in cp_metrics
+    assert 'decode-walltime' in cp_metrics
+
+
+def _test_mc_dropout(model_path: str):
+    """
+    Check that loading a model with MC Dropoout returns a model with dropout layers.
+    """
+    model, _, _ = load_model(model_folder=model_path, context=[mx.cpu()], mc_dropout=True,
+                             inference_only=True, hybridize=True)
+
+    # Ensure the model has some dropout turned on
+    config_blocks = [block for _, block in model.config.__dict__.items() if isinstance(block, Config)]
+    dropout_settings = {setting: val for block in config_blocks for setting, val in block.__dict__.items()
+            if "dropout" in setting}
+    assert any(s > 0.0 for s in dropout_settings.values())
