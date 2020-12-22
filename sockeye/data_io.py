@@ -405,7 +405,7 @@ def shard_data(source_fnames: List[str],
                buckets: List[Tuple[int, int]],
                length_ratio_mean: float,
                length_ratio_std: float,
-               output_prefix: str) -> Tuple[List[Tuple[List[str], List[str], 'DataStatistics']], 'DataStatistics']:
+               output_prefix: str):
     """
     Assign int-coded source/target sentence pairs to shards at random.
 
@@ -464,8 +464,8 @@ def shard_data(source_fnames: List[str],
 
     per_shard_stats = [shard_stat_accumulator.statistics for shard_stat_accumulator in per_shard_stat_accumulators]
 
-    sources_shard_fnames_by_shards = zip(*sources_shard_fnames)  # type: List[List[str]]
-    targets_shard_fnames_by_shards = zip(*targets_shard_fnames)  # type: List[List[str]]
+    sources_shard_fnames_by_shards = zip(*sources_shard_fnames)  # type: ignore
+    targets_shard_fnames_by_shards = zip(*targets_shard_fnames)  # type: ignore
 
     return list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards, per_shard_stats)), \
            data_stats_accumulator.statistics

@@ -68,7 +68,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         group = super().add_argument_group(*args, **kwargs)
         return self._overwrite_add_argument(group)
 
-    def parse_args(self, args=None, namespace=None) -> argparse.Namespace:
+    def parse_args(self, args=None, namespace=None) -> argparse.Namespace:  # type: ignore
         # Mini argument parser to find the config file
         config_parser = argparse.ArgumentParser(add_help=False)
         config_parser.add_argument("--config", type=regular_file())

@@ -1114,7 +1114,7 @@ class Translator:
                          reference_lengths[best_ids])])
 
         # reorder and regroup lists
-        reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]
+        reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]  # type: ignore
         return reduced_translations
 
     @staticmethod

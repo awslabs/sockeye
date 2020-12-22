@@ -122,7 +122,7 @@ class CheckpointDecoder:
         for factor_idx, factor in enumerate(self.targets_sentences):
             write_to_file(factor, os.path.join(model_folder, C.DECODE_REF_NAME.format(factor=factor_idx)))
 
-        self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: List[List[str]]
+        self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: ignore
 
         scorer = inference.CandidateScorer(
             length_penalty_alpha=length_penalty_alpha,
@@ -177,7 +177,7 @@ class CheckpointDecoder:
                     if output_file is not None:
                         print(output_string, file=output_file)
         avg_time = trans_wall_time / len(self.targets_sentences[0])
-        translations = list(zip(*translations))
+        translations = list(zip(*translations))  # type: ignore
 
         # 2. Evaluate
         metrics = {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations[0],

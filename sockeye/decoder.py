@@ -79,7 +79,8 @@ class Decoder(mx.gluon.Block):
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls, suffix = cls.__registry[config_type]
         # TODO: move final suffix/prefix construction logic into config builder
-        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix, dtype=dtype)
+        return decoder_cls(config=config, inference_only=inference_only,
+                           prefix=prefix + suffix, dtype=dtype)  # type: ignore
 
     @abstractmethod
     def __init__(self):
