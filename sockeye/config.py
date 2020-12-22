@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,8 +12,8 @@
 # permissions and limitations under the License.
 
 import copy
-import inspect
 import logging
+from dataclasses import dataclass
 
 import yaml
 
@@ -29,43 +29,13 @@ class TaggedYamlObjectMetaclass(yaml.YAMLObjectMetaclass):
         super().__init__(name, bases, new_kwds)
 
 
+@dataclass
 class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
     """
     Base configuration object YAML (de-)serialization.
     Actual Configuration should subclass this object.
     """
     yaml_loader = yaml.UnsafeLoader  # type: ignore
-
-    def __setattr__(self, key, value):
-        if value == self:
-            raise AttributeError("Cannot set self as attribute")
-        object.__setattr__(self, key, value)
-
-    def __setstate__(self, state):
-        """Pickle protocol implementation."""
-        # We first take the serialized state:
-        self.__dict__.update(state)
-        # Then we take the constructors default values for missing arguments in order to stay backwards compatible
-        # This way we can add parameters to Config objects and still load old models.
-        init_signature = inspect.signature(self.__init__)
-        for param_name, param in init_signature.parameters.items():
-            if param.default is not param.empty:
-                if not hasattr(self, param_name):
-                    object.__setattr__(self, param_name, param.default)
-
-    def __repr__(self):
-        return "Config[%s]" % ", ".join("%s=%s" % (str(k), str(v)) for k, v in sorted(self.__dict__.items()))
-
-    def __eq__(self, other):
-        if type(other) is not type(self):
-            return False
-        for k, v in self.__dict__.items():
-            if k != "self":
-                if k not in other.__dict__:
-                    return False
-                if self.__dict__[k] != other.__dict__[k]:
-                    return False
-        return True
 
     def save(self, fname: str):
         """

@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -24,6 +24,7 @@ import random
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import ExitStack
+from dataclasses import dataclass
 from itertools import chain
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple, Set
 
@@ -392,7 +393,7 @@ class DataStatisticsAccumulator:
                               length_ratio_std=self.length_ratio_std,
                               buckets=self.buckets,
                               num_sents_per_bucket=num_sents_per_bucket,
-                              mean_len_target_per_bucket=self.mean_len_target_per_bucket,
+                              average_len_target_per_bucket=self.mean_len_target_per_bucket,
                               length_ratio_stats_per_bucket=self.length_ratio_stats_per_bucket)
 
 
@@ -1061,54 +1062,31 @@ def get_scoring_data_iters(sources: List[str],
     return scoring_iter
 
 
+@dataclass
 class LengthStatistics(config.Config):
-
-    def __init__(self,
-                 num_sents: int,
-                 length_ratio_mean: float,
-                 length_ratio_std: float) -> None:
-        super().__init__()
-        self.num_sents = num_sents
-        self.length_ratio_mean = length_ratio_mean
-        self.length_ratio_std = length_ratio_std
+    num_sents: int
+    length_ratio_mean: float
+    length_ratio_std: float
 
 
+@dataclass
 class DataStatistics(config.Config):
-
-    def __init__(self,
-                 num_sents: int,
-                 num_discarded,
-                 num_tokens_source,
-                 num_tokens_target,
-                 num_unks_source,
-                 num_unks_target,
-                 max_observed_len_source,
-                 max_observed_len_target,
-                 size_vocab_source,
-                 size_vocab_target,
-                 length_ratio_mean,
-                 length_ratio_std,
-                 buckets: List[Tuple[int, int]],
-                 num_sents_per_bucket: List[int],
-                 mean_len_target_per_bucket: List[Optional[float]],
-                 length_ratio_stats_per_bucket: Optional[List[Tuple[Optional[float], Optional[float]]]] = None) -> None:
-        super().__init__()
-        self.num_sents = num_sents
-        self.num_discarded = num_discarded
-        self.num_tokens_source = num_tokens_source
-        self.num_tokens_target = num_tokens_target
-        self.num_unks_source = num_unks_source
-        self.num_unks_target = num_unks_target
-        self.max_observed_len_source = max_observed_len_source
-        self.max_observed_len_target = max_observed_len_target
-        self.size_vocab_source = size_vocab_source
-        self.size_vocab_target = size_vocab_target
-        self.length_ratio_mean = length_ratio_mean
-        self.length_ratio_std = length_ratio_std
-        self.length_ratio_stats_per_bucket = length_ratio_stats_per_bucket
-        self.buckets = buckets
-        self.num_sents_per_bucket = num_sents_per_bucket
-        self.average_len_target_per_bucket = mean_len_target_per_bucket
+    num_sents: int
+    num_discarded: int
+    num_tokens_source: int
+    num_tokens_target: int
+    num_unks_source: int
+    num_unks_target: int
+    max_observed_len_source: int
+    max_observed_len_target: int
+    size_vocab_source: int
+    size_vocab_target: int
+    length_ratio_mean: float
+    length_ratio_std: float
+    buckets: List[Tuple[int, int]]
+    num_sents_per_bucket: List[int]
+    average_len_target_per_bucket: List[Optional[float]]
+    length_ratio_stats_per_bucket: Optional[List[Tuple[Optional[float], Optional[float]]]] = None
 
     def log(self, bucket_batch_sizes: Optional[List[BucketBatchSize]] = None):
         logger.info("Tokens: source %d target %d", self.num_tokens_source, self.num_tokens_target)
@@ -1144,44 +1122,29 @@ def describe_data_and_buckets(data_statistics: DataStatistics, bucket_batch_size
                         lr_mean, lr_std)
 
 
+@dataclass
 class DataInfo(config.Config):
     """
     Stores training data information that is not relevant for inference.
     """
-
-    def __init__(self,
-                 sources: List[str],
-                 targets: List[str],
-                 source_vocabs: List[Optional[str]],
-                 target_vocabs: List[Optional[str]],
-                 shared_vocab: bool,
-                 num_shards: int) -> None:
-        super().__init__()
-        self.sources = sources
-        self.targets = targets
-        self.source_vocabs = source_vocabs
-        self.target_vocabs = target_vocabs
-        self.shared_vocab = shared_vocab
-        self.num_shards = num_shards
+    sources: List[str]
+    targets: List[str]
+    source_vocabs: List[Optional[str]]
+    target_vocabs: List[Optional[str]]
+    shared_vocab: bool
+    num_shards: int
 
 
+@dataclass
 class DataConfig(config.Config):
     """
     Stores data statistics relevant for inference.
     """
-
-    def __init__(self,
-                 data_statistics: DataStatistics,
-                 max_seq_len_source: int,
-                 max_seq_len_target: int,
-                 num_source_factors: int,
-                 num_target_factors: int) -> None:
-        super().__init__()
-        self.data_statistics = data_statistics
-        self.max_seq_len_source = max_seq_len_source
-        self.max_seq_len_target = max_seq_len_target
-        self.num_source_factors = num_source_factors
-        self.num_target_factors = num_target_factors
+    data_statistics: DataStatistics
+    max_seq_len_source: int
+    max_seq_len_target: int
+    num_source_factors: int
+    num_target_factors: int
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
