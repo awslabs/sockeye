@@ -3,3 +3,4 @@ mxnet-cu92==1.7.0
 numpy>1.16.0,<2.0.0
 portalocker
 sacrebleu==1.4.14
+dataclasses
