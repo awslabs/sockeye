@@ -176,7 +176,13 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
         return lr
 
     def __repr__(self):
-        return "LearningRateSchedulerPlateauReduce(reduce_factor=%.2f, reduce_num_not_improved=%d, num_not_improved=%d, base_lr=%s, lr=%s, warmup=%d, warmed_up=%s)" % (self.reduce_factor, self.reduce_num_not_improved, self.num_not_improved, self.base_lr, self.lr, self.warmup, self.warmed_up)
+        return (
+            "LearningRateSchedulerPlateauReduce(reduce_factor=%.2f, reduce_num_not_improved=%d, num_not_improved=%d,"
+            " base_lr=%s, lr=%s, warmup=%d, warmed_up=%s)"
+            %
+            (self.reduce_factor, self.reduce_num_not_improved,
+             self.num_not_improved, self.base_lr, self.lr, self.warmup, self.warmed_up)
+        )
 
 
 def get_lr_scheduler(scheduler_type: str,
