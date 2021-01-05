@@ -221,9 +221,15 @@ TENSORBOARD_NAME = "tensorboard"
 TRAINING_STATE_DIRNAME = "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
+
 OPT_STATES_LAST = "mx_optimizer_last.pkl"
 OPT_STATES_BEST = "mx_optimizer_best.pkl"
 OPT_STATES_INITIAL = "mx_optimizer_initial.pkl"
+
+LR_SCHEDULER_LAST = "lr_scheduler_last.pkl"
+LR_SCHEDULER_BEST = "lr_scheduler_best.pkl"
+LR_SCHEDULER_INITIAL = "lr_scheduler_initial.pkl"
+
 BUCKET_ITER_STATE_NAME = "bucket.pkl"
 RNG_STATE_NAME = "rng.pkl"
 TRAINING_STATE_NAME = "training.pkl"

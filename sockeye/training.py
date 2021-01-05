@@ -307,6 +307,7 @@ class GluonEarlyStoppingTrainer:
         if has_improved:
             self._update_best_params()
             self._save_trainer_states(self.best_optimizer_states_fname)
+            self._save_lr_scheduler(self.best_lr_scheduler_fname)
         self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
         for metric in train_metrics:
             metric.reset()
@@ -587,6 +588,18 @@ class GluonEarlyStoppingTrainer:
         self.trainer.load_states(fname)
         logger.info('Loaded optimizer states from "%s"', fname)
 
+    def _save_lr_scheduler(self, fname):
+        with open(fname, "wb") as fp:
+            pickle.dump(self.trainer.optimizer.lr_scheduler, fp)
+        logger.info('Saved lr_scheduler to "%s"', fname)
+        logger.info('Saved lr_scheduler %s', self.trainer.optimizer.lr_scheduler.__repr__())
+
+    def _load_lr_scheduler(self, fname):
+        with open(fname, "rb") as fp:
+            self.trainer.optimizer.lr_scheduler = pickle.load(fp)
+        logger.info('Loaded lr_scheduler from "%s"', fname)
+        logger.info('Loaded lr_scheduler %s', self.trainer.optimizer.lr_scheduler.__repr__())
+
     def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
         Saves current training state.
@@ -606,6 +619,10 @@ class GluonEarlyStoppingTrainer:
         # (2) Optimizer states
         opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATES_LAST)
         self._save_trainer_states(opt_state_fname)
+
+        # (2.5) lr_scheduler
+        lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
+        self._save_lr_scheduler(lr_scheduler_fname)
 
         # (3) Data iterator
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
@@ -658,6 +675,10 @@ class GluonEarlyStoppingTrainer:
         opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATES_LAST)
         self._load_trainer_states(opt_state_fname)
 
+        # (2.5) lr_scheduler
+        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
+        self._load_lr_scheduler(lr_scheduler_fname)
+
         # (3) Data Iterator
         train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
@@ -697,6 +718,8 @@ class GluonEarlyStoppingTrainer:
                 shutil.rmtree(self.training_state_dirname)
             if os.path.exists(self.best_optimizer_states_fname):
                 os.remove(self.best_optimizer_states_fname)
+            if os.path.exists(self.best_lr_scheduler_fname):
+                os.remove(self.best_lr_scheduler_fname)
 
     @property
     def metrics_fname(self) -> str:
@@ -717,6 +740,10 @@ class GluonEarlyStoppingTrainer:
     @property
     def best_optimizer_states_fname(self) -> str:
         return os.path.join(self.config.output_dir, C.OPT_STATES_BEST)
+
+    @property
+    def best_lr_scheduler_fname(self) -> str:
+        return os.path.join(self.config.output_dir, C.LR_SCHEDULER_BEST)
 
 
 class ParallelModel(parallel.Parallelizable):
