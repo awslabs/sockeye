@@ -38,7 +38,7 @@ class TransformerConfig(config.Config):
     max_seq_len_source: int
     max_seq_len_target: int
     decoder_type: str = C.TRANSFORMER_TYPE
-    lhuc: bool = False
+    use_lhuc: bool = False
     depth_key_value: int = 0
 
 
@@ -85,7 +85,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                                    prefix="ff_post_",
                                                    num_hidden=config.model_size)
             self.lhuc = None
-            if config.lhuc:
+            if config.use_lhuc:
                 self.lhuc = layers.LHUC(config.model_size)
 
     def hybrid_forward(self, F, data: mx.sym.Symbol, lengths: mx.sym.Symbol) -> mx.sym.Symbol:
@@ -174,7 +174,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                    num_hidden=config.model_size)
 
             self.lhuc = None
-            if config.lhuc:
+            if config.use_lhuc:
                 self.lhuc = layers.LHUC(config.model_size)
 
     @property

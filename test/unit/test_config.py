@@ -17,12 +17,9 @@ import os
 from typing import Any, Optional
 from sockeye.config import Config
 
-import pytest
-
 
 @dataclass
 class ConfigTest(Config):
-    #yaml_tag = "!ConfigTest"
     param: Any
     config: Optional[Config] = None
 
@@ -93,8 +90,7 @@ class ConfigWithMissingAttributes(Config):
 
 def test_config_missing_attributes_filled_with_default():
     # when we load a configuration object that does not contain all attributes as the current version of the
-    # configuration object we expect the missing attributes to be filled with the default values taken from the
-    # __init__ method.
+    # configuration object we expect the missing attributes to be filled with the default values of the dataclass
 
     config_obj = Config.load("test/data/config_with_missing_attributes.yaml")
     assert config_obj.new_attribute == "new_attribute"
