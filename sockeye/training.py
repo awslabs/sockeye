@@ -582,6 +582,8 @@ class GluonEarlyStoppingTrainer:
             with open(fname, "rb") as fp:
                 self.trainer.optimizer.lr_scheduler = pickle.load(fp)
             logger.info("Loaded '%s' from '%s'", self.trainer.optimizer.lr_scheduler, fname)
+        self.trainer.optimizer.begin_num_update = self.state.updates
+        self.trainer.optimizer.num_update = self.state.updates
 
     def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
@@ -603,10 +605,6 @@ class GluonEarlyStoppingTrainer:
         opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATES_LAST)
         self._save_trainer_states(opt_state_fname)
 
-        # (2.5) lr_scheduler
-        lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
-        self._save_lr_scheduler(lr_scheduler_fname)
-
         # (3) Data iterator
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
@@ -620,6 +618,10 @@ class GluonEarlyStoppingTrainer:
 
         # (5) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
+
+        # (5.5) lr_scheduler
+        lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
+        self._save_lr_scheduler(lr_scheduler_fname)
 
         # (6) AMP loss scaler state
         if self.using_amp:
@@ -658,10 +660,6 @@ class GluonEarlyStoppingTrainer:
         opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATES_LAST)
         self._load_trainer_states(opt_state_fname)
 
-        # (2.5) lr_scheduler
-        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
-        self._load_lr_scheduler(lr_scheduler_fname)
-
         # (3) Data Iterator
         train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
@@ -675,6 +673,10 @@ class GluonEarlyStoppingTrainer:
 
         # (5) Training state
         self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
+
+        # (5.5) lr_scheduler
+        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
+        self._load_lr_scheduler(lr_scheduler_fname)
 
         # (6) AMP loss scaler state
         if self.using_amp:
