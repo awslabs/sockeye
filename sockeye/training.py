@@ -589,15 +589,16 @@ class GluonEarlyStoppingTrainer:
         logger.info('Loaded optimizer states from "%s"', fname)
 
     def _save_lr_scheduler(self, fname):
-        with open(fname, "wb") as fp:
-            pickle.dump(self.trainer.optimizer.lr_scheduler, fp)
-        logger.info("Saved '%s' to '%s'", self.trainer.optimizer.lr_scheduler, fname)
+        if self.trainer.optimizer.lr_scheduler is not None:
+            with open(fname, "wb") as fp:
+                pickle.dump(self.trainer.optimizer.lr_scheduler, fp)
+            logger.info("Saved '%s' to '%s'", self.trainer.optimizer.lr_scheduler, fname)
 
     def _load_lr_scheduler(self, fname):
         if os.path.exists(fname):
             with open(fname, "rb") as fp:
                 self.trainer.optimizer.lr_scheduler = pickle.load(fp)
-                logger.info("Loaded '%s' from '%s'", self.trainer.optimizer.lr_scheduler, fname)
+            logger.info("Loaded '%s' from '%s'", self.trainer.optimizer.lr_scheduler, fname)
 
     def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
