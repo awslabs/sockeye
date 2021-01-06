@@ -11,6 +11,18 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.6]
+
+### Fixed
+
+- Fixes the problem identified in issue #890, where the lr_scheduler
+  does not behave as expected when continuing training. The problem is
+  that the lr_scheduler is kept as part of the optimizer, but the
+  optimizer is not saved when saving state. Therefore, every time
+  training is restarted, a new lr_scheduler is created with initial
+  parameter settings. Fix by saving and restoring the lr_scheduling
+  separately.
+
 ## [2.3.5]
 
 ### Fixed
