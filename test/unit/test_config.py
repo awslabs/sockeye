@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,29 +12,25 @@
 # permissions and limitations under the License.
 
 import tempfile
+from dataclasses import dataclass
 import os
-
-import pytest
-
-from sockeye import config
+from typing import Any, Optional
+from sockeye.config import Config
 
 
-class ConfigTest(config.Config):
-    yaml_tag = "!ConfigTest"
-
-    def __init__(self, param, config=None):
-        super().__init__()
-        self.param = param
-        self.config = config
+@dataclass
+class ConfigTest(Config):
+    param: Any
+    config: Optional[Config] = None
 
 
 def test_config_repr():
     c1 = ConfigTest(param=1, config=ConfigTest(param=3))
-    assert str(c1) == "Config[config=Config[config=None, param=3], param=1]"
+    assert str(c1) == "ConfigTest(param=1, config=ConfigTest(param=3, config=None))"
 
 
 def test_config_eq():
-    basic_c = config.Config()
+    basic_c = Config()
     c1 = ConfigTest(param=1)
     c1_other = ConfigTest(param=1)
     c2 = ConfigTest(param=2)
@@ -49,13 +45,6 @@ def test_config_eq():
     assert c1 != c2
     assert c_nested == c_nested_other
     assert c_nested != c_nested_c2
-
-
-def test_config_no_self_attribute():
-    c1 = ConfigTest(param=1)
-    with pytest.raises(AttributeError) as e:
-        c1.config = c1
-    assert str(e.value) == "Cannot set self as attribute"
 
 
 def test_config_serialization():
@@ -73,7 +62,7 @@ param: 1
         with open(fname) as f:
             assert f.read() == expected_serialization
 
-        c2 = config.Config.load(fname)
+        c2 = Config.load(fname)
         assert c2.param == c1.param
         assert c2.config.param == c1.config.param
 
@@ -93,18 +82,16 @@ def test_config_copy():
     assert c1 != mod_copy_c1
 
 
-class ConfigWithMissingAttributes(config.Config):
-    def __init__(self, existing_attribute, new_attribute="new_attribute"):
-        super().__init__()
-        self.existing_attribute = existing_attribute
-        self.new_attribute = new_attribute
+@dataclass
+class ConfigWithMissingAttributes(Config):
+    existing_attribute: str
+    new_attribute: str = "new_attribute"
 
 
 def test_config_missing_attributes_filled_with_default():
     # when we load a configuration object that does not contain all attributes as the current version of the
-    # configuration object we expect the missing attributes to be filled with the default values taken from the
-    # __init__ method.
+    # configuration object we expect the missing attributes to be filled with the default values of the dataclass
 
-    config_obj = config.Config.load("test/data/config_with_missing_attributes.yaml")
+    config_obj = Config.load("test/data/config_with_missing_attributes.yaml")
     assert config_obj.new_attribute == "new_attribute"
 

@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,6 +17,7 @@ Encoders for sequence-to-sequence models.
 import inspect
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
 import mxnet as mx
@@ -90,38 +91,27 @@ class Encoder(ABC, mx.gluon.HybridBlock):
         """
         return None
 
-
+@dataclass
 class FactorConfig(config.Config):
-
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 combine: str,  # From C.FACTORS_COMBINE_CHOICES
-                 share_embedding: bool) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.combine = combine
-        self.share_embedding = share_embedding
+    vocab_size: int
+    num_embed: int
+    combine: str  # From C.FACTORS_COMBINE_CHOICES
+    share_embedding: bool
 
 
+@dataclass
 class EmbeddingConfig(config.Config):
+    vocab_size: int
+    num_embed: int
+    dropout: float
+    num_factors: int = field(init=False)
+    factor_configs: Optional[List[FactorConfig]] = None
+    allow_sparse_grad: bool = False
 
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 dropout: float,
-                 factor_configs: Optional[List[FactorConfig]] = None,
-                 allow_sparse_grad: bool = False) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.dropout = dropout
-        self.factor_configs = factor_configs
+    def __post_init__(self):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
-        self.allow_sparse_grad = allow_sparse_grad
 
 
 class Embedding(Encoder):

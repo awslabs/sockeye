@@ -50,7 +50,7 @@ def test_get_transformer_encoder(lhuc):
                                                    postprocess_sequence='test_post',
                                                    max_seq_len_source=50,
                                                    max_seq_len_target=60,
-                                                   lhuc=lhuc)
+                                                   use_lhuc=lhuc)
     encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix, dtype = C.DTYPE_FP32)
     encoder.initialize()
     encoder.hybridize(static_alloc=True)

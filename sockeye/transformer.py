@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,6 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import mxnet as mx
@@ -21,42 +22,24 @@ from . import layers
 from . import quantization
 
 
+@dataclass
 class TransformerConfig(config.Config):
-
-    def __init__(self,
-                 model_size: int,
-                 attention_heads: int,
-                 feed_forward_num_hidden: int,
-                 act_type: str,
-                 num_layers: int,
-                 dropout_attention: float,
-                 dropout_act: float,
-                 dropout_prepost: float,
-                 positional_embedding_type: str,
-                 preprocess_sequence: str,
-                 postprocess_sequence: str,
-                 max_seq_len_source: int,
-                 max_seq_len_target: int,
-                 decoder_type: str = C.TRANSFORMER_TYPE,
-                 lhuc: bool = False,
-                 depth_key_value: int = 0) -> None:  # type: ignore
-        super().__init__()
-        self.model_size = model_size
-        self.attention_heads = attention_heads
-        self.feed_forward_num_hidden = feed_forward_num_hidden
-        self.act_type = act_type
-        self.num_layers = num_layers
-        self.dropout_attention = dropout_attention
-        self.dropout_act = dropout_act
-        self.dropout_prepost = dropout_prepost
-        self.positional_embedding_type = positional_embedding_type
-        self.preprocess_sequence = preprocess_sequence
-        self.postprocess_sequence = postprocess_sequence
-        self.max_seq_len_source = max_seq_len_source
-        self.max_seq_len_target = max_seq_len_target
-        self.use_lhuc = lhuc
-        self.depth_key_value = depth_key_value
-        self.decoder_type = decoder_type
+    model_size: int
+    attention_heads: int
+    feed_forward_num_hidden: int
+    act_type: str
+    num_layers: int
+    dropout_attention: float
+    dropout_act: float
+    dropout_prepost: float
+    positional_embedding_type: str
+    preprocess_sequence: str
+    postprocess_sequence: str
+    max_seq_len_source: int
+    max_seq_len_target: int
+    decoder_type: str = C.TRANSFORMER_TYPE
+    use_lhuc: bool = False
+    depth_key_value: int = 0
 
 
 class TransformerEncoderBlock(mx.gluon.HybridBlock):

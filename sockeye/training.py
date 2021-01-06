@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,29 +14,30 @@
 """
 Code for training
 """
-from collections import deque
 import logging
 import os
 import pickle
 import random
 import shutil
 import time
+from collections import deque
+from dataclasses import dataclass
 from math import sqrt
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
 
 import mxnet as mx
-from mxnet.contrib import amp
 import numpy as np
+from mxnet.contrib import amp
 
-from .checkpoint_decoder import CheckpointDecoder
 from . import constants as C
 from . import data_io
 from . import horovod_mpi
 from . import loss
 from . import lr_scheduler
+from . import parallel
 from . import utils
 from . import vocab
-from . import parallel
+from .checkpoint_decoder import CheckpointDecoder
 from .config import Config
 from .model import SockeyeModel
 from .optimizers import OptimizerConfig
@@ -50,43 +51,25 @@ def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     return sqrt(sum(norm.asscalar() for norm in norms))
 
 
+@dataclass
 class TrainerConfig(Config):
-    def __init__(self,
-                 output_dir: str,
-                 early_stopping_metric: str,
-                 max_params_files_to_keep: int,
-                 keep_initializations: bool,
-                 checkpoint_interval: int,
-                 max_num_checkpoint_not_improved: int,
-                 checkpoint_improvement_threshold: float,
-                 max_checkpoints: Optional[int] = None,
-                 min_samples: Optional[int] = None,
-                 max_samples: Optional[int] = None,
-                 min_updates: Optional[int] = None,
-                 max_updates: Optional[int] = None,
-                 min_epochs: Optional[int] = None,
-                 max_epochs: Optional[int] = None,
-                 max_seconds: Optional[int] = None,
-                 update_interval: int = 1,
-                 stop_training_on_decoder_failure: bool = False) -> None:
-        super().__init__()
-        self.output_dir = output_dir
-        self.early_stopping_metric = early_stopping_metric
-        self.max_params_files_to_keep = max_params_files_to_keep
-        self.keep_initializations = keep_initializations
-        self.checkpoint_interval = checkpoint_interval
-        self.max_num_checkpoint_not_improved = max_num_checkpoint_not_improved
-        self.checkpoint_improvement_threshold = checkpoint_improvement_threshold
-        self.max_checkpoints = max_checkpoints
-        self.min_samples = min_samples
-        self.max_samples = max_samples
-        self.min_updates = min_updates
-        self.max_updates = max_updates
-        self.min_epochs = min_epochs
-        self.max_epochs = max_epochs
-        self.max_seconds = max_seconds
-        self.update_interval = update_interval
-        self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
+    output_dir: str
+    early_stopping_metric: str
+    max_params_files_to_keep: int
+    keep_initializations: bool
+    checkpoint_interval: int
+    max_num_checkpoint_not_improved: int
+    checkpoint_improvement_threshold: float
+    max_checkpoints: Optional[int] = None
+    min_samples: Optional[int] = None
+    max_samples: Optional[int] = None
+    min_updates: Optional[int] = None
+    max_updates: Optional[int] = None
+    min_epochs: Optional[int] = None
+    max_epochs: Optional[int] = None
+    max_seconds: Optional[int] = None
+    update_interval: int = 1
+    stop_training_on_decoder_failure: bool = False
 
 
 class TrainState:

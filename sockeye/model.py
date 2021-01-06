@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -30,10 +30,11 @@ from . import layers
 from . import quantization
 from . import utils
 from . import vocab
-
+from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+@dataclass
 class ModelConfig(Config):
     """
     ModelConfig defines model parameters defined at training time which are relevant to model inference.
@@ -54,33 +55,18 @@ class ModelConfig(Config):
     :param intgemm_custom_lib: Path to intgemm custom operator library used for dtype is int8.  Default: libintgemm.so
                                in the same directory as this script.
     """
-
-    def __init__(self,
-                 config_data: data_io.DataConfig,
-                 vocab_source_size: int,
-                 vocab_target_size: int,
-                 config_embed_source: encoder.EmbeddingConfig,
-                 config_embed_target: encoder.EmbeddingConfig,
-                 config_encoder: encoder.EncoderConfig,
-                 config_decoder: decoder.DecoderConfig,
-                 config_length_task: layers.LengthRatioConfig= None,
-                 weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
-                 lhuc: bool = False,
-                 dtype: str = C.DTYPE_FP32,
-                 intgemm_custom_lib: str = os.path.join(os.path.dirname(__file__), "libintgemm.so")) -> None:
-        super().__init__()
-        self.config_data = config_data
-        self.vocab_source_size = vocab_source_size
-        self.vocab_target_size = vocab_target_size
-        self.config_embed_source = config_embed_source
-        self.config_embed_target = config_embed_target
-        self.config_encoder = config_encoder
-        self.config_decoder = config_decoder
-        self.config_length_task = config_length_task
-        self.weight_tying_type = weight_tying_type
-        self.lhuc = lhuc
-        self.dtype = dtype
-        self.intgemm_custom_lib = intgemm_custom_lib
+    config_data: data_io.DataConfig
+    vocab_source_size: int
+    vocab_target_size: int
+    config_embed_source: encoder.EmbeddingConfig
+    config_embed_target: encoder.EmbeddingConfig
+    config_encoder: encoder.EncoderConfig
+    config_decoder: decoder.DecoderConfig
+    config_length_task: Optional[layers.LengthRatioConfig] = None
+    weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX
+    lhuc: bool = False
+    dtype: str = C.DTYPE_FP32
+    intgemm_custom_lib: str = os.path.join(os.path.dirname(__file__), "libintgemm.so")
 
 
 class SockeyeModel(mx.gluon.Block):

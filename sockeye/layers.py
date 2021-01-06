@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -13,8 +13,9 @@
 
 import logging
 from abc import abstractmethod
-from typing import Optional, Union, Tuple
+from dataclasses import dataclass
 from functools import lru_cache
+from typing import Optional, Union, Tuple
 
 import mxnet as mx
 import numpy as np
@@ -194,18 +195,10 @@ class OutputLayer(mx.gluon.HybridBlock):
                                     name=C.LOGITS_NAME)
 
 
+@dataclass
 class LengthRatioConfig(config.Config):
-    """
-    Configuration of the length ratio predictor.
-
-    :param num_layers: Number of layers.
-    :param weight: Weight of this loss.
-    """
-
-    def __init__(self, num_layers: int, weight: float) -> None:
-        super().__init__()
-        self.num_layers = num_layers
-        self.weight = weight
+    num_layers: int  # Number of layers
+    weight: float  # Weight of this loss
 
 
 class LengthRatio(mx.gluon.HybridBlock):
