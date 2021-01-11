@@ -1086,17 +1086,17 @@ def add_training_args(params):
                               help='In addition to keeping the last n params files, also keep params from checkpoint 0.')
 
     
-    train_params.add_argument('--cache-last-best-params', #sjb
+    train_params.add_argument('--cache-last-best-params',
                               type=int,
                               default=4,
                               help='Cache the last n best params files to a separate directory, use 0 or negative to disable. Default: %(default)s')
 
-    train_params.add_argument('--cache-strategy', #sjb
+    train_params.add_argument('--cache-strategy',
                               type=str,
                               default="best",
                               help='Strategy to use when deciding which are the "best" params files. Options = [best, last, lifespan]. Default: %(default)s')
 
-    train_params.add_argument('--cache-metric', #sjb
+    train_params.add_argument('--cache-metric',
                               type=str,
                               default=C.PERPLEXITY,
                               help='Metric to use when deciding which are the "best" params files. Options = %s, Default: %s' % (str(C.METRICS), str(C.PERPLEXITY)))

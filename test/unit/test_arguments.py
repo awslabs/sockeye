@@ -228,6 +228,9 @@ def test_inference_args(test_params, expected_params):
               seed=1,
               keep_last_params=-1,
               keep_initializations=False,
+              max_params_files_to_cache=4,
+              cache_strategy="best",
+              cache_metric=C.PERPLEXITY,
               dry_run=False)),
 ])
 def test_training_arg(test_params, expected_params):
