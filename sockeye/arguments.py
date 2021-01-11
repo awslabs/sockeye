@@ -1085,6 +1085,22 @@ def add_training_args(params):
                               action="store_true",
                               help='In addition to keeping the last n params files, also keep params from checkpoint 0.')
 
+    
+    train_params.add_argument('--cache-last-best-params', #sjb
+                              type=int,
+                              default=4,
+                              help='Cache the last n best params files to a separate directory, use 0 or negative to disable. Default: %(default)s')
+
+    train_params.add_argument('--cache-strategy', #sjb
+                              type=str,
+                              default="best",
+                              help='Strategy to use when deciding which are the "best" params files. Options = [best, last, lifespan]. Default: %(default)s')
+
+    train_params.add_argument('--cache-metric', #sjb
+                              type=str,
+                              default=C.PERPLEXITY,
+                              help='Metric to use when deciding which are the "best" params files. Options = %s, Default: %s' % (str(C.METRICS), str(C.PERPLEXITY)))
+
     train_params.add_argument('--dry-run',
                               action='store_true',
                               help="Do not perform any actual training, but print statistics about the model"

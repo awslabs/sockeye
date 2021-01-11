@@ -11,12 +11,21 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.9]
+
+### Fixed
+
+- Make sure that the top N best params files are cached in a separate
+  directory, even if N > --keep-last-params. This ensures that model
+  averaging will not be crippled when keeping only a few params files
+  during training.
+
 ## [2.3.8]
 
 ### Fixed
 
 - Fix problem identified in issue #925 that caused learning rate
-  warmup to fail in some instances when doing continued training 
+  warmup to fail in some instances when doing continued training
 
 ## [2.3.7]
 
