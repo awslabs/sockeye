@@ -31,6 +31,7 @@ from mxnet.contrib import amp
 
 from . import constants as C
 from . import data_io
+from . import ewc
 from . import horovod_mpi
 from . import loss
 from . import lr_scheduler
@@ -157,7 +158,10 @@ class GluonEarlyStoppingTrainer:
                  dtype: str,
                  using_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
-                 checkpoint_callback: Optional[Callable] = None) -> None:
+                 checkpoint_callback: Optional[Callable] = None,
+                 ewc_fisher_information: Optional[Dict[str, mx.nd.NDArray]] = None,
+                 ewc_best_params: Optional[Dict[str, mx.nd.NDArray]] = None,
+                 ewc_importance: float = 1) -> None:
         self.config = config
         self.optimizer_config = optimizer_config
         self.model = sockeye_model
@@ -166,11 +170,20 @@ class GluonEarlyStoppingTrainer:
         self.context = context
         self.dtype = dtype
         self.using_amp = using_amp
+
+        _ewc_penalty = None
+        if ewc_fisher_information is not None and ewc_best_params is not None:
+            from . import ewc
+            logger.info("EWC")
+            _ewc_penalty = ewc.ElasticWeightConsolidationPenalty(fisher_matrix=ewc_fisher_information,
+                                                                 best_params=ewc_best_params,
+                                                                 importance=ewc_importance)
         self._parallel = parallel.Parallel(len(context) if len(context) > 1 else 0,
                                            ParallelModel(sockeye_model,
                                                          loss_functions,
                                                          trainer,
-                                                         using_amp=using_amp))
+                                                         using_amp=using_amp,
+                                                         ewc_penalty=_ewc_penalty))
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
@@ -737,11 +750,13 @@ class ParallelModel(parallel.Parallelizable):
                  model: Callable,
                  loss_functions: List[loss.Loss],
                  trainer: mx.gluon.Trainer,
-                 using_amp: bool = False) -> None:
+                 using_amp: bool = False,
+                 ewc_penalty: Optional[ewc.ElasticWeightConsolidationPenalty] = None) -> None:
         self.model = model
         self.loss_functions = loss_functions
         self.trainer = trainer
         self.using_amp = using_amp
+        self.ewc_penalty = ewc_penalty
 
     def forward_backward(self, shard: Tuple) -> List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]:
         """
@@ -753,6 +768,13 @@ class ParallelModel(parallel.Parallelizable):
             loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
             loss_values = (v for v, _ in loss_outputs)
             sum_losses = mx.nd.add_n(*loss_values)
+            #print("SUM LOSSES", sum_losses.asscalar())
+            if self.ewc_penalty is not None:
+                current_params = {}
+                for name, param in self.model.collect_params().items():
+                    if param.grad_req != 'null':
+                        current_params[name] = param.data()
+                sum_losses = sum_losses + self.ewc_penalty(current_params)
             if self.using_amp:
                 # AMP applies dynamic loss scaling to the losses (scale up) and
                 # the Trainer (scale down).

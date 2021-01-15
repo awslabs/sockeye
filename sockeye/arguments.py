@@ -657,6 +657,14 @@ def add_model_parameters(params):
                               default=False,
                               help="Allow extra parameters when initializing model parameters from file. "
                                    "Default: %(default)s.")
+    model_params.add_argument('--fisher-information', '-fp',
+                              type=str,
+                              default=None,
+                              help='Existing Fisher information for parameters from --params. Enables EWC.')
+    model_params.add_argument('--ewc-importance',
+                              type=float,
+                              default=0,
+                              help='TBD')
 
     model_params.add_argument('--encoder',
                               choices=C.ENCODERS,
@@ -1084,6 +1092,11 @@ def add_training_args(params):
     train_params.add_argument('--keep-initializations',
                               action="store_true",
                               help='In addition to keeping the last n params files, also keep params from checkpoint 0.')
+
+    train_params.add_argument('--compute-fisher-information',
+                              type=int,
+                              default=0,
+                              help='TODO')
 
     train_params.add_argument('--dry-run',
                               action='store_true',

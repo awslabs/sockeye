@@ -244,7 +244,7 @@ ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
                    "keep_last_params", "seed",
                    "max_updates", "min_updates",
                    "max_num_epochs", "min_num_epochs",
-                   "max_samples", "min_samples", "max_checkpoints", "max_seconds"]
+                   "max_samples", "min_samples", "max_checkpoints", "max_seconds", "compute_fisher_information"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"

@@ -1052,6 +1052,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         optimizer_config = create_optimizer_config(args)
         training_model.initialize(optimizer_config.initializer, ctx=context)
+
+        ewc_fisher_information = None
+        ewc_best_params = None
         if args.params is not None:  # load existing parameters if present
             training_model.load_parameters(filename=args.params,
                                            ctx=context,
@@ -1059,6 +1062,11 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                            ignore_extra=args.ignore_extra_params,
                                            cast_dtype=True,
                                            dtype_source='current')
+            if args.fisher_information is not None:
+                logger.info("ENABLING ELASTIC WEIGHT CONSOLIDATION")
+                ewc_fisher_information = mx.nd.load(args.fisher_information)
+                ewc_best_params = {name: param.data().copy() for name, param in training_model.collect_params().items()}
+                
         params = training_model.collect_params()
         # set grad_req for fixed params
         params = set_grad_req_for_fixed_params(config=model_config,
@@ -1130,13 +1138,25 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             dtype=args.dtype,
             using_amp=using_amp,
             custom_metrics_logger=custom_metrics_logger,
-            checkpoint_callback=checkpoint_callback
+            checkpoint_callback=checkpoint_callback,
+            ewc_fisher_information=ewc_fisher_information,
+            ewc_best_params=ewc_best_params,
+            ewc_importance=args.ewc_importance
         )
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
                                                training_model, source_vocabs, target_vocabs, hybridize=hybridize)
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
+
+        if args.compute_fisher_information > 0:
+            from . import ewc
+            ewc.compute_fisher(model=training_model,
+                               train_iter=train_iter,
+                               loss_functions=losses,
+                               context=context,
+                               output_folder=output_folder,
+                               steps=args.compute_fisher_information)
         return training_state
 
 
