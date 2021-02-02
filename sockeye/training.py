@@ -39,7 +39,6 @@ from . import lr_scheduler
 from . import parallel
 from . import utils
 from . import vocab
-from . import average
 from .checkpoint_decoder import CheckpointDecoder
 from .config import Config
 from .model import SockeyeModel
@@ -298,7 +297,6 @@ class GluonEarlyStoppingTrainer:
             self._save_trainer_states(self.best_optimizer_states_fname)
             self._save_lr_scheduler(self.best_lr_scheduler_fname)
         self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
-        self._cache_best_params()
         for metric in train_metrics:
             metric.reset()
         self._save_training_state(train_iter)
@@ -562,83 +560,14 @@ class GluonEarlyStoppingTrainer:
         os.symlink(actual_best_params_fname, self.best_params_fname)
         logger.info("'%s' now points to '%s'", self.best_params_fname, actual_best_params_fname)
 
-    def _cache_best_params(self):
-        """
-        Finds N best points from .metrics file according to strategy.
-
-        :param strategy: Combination strategy.
-        :param metric: Metric according to which checkpoints are selected.  Corresponds to columns in model/metrics file.
-        """
-        
-        if self.config.max_params_files_to_cache <= 0:
-            return
-        
-        metric = self.config.cache_metric
-        strategy = self.config.cache_strategy
-        
-        cache_path = os.path.realpath(os.path.join(self.config.output_dir, "best_params_cache"))
-        
-        if not os.path.exists(cache_path):
-            os.makedirs(cache_path)
-            logger.info("created cache directory %s..." % (cache_path))
-
-        self.config.max_params_files_to_keep = max(self.config.max_params_files_to_keep, self.config.max_params_files_to_cache)
-            
-        maximize = C.METRIC_MAXIMIZE[metric]
-        points = utils.get_validation_metric_points(model_path=os.path.realpath(self.config.output_dir), metric=metric)
-
-        if strategy == "best":
-            # N best scoring points
-            top_n = average._strategy_best(points, self.config.max_params_files_to_cache, maximize)
-
-        elif strategy == "last":
-            # N sequential points ending with overall best
-            top_n = average._strategy_last(points, self.config.max_params_files_to_cache, maximize)
-
-        elif strategy == "lifespan":
-            # Track lifespan of every "new best" point
-            # Points dominated by a previous better point have lifespan 0
-            top_n = average._strategy_lifespan(points, self.config.max_params_files_to_cache, maximize)
-        else:
-            raise RuntimeError("Unknown strategy, options: best last lifespan")
-
-        #
-        # copy metrics file to cache directory for use during any averaging operations
-        #
-
-        shutil.copy2(self.metrics_fname, cache_path)
-
-        #
-        # copy new files into cache directory
-        #
-
-        for point in top_n:
-            path = os.path.join(self.config.output_dir, C.PARAMS_NAME % point[-1])
-            cached = os.path.join(cache_path, C.PARAMS_NAME % point[-1])
-            
-            if os.path.exists(path):
-                if not os.path.exists(cached):
-                    shutil.copy2(path, cache_path)
-
-        #
-        # clean out extra files from cache directory
-        #
-
-        keep = [os.path.join(cache_path, C.PARAMS_NAME % x[1]) for x in top_n]
-        paths = [str(x) for x in Path(cache_path).iterdir()]
-
-        if len(paths) > self.config.max_params_files_to_cache:
-            for path in paths:
-                if path not in keep:
-                    os.remove(path)
-
     def _save_params(self):
         """
         Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
         """
         self.model.save_parameters(self.current_params_fname)
         utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
-                                   self.state.best_checkpoint, self.config.keep_initializations)
+                                   self.state.best_checkpoint, self.config.keep_initializations,
+                                   self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
 
     def _save_trainer_states(self, fname):
         trainer_save_states_no_dump_optimizer(self.trainer, fname)
@@ -773,7 +702,8 @@ class GluonEarlyStoppingTrainer:
         Cleans parameter files, training state directory and waits for remaining decoding processes.
         """
         utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep,
-                                   self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations)
+                                   self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations,
+                                   self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
 
         if not keep_training_state:
             if os.path.exists(self.training_state_dirname):
