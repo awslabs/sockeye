@@ -11,14 +11,21 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.10]
+
+### Changed
+
+- Make sure that the top N best params files retained, even if N > --keep-last-params. This ensures that model
+  averaging will not be crippled when keeping only a few params files during training. This can result in a
+  significant savings of disk space during training.
+
 ## [2.3.9]
 
-### Fixed
+### Added
 
-- Make sure that the top N best params files are cached in a separate
-  directory, even if N > --keep-last-params. This ensures that model
-  averaging will not be crippled when keeping only a few params files
-  during training.
+- Added scripts for processing Sockeye benchmark output (`--output-type benchmark`):
+  - [benchmark_to_output.py](sockeye_contrib/benchmark/benchmark_to_output.py) extracts translations
+  - [benchmark_to_percentiles.py](sockeye_contrib/benchmark/benchmark_to_percentiles.py) computes percentiles
 
 ## [2.3.8]
 
