@@ -707,32 +707,29 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
     # make sure we keep N best params files from .metrics file according to strategy.
     #
 
-    top_n = []
+    top_n : Set[int] = set()
     metrics_path = os.path.join(output_folder, C.METRICS_NAME)
     
     if max_params_files_to_cache > 0 and os.path.exists(metrics_path):
-        metric = cache_metric
-        strategy = cache_strategy
-            
-        maximize = C.METRIC_MAXIMIZE[metric]
-        points = get_validation_metric_points(model_path=output_folder, metric=metric)
+        maximize = C.METRIC_MAXIMIZE[cache_metric]
+        points = get_validation_metric_points(model_path=output_folder, metric=cache_metric)
 
-        if strategy == "best":
+        if cache_strategy == C.AVERAGE_BEST:
             # N best scoring points
-            top_n = average._strategy_best(points, max_params_files_to_cache, maximize)
+            top = average.strategy_best(points, max_params_files_to_cache, maximize)
 
-        elif strategy == "last":
+        elif cache_strategy == C.AVERAGE_LAST:
             # N sequential points ending with overall best
-            top_n = average._strategy_last(points, max_params_files_to_cache, maximize)
+            top = average.strategy_last(points, max_params_files_to_cache, maximize)
 
-        elif strategy == "lifespan":
+        elif cache_strategy == C.AVERAGE_LIFESPAN:
             # Track lifespan of every "new best" point
             # Points dominated by a previous better point have lifespan 0
-            top_n = average._strategy_lifespan(points, max_params_files_to_cache, maximize)
+            top = average.strategy_lifespan(points, max_params_files_to_cache, maximize)
         else:
-            raise RuntimeError("Unknown strategy, options: [best, last, lifespan]")
+            raise RuntimeError("Unknown strategy, options are: %s" % (C.AVERAGE_CHOICES))
 
-    top_n = [x[1] for x in top_n]
+        top_n = set([x[1] for x in top])
 
     #
     # get rid of params files that are neither among the latest, nor among the best

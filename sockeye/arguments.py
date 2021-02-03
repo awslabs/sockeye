@@ -1087,19 +1087,24 @@ def add_training_args(params):
 
     
     train_params.add_argument('--cache-last-best-params',
+                              required=False,
                               type=int,
-                              default=4,
-                              help='Cache the last n best params files to a separate directory, use 0 or negative to disable. Default: %(default)s')
+                              default=0,
+                              help='Cache the last n best params files, as distinct from the last n in sequence. Use 0 or negative to disable. Default: %(default)s')
 
     train_params.add_argument('--cache-strategy',
+                              required=False,
                               type=str,
-                              default="best",
-                              help='Strategy to use when deciding which are the "best" params files. Options = [best, last, lifespan]. Default: %(default)s')
+                              default=C.AVERAGE_BEST,
+                              choices=C.AVERAGE_CHOICES,
+                              help='Strategy to use when deciding which are the "best" params files. Default: %(default)s')
 
     train_params.add_argument('--cache-metric',
+                              required=False,
                               type=str,
                               default=C.PERPLEXITY,
-                              help='Metric to use when deciding which are the "best" params files. Options = %s, Default: %s' % (str(C.METRICS), str(C.PERPLEXITY)))
+                              choices=C.METRICS,
+                              help='Metric to use when deciding which are the "best" params files. Default: %(default)s')
 
     train_params.add_argument('--dry-run',
                               action='store_true',

@@ -228,8 +228,8 @@ def test_inference_args(test_params, expected_params):
               seed=1,
               keep_last_params=-1,
               keep_initializations=False,
-              cache_last_best_params=4,
-              cache_strategy="best",
+              cache_last_best_params=0,
+              cache_strategy=C.AVERAGE_BEST,
               cache_metric=C.PERPLEXITY,
               dry_run=False)),
 ])
