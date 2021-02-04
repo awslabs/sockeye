@@ -627,7 +627,7 @@ class BeamSearch(mx.gluon.Block):
             if any(raw_constraint_list):
                 # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
                 constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
-                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)
+                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)  # type: ignore
                 full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
                 raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                        raw_constraint_list]

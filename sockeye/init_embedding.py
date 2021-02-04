@@ -100,7 +100,7 @@ def load_weight(weight_file: str,
                 weight_name: str,
                 weight_file_cache: Dict[str, Dict]) -> mx.nd.NDArray:
     """
-    Load wight fron a file or the cache if it was loaded before.
+    Load wight from a file or the cache if it was loaded before.
 
     :param weight_file: Weight file.
     :param weight_name: Weight name.
@@ -148,7 +148,7 @@ def init_embeddings(args: argparse.Namespace):
         sys.exit(1)
 
     params = {}  # type: Dict[str, mx.nd.NDArray]
-    weight_file_cache = {}  # type: Dict[str, np.ndarray]
+    weight_file_cache = {}  # type: Dict[str, Dict[str, np.ndarray]]
     for weight_file, vocab_in_file, vocab_out_file, name in zip(args.weight_files, args.vocabularies_in,
                                                                 args.vocabularies_out, args.names):
         weight = load_weight(weight_file, name, weight_file_cache)
