@@ -1162,12 +1162,12 @@ class Translator:
             sequence = _unshift_target_factors(sequence, fill_last_with=C.EOS_ID)
         else:
             sequence = sequence.tolist()
-        length = int(length)
-        sequence = sequence[:length]
+        length = int(length)  # type: ignore
+        sequence = sequence[:length]  # type: ignore
         score = float(seq_score)
         estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
         beam_history_list = [beam_history] if beam_history is not None else []
-        return Translation(sequence, score, beam_history_list,
+        return Translation(sequence, score, beam_history_list,  # type: ignore
                            nbest_translations=None,
                            estimated_reference_length=estimated_reference_length)
 
@@ -1184,5 +1184,5 @@ def _unshift_target_factors(sequence: np.ndarray, fill_last_with: int = C.EOS_ID
     _fillvalue = num_factors_to_shift * [fill_last_with]
     _words = sequence[:, 0]  # tokens from t==0 onwards
     _next_factors = sequence[1:, 1:]  # factors from t==1 onwards
-    sequence = [(w, *fs) for w, fs in itertools.zip_longest(_words, _next_factors, fillvalue=_fillvalue)]
+    sequence = [(w, *fs) for w, fs in itertools.zip_longest(_words, _next_factors, fillvalue=_fillvalue)]  # type: ignore
     return sequence
