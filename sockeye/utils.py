@@ -37,6 +37,7 @@ import portalocker
 from . import __version__, constants as C
 from . import horovod_mpi
 from .log import log_sockeye_version, log_mxnet_version
+from . import average
 
 logger = logging.getLogger(__name__)
 
@@ -688,7 +689,8 @@ def metric_value_is_better(new: float, old: float, metric: str) -> bool:
         return new < old
 
 
-def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int, keep_first: bool):
+def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int, keep_first: bool,
+                         max_params_files_to_cache: int, cache_metric: str, cache_strategy: str):
     """
     Deletes oldest parameter files from a model folder.
 
@@ -700,12 +702,46 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
     """
     if max_to_keep <= 0:
         return
+
+    #
+    # make sure we keep N best params files from .metrics file according to strategy.
+    #
+
+    top_n : Set[int] = set()
+    metrics_path = os.path.join(output_folder, C.METRICS_NAME)
+    
+    if max_params_files_to_cache > 0 and os.path.exists(metrics_path):
+        maximize = C.METRIC_MAXIMIZE[cache_metric]
+        points = get_validation_metric_points(model_path=output_folder, metric=cache_metric)
+
+        if cache_strategy == C.AVERAGE_BEST:
+            # N best scoring points
+            top = average.strategy_best(points, max_params_files_to_cache, maximize)
+
+        elif cache_strategy == C.AVERAGE_LAST:
+            # N sequential points ending with overall best
+            top = average.strategy_last(points, max_params_files_to_cache, maximize)
+
+        elif cache_strategy == C.AVERAGE_LIFESPAN:
+            # Track lifespan of every "new best" point
+            # Points dominated by a previous better point have lifespan 0
+            top = average.strategy_lifespan(points, max_params_files_to_cache, maximize)
+        else:
+            raise RuntimeError("Unknown strategy, options are: %s" % (C.AVERAGE_CHOICES))
+
+        top_n = set([x[1] for x in top])
+
+    #
+    # get rid of params files that are neither among the latest, nor among the best
+    #
+
     existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
     params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
+    
     for n in range(1 if keep_first else 0, max(1, checkpoint - max_to_keep + 1)):
         if n != best_checkpoint:
             param_fname_n = params_name_with_dir % n
-            if param_fname_n in existing_files:
+            if param_fname_n in existing_files and n not in top_n:
                 try:
                     os.remove(param_fname_n)
                 except FileNotFoundError:

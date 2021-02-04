@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from math import sqrt
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
 
+from pathlib import Path
+
 import mxnet as mx
 import numpy as np
 from mxnet.contrib import amp
@@ -57,6 +59,9 @@ class TrainerConfig(Config):
     early_stopping_metric: str
     max_params_files_to_keep: int
     keep_initializations: bool
+    max_params_files_to_cache: int
+    cache_strategy: str
+    cache_metric: str
     checkpoint_interval: int
     max_num_checkpoint_not_improved: int
     checkpoint_improvement_threshold: float
@@ -561,7 +566,8 @@ class GluonEarlyStoppingTrainer:
         """
         self.model.save_parameters(self.current_params_fname)
         utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
-                                   self.state.best_checkpoint, self.config.keep_initializations)
+                                   self.state.best_checkpoint, self.config.keep_initializations,
+                                   self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
 
     def _save_trainer_states(self, fname):
         trainer_save_states_no_dump_optimizer(self.trainer, fname)
@@ -696,7 +702,8 @@ class GluonEarlyStoppingTrainer:
         Cleans parameter files, training state directory and waits for remaining decoding processes.
         """
         utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep,
-                                   self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations)
+                                   self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations,
+                                   self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
 
         if not keep_training_state:
             if os.path.exists(self.training_state_dirname):
