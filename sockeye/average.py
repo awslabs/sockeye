@@ -75,15 +75,15 @@ def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.P
     param_path = os.path.join(model_path, C.PARAMS_NAME)
     points = [(value, checkpoint) for value, checkpoint in points if os.path.exists(param_path % checkpoint)]
 
-    if strategy == "best":
+    if strategy == C.AVERAGE_BEST:
         # N best scoring points
         top_n = strategy_best(points, size, maximize)
 
-    elif strategy == "last":
+    elif strategy == C.AVERAGE_LAST:
         # N sequential points ending with overall best
         top_n = strategy_last(points, size, maximize)
 
-    elif strategy == "lifespan":
+    elif strategy == C.AVERAGE_LIFESPAN:
         # Track lifespan of every "new best" point
         # Points dominated by a previous better point have lifespan 0
         top_n = strategy_lifespan(points, size, maximize)

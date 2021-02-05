@@ -18,10 +18,8 @@ import random
 import sys
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 from unittest.mock import patch
-
-import numpy as np
 
 import sockeye.average
 import sockeye.checkpoint_decoder
