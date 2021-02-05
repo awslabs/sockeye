@@ -23,7 +23,6 @@ import sockeye.encoder
 import sockeye.model
 import sockeye.training
 import sockeye.constants as C
-import sockeye.utils
 
 
 def test_cleanup_param_files():
@@ -31,7 +30,7 @@ def test_cleanup_param_files():
         for n in itertools.chain(range(1, 20, 2), range(21, 41)):
             # Create empty files
             open(os.path.join(tmp_dir, C.PARAMS_NAME % n), "w").close()
-        sockeye.utils.cleanup_params_files(tmp_dir, 5, 40, 17, False, 8, "perplexity", "best")
+        sockeye.training.cleanup_params_files(tmp_dir, 5, 40, 17, False, 8, "perplexity", "best")
 
         expectedSurviving = set([os.path.join(tmp_dir, C.PARAMS_NAME % n)
                                  for n in [17, 36, 37, 38, 39, 40]])
@@ -44,7 +43,7 @@ def test_cleanup_param_files_keep_first():
         for n in itertools.chain(range(0, 20, 2), range(21, 41)):
             # Create empty files
             open(os.path.join(tmp_dir, C.PARAMS_NAME % n), "w").close()
-        sockeye.utils.cleanup_params_files(tmp_dir, 5, 40, 16, True, 8, "perplexity", "best")
+        sockeye.training.cleanup_params_files(tmp_dir, 5, 40, 16, True, 8, "perplexity", "best")
 
         expectedSurviving = set([os.path.join(tmp_dir, C.PARAMS_NAME % n)
                                  for n in [0, 16, 36, 37, 38, 39, 40]])
