@@ -1831,7 +1831,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                 self._load_shard()
             else:
                 raise StopIteration
-        return self.shard_iter.next()
+        return self.shard_iter.next()  # pylint: disable=E1102
 
     def save_state(self, fname: str):
         with open(fname, "wb") as fp:
