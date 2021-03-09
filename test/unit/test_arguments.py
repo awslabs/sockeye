@@ -167,6 +167,7 @@ def test_model_parameters(test_params, expected_params):
                       dtype=None,
                       mc_dropout=False,
                       softmax_temperature=None,
+                      prevent_unk=False,
                       sample=None,
                       seed=None)),
 ])

@@ -510,7 +510,8 @@ class BeamSearch(mx.gluon.Block):
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
-                 sample: Optional[int] = None) -> None:
+                 sample: Optional[int] = None,
+                 prevent_unk: bool = False,) -> None:
         super().__init__(prefix='beam_search_')
         self.beam_size = beam_size
         self.dtype = dtype
@@ -523,6 +524,7 @@ class BeamSearch(mx.gluon.Block):
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
         self.global_avoid_trie = global_avoid_trie
+        self.prevent_unk = prevent_unk
 
         with self.name_scope():
             self._sort_states = SortStates(state_structure=self._inference.state_structure(),
@@ -677,7 +679,12 @@ class BeamSearch(mx.gluon.Block):
             target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
                                                                                      model_states,
                                                                                      vocab_slice_ids)
-
+            # Do not generate <unk> token if prevent_unk is specified
+            if self.prevent_unk:
+                if target_dists.ndim == 1:
+                    target_dists[C.UNK_ID] = float('inf')
+                else:
+                    target_dists[:, C.UNK_ID] = float('inf')
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
@@ -791,7 +798,8 @@ def get_beam_search(models: List[SockeyeModel],
                     avoid_list: Optional[str] = None,
                     sample: Optional[int] = None,
                     hybridize: bool = True,
-                    softmax_temperature: Optional[float] = None) -> BeamSearch:
+                    softmax_temperature: Optional[float] = None,
+                    prevent_unk: bool = False) -> BeamSearch:
 
     inference = None  # type: Optional[_Inference]
     if len(models) == 1:
@@ -822,6 +830,7 @@ def get_beam_search(models: List[SockeyeModel],
         num_source_factors=models[0].num_source_factors,
         num_target_factors=models[0].num_target_factors,
         global_avoid_trie=global_avoid_trie,
+        prevent_unk=prevent_unk,
         inference=inference
     )
     bs.initialize()

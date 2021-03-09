@@ -694,7 +694,8 @@ class Translator:
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None,
-                 softmax_temperature: Optional[float] = None) -> None:
+                 softmax_temperature: Optional[float] = None,
+                 prevent_unk: bool = False) -> None:
         self.context = context
         self.dtype = C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
         self._scorer = scorer
@@ -740,7 +741,8 @@ class Translator:
             constant_length_ratio=constant_length_ratio,
             avoid_list=avoid_list,
             hybridize=hybridize,
-            softmax_temperature=softmax_temperature)
+            softmax_temperature=softmax_temperature,
+            prevent_unk=prevent_unk)
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,

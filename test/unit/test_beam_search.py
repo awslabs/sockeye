@@ -328,7 +328,8 @@ def test_beam_search():
         inference=inference,
         beam_search_stop=C.BEAM_SEARCH_STOP_ALL,
         global_avoid_trie=None,
-        sample=None)
+        sample=None,
+        prevent_unk=True)
 
     # inputs
     batch_size = 1
@@ -351,4 +352,3 @@ def test_beam_search():
 
     print(best_hyp_indices)
     print(best_word_indices)
-
