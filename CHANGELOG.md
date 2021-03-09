@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.11]
+
+### Added
+- Added option `prevent_unk` to avoid generating `<unk>` token in beam search.
+
 ## [2.3.10]
 
 ### Changed
