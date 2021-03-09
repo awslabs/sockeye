@@ -147,70 +147,88 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
             assert read_sequences == expected_sequences
 
 
-@pytest.mark.parametrize("source_iterables, target_iterable",
+@pytest.mark.parametrize("source_iterables, target_iterables",
                          [
                              (
                                      [[[0], [1, 1], [2], [3, 3, 3]], [[0], [1, 1], [2], [3, 3, 3]]],
-                                     [[0], [1]]
+                                     [[[0], [1]]]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
-                                     [[0], [1, 1], [2], [3, 3, 3]]
+                                     [[[0], [1, 1], [2], [3, 3, 3]]]
                              ),
                              (
                                      [[[0], [1, 1]]],
-                                     [[0], [1, 1], [2], [3, 3, 3]]
+                                     [[[0], [1, 1], [2], [3, 3, 3]]]
                              ),
                          ])
-def test_nonparallel_iter(source_iterables, target_iterable):
+def test_nonparallel_iter(source_iterables, target_iterables):
     with pytest.raises(SockeyeError) as e:
-        list(data_io.parallel_iter(source_iterables, target_iterable))
-    assert str(e.value) == "Different number of lines in source(s) and target iterables."
+        list(data_io.parallel_iter(source_iterables, target_iterables))
+    assert str(e.value) == "Different number of lines in source(s) and target(s) iterables."
 
 
-@pytest.mark.parametrize("source_iterables, target_iterable",
+@pytest.mark.parametrize("source_iterables, target_iterables",
                          [
                              (
                                      [[[0], [1, 1]], [[0], [1]]],
-                                     [[0], [1]]
+                                     [[[0], [1]]]
                              )
                          ])
-def test_nontoken_parallel_iter(source_iterables, target_iterable):
+def test_not_source_token_parallel_iter(source_iterables, target_iterables):
     with pytest.raises(SockeyeError) as e:
-        list(data_io.parallel_iter(source_iterables, target_iterable))
+        list(data_io.parallel_iter(source_iterables, target_iterables))
     assert str(e.value).startswith("Source sequences are not token-parallel")
 
 
-@pytest.mark.parametrize("source_iterables, target_iterable, expected",
+@pytest.mark.parametrize("source_iterables, target_iterables",
+                         [
+                             (
+                                     [[[0], [1]]],
+                                     [[[0], [1, 1]], [[0], [1]]],
+                             )
+                         ])
+def test_not_target_token_parallel_iter(source_iterables, target_iterables):
+    with pytest.raises(SockeyeError) as e:
+        list(data_io.parallel_iter(source_iterables, target_iterables))
+    assert str(e.value).startswith("Target sequences are not token-parallel")
+
+
+@pytest.mark.parametrize("source_iterables, target_iterables, expected",
                          [
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
-                                     [[0], [1]],
-                                     [([[0], [0]], [0]), ([[1, 1], [1, 1]], [1])]
+                                     [[[0], [1]]],
+                                     [([[0], [0]], [[0]]), ([[1, 1], [1, 1]], [[1]])]
                              ),
                              (
                                      [[[0], None], [[0], None]],
-                                     [[0], [1]],
-                                     [([[0], [0]], [0])]
+                                     [[[0], [1]]],
+                                     [([[0], [0]], [[0]])]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
-                                     [[0], None],
-                                     [([[0], [0]], [0])]
+                                     [[[0], None]],
+                                     [([[0], [0]], [[0]])]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
-                                     [None, [1]],
-                                     [([[1, 1], [1, 1]], [1])]
+                                     [[None, [1]]],
+                                     [([[1, 1], [1, 1]], [[1]])]
+                             ),
+                             (
+                                     [[None, [1]]],
+                                     [[None, [1, 1]], [None, [1, 1]]],
+                                     [([[1]], [[1, 1], [1, 1]])]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
-                                     [None, None],
+                                     [[None, None]],
                                      []
                              )
                          ])
-def test_parallel_iter(source_iterables, target_iterable, expected):
-    assert list(data_io.parallel_iter(source_iterables, target_iterable)) == expected
+def test_parallel_iter(source_iterables, target_iterables, expected):
+    assert list(data_io.parallel_iter(source_iterables, target_iterables)) == expected
 
 
 def test_sample_based_define_bucket_batch_sizes():
@@ -308,7 +326,7 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
                      for given_count in bucket_counts]
     source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0]), 1))) for count, bucket in
               zip(bucket_counts, buckets)]
-    target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(2, bucket[1])))) for count, bucket in
+    target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(2, bucket[1]), 1))) for count, bucket in
               zip(bucket_counts, buckets)]
     return source, target
 
@@ -374,7 +392,7 @@ def test_get_permutations():
 
 def test_parallel_data_set_permute():
     batch_size = 5
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
@@ -401,7 +419,7 @@ def test_parallel_data_set_permute():
 def test_get_batch_indices():
     max_bucket_size = 50
     batch_size = 10
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
@@ -452,30 +470,30 @@ def test_get_parallel_bucket(buckets, source_length, target_length, expected_buc
     assert bucket == expected_bucket
 
 
-@pytest.mark.parametrize("sources, target, expected_num_sents, expected_mean, expected_std",
+@pytest.mark.parametrize("sources, targets, expected_num_sents, expected_mean, expected_std",
                          [([[[1, 1, 1], [2, 2, 2], [3, 3, 3]]],
-                           [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.0, 0.0),
+                           [[[1, 1, 1], [2, 2, 2], [3, 3, 3]]], 3, 1.0, 0.0),
                           ([[[1, 1], [2, 2], [3, 3]]],
-                           [[1, 1, 1], [2, 2, 2], [3, 3, 3]], 3, 1.5, 0.0),
+                           [[[1, 1, 1], [2, 2, 2], [3, 3, 3]]], 3, 1.5, 0.0),
                           ([[[1, 1, 1], [2, 2], [3, 3, 3, 3, 3, 3, 3]]],
-                           [[1, 1, 1], [2], [3, 3, 3]], 2, 0.75, 0.25)])
-def test_calculate_length_statistics(sources, target, expected_num_sents, expected_mean, expected_std):
-    length_statistics = data_io.calculate_length_statistics(sources, target, 5, 5)
-    assert len(sources[0]) == len(target)
+                           [[[1, 1, 1], [2], [3, 3, 3]]], 2, 0.75, 0.25)])
+def test_calculate_length_statistics(sources, targets, expected_num_sents, expected_mean, expected_std):
+    length_statistics = data_io.calculate_length_statistics(sources, targets, 5, 5)
+    assert len(sources[0]) == len(targets[0])
     assert length_statistics.num_sents == expected_num_sents
     assert np.isclose(length_statistics.length_ratio_mean, expected_mean)
     assert np.isclose(length_statistics.length_ratio_std, expected_std)
 
 
-@pytest.mark.parametrize("sources, target",
+@pytest.mark.parametrize("sources, targets",
                          [
                              ([[[1, 1, 1], [2, 2, 2], [3, 3, 3]],
                                [[1, 1, 1], [2, 2], [3, 3, 3]]],
-                              [[1, 1, 1], [2, 2, 2], [3, 3, 3]])
+                              [[[1, 1, 1], [2, 2, 2], [3, 3, 3]]])
                          ])
-def test_non_parallel_calculate_length_statistics(sources, target):
+def test_non_parallel_calculate_length_statistics(sources, targets):
     with pytest.raises(SockeyeError):
-        data_io.calculate_length_statistics(sources, target, 5, 5)
+        data_io.calculate_length_statistics(sources, targets, 5, 5)
 
 
 def test_get_training_data_iters():
@@ -490,6 +508,7 @@ def test_get_training_data_iters():
     test_line_count_empty = 0
     test_max_length = 30
     batch_size = 5
+    num_source_factors = num_target_factors = 1
     with tmp_digits_dataset("tmp_corpus",
                             train_line_count, train_line_count_empty, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
@@ -500,13 +519,13 @@ def test_get_training_data_iters():
 
         train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=[data['train_source']],
-            target=data['train_target'],
+            targets=[data['train_target']],
             validation_sources=[data['dev_source']],
-            validation_target=data['dev_target'],
+            validation_targets=[data['dev_target']],
             source_vocabs=[vcb],
-            target_vocab=vcb,
+            target_vocabs=[vcb],
             source_vocab_paths=[None],
-            target_vocab_path=None,
+            target_vocab_paths=[None],
             shared_vocab=True,
             batch_size=batch_size,
             batch_type=C.BATCH_TYPE_SENTENCE,
@@ -519,9 +538,9 @@ def test_get_training_data_iters():
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
         assert data_info.sources == [data['train_source']]
-        assert data_info.target == data['train_target']
+        assert data_info.targets == [data['train_target']]
         assert data_info.source_vocabs == [None]
-        assert data_info.target_vocab is None
+        assert data_info.target_vocabs == [None]
         assert config_data.data_statistics.max_observed_len_source == train_max_length
         assert config_data.data_statistics.max_observed_len_target == train_max_length
         assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
@@ -536,22 +555,23 @@ def test_get_training_data_iters():
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]
         eos_id = vcb[C.EOS_SYMBOL]
-        expected_first_target_symbols = np.full((batch_size,), bos_id, dtype='float32')
+        expected_first_target_symbols = np.full((batch_size, 1), bos_id, dtype='float32')
         for epoch in range(2):
             while train_iter.iter_next():
                 batch = train_iter.next()
                 assert isinstance(batch, data_io.Batch)
                 source = batch.source.asnumpy()
                 target = batch.target.asnumpy()
-                label = batch.labels[C.TARGET_LABEL_NAME].asnumpy()
+                label = batch.labels[C.TARGET_LABEL_NAME].asnumpy()  # TODO: still 2-shape: (batch, length)
                 length_ratio_label = batch.labels[C.LENRATIO_LABEL_NAME].asnumpy()
                 assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size
+                assert source.shape[2] == target.shape[2] == num_source_factors == num_target_factors
                 # target first symbol should be BOS
                 # each source sequence contains one EOS symbol
                 assert np.sum(source == eos_id) == batch_size
                 assert np.array_equal(target[:, 0], expected_first_target_symbols)
                 # label first symbol should be 2nd target symbol
-                assert np.array_equal(label[:, 0], target[:, 1])
+                assert np.array_equal(label[:, 0], target[:, 1, 0])
                 # each label sequence contains one EOS symbol
                 assert np.sum(label == eos_id) == batch_size
             train_iter.reset()
@@ -571,7 +591,7 @@ def _data_batches_equal(db1: data_io.Batch, db2: data_io.Batch) -> bool:
 
 def test_parallel_sample_iter():
     batch_size = 2
-    buckets = data_io.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     # The first bucket is going to be empty:
     bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
@@ -650,7 +670,7 @@ def test_sharded_parallel_sample_iter():
         dataset2.save(shard2_fname)
         shard_fnames = [shard1_fname, shard2_fname]
 
-        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes, 'replicate')
+        it = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
 
         # Test 1
         it.next()
@@ -659,8 +679,7 @@ def test_sharded_parallel_sample_iter():
         fname = os.path.join(work_dir, "saved_iter")
         it.save_state(fname)
 
-        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                      'replicate')
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
         it_loaded.reset()
         it_loaded.load_state(fname)
         loaded_batch = it_loaded.next()
@@ -671,8 +690,7 @@ def test_sharded_parallel_sample_iter():
         expected_batch = it.next()
         it.save_state(fname)
 
-        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                      'replicate')
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
         it_loaded.reset()
         it_loaded.load_state(fname)
 
@@ -683,8 +701,7 @@ def test_sharded_parallel_sample_iter():
         it.reset()
         expected_batch = it.next()
         it.save_state(fname)
-        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes,
-                                                      'replicate')
+        it_loaded = data_io.ShardedParallelSampleIter(shard_fnames, buckets, batch_size, bucket_batch_sizes)
         it_loaded.reset()
         it_loaded.load_state(fname)
 
@@ -784,12 +801,13 @@ def test_create_target_and_shifted_label_sequences():
     target_and_label = mx.nd.array([[C.BOS_ID, 4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
                                     [C.BOS_ID, 15, 23, 23, 77, 55, 22, C.EOS_ID],
                                     [C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]])
+    target_and_label = target_and_label.expand_dims(axis=2)
     expected_lengths = mx.nd.array([5, 7, 2])
 
     target, label = data_io.create_target_and_shifted_label_sequences(target_and_label)
 
     assert target.shape[0] == label.shape[0] == target_and_label.shape[0]
     assert target.shape[1] == label.shape[1] == target_and_label.shape[1] - 1
-    lengths = (target != C.PAD_ID).sum(axis=1)
+    lengths = (target != C.PAD_ID).sum(axis=1).squeeze()
     assert np.allclose(lengths.asnumpy(), expected_lengths.asnumpy())
 

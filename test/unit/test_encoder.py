@@ -18,17 +18,16 @@ import sockeye.encoder
 import sockeye.transformer
 
 
-@pytest.mark.parametrize('dropout, factor_configs, is_source', [
-    (0., None, False),
+@pytest.mark.parametrize('dropout, factor_configs', [
+    (0., None),
     (0.1, [sockeye.encoder.FactorConfig(vocab_size=5,
                                         num_embed=5,
-                                        combine=C.SOURCE_FACTORS_COMBINE_SUM,
-                                        share_source_embedding=False)],
-     True),
+                                        combine=C.FACTORS_COMBINE_SUM,
+                                        share_embedding=False)]),
 ])
-def test_embedding_encoder(dropout, factor_configs, is_source):
+def test_embedding_encoder(dropout, factor_configs):
     config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, factor_configs=factor_configs)
-    embedding = sockeye.encoder.Embedding(config, prefix='embedding', is_source=is_source)
+    embedding = sockeye.encoder.Embedding(config, prefix='embedding')
     assert type(embedding) == sockeye.encoder.Embedding
 
 
@@ -51,7 +50,7 @@ def test_get_transformer_encoder(lhuc):
                                                    postprocess_sequence='test_post',
                                                    max_seq_len_source=50,
                                                    max_seq_len_target=60,
-                                                   lhuc=lhuc)
+                                                   use_lhuc=lhuc)
     encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix, dtype = C.DTYPE_FP32)
     encoder.initialize()
     encoder.hybridize(static_alloc=True)

@@ -24,7 +24,6 @@ import yaml
 
 from . import constants as C
 from . import data_io
-from . import utils
 
 
 class ConfigArgumentParser(argparse.ArgumentParser):
@@ -68,7 +67,7 @@ class ConfigArgumentParser(argparse.ArgumentParser):
         group = super().add_argument_group(*args, **kwargs)
         return self._overwrite_add_argument(group)
 
-    def parse_args(self, args=None, namespace=None) -> argparse.Namespace:
+    def parse_args(self, args=None, namespace=None) -> argparse.Namespace:  # type: ignore
         # Mini argument parser to find the config file
         config_parser = argparse.ArgumentParser(add_help=False)
         config_parser.add_argument("--config", type=regular_file())
@@ -388,10 +387,15 @@ def add_logging_args(params):
                                 default=False,
                                 action="store_true",
                                 help='Suppress file logging')
+    log_levels = ['INFO', 'DEBUG', 'ERROR']
     logging_params.add_argument('--loglevel',
                                 default='INFO',
-                                choices=['INFO', 'DEBUG'],
+                                choices=log_levels,
                                 help='Log level. Default: %(default)s.')
+    logging_params.add_argument('--loglevel-secondary-workers',
+                                default='INFO',
+                                choices=log_levels,
+                                help='Console log level for secondary workers. Default: %(default)s.')
 
 
 def add_training_data_args(params, required=False):
@@ -404,14 +408,27 @@ def add_training_data_args(params, required=False):
                         nargs='+',
                         type=regular_file(),
                         default=[],
-                        help='File(s) containing additional token-parallel source side factors. Default: %(default)s.')
+                        help='File(s) containing additional token-parallel source-side factors. Default: %(default)s.')
     params.add_argument('--source-factors-use-source-vocab',
                         required=False,
                         nargs='+',
                         type=bool_str(),
                         default=[],
-                        help='List of bools signaling wether to use the source vocabulary for the source factors. '
+                        help='List of bools signaling whether to use the source vocabulary for the source factors. '
                         'If empty (default) each factor has its own vocabulary.')
+    params.add_argument('--target-factors', '-tf',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='File(s) containing additional token-parallel target-side factors. Default: %(default)s.')
+    params.add_argument('--target-factors-use-target-vocab',
+                        required=False,
+                        nargs='+',
+                        type=bool_str(),
+                        default=[],
+                        help='List of bools signaling whether to use the target vocabulary for the target factors. '
+                             'If empty (default) each factor has its own vocabulary.')
     params.add_argument(C.TRAINING_ARG_TARGET, '-t',
                         required=required,
                         type=regular_file(),
@@ -434,6 +451,13 @@ def add_validation_data_params(params):
                         required=True,
                         type=regular_file(),
                         help='Target side of validation data.')
+    params.add_argument('--validation-target-factors', '-vtf',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='File(s) containing additional token-parallel validation target side factors. '
+                             'Default: %(default)s.')
 
 
 def add_prepared_data_args(params):
@@ -587,6 +611,12 @@ def add_vocab_args(params):
                         type=regular_file(),
                         default=[],
                         help='Existing source factor vocabulary (-ies) (JSON).')
+    params.add_argument('--target-factor-vocabs',
+                        required=False,
+                        nargs='+',
+                        type=regular_file(),
+                        default=[],
+                        help='Existing target factor vocabulary (-ies) (JSON).')
     params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
                         action='store_true',
                         default=False,
@@ -714,18 +744,39 @@ def add_model_parameters(params):
                               help='Embedding size for additional source factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) source factor files. Default: %(default)s.')
-    model_params.add_argument('--source-factors-combine', '-sfc',
-                              choices=C.SOURCE_FACTORS_COMBINE_CHOICES,
-                              default=[C.SOURCE_FACTORS_COMBINE_CONCAT],
+    model_params.add_argument('--target-factors-num-embed',
+                              type=int,
                               nargs='+',
-                              help='How to combine source factors. Can be either one value which will be applied to all '
-                              'source factors, or a list of values. Default: %(default)s.')
+                              default=[],
+                              help='Embedding size for additional target factors. '
+                                   'You must provide as many dimensions as '
+                                   '(validation) target factor files. Default: %(default)s.')
+    model_params.add_argument('--source-factors-combine', '-sfc',
+                              choices=C.FACTORS_COMBINE_CHOICES,
+                              default=[C.FACTORS_COMBINE_SUM],
+                              nargs='+',
+                              help='How to combine source factors. Can be either one value which will be applied to '
+                                   'all source factors, or a list of values. Default: %(default)s.')
+    model_params.add_argument('--target-factors-combine', '-tfc',
+                              choices=C.FACTORS_COMBINE_CHOICES,
+                              default=[C.FACTORS_COMBINE_SUM],
+                              nargs='+',
+                              help='How to combine target factors. Can be either one value which will be applied to '
+                                   'all target factors, or a list of values. Default: %(default)s.')
     model_params.add_argument('--source-factors-share-embedding',
                               type=bool_str(),
                               nargs='+',
                               default=[False],
-                              help='Share the embeddings with the source language. Can be either one value which will be '
-                              'applied to all source factors, or a list of values. Default: do not share.')
+                              help='Share the embeddings with the source language. '
+                                   'Can be either one value which will be applied '
+                                   'to all source factors, or a list of values. Default: %(default)s.')
+    model_params.add_argument('--target-factors-share-embedding',
+                              type=bool_str(),
+                              nargs='+',
+                              default=[False],
+                              help='Share the embeddings with the target language. '
+                                   'Can be either one value which will be applied '
+                                   'to all target factors, or a list of values. Default: %(default)s.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,
@@ -741,8 +792,7 @@ def add_model_parameters(params):
                               help='Attempt to increase loss scale after this many updates without overflow. '
                                    'Default: %(default)s.')
 
-
-def add_batch_args(params, default_batch_size=4096):
+def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',
                         type=int_greater_or_equal(1),
                         default=default_batch_size,
@@ -751,7 +801,7 @@ def add_batch_args(params, default_batch_size=4096):
                              'update_interval. Default: %(default)s.')
     params.add_argument('--batch-type',
                         type=str,
-                        default=C.BATCH_TYPE_WORD,
+                        default=default_batch_type,
                         choices=C.BATCH_TYPES,
                         help='sentence: each batch contains exactly X sentences. '
                              'word: each batch contains approximately X target words. '
@@ -809,6 +859,14 @@ def add_training_args(params):
                               type=int_greater_or_equal(1),
                               default=1,
                               help='Number of fully-connected layers for predicting the length ratio. Default %(default)s.')
+
+    train_params.add_argument('--target-factors-weight',
+                              type=float,
+                              nargs='+',
+                              default=[1.0],
+                              help='Weights of target factor losses. If one value is given, it applies to all '
+                                   'secondary target factors. For multiple values, the number of weights given has '
+                                   'to match the number of target factors. Default: %(default)s.')
 
     train_params.add_argument('--optimized-metric',
                               default=C.PERPLEXITY,
@@ -870,7 +928,6 @@ def add_training_args(params):
                               type=int,
                               default=None,
                               help='Maximum number of epochs (passes through the training data) Default: %(default)s.')
-
     train_params.add_argument('--embed-dropout',
                               type=multiple_values(2, data_type=float),
                               default=(.0, .0),
@@ -1027,6 +1084,29 @@ def add_training_args(params):
                               action="store_true",
                               help='In addition to keeping the last n params files, also keep params from checkpoint 0.')
 
+    train_params.add_argument('--cache-last-best-params',
+                              required=False,
+                              type=int,
+                              default=0,
+                              help='Cache the last n best params files, as distinct from the last n in sequence. '
+                                   'Use 0 or negative to disable. Default: %(default)s')
+
+    train_params.add_argument('--cache-strategy',
+                              required=False,
+                              type=str,
+                              default=C.AVERAGE_BEST,
+                              choices=C.AVERAGE_CHOICES,
+                              help='Strategy to use when deciding which are the "best" params files. '
+                                   'Default: %(default)s')
+
+    train_params.add_argument('--cache-metric',
+                              required=False,
+                              type=str,
+                              default=C.PERPLEXITY,
+                              choices=C.METRICS,
+                              help='Metric to use when deciding which are the "best" params files. '
+                                   'Default: %(default)s')
+
     train_params.add_argument('--dry-run',
                               action='store_true',
                               help="Do not perform any actual training, but print statistics about the model"
@@ -1050,10 +1130,10 @@ def add_translate_cli_args(params):
 
 
 def add_score_cli_args(params):
-    add_training_data_args(params, required=False)
+    add_training_data_args(params, required=True)
     add_vocab_args(params)
     add_device_args(params)
-    add_batch_args(params, default_batch_size=500)
+    add_batch_args(params, default_batch_size=56, default_batch_type=C.BATCH_TYPE_SENTENCE)
     add_hybridization_arg(params)
 
     params = params.add_argument_group("Scoring parameters")

@@ -11,16 +11,138 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [2.2.3]
+## [2.3.10]
+
+### Changed
+
+- Make sure that the top N best params files retained, even if N > --keep-last-params. This ensures that model
+  averaging will not be crippled when keeping only a few params files during training. This can result in a
+  significant savings of disk space during training.
+
+## [2.3.9]
+
 ### Added
- - Log the absolute number of `<unk>` tokens in source and target data
+
+- Added scripts for processing Sockeye benchmark output (`--output-type benchmark`):
+  - [benchmark_to_output.py](sockeye_contrib/benchmark/benchmark_to_output.py) extracts translations
+  - [benchmark_to_percentiles.py](sockeye_contrib/benchmark/benchmark_to_percentiles.py) computes percentiles
+
+## [2.3.8]
+
+### Fixed
+
+- Fix problem identified in issue #925 that caused learning rate
+  warmup to fail in some instances when doing continued training
+
+## [2.3.7]
+
+### Changed
+
+- Use dataclass module to simplify Config classes. No functional change.
+
+## [2.3.6]
+
+### Fixed
+
+- Fixes the problem identified in issue #890, where the lr_scheduler
+  does not behave as expected when continuing training. The problem is
+  that the lr_scheduler is kept as part of the optimizer, but the
+  optimizer is not saved when saving state. Therefore, every time
+  training is restarted, a new lr_scheduler is created with initial
+  parameter settings. Fix by saving and restoring the lr_scheduling
+  separately.
+
+## [2.3.5]
+
+### Fixed
+
+- Fixed issue with LearningRateSchedulerPlateauReduce.__repr__ printing
+	out num_not_improved instead of reduce_num_not_improved.
+
+## [2.3.4]
+
+### Fixed
+
+- Fixed issue with dtype mismatch in beam search when translating with `--dtype float16`.
+
+## [2.3.3]
+
+### Changed
+
+- Upgraded `SacreBLEU` dependency of Sockeye to a newer version (`1.4.14`).
+
+## [2.3.2]
+### Fixed
+
+- Fixed edge case that unintentionally skips softmax for sampling if beam size is 1.
+
+## [2.3.1]
+### Fixed
+
+- Optimizing for BLEU/CHRF with horovod required the secondary workers to also create checkpoint decoders.
+
+## [2.3.0]
+
+### Added
+
+- Added support for target factors.
+  If provided with additional target-side tokens/features (token-parallel to the regular target-side) at training time,
+  the model can now learn to predict these in a multi-task setting. You can provide target factor data similar to source
+  factors: `--target-factors <factor_file1> [<factor_fileN>]`. During training, Sockeye optimizes one loss per factor
+  in a multi-task setting. The weight of the losses can be controlled by `--target-factors-weight`.
+  At inference, target factors are decoded greedily, they do not participate in beam search.
+  The predicted factor at each time step is the argmax over its separate output
+  layer distribution. To receive the target factor predictions at inference time, use
+  `--output-type translation_with_factors`.
+
+### Changed
+
+- `load_model(s)` now returns a list of target vocabs.
+- Default source factor combination changed to `sum` (was `concat` before).
+- `SockeyeModel` class has three new properties: `num_target_factors`, `target_factor_configs`,
+  and `factor_output_layers`.
+
+## [2.2.8]
+
+### Changed
+- Make source/target data parameters required for the scoring CLI to avoid cryptic error messages.
+
+## [2.2.7]
+
+### Added
+
+- Added an argument to specify the log level of secondary workers. Defaults to ERROR to hide any logs except for exceptions.
+
+## [2.2.6]
+
+### Fixed
+- Avoid a crash due to an edge case when no model improvement has been observed by the time the learning rate gets reduced for the first time.
+
+## [2.2.5]
+
+### Fixed
+- Enforce sentence batching for sockeye score tool, set default batch size to 56
+
+## [2.2.4]
+
+### Changed
+- Use softmax with length in DotAttentionCell.
+- Use `contrib.arange_like` in AutoRegressiveBias block to reduce number of ops.
+
+## [2.2.3]
+
+### Added
+
+- Log the absolute number of `<unk>` tokens in source and target data
 
 ## [2.2.2]
 
 ### Fixed
- - Fix: Guard against null division for small batch sizes.
+
+- Fix: Guard against null division for small batch sizes.
 
 ## [2.2.1]
+
 ## Fixed
 
 - Fixes a corner case bug by which the beam decoder can wrongly return a best hypothesis with -infinite score.
@@ -101,7 +223,6 @@ Kim et al, "From Research to Production and Back: Ludicrously Fast Neural Machin
 
 - Reduced the number of arguments for `MultiHeadSelfAttention.hybrid_forward()`.
  `previous_keys` and `previous_values` should now be input together as `previous_states`, a list containing two symbols.
-
 
 ## [2.1.16]
 

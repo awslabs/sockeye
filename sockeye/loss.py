@@ -17,7 +17,7 @@ Functions to generate loss symbols for sequence-to-sequence models.
 import logging
 import math
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import mxnet as mx
 
@@ -38,14 +38,18 @@ class Loss(mx.gluon.HybridBlock):
                  name: str,
                  output_name: str,
                  label_name: str,
-                 weight: float = 1.0) -> None:
+                 weight: float = 1.0,
+                 metric_prefix: str = '') -> None:
         super().__init__(prefix=name)
+        self._name = name
         self._output_name = output_name
         self._label_name = label_name
         self._weight = weight
-        self._metric = None
-        logger.info("Loss: %s | weight=%.2f | metric: %s | output_name: '%s' | label_name: '%s'",
-                    self.prefix, self.weight, self.metric.name, self.output_name, self.label_name)
+        self._metric = None  # type: Optional[LossMetric]
+        self._metric_prefix = metric_prefix
+        logger.info("Loss: %s | weight=%.2f | metric: %s (%s) | output_name: '%s' | label_name: '%s'",
+                    self._name, self.weight, self.metric.name, self.metric.short_name,
+                    self.output_name, self.label_name)
 
     def forward(self, outputs: Dict[str, Any], labels: Dict[str, Any]):
         """
@@ -73,27 +77,32 @@ class Loss(mx.gluon.HybridBlock):
         raise NotImplementedError()
 
     @property
-    def metric(self):
+    def metric(self) -> 'LossMetric':
         if self._metric is None:
             self._metric = self.create_metric()
         return self._metric
 
     @property
-    def weight(self):
+    def weight(self) -> float:
         return self._weight
 
     @property
-    def output_name(self):
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def output_name(self) -> str:
         return self._output_name
 
     @property
-    def label_name(self):
+    def label_name(self) -> str:
         return self._label_name
 
 
 class LossMetric(ABC):
-    def __init__(self, name: str) -> None:
-        self._name = name
+    def __init__(self, name: str, short_name: Optional[str] = None, prefix: str = '') -> None:
+        self._name = prefix + name
+        self._short_name = prefix + short_name if short_name else self._name
         self._sum = 0.0
         self._num_inst = 0.0
 
@@ -101,11 +110,15 @@ class LossMetric(ABC):
         return "%s(%.2f/%.2f=%.2f)" % (self.name, self._sum, self._num_inst, self.get())
 
     def __str__(self):
-        return "%s=%f" % (self.name, self.get())
+        return "%s=%f" % (self.short_name, self.get())
 
     @property
     def name(self):
         return self._name
+
+    @property
+    def short_name(self) -> str:
+        return self._short_name
 
     def update(self, loss, num_samples):
         self._sum += loss
@@ -132,8 +145,10 @@ class CrossEntropyLoss(Loss):
                  dtype: str = C.DTYPE_FP32,
                  output_name: str = C.LOGITS_NAME,
                  label_name: str = C.TARGET_LABEL_NAME,
-                 ignore_label: int = C.PAD_ID) -> None:
-        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
+                 ignore_label: int = C.PAD_ID,
+                 metric_prefix: str = '') -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name,
+                         weight=weight, metric_prefix=metric_prefix)
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._normalization = "valid"
@@ -172,7 +187,7 @@ class CrossEntropyLoss(Loss):
         """
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
-        return PerplexityMetric()
+        return PerplexityMetric(prefix=self._metric_prefix)
 
 
 class CrossEntropyLossWithoutSoftmaxOutput(Loss):
@@ -189,8 +204,10 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
                  output_name: str = C.LOGITS_NAME,
                  label_name: str = C.TARGET_LABEL_NAME,
                  ignore_label: int = C.PAD_ID,
-                 num_labels: int = 0) -> None:  # this is needed for label smoothing
-        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
+                 num_labels: int = 0,
+                 metric_prefix: str = '') -> None:  # this is needed for label smoothing
+        super().__init__(name=name, output_name=output_name, label_name=label_name,
+                         weight=weight, metric_prefix=metric_prefix)
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._dtype = dtype
@@ -227,13 +244,13 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
         """
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
-        return PerplexityMetric()
+        return PerplexityMetric(prefix=self._metric_prefix)
 
 
 class PerplexityMetric(LossMetric):
 
-    def __init__(self, name=C.PERPLEXITY):
-        super().__init__(name=name)
+    def __init__(self, prefix: str = '', name: str = C.PERPLEXITY, short_name: str = C.PERPLEXITY_SHORT_NAME) -> None:
+        super().__init__(prefix=prefix, name=name, short_name=short_name)
 
     def update(self, batch_cross_entropy: float, batch_num_valid: float):
         self._sum += batch_cross_entropy

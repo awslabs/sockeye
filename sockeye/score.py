@@ -38,6 +38,7 @@ def main():
     params = arguments.ConfigArgumentParser(description='Score data with an existing model.')
     arguments.add_score_cli_args(params)
     args = params.parse_args()
+    check_condition(args.batch_type == C.BATCH_TYPE_SENTENCE, "Batching by number of words is not supported")
     score(args)
 
 
@@ -60,7 +61,7 @@ def score(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
-        model, source_vocabs, target_vocab = load_model(args.model, context=context, dtype=args.dtype)
+        model, source_vocabs, target_vocabs = load_model(args.model, context=context, dtype=args.dtype)
 
         max_seq_len_source = model.max_supported_len_source
         max_seq_len_target = model.max_supported_len_target
@@ -72,13 +73,18 @@ def score(args: argparse.Namespace):
 
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
-        target = os.path.abspath(args.target)
+        targets = [args.target] + args.target_factors
+        targets = [str(os.path.abspath(target)) for target in targets]
+
+        check_condition(len(targets) == model.num_target_factors,
+                        "Number of target inputs/factors provided (%d) does not match number of target factors "
+                        "required by the model (%d)" % (len(targets), model.num_target_factors))
 
         score_iter = data_io.get_scoring_data_iters(
             sources=sources,
-            target=target,
+            targets=targets,
             source_vocabs=source_vocabs,
-            target_vocab=target_vocab,
+            target_vocabs=target_vocabs,
             batch_size=args.batch_size,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target)
@@ -103,7 +109,7 @@ def score(args: argparse.Namespace):
         scorer = scoring.Scorer(model=model,
                                 batch_scorer=batch_scorer,
                                 source_vocabs=source_vocabs,
-                                target_vocab=target_vocab,
+                                target_vocabs=target_vocabs,
                                 context=context)
 
         scorer.score(score_iter=score_iter,

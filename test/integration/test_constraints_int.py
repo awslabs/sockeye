@@ -91,23 +91,23 @@ def _test_constrained_type(constraint_type: str, data: Dict[str, Any], translate
         translate_params)
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()
-    constrained_outputs, constrained_scores = collect_translate_output_and_scores(out_path_constrained)
+    constrained_outputs = collect_translate_output_and_scores(out_path_constrained)
     assert len(constrained_outputs) == len(data['test_outputs']) == len(constrained_inputs)
-    for json_source, constrained_out, unconstrained_out in zip(constrained_inputs,
+    for json_source, json_constrained, json_unconstrained in zip(constrained_inputs,
                                                                constrained_outputs,
                                                                data['test_outputs']):
         jobj = json.loads(json_source)
         if jobj.get(constraint_type) is None:
             # if there were no constraints, make sure the output is the same as the unconstrained output
-            assert constrained_out == unconstrained_out
+            assert json_constrained['translation'] == json_unconstrained['json_constrained']
         else:
             restriction = jobj[constraint_type][0]
             if constraint_type == 'constraints':
                 # for positive constraints, ensure the constraint is in the constrained output
-                assert restriction in constrained_out
+                assert restriction in json_constrained['translation']
             else:
                 # for negative constraints, ensure the constraints is *not* in the constrained output
-                assert restriction not in constrained_out
+                assert restriction not in json_constrained['translation']
 
 
 def _create_constrained_inputs(constraint_type: str,

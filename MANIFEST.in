@@ -7,12 +7,7 @@ include pylintrc
 include .flake8
 include typechecked-files
 include test/data/config_with_missing_attributes.yaml
-include test/data/model_2.2.x/config
-include test/data/model_2.2.x/params.best
-include test/data/model_2.2.x/model_input
-include test/data/model_2.2.x/vocab*
-include test/data/model_2.2.x/version
-include test/data/model_2.2.x/README.md
+include test/data/model_2.3.x/*
 include sockeye/git_version.py
 include *.bib
 recursive-include .github *

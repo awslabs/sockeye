@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,6 +17,7 @@ Encoders for sequence-to-sequence models.
 import inspect
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
 import mxnet as mx
@@ -90,38 +91,27 @@ class Encoder(ABC, mx.gluon.HybridBlock):
         """
         return None
 
-
+@dataclass
 class FactorConfig(config.Config):
-
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 combine: str, # From C.SOURCE_FACTORS_COMBINE_CHOICES
-                 share_source_embedding: bool) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.combine = combine
-        self.share_source_embedding = share_source_embedding
+    vocab_size: int
+    num_embed: int
+    combine: str  # From C.FACTORS_COMBINE_CHOICES
+    share_embedding: bool
 
 
+@dataclass
 class EmbeddingConfig(config.Config):
+    vocab_size: int
+    num_embed: int
+    dropout: float
+    num_factors: int = field(init=False)
+    factor_configs: Optional[List[FactorConfig]] = None
+    allow_sparse_grad: bool = False
 
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 dropout: float,
-                 factor_configs: Optional[List[FactorConfig]] = None,
-                 allow_sparse_grad: bool = False) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.dropout = dropout
-        self.factor_configs = factor_configs
+    def __post_init__(self):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
-        self.allow_sparse_grad = allow_sparse_grad
 
 
 class Embedding(Encoder):
@@ -130,20 +120,18 @@ class Embedding(Encoder):
 
     :param config: Embedding config.
     :param prefix: Name prefix for symbols of this encoder.
-    :param is_source: Whether this is the source embedding instance. Default: False.
     :param dtype: Data type. Default: 'float32'.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
                  prefix: str,
-                 is_source: bool = False,
                  embed_weight: Optional[mx.gluon.Parameter] = None,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(prefix=prefix)
         self.config = config
-        self.is_source = is_source
         self._dtype = dtype
+        self._factor_weight_format_string = 'factor%d_weight'
 
         with self.name_scope():
             if embed_weight is None:
@@ -158,10 +146,10 @@ class Embedding(Encoder):
                 self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
             if self.config.factor_configs is not None:
-                for i, fc in enumerate(self.config.factor_configs):
-                    factor_weight_name = 'factor%d_weight' % i
-                    factor_weight = embed_weight if fc.share_source_embedding else \
-                        self.params.get('factor%d_weight' % i, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
+                for i, fc in enumerate(self.config.factor_configs, 1):
+                    factor_weight_name = self._factor_weight_format_string % i
+                    factor_weight = embed_weight if fc.share_embedding else \
+                        self.params.get(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
                     # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
                     setattr(self, factor_weight_name, factor_weight)
 
@@ -170,29 +158,28 @@ class Embedding(Encoder):
         average_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         concat_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         sum_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
-        if self.is_source:
-            if self.config.num_factors > 1 and self.config.factor_configs is not None:
-                data, *data_factors = F.split(data=data,
-                                              num_outputs=self.config.num_factors,
-                                              axis=2,
-                                              squeeze_axis=True)
-                for i, (factor_data, factor_config) in enumerate(zip(data_factors,
-                                                                     self.config.factor_configs)):
-                    factor_weight = kwargs['factor%d_weight' % i]
-                    factor_embedding = F.Embedding(data=factor_data,
-                                                   input_dim=factor_config.vocab_size,
-                                                   weight=factor_weight,
-                                                   output_dim=factor_config.num_embed)
-                    if factor_config.combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-                        concat_factors_embeds.append(factor_embedding)
-                    elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_SUM:
-                        sum_factors_embeds.append(factor_embedding)
-                    elif factor_config.combine == C.SOURCE_FACTORS_COMBINE_AVERAGE:
-                        average_factors_embeds.append(factor_embedding)
-                    else:
-                        raise ValueError("Unknown combine value for source factors: %s" % factor_config.combine)
-            else:
-                data = F.squeeze(data, axis=2)
+        if self.config.num_factors > 1 and self.config.factor_configs is not None:
+            data, *data_factors = F.split(data=data,
+                                          num_outputs=self.config.num_factors,
+                                          axis=2,
+                                          squeeze_axis=True)
+            for i, (factor_data, factor_config) in enumerate(zip(data_factors,
+                                                                 self.config.factor_configs), 1):
+                factor_weight = kwargs[self._factor_weight_format_string % i]
+                factor_embedding = F.Embedding(data=factor_data,
+                                               input_dim=factor_config.vocab_size,
+                                               weight=factor_weight,
+                                               output_dim=factor_config.num_embed)
+                if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
+                    concat_factors_embeds.append(factor_embedding)
+                elif factor_config.combine == C.FACTORS_COMBINE_SUM:
+                    sum_factors_embeds.append(factor_embedding)
+                elif factor_config.combine == C.FACTORS_COMBINE_AVERAGE:
+                    average_factors_embeds.append(factor_embedding)
+                else:
+                    raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
+        else:
+            data = F.squeeze(data, axis=2)
 
         embed = F.Embedding(data,
                             weight=embed_weight,
@@ -308,9 +295,6 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                                                              prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX,
                                                              scale_up_input=True,
                                                              scale_down_positions=False)
-            self.valid_length_mask = transformer.TransformerValidLengthMask(num_heads=self.config.attention_heads,
-                                                                            fold_heads=True,
-                                                                            name="bias")
 
             self.layers = mx.gluon.nn.HybridSequential()
             for i in range(config.num_layers):
@@ -328,13 +312,13 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         if self.config.dropout_prepost > 0.0:
             data = F.Dropout(data=data, p=self.config.dropout_prepost)
 
-        # (batch_size * heads, 1, seq_len)
-        bias = F.expand_dims(self.valid_length_mask(data, valid_length), axis=1)
+        # (batch_size * heads, seq_len)
+        att_valid_length = layers.prepare_source_valid_lengths(F, valid_length, data,
+                                                               num_heads=self.config.attention_heads)
+
         data = F.transpose(data, axes=(1, 0, 2))
-
         for block in self.layers:
-            data = block(data, bias)
-
+            data = block(data, att_valid_length)
         data = self.final_process(data, None)
         data = F.transpose(data, axes=(1, 0, 2))
         return data, valid_length

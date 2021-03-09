@@ -229,6 +229,7 @@ class AvoidBatch:
 
         :return: Two lists of indices: the x coordinates and y coordinates.
         """
+        # TODO(FH): return boolean mask instead of list of tuples
         to_avoid = set()  # type: Set[Tuple[int, int]]
         for i, state in enumerate(self.global_avoid_states):
             for word_id in state.avoid():
@@ -507,7 +508,7 @@ def topk(timestep: int,
          hypotheses: List[ConstrainedHypothesis],
          best_ids: mx.nd.NDArray,
          best_word_ids: mx.nd.NDArray,
-         seq_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array, List[ConstrainedHypothesis], mx.nd.NDArray]:
+         seq_scores: mx.nd.NDArray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
@@ -556,7 +557,7 @@ def _sequential_topk(timestep: int,
                      hypotheses: List[ConstrainedHypothesis],
                      best_ids: mx.nd.NDArray,
                      best_word_ids: mx.nd.NDArray,
-                     sequence_scores: mx.nd.NDArray) -> Tuple[np.array, np.array, np.array,
+                     sequence_scores: mx.nd.NDArray) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
                                                               List[ConstrainedHypothesis], mx.nd.NDArray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.

@@ -138,6 +138,7 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
         self.lr = None  # type: Optional[float]
         self.t_last_log = -1
         self.warmed_up = not self.warmup > 0
+        
         logger.info("Will reduce the learning rate by a factor of %.2f whenever"
                     " the validation score doesn't improve %d times.",
                     reduce_factor, reduce_num_not_improved)
@@ -175,8 +176,13 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
         return lr
 
     def __repr__(self):
-        return "LearningRateSchedulerPlateauReduce(reduce_factor=%.2f, " \
-               "reduce_num_not_improved=%d)" % (self.reduce_factor, self.num_not_improved)
+        return (
+            "LearningRateSchedulerPlateauReduce(reduce_factor=%.2f, reduce_num_not_improved=%d, num_not_improved=%d,"
+            " base_lr=%s, lr=%s, warmup=%d, warmed_up=%s)"
+            %
+            (self.reduce_factor, self.reduce_num_not_improved,
+             self.num_not_improved, self.base_lr, self.lr, self.warmup, self.warmed_up)
+        )
 
 
 def get_lr_scheduler(scheduler_type: str,

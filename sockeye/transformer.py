@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,6 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import mxnet as mx
@@ -21,42 +22,24 @@ from . import layers
 from . import quantization
 
 
+@dataclass
 class TransformerConfig(config.Config):
-
-    def __init__(self,
-                 model_size: int,
-                 attention_heads: int,
-                 feed_forward_num_hidden: int,
-                 act_type: str,
-                 num_layers: int,
-                 dropout_attention: float,
-                 dropout_act: float,
-                 dropout_prepost: float,
-                 positional_embedding_type: str,
-                 preprocess_sequence: str,
-                 postprocess_sequence: str,
-                 max_seq_len_source: int,
-                 max_seq_len_target: int,
-                 decoder_type: str = C.TRANSFORMER_TYPE,
-                 lhuc: bool = False,
-                 depth_key_value: int = 0) -> None:  # type: ignore
-        super().__init__()
-        self.model_size = model_size
-        self.attention_heads = attention_heads
-        self.feed_forward_num_hidden = feed_forward_num_hidden
-        self.act_type = act_type
-        self.num_layers = num_layers
-        self.dropout_attention = dropout_attention
-        self.dropout_act = dropout_act
-        self.dropout_prepost = dropout_prepost
-        self.positional_embedding_type = positional_embedding_type
-        self.preprocess_sequence = preprocess_sequence
-        self.postprocess_sequence = postprocess_sequence
-        self.max_seq_len_source = max_seq_len_source
-        self.max_seq_len_target = max_seq_len_target
-        self.use_lhuc = lhuc
-        self.depth_key_value = depth_key_value
-        self.decoder_type = decoder_type
+    model_size: int
+    attention_heads: int
+    feed_forward_num_hidden: int
+    act_type: str
+    num_layers: int
+    dropout_attention: float
+    dropout_act: float
+    dropout_prepost: float
+    positional_embedding_type: str
+    preprocess_sequence: str
+    postprocess_sequence: str
+    max_seq_len_source: int
+    max_seq_len_target: int
+    decoder_type: str = C.TRANSFORMER_TYPE
+    use_lhuc: bool = False
+    depth_key_value: int = 0
 
 
 class TransformerEncoderBlock(mx.gluon.HybridBlock):
@@ -105,9 +88,9 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
             if config.use_lhuc:
                 self.lhuc = layers.LHUC(config.model_size)
 
-    def hybrid_forward(self, F, data: mx.sym.Symbol, bias: mx.sym.Symbol) -> mx.sym.Symbol:
+    def hybrid_forward(self, F, data: mx.sym.Symbol, lengths: mx.sym.Symbol) -> mx.sym.Symbol:
         # self-attention
-        data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, None, bias)
+        data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, lengths, None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -122,8 +105,8 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
 class TransformerDecoderBlock(mx.gluon.HybridBlock):
     """
-    A transformer decoder block consists of an autoregressive attention block, encoder attention, and a feed-forward layer
-    with pre/post process blocks in between.
+    A transformer decoder block consists of an autoregressive attention block, encoder attention,
+    and a feed-forward layer with pre/post process blocks in between.
     """
 
     def __init__(self,
@@ -215,7 +198,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                        target: mx.sym.Symbol,
                        target_bias: mx.sym.Symbol,
                        source: mx.sym.Symbol,
-                       source_bias: mx.sym.Symbol,
+                       source_att_lengths: mx.sym.Symbol,
                        autoregr_states: mx.sym.Symbol,
                        enc_att_kv: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
                                                                             mx.sym.Symbol]:
@@ -229,8 +212,8 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         # encoder attention
         target_enc_att = self.enc_attention(self.pre_enc_attention(target, None),
                                             source,
+                                            source_att_lengths,
                                             None,
-                                            source_bias,
                                             enc_att_kv)
 
         target = self.post_enc_attention(target_enc_att, target)
@@ -313,9 +296,11 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
         super().__init__(prefix=prefix)
         self.dropout = dropout
         with self.name_scope():
-            self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_', dtype = dtype)
+            self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_',
+                                                     dtype=dtype)
             self.act = layers.get_activation(act_type)
-            self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_', dtype = dtype)
+            self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_',
+                                                     dtype=dtype)
 
     def hybrid_forward(self, F, x):
         h = self.ff1(x)
@@ -326,53 +311,8 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
         return y
 
 
-class TransformerValidLengthMask(mx.gluon.HybridBlock):
-    """
-    Returns bias/mask for variable sequence lengths.
-
-    :param num_heads: Number of attention heads.
-    :param fold_heads: Whether to fold heads dimension into batch dimension.
-    :param name: Name of symbol.
-    :return: Bias symbol. Shape: (batch, seq_len)
-    """
-    def __init__(self, num_heads: Optional[int] = None, fold_heads: bool = True, name: str = '') -> None:
-        super().__init__(prefix=name)
-        self.num_heads = num_heads
-        self.fold_heads = fold_heads
-        self._dtype = 'float32'
-
-    def cast(self, dtype):
-        self._dtype = dtype
-        super().cast(dtype)
-
-    def hybrid_forward(self, F, data, lengths):
-        """
-        Returns bias/mask for variable sequence lengths.
-
-        :param F: symbolic or ndarray.
-        :param data: Input data to mask. Shape: (batch, seq_len, _).
-        :param lengths: Sequence lengths. Shape: (batch,).
-        :return:
-        """
-        # (batch, 1)
-        mask = F.reshape(F.zeros_like(lengths.astype(self._dtype)), shape=(-1, 1))
-        # (batch, seq_len)
-        mask = F.broadcast_like(mask, data, lhs_axes=(1,), rhs_axes=(1,))
-        # (batch_size, max_length)
-        mask = F.SequenceMask(data=mask,
-                              use_sequence_length=True,
-                              sequence_length=lengths,
-                              axis=1,
-                              value=-C.LARGE_VALUES[self._dtype])
-        if self.num_heads is not None:
-            # (batch_size, heads, max_length) if fold_heads == False else (batch_size * heads, max_length)
-            mask = layers.broadcast_to_heads(F, mask, self.num_heads, ndim=2, fold_heads=self.fold_heads)
-
-        return F.BlockGrad(mask)
-
-
 class AutoRegressiveBias(mx.gluon.HybridBlock):
-    def __init__(self, prefix: str = '',) -> None:
+    def __init__(self, prefix: str = '') -> None:
         super().__init__(prefix=prefix)
         self._dtype = 'float32'
 
@@ -381,15 +321,12 @@ class AutoRegressiveBias(mx.gluon.HybridBlock):
         super().cast(dtype)
 
     def hybrid_forward(self, F, x):
-        # (length)
-        x = F.squeeze(F.slice(x, begin=(0, None, 0), end=(1, None, 1)))
-        # (length, 1)
-        # TODO: use F.contrib.arange_like with MXNET 1.6.0
-        length_array = F.cast(F.contrib.index_array(x, axes=(1,)), dtype=self._dtype)
+        # Shape: (length, 1)
+        length_array = F.contrib.arange_like(x, axis=1)
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         # Shape: (length, length)
-        bias = F.broadcast_greater(F.reshape(length_array, shape=(1, -1)),
-                                   length_array)
+        bias = F.broadcast_greater(F.expand_dims(length_array, axis=0),
+                                   F.expand_dims(length_array, axis=1))
         bias = bias * -C.LARGE_VALUES[self._dtype]
         bias = F.expand_dims(bias, axis=0)
         return F.BlockGrad(bias)

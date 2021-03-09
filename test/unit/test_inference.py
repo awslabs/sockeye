@@ -51,7 +51,7 @@ def mock_translator(batch_size: int = 1,
                                                   nbest_size=None,
                                                   models=None,
                                                   source_vocabs=None,
-                                                  target_vocab=None,
+                                                  target_vocabs=None,
                                                   restrict_lexicon=None,
                                                   strip_unknown_words=None)
 
@@ -82,7 +82,7 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     beam_history2 = {"id": [2]}
     beam_history3 = {"id": [3]}
     expected_beam_histories = [beam_history1, beam_history2, beam_history3]
-    expected_target_ids = [0, 1, 2, 0, 8, 9, 0, 3, 4, 5, -1]
+    expected_target_ids = [[0], [1], [2], [0], [8], [9], [0], [3], [4], [5], [-1]]
 
     scorer = sockeye.beam_search.CandidateScorer(lp_alpha, lp_beta, bp_weight)
 
@@ -92,18 +92,18 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     expected_score = scorer(raw_score, length, reference_length)
     # expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids)) - \
     #                  brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
-    translations = [sockeye.inference.Translation([0, 1, 2, -1],
+    translations = [sockeye.inference.Translation([[0], [1], [2], [-1]],
                                                   scorer(1.0, 4, 10),
                                                   [beam_history1],
                                                   None,
                                                   10),
                     # Translation without EOS
-                    sockeye.inference.Translation([0, 8, 9],
+                    sockeye.inference.Translation([[0], [8], [9]],
                                                   scorer(2.0, 3, 11),
                                                   [beam_history2],
                                                   None,
                                                   11),
-                    sockeye.inference.Translation([0, 3, 4, 5, -1],
+                    sockeye.inference.Translation([[0], [3], [4], [5], [-1]],
                                                   scorer(3.0, 5, 12),
                                                   [beam_history3],
                                                   None,
@@ -398,10 +398,10 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
                                  [2, 3, 2, 3],
                                  [2, 3, 3, 2]],
                                 dtype='int32')
-    best_word_indices = np.array([[3, 3, 0],
-                                  [4, 4, 3],
-                                  [3, 3, 0],
-                                  [4, 5, 3]],
+    best_word_indices = np.array([[[3, 3, 0]],
+                                  [[4, 4, 3]],
+                                  [[3, 3, 0]],
+                                  [[4, 5, 3]]],
                                  dtype='int32')
     seq_scores = np.array([[3.8197377],
                            [5.081118 ],
@@ -413,7 +413,7 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
     translator = mock_translator(beam_size=2, batch_size=2)
 
     expected_result = [sockeye.inference.Translator._assemble_translation(*x) for x in zip(
-                            best_word_indices[expected_best_indices, np.arange(expected_best_indices.shape[1])],
+                            best_word_indices[expected_best_indices, :, np.arange(expected_best_indices.shape[1])],
                             lengths[expected_best_ids],
                             seq_scores[expected_best_ids],
                             beam_histories,
@@ -434,3 +434,15 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
         assert expected_translation.target_ids == actual_translation.target_ids
         assert expected_translation.score == actual_translation.score
         assert expected_translation.beam_histories == actual_translation.beam_histories
+
+
+@pytest.mark.parametrize("sequence, fill_with, expected_sequence",
+                         [
+                          (np.array([1, 2, 3]), C.EOS_ID, [1, 2, 3]),
+                          (np.array([[1], [2], [3]]), C.EOS_ID, [[1], [2], [3]]),
+                          (np.array([[1, 0], [2, 1], [3, 2]]), C.EOS_ID, [(1, 1), (2, 2), (3, C.EOS_ID)]),
+                          (np.array([[1, 0], [2, 1], [3, 2]]), C.PAD_ID, [(1, 1), (2, 2), (3, C.PAD_ID)]),
+                         ])
+def test_unshift_target_factors(sequence, fill_with, expected_sequence):
+    sequence = sockeye.inference._unshift_target_factors(sequence, fill_last_with=fill_with)
+    assert sequence == expected_sequence

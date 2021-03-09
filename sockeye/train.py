@@ -110,7 +110,22 @@ def check_arg_compatibility(args: argparse.Namespace):
         # Length 1: expand the list to the appropriate length
         args.source_factors_share_embedding = args.source_factors_share_embedding * n_source_factors
 
-
+    # Check and possibly adapt the parameters for target factors
+    n_target_factors = len(args.validation_target_factors)
+    if len(args.target_factors_combine) > 1:
+        check_condition(n_target_factors == len(args.target_factors_combine),
+                        'The number of combination strategies for target '
+                        'factors does not match the number of target factors.')
+    else:
+        # Length 1: expand the list to the appropriate length
+        args.target_factors_combine = args.target_factors_combine * n_target_factors
+    if len(args.target_factors_share_embedding) > 1:
+        check_condition(n_target_factors == len(args.target_factors_share_embedding),
+                        'The number of vocabulary sharing flags for target '
+                        'factors does not match the number of target factors.')
+    else:
+        # Length 1: expand the list to the appropriate length
+        args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -173,7 +188,8 @@ def create_checkpoint_decoder(
         exit_stack: ExitStack,
         train_context: List[mx.Context],
         sockeye_model: model.SockeyeModel,
-        source_vocabs: List[vocab.Vocab], target_vocab: vocab.Vocab,
+        source_vocabs: List[vocab.Vocab],
+        target_vocabs: List[vocab.Vocab],
         hybridize: bool = True) -> Optional[checkpoint_decoder.CheckpointDecoder]:
     """
     Returns a checkpoint decoder or None.
@@ -183,20 +199,21 @@ def create_checkpoint_decoder(
     :param train_context: The training contexts.
     :param sockeye_model: The Sockeye model instance.
     :param source_vocabs: The source vocabs.
+    :param target_vocabs: The target vocabs.
     :param hybridize: Turn hybridization of the Translator on/off (the model is already hybridized or not).
     :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
     sample_size = args.decode_and_evaluate
-    if args.optimized_metric == C.BLEU and sample_size == 0:
-        logger.info("You chose BLEU as the optimized metric, will turn on BLEU monitoring during training. "
+    if args.optimized_metric in C.METRICS_REQUIRING_DECODER and sample_size == 0:
+        logger.info("You chose %s as the optimized metric, will turn on %s monitoring during training. "
                     "To control how many validation sentences are used for calculating bleu use "
-                    "the --decode-and-evaluate argument.")
+                    "the --decode-and-evaluate argument.", args.optimized_metric, args.optimized_metric)
         sample_size = -1
 
     if sample_size == 0:
         return None
 
-    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
+    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0 and args.optimized_metric not in C.METRICS_REQUIRING_DECODER:
         logger.info("This is a secondary worker, not creating a checkpoint decoder for this training instance")
         return None
 
@@ -212,11 +229,11 @@ def create_checkpoint_decoder(
 
     return checkpoint_decoder.CheckpointDecoder(model_folder=args.output,
                                                 inputs=[args.validation_source] + args.validation_source_factors,
-                                                references=args.validation_target,
+                                                references=[args.validation_target] + args.validation_target_factors,
                                                 sample_size=sample_size,
                                                 model=sockeye_model,
                                                 source_vocabs=source_vocabs,
-                                                target_vocab=target_vocab,
+                                                target_vocabs=target_vocabs,
                                                 context=context,
                                                 hybridize=hybridize)
 
@@ -245,7 +262,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
                                                               'data_io.BaseParallelSampleIter',
                                                               'data_io.DataConfig',
-                                                              List[vocab.Vocab], vocab.Vocab]:
+                                                              List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Create the data iterators and the vocabularies.
 
@@ -266,7 +283,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
-    validation_target = str(os.path.abspath(args.validation_target))
+    validation_targets = [args.validation_target] + args.validation_target_factors
+    validation_targets = [str(os.path.abspath(target)) for target in validation_targets]
 
     if args.horovod:
         horovod_data_error_msg = "Horovod training requires prepared training data.  Use `python -m " \
@@ -282,21 +300,26 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
-        train_iter, validation_iter, data_config, source_vocabs, target_vocab = data_io.get_prepared_data_iters(
+        train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io.get_prepared_data_iters(
             prepared_data_dir=args.prepared_data,
             validation_sources=validation_sources,
-            validation_target=validation_target,
+            validation_targets=validation_targets,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_type=args.batch_type,
             batch_num_devices=batch_num_devices,
             batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
-        check_condition(all([combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]
+        check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])
                         or len(source_vocabs) == len(args.source_factors_num_embed) + 1,
                         "Data was prepared with %d source factors, but only provided %d source factor dimensions." % (
                             len(source_vocabs), len(args.source_factors_num_embed) + 1))
+        check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
+                             for combine in args.target_factors_combine])
+                        or len(target_vocabs) == len(args.target_factors_num_embed) + 1,
+                        "Data was prepared with %d target factors, but only provided %d target factor dimensions." % (
+                            len(target_vocabs), len(args.target_factors_num_embed) + 1))
 
         if resume_training:
             # resuming training. Making sure the vocabs in the model and in the prepared data match up
@@ -304,15 +327,21 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             for i, (v, mv) in enumerate(zip(source_vocabs, model_source_vocabs)):
                 utils.check_condition(vocab.are_identical(v, mv),
                                       "Prepared data and resumed model source vocab %d do not match." % i)
-            model_target_vocab = vocab.load_target_vocab(output_folder)
-            utils.check_condition(vocab.are_identical(target_vocab, model_target_vocab),
-                                  "Prepared data and resumed model target vocabs do not match.")
+            model_target_vocabs = vocab.load_target_vocabs(output_folder)
+            for i, (v, mv) in enumerate(zip(target_vocabs, model_target_vocabs)):
+                utils.check_condition(vocab.are_identical(v, mv),
+                                      "Prepared data and resumed model target vocab %d do not match." % i)
 
         check_condition(data_config.num_source_factors == len(validation_sources),
-                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
+                        'Training and validation data must have the same number of source factors,'
+                        ' but found %d and %d.' % (
                             data_config.num_source_factors, len(validation_sources)))
+        check_condition(data_config.num_target_factors == len(validation_targets),
+                        'Training and validation data must have the same number of target factors,'
+                        ' but found %d and %d.' % (
+                            data_config.num_target_factors, len(validation_targets)))
 
-        return train_iter, validation_iter, data_config, source_vocabs, target_vocab
+        return train_iter, validation_iter, data_config, source_vocabs, target_vocabs
 
     else:
         utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
@@ -321,25 +350,28 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         if resume_training:
             # Load the existing vocabs created when starting the training run.
             source_vocabs = vocab.load_source_vocabs(output_folder)
-            target_vocab = vocab.load_target_vocab(output_folder)
+            target_vocabs = vocab.load_target_vocabs(output_folder)
 
             # Recover the vocabulary path from the data info file:
             data_info = cast(data_io.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
             source_vocab_paths = data_info.source_vocabs
-            target_vocab_path = data_info.target_vocab
+            target_vocab_paths = data_info.target_vocabs
 
         else:
             # Load or create vocabs
             source_factor_vocab_paths = [args.source_factor_vocabs[i] if i < len(args.source_factor_vocabs)
                                          else None for i in range(len(args.source_factors))]
             source_vocab_paths = [args.source_vocab] + source_factor_vocab_paths
-            target_vocab_path = args.target_vocab
-            source_vocabs, target_vocab = vocab.load_or_create_vocabs(
+            target_factor_vocab_paths = [args.target_factor_vocabs[i] if i < len(args.target_factor_vocabs)
+                                         else None for i in range(len(args.target_factors))]
+            target_vocab_paths = [args.target_vocab] + target_factor_vocab_paths
+            source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
                 source_paths=[args.source] + args.source_factors,
-                target_path=args.target,
+                target_paths=[args.target] + args.target_factors,
                 source_vocab_paths=source_vocab_paths,
-                factor_vocab_same_as_source=args.source_factors_share_embedding,
-                target_vocab_path=target_vocab_path,
+                source_factor_vocab_same_as_source=args.source_factors_share_embedding,
+                target_vocab_paths=target_vocab_paths,
+                target_factor_vocab_same_as_target=args.target_factors_share_embedding,
                 shared_vocab=shared_vocab,
                 num_words_source=num_words_source,
                 num_words_target=num_words_target,
@@ -347,28 +379,38 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                 word_min_count_target=word_min_count_target,
                 pad_to_multiple_of=args.pad_vocab_to_multiple_of)
 
-        check_condition(all([combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]
+        check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])
                         or len(args.source_factors) == len(args.source_factors_num_embed),
                         "Number of source factor data (%d) differs from provided source factor dimensions (%d)" % (
                             len(args.source_factors), len(args.source_factors_num_embed)))
+        check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
+                             for combine in args.target_factors_combine])
+                        or len(args.target_factors) == len(args.target_factors_num_embed),
+                        "Number of target factor data (%d) differs from provided source factor dimensions (%d)" % (
+                            len(args.target_factors), len(args.target_factors_num_embed)))
 
         sources = [args.source] + args.source_factors
-        sources = [str(os.path.abspath(source)) for source in sources]
+        sources = [str(os.path.abspath(s)) for s in sources]
+        targets = [args.target] + args.target_factors
+        targets = [str(os.path.abspath(t)) for t in targets]
 
         check_condition(len(sources) == len(validation_sources),
-                        'Training and validation data must have the same number of factors, but found %d and %d.' % (
-                            len(source_vocabs), len(validation_sources)))
+                        'Training and validation data must have the same number of source factors, '
+                        'but found %d and %d.' % (len(source_vocabs), len(validation_sources)))
+        check_condition(len(targets) == len(validation_targets),
+                        'Training and validation data must have the same number of target factors, '
+                        'but found %d and %d.' % (len(source_vocabs), len(validation_sources)))
 
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
-            target=os.path.abspath(args.target),
+            targets=targets,
             validation_sources=validation_sources,
-            validation_target=validation_target,
+            validation_targets=validation_targets,
             source_vocabs=source_vocabs,
-            target_vocab=target_vocab,
+            target_vocabs=target_vocabs,
             source_vocab_paths=source_vocab_paths,
-            target_vocab_path=target_vocab_path,
+            target_vocab_paths=target_vocab_paths,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_type=args.batch_type,
@@ -384,7 +426,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         logger.info("Writing data config to '%s'", data_info_fname)
         data_info.save(data_info_fname)
 
-        return train_iter, validation_iter, config_data, source_vocabs, target_vocab
+        return train_iter, validation_iter, config_data, source_vocabs, target_vocabs
 
 
 def create_encoder_config(args: argparse.Namespace,
@@ -404,11 +446,11 @@ def create_encoder_config(args: argparse.Namespace,
 
     encoder_transformer_preprocess, _ = args.transformer_preprocess
     encoder_transformer_postprocess, _ = args.transformer_postprocess
-    encoder_transformer_model_size = args.transformer_model_size[0]
+    encoder_transformer_model_size, _ = args.transformer_model_size
 
     total_source_factor_size = 0
     for factor_combine, factor_size in zip(args.source_factors_combine, args.source_factors_num_embed):
-        if factor_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
+        if factor_combine == C.FACTORS_COMBINE_CONCAT:
             total_source_factor_size += factor_size
     if total_source_factor_size > 0:
         logger.info("Encoder transformer-model-size adjusted to account for source factor embeddings: %d -> %d" % (
@@ -429,15 +471,18 @@ def create_encoder_config(args: argparse.Namespace,
         postprocess_sequence=encoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
+        use_lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         decoder_type=args.decoder)
     encoder_num_hidden = encoder_transformer_model_size
 
     return config_encoder, encoder_num_hidden
 
 
-def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
-                          max_seq_len_source: int, max_seq_len_target: int) -> decoder.DecoderConfig:
+def create_decoder_config(args: argparse.Namespace,
+                          encoder_num_hidden: int,
+                          max_seq_len_source: int,
+                          max_seq_len_target: int,
+                          num_embed_target: int) -> decoder.DecoderConfig:
     """
     Create the config for the decoder.
 
@@ -445,14 +490,26 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
     :param encoder_num_hidden: Number of hidden units of the Encoder.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
+    :param num_embed_target: The size of the target embedding.
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
 
     _, decoder_transformer_preprocess = args.transformer_preprocess
     _, decoder_transformer_postprocess = args.transformer_postprocess
+    _, decoder_transformer_model_size = args.transformer_model_size
+
+    total_target_factor_size = 0
+    for factor_combine, factor_size in zip(args.target_factors_combine, args.target_factors_num_embed):
+        if factor_combine == C.FACTORS_COMBINE_CONCAT:
+            total_target_factor_size += factor_size
+    if total_target_factor_size > 0:
+        logger.info("Decoder transformer-model-size adjusted to account for target factor embeddings: %d -> %d" % (
+            decoder_transformer_model_size, num_embed_target + total_target_factor_size))
+        decoder_transformer_model_size = num_embed_target + total_target_factor_size
+
     config_decoder = transformer.TransformerConfig(
-        model_size=args.transformer_model_size[1],
+        model_size=decoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[1],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
         act_type=args.transformer_activation_type[1],
@@ -465,7 +522,7 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
         postprocess_sequence=decoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
-        lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
+        use_lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         depth_key_value=encoder_num_hidden,
         decoder_type=args.decoder)
 
@@ -474,43 +531,64 @@ def create_decoder_config(args: argparse.Namespace, encoder_num_hidden: int,
 
 def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
     num_embed_source, num_embed_target = args.num_embed
-    if args.encoder == C.TRANSFORMER_TYPE:
-        transformer_model_size_source = args.transformer_model_size[0]
-        if not num_embed_source:
-            logger.info("Source embedding size was not set it will automatically be adjusted to match the "
-                        "Transformer source model size (%d).", transformer_model_size_source)
-            num_embed_source = transformer_model_size_source
-        else:
-            check_condition(args.transformer_model_size[0] == num_embed_source,
-                            "Source embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size[0], num_embed_source))
 
-        total_source_factor_size = 0
-        for factor_combine, factor_size in zip(args.source_factors_combine, args.source_factors_num_embed):
-            if factor_combine == C.SOURCE_FACTORS_COMBINE_CONCAT:
-                total_source_factor_size += factor_size
-        if total_source_factor_size > 0:
-            adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
-            check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
-                            adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
-                            "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
-                            "has to be even and a multiple of encoder attention heads (%d)" % (
-                                adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
+    transformer_model_size_source = args.transformer_model_size[0]
+    if not num_embed_source:
+        logger.info("Source embedding size was not set it will automatically be adjusted to match the "
+                    "Transformer source model size (%d).", transformer_model_size_source)
+        num_embed_source = transformer_model_size_source
+    else:
+        check_condition(args.transformer_model_size[0] == num_embed_source,
+                        "Source embedding size must match transformer model size: %s vs. %s"
+                        % (args.transformer_model_size[0], num_embed_source))
 
-    if args.decoder == C.TRANSFORMER_TYPE:
-        transformer_model_size_target = args.transformer_model_size[1]
-        if not num_embed_target:
-            logger.info("Target embedding size was not set it will automatically be adjusted to match the "
-                        "Transformer target model size (%d).", transformer_model_size_target)
-            num_embed_target = transformer_model_size_target
-        else:
-            # Make sure that if the user sets num_embed it matches the Transformer model size
-            check_condition(args.transformer_model_size[1] == num_embed_target,
-                            "Target embedding size must match transformer model size: %s vs. %s"
-                            % (args.transformer_model_size[1], num_embed_target))
+    total_source_factor_size = 0
+    for factor_combine, factor_size in zip(args.source_factors_combine, args.source_factors_num_embed):
+        if factor_combine == C.FACTORS_COMBINE_CONCAT:
+            total_source_factor_size += factor_size
+    if total_source_factor_size > 0:
+        adjusted_transformer_encoder_model_size = num_embed_source + total_source_factor_size
+        check_condition(adjusted_transformer_encoder_model_size % 2 == 0 and
+                        adjusted_transformer_encoder_model_size % args.transformer_attention_heads[0] == 0,
+                        "Sum of source factor sizes, i.e. num-embed plus source-factors-num-embed, (%d) "
+                        "has to be even and a multiple of encoder attention heads (%d)" % (
+                            adjusted_transformer_encoder_model_size, args.transformer_attention_heads[0]))
 
     if not num_embed_source:
         num_embed_source = C.DEFAULT_NUM_EMBED
+
+    transformer_model_size_target = args.transformer_model_size[1]
+    total_target_factor_size = 0
+    for factor_combine, factor_size in zip(args.target_factors_combine, args.target_factors_num_embed):
+        if factor_combine == C.FACTORS_COMBINE_CONCAT:
+            total_target_factor_size += factor_size
+
+    if not num_embed_target:
+        logger.info("Target embedding size was not set it will automatically be adjusted to match the "
+                    "Transformer target model size (%d).", transformer_model_size_target)
+        num_embed_target = transformer_model_size_target
+    else:
+        # Make sure that if the user sets num_embed it matches the Transformer model size
+        check_condition(args.transformer_model_size[1] == num_embed_target + total_target_factor_size,
+                        "Target embedding size must match transformer model size: %s vs. %s"
+                        % (args.transformer_model_size[1], num_embed_target + total_target_factor_size))
+
+    if total_target_factor_size > 0:
+        adjusted_transformer_decoder_model_size = num_embed_target + total_target_factor_size
+        check_condition(adjusted_transformer_decoder_model_size % 2 == 0 and
+                        adjusted_transformer_decoder_model_size % args.transformer_attention_heads[0] == 0,
+                        "Sum of target factor sizes, i.e. num-embed plus target-factors-num-embed, (%d) "
+                        "has to be even and a multiple of encoder attention heads (%d)" % (
+                            adjusted_transformer_decoder_model_size, args.transformer_attention_heads[0]))
+        # Whenever an input embedding weight is used for the output layer, we cannot use
+        # 'concatenation' as the method of combining target factors to the regular target input embedding:
+        # num_embed_target + factor_sizes = transformer_model_size
+        # output layer input: transformer_model_size, its parameters are however of size num_embed_target
+        check_condition(C.WEIGHT_TYING_SOFTMAX not in args.weight_tying_type,
+                        "Cannot use weight tying of target input and output embeddings when target factors "
+                        "are defined and to be combined via 'concat'. Use 'sum' instead or disable "
+                        "weight tying")
+
     if not num_embed_target:
         num_embed_target = C.DEFAULT_NUM_EMBED
 
@@ -519,7 +597,7 @@ def get_num_embed(args: argparse.Namespace) -> Tuple[int, int]:
 
 def create_model_config(args: argparse.Namespace,
                         source_vocab_sizes: List[int],
-                        target_vocab_size: int,
+                        target_vocab_sizes: List[int],
                         max_seq_len_source: int,
                         max_seq_len_target: int,
                         config_data: data_io.DataConfig) -> model.ModelConfig:
@@ -528,7 +606,7 @@ def create_model_config(args: argparse.Namespace,
 
     :param args: Arguments as returned by argparse.
     :param source_vocab_sizes: The size of the source vocabulary (and source factors).
-    :param target_vocab_size: The size of the target vocabulary.
+    :param target_vocab_sizes: The size of the target vocabulary (and target factors).
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :param config_data: Data config.
@@ -538,10 +616,12 @@ def create_model_config(args: argparse.Namespace,
 
     embed_dropout_source, embed_dropout_target = args.embed_dropout
     source_vocab_size, *source_factor_vocab_sizes = source_vocab_sizes
+    target_vocab_size, *target_factor_vocab_sizes = target_vocab_sizes
 
     config_encoder, encoder_num_hidden = create_encoder_config(args, max_seq_len_source, max_seq_len_target,
                                                                num_embed_source)
-    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target)
+    config_decoder = create_decoder_config(args, encoder_num_hidden, max_seq_len_source, max_seq_len_target,
+                                           num_embed_target)
 
     source_factor_configs = None
     if len(source_vocab_sizes) > 1:
@@ -555,10 +635,10 @@ def create_model_config(args: argparse.Namespace,
         else:
             # Check each individual factor
             for i, combine in enumerate(args.source_factors_combine):
-                if combine in [C.SOURCE_FACTORS_COMBINE_SUM, C.SOURCE_FACTORS_COMBINE_AVERAGE]:
-                    logger.info("Setting embedding size of factor %d to `num_embed` ('%d') for %s",
+                if combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]:
+                    logger.info("Setting embedding size of source factor %d to `num_embed` ('%d') for %s",
                                 i + 1, num_embed_source,
-                                "summing" if combine == C.SOURCE_FACTORS_COMBINE_SUM else "averaging")
+                                "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     source_factors_num_embed[i] = num_embed_source
 
         source_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
@@ -566,6 +646,30 @@ def create_model_config(args: argparse.Namespace,
                                                                       source_factors_num_embed,
                                                                       args.source_factors_combine,
                                                                       args.source_factors_share_embedding)]
+
+    target_factor_configs = None
+    if len(target_vocab_sizes) > 1:
+        target_factors_num_embed = args.target_factors_num_embed
+        if not target_factors_num_embed:
+            # This happens if the combination method is sum or average. We then
+            # set the dimension to num_embed_target for all factors
+            logger.info("Setting all target factor embedding sizes to `num_embed` ('%d')",
+                        num_embed_target)
+            target_factors_num_embed = [num_embed_target] * len(target_factor_vocab_sizes)
+        else:
+            # Check each individual factor
+            for i, combine in enumerate(args.target_factors_combine):
+                if combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]:
+                    logger.info("Setting embedding size of target factor %d to `num_embed` ('%d') for %s",
+                                i + 1, num_embed_target,
+                                "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
+                    target_factors_num_embed[i] = num_embed_target
+
+        target_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
+                                 for size, dim, combine, share in zip(target_factor_vocab_sizes,
+                                                                      target_factors_num_embed,
+                                                                      args.target_factors_combine,
+                                                                      args.target_factors_share_embedding)]
 
     allow_sparse_grad = args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
 
@@ -578,6 +682,7 @@ def create_model_config(args: argparse.Namespace,
     config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target,
+                                                  factor_configs=target_factor_configs,
                                                   allow_sparse_grad=allow_sparse_grad)
 
     config_length_task = None
@@ -599,25 +704,48 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_losses(args: argparse.Namespace, num_classes: int = 0) -> List[loss.Loss]:
+def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss.Loss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
-    if args.loss == C.CROSS_ENTROPY:
-        losses = [loss.CrossEntropyLoss(name=C.CROSS_ENTROPY,
-                                        weight=softmax_output_grad_scale,
-                                        label_smoothing=args.label_smoothing,
-                                        dtype=args.dtype,
-                                        output_name=C.LOGITS_NAME,
-                                        label_name=C.TARGET_LABEL_NAME)]
-    elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
-        losses = [loss.CrossEntropyLossWithoutSoftmaxOutput(name=C.CROSS_ENTROPY,
-                                                            weight=softmax_output_grad_scale,
-                                                            label_smoothing=args.label_smoothing,
-                                                            dtype=args.dtype,
-                                                            output_name=C.LOGITS_NAME,
-                                                            label_name=C.TARGET_LABEL_NAME,
-                                                            num_labels=num_classes)]
+
+    # loss weights per factor
+    if len(args.target_factors_weight) != len(all_num_classes) - 1:
+        check_condition(len(args.target_factors_weight) == 1,
+                        "Must provide the same number of target factor weights as secondary target factors, or one.")
+        factor_weights = args.target_factors_weight * (len(all_num_classes) - 1)
     else:
-        raise ValueError('Unknown loss %s', args.loss)
+        factor_weights = args.target_factors_weight
+    loss_weights = [softmax_output_grad_scale] + factor_weights
+
+    losses = []  # type: List[loss.Loss]
+
+    # Cross-Entropy losses for all target streams/factors
+    for i, (num_classes, weight) in enumerate(zip(all_num_classes, loss_weights)):
+        name = C.CROSS_ENTROPY
+        metric_prefix = '' if i == 0 else 'f%i-' % i
+        output_name = C.LOGITS_NAME if i == 0 else C.FACTOR_LOGITS_NAME % i
+        label_name = C.TARGET_LABEL_NAME if i == 0 else C.TARGET_FACTOR_LABEL_NAME % i
+        label_smoothing = args.label_smoothing if i == 0 else .0  # Note: No label smoothing for target factor losses.
+
+        if args.loss == C.CROSS_ENTROPY:
+            losses.append(loss.CrossEntropyLoss(name=name,
+                                                weight=weight,
+                                                label_smoothing=label_smoothing,
+                                                dtype=args.dtype,
+                                                output_name=output_name,
+                                                label_name=label_name,
+                                                metric_prefix=metric_prefix))
+        elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
+            losses.append(loss.CrossEntropyLossWithoutSoftmaxOutput(name=name,
+                                                                    weight=weight,
+                                                                    label_smoothing=label_smoothing,
+                                                                    dtype=args.dtype,
+                                                                    output_name=output_name,
+                                                                    label_name=label_name,
+                                                                    num_labels=num_classes,
+                                                                    metric_prefix=metric_prefix))
+        else:
+            raise ValueError('Unknown loss %s', args.loss)
+
     if args.length_task is not None:
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:
@@ -804,6 +932,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # training run) and a local rank (unique on the current host).  For example,
     # running on 2 hosts with 4 slots each will assign ranks 0-7 and local ranks
     # 0-3.
+    console_level = None
     if args.horovod:
         if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
             raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
@@ -825,6 +954,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # If requested, suppress console output for secondary workers
             if args.quiet_secondary_workers:
                 args.quiet = True
+            console_level = args.loglevel_secondary_workers
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
@@ -833,7 +963,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     setup_main_logger(file_logging=not args.no_logfile,
                       console=not args.quiet,
                       path=os.path.join(output_folder, C.LOG_NAME),
-                      level=args.loglevel)
+                      level=args.loglevel,
+                      console_level=console_level)
     utils.log_basic_info(args)
     arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
@@ -858,7 +989,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         utils.seed_rngs(args.seed, ctx=context)
 
-        train_iter, eval_iter, config_data, source_vocabs, target_vocab = create_data_iters_and_vocabs(
+        train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
             args=args,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
@@ -878,17 +1009,17 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # Dump the vocabularies if we're just starting up
         if not resume_training:
             vocab.save_source_vocabs(source_vocabs, output_folder)
-            vocab.save_target_vocab(target_vocab, output_folder)
+            vocab.save_target_vocabs(target_vocabs, output_folder)
 
         source_vocab_sizes = [len(v) for v in source_vocabs]
-        target_vocab_size = len(target_vocab)
-        logger.info('Vocabulary sizes: source=[%s] target=%d',
+        target_vocab_sizes = [len(v) for v in target_vocabs]
+        logger.info('Vocabulary sizes: source=[%s] target=[%s]',
                     '|'.join([str(size) for size in source_vocab_sizes]),
-                    target_vocab_size)
+                    '|'.join([str(size) for size in target_vocab_sizes]))
 
         model_config = create_model_config(args=args,
                                            source_vocab_sizes=source_vocab_sizes,
-                                           target_vocab_size=target_vocab_size,
+                                           target_vocab_sizes=target_vocab_sizes,
                                            max_seq_len_source=max_seq_len_source,
                                            max_seq_len_target=max_seq_len_target,
                                            config_data=config_data)
@@ -901,6 +1032,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             early_stopping_metric=args.optimized_metric,
             max_params_files_to_keep=args.keep_last_params,
             keep_initializations=args.keep_initializations,
+            max_params_files_to_cache=args.cache_last_best_params,
+            cache_strategy=args.cache_strategy,
+            cache_metric=args.cache_metric,
             checkpoint_interval=args.checkpoint_interval,
             max_num_checkpoint_not_improved=args.max_num_checkpoint_not_improved,
             checkpoint_improvement_threshold=args.checkpoint_improvement_threshold,
@@ -976,7 +1110,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # we set them immediately after calling init.
             gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
 
-        losses = create_losses(args, num_classes=target_vocab_size)
+        losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
         hybridize = not args.no_hybridization
         if hybridize:
@@ -1003,7 +1137,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         )
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
-                                               training_model, source_vocabs, target_vocab, hybridize=hybridize)
+                                               training_model, source_vocabs, target_vocabs, hybridize=hybridize)
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
         return training_state

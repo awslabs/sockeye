@@ -67,18 +67,26 @@ class _SingleModelInference(_Inference):
 
     def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
-        predicted_output_length = predicted_output_length.expand_dims(axis=1)
+        predicted_output_length = predicted_output_length.expand_dims(axis=1, inplace=True)
         return states, predicted_output_length
 
     def decode_step(self,
                     step_input: mx.nd.NDArray,
                     states: List,
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
-        logits, states, _ = self._model.decode_step(step_input, states, vocab_slice_ids)
+        logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             logits = logits.log_softmax(axis=-1, temperature=self._softmax_temperature)
         scores = -logits
-        return scores, states
+
+        target_factors = None  # type: Optional[mx.nd.NDArray]
+        if target_factor_outputs:
+            # target factors are greedily 'decoded'.
+            factor_predictions = [mx.nd.cast(tfo.argmax(axis=-1, keepdims=True), dtype='int32') for tfo in
+                                  target_factor_outputs]
+            target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
+                else mx.nd.concat(*factor_predictions, dim=1)
+        return scores, states, target_factors
 
 
 class _EnsembleInference(_Inference):
@@ -121,16 +129,29 @@ class _EnsembleInference(_Inference):
                     vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         outputs = []  # type: List[mx.nd.NDArray]
         new_states = []  # type: List[mx.nd.NDArray]
+        factor_outputs = []  # type: List[List[mx.nd.NDArray]]
         state_index = 0
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
-            logits, model_states, _ = model.decode_step(step_input, model_states, vocab_slice_ids)
+            logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
             probs = logits.softmax(axis=-1, temperature=self._softmax_temperature)
             outputs.append(probs)
+            target_factor_probs = [tfo.softmax(axis=-1) for tfo in target_factor_outputs]
+            factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
-        return scores, new_states
+
+        target_factors = None  # type: Optional[mx.nd.NDArray]
+
+        if factor_outputs:
+            # target factors are greedily 'decoded'.
+            factor_predictions = [mx.nd.cast(self._interpolation(fs).argmin(axis=-1, keepdims=True), dtype='int32')
+                                  for fs in zip(*factor_outputs)]
+            if factor_predictions:
+                target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
+                    else mx.nd.concat(*factor_predictions, dim=1)
+        return scores, new_states, target_factors
 
     @staticmethod
     def linear_interpolation(predictions):
@@ -309,7 +330,8 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         self._scorer = scorer
 
     def hybrid_forward(self, F, best_hyp_indices, best_word_indices,
-                       finished, scores_accumulated, lengths, reference_lengths):
+                       finished, scores_accumulated, lengths, reference_lengths,
+                       factors=None):
 
         # Reorder fixed-size beam data according to best_hyp_indices (ascending)
         finished = F.take(finished, best_hyp_indices)
@@ -328,7 +350,14 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
         # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
         finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
 
-        return finished, scores_accumulated, lengths, reference_lengths
+        # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
+        best_word_indices = F.expand_dims(best_word_indices, axis=1)
+
+        if factors is not None:
+            secondary_factors = F.take(factors, best_hyp_indices)
+            best_word_indices = F.concat(best_word_indices, secondary_factors)
+
+        return best_word_indices, finished, scores_accumulated, lengths, reference_lengths
 
 
 class TopK(mx.gluon.HybridBlock):
@@ -353,8 +382,8 @@ class TopK(mx.gluon.HybridBlock):
         :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices and values of the k smallest items in matrix.
         """
-        vocab_size = scores.shape[1]
-        batch_size = int(offset.shape[-1] / self.k)
+        batch_times_beam, vocab_size = scores.shape
+        batch_size = int(batch_times_beam / self.k)
         # Shape: (batch size, beam_size * vocab_size)
         batchwise_scores = scores.reshape(shape=(batch_size, self.k * vocab_size))
         indices, values = super().forward(batchwise_scores)
@@ -365,9 +394,9 @@ class TopK(mx.gluon.HybridBlock):
         return best_hyp_indices, best_word_indices, values
 
     def hybrid_forward(self, F, scores):
-        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True)
+        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
         # Project indices back into original shape (which is different for t==1 and t>1)
-        return F.reshape(F.cast(indices, 'int32'), shape=(-1,)), F.reshape(values, shape=(-1, 1))
+        return F.reshape(indices, shape=(-1,)), F.reshape(values, shape=(-1, 1))
 
 
 class SampleK(mx.gluon.HybridBlock):
@@ -428,6 +457,7 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
         repeated_states.append(repeated_state)
     return repeated_states
 
+
 class SortStates(mx.gluon.HybridBlock):
 
     def __init__(self, state_structure, prefix):
@@ -460,7 +490,7 @@ class BeamSearch(mx.gluon.Block):
     - constraints (pos & neg)
     - ensemble decoding
     - vocabulary selection
-    - sampling (TODO: check if its working correctly)
+    - sampling
 
     Not supported:
     - beam pruning
@@ -476,6 +506,7 @@ class BeamSearch(mx.gluon.Block):
                  output_vocab_size: int,
                  scorer: CandidateScorer,
                  num_source_factors: int,
+                 num_target_factors: int,
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
@@ -490,6 +521,7 @@ class BeamSearch(mx.gluon.Block):
         self._inference = inference
         self.beam_search_stop = beam_search_stop
         self.num_source_factors = num_source_factors
+        self.num_target_factors = num_target_factors
         self.global_avoid_trie = global_avoid_trie
 
         with self.name_scope():
@@ -555,7 +587,8 @@ class BeamSearch(mx.gluon.Block):
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
 
-        best_word_indices = mx.nd.full((batch_size * self.beam_size,), val=self.bos_id, ctx=self.context,
+        # best word_indices (also act as input: (batch*beam, num_target_factors
+        best_word_indices = mx.nd.full((batch_size * self.beam_size, self.num_target_factors), val=self.bos_id, ctx=self.context,
                                        dtype='int32')
 
         # offset for hypothesis indices in batch decoding
@@ -594,29 +627,30 @@ class BeamSearch(mx.gluon.Block):
             if any(raw_constraint_list):
                 # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
                 constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
-                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)
+                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)  # type: ignore
                 full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
                 raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                        raw_constraint_list]
             # Pad to a multiple of 8.
             vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
-                                     mode='constant', constant_values = self.eos_id)
+                                     mode='constant', constant_values=self.eos_id)
             vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
 
-            if vocab_slice_ids.shape[0] < self.beam_size + 1:
+            vocab_slice_ids_shape = vocab_slice_ids.shape[0]
+            if vocab_slice_ids_shape < self.beam_size + 1:
                 # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
                 # smaller than the beam size.
                 logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
-                               vocab_slice_ids.shape[0], self.beam_size)
-                n = self.beam_size - vocab_slice_ids.shape[0] + 1
+                               vocab_slice_ids_shape, self.beam_size)
+                n = self.beam_size - vocab_slice_ids_shape + 1
                 vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
                                                mx.nd.full((n,), val=self.eos_id, ctx=self.context, dtype='int32'),
                                                dim=0)
 
-            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0] - 1),
-                                  val=np.inf, ctx=self.context)
-            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids.shape[0]),
-                                  val=np.inf, ctx=self.context)
+            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape - 1),
+                                  val=np.inf, ctx=self.context, dtype=self.dtype)
+            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape),
+                                  val=np.inf, ctx=self.context, dtype=self.dtype)
             eos_dist[:, C.EOS_ID] = 0
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
@@ -626,7 +660,7 @@ class BeamSearch(mx.gluon.Block):
             avoid_states = constrained.AvoidBatch(batch_size, self.beam_size,
                                                   avoid_list=raw_avoid_list,
                                                   global_avoid_trie=self.global_avoid_trie)
-            avoid_states.consume(best_word_indices)
+            avoid_states.consume(best_word_indices[:, 0])  # constraints operate only on primary target factor
 
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
@@ -637,10 +671,12 @@ class BeamSearch(mx.gluon.Block):
         # item on the beam for each sentence
         inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
-        for t in range(1, max_iterations + 1):  # TODO: max_iterations + 1 is the MINIMUM to get correct results right now
+        for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
-            target_dists, model_states = self._inference.decode_step(best_word_indices, model_states, vocab_slice_ids)
+            target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
+                                                                                     model_states,
+                                                                                     vocab_slice_ids)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
@@ -696,17 +732,16 @@ class BeamSearch(mx.gluon.Block):
 
             # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
-            finished, scores_accumulated, lengths, estimated_reference_lengths = self._sort_norm_and_update_finished(
-                best_hyp_indices,
-                best_word_indices,
-                finished,
-                scores_accumulated,
-                lengths,
-                estimated_reference_lengths)
+            _sort_inputs = [best_hyp_indices, best_word_indices, finished, scores_accumulated, lengths,
+                            estimated_reference_lengths]
+            if target_factors is not None:
+                _sort_inputs.append(target_factors)
+            best_word_indices, finished, scores_accumulated, lengths, estimated_reference_lengths = \
+                self._sort_norm_and_update_finished(*_sort_inputs)
 
             # Collect best hypotheses, best word indices
-            best_hyp_indices_list.append(best_hyp_indices)
             best_word_indices_list.append(best_word_indices)
+            best_hyp_indices_list.append(best_hyp_indices)
 
             if self._should_stop(finished, batch_size):
                 break
@@ -717,15 +752,16 @@ class BeamSearch(mx.gluon.Block):
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        scores_accumulated_shape = scores_accumulated.shape
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
-                                                                self.beam_size * scores_accumulated.shape[-1]))
-        indices = mx.nd.cast(mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1), dtype='int32').reshape((-1,))
-        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated.shape) + offset
+                                                                self.beam_size * scores_accumulated_shape[-1]))
+        indices = mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1, dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated_shape) + offset
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
         all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
-        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=1)
+        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=2)
         constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
 
         return all_best_hyp_indices.asnumpy(), \
@@ -759,7 +795,7 @@ def get_beam_search(models: List[SockeyeModel],
 
     inference = None  # type: Optional[_Inference]
     if len(models) == 1:
-        skip_softmax = beam_size == 1 and not output_scores and not sample
+        skip_softmax = beam_size == 1 and not output_scores and sample is None
         if skip_softmax:
             logger.info("Enabled skipping softmax for a single model and greedy decoding.")
         inference = _SingleModelInference(model=models[0],
@@ -784,6 +820,7 @@ def get_beam_search(models: List[SockeyeModel],
         scorer=scorer,
         sample=sample,
         num_source_factors=models[0].num_source_factors,
+        num_target_factors=models[0].num_target_factors,
         global_avoid_trie=global_avoid_trie,
         inference=inference
     )

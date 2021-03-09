@@ -50,7 +50,7 @@ class Reranker:
             # (http://aclweb.org/anthology/W14-3346)
             self.scoring_function = partial(sacrebleu.sentence_bleu, smooth_method='add-k')
         elif metric == C.RERANK_CHRF:
-            self.scoring_function = sacrebleu.sentence_chrf
+            self.scoring_function = sacrebleu.sentence_chrf  # type: ignore
         else:
             raise utils.SockeyeError("Scoring metric '%s' unknown. Choices are: %s" % (metric, C.RERANK_METRICS))
 
@@ -65,7 +65,7 @@ class Reranker:
         :param reference: A single string with the actual reference translation.
         :return: Nbest translations sorted by reranking scores.
         """
-        scores = [self.scoring_function(hypothesis, reference).score for hypothesis in hypotheses['translations']]
+        scores = [self.scoring_function(hypothesis, [reference]).score for hypothesis in hypotheses['translations']]
         ranking = list(np.argsort(scores, kind='mergesort')[::-1])  # descending
         reranked_hypotheses = self._sort_by_ranking(hypotheses, ranking)
         if self.return_score:

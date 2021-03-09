@@ -16,7 +16,6 @@ A set of utility methods.
 """
 import binascii
 import errno
-import glob
 import gzip
 import itertools
 import logging
@@ -686,34 +685,6 @@ def metric_value_is_better(new: float, old: float, metric: str) -> bool:
         return new > old
     else:
         return new < old
-
-
-def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int, keep_first: bool):
-    """
-    Deletes oldest parameter files from a model folder.
-
-    :param output_folder: Folder where param files are located.
-    :param max_to_keep: Maximum number of files to keep, negative to keep all.
-    :param checkpoint: Current checkpoint (i.e. index of last params file created).
-    :param best_checkpoint: Best checkpoint. The parameter file corresponding to this checkpoint will not be deleted.
-    :param keep_first: Don't delete the first checkpoint.
-    """
-    if max_to_keep <= 0:
-        return
-    existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
-    params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
-    for n in range(1 if keep_first else 0, max(1, checkpoint - max_to_keep + 1)):
-        if n != best_checkpoint:
-            param_fname_n = params_name_with_dir % n
-            if param_fname_n in existing_files:
-                try:
-                    os.remove(param_fname_n)
-                except FileNotFoundError:
-                    # This can be occur on file systems with higher latency,
-                    # such as distributed file systems.  While repeated
-                    # occurrences of this warning may indicate a problem, seeing
-                    # one or two warnings during training is usually fine.
-                    logger.warning('File has already been removed: %s', param_fname_n)
 
 
 def split(data: mx.nd.NDArray,

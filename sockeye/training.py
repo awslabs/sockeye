@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,29 +14,32 @@
 """
 Code for training
 """
-from collections import deque
+import glob
 import logging
 import os
 import pickle
 import random
 import shutil
 import time
+from collections import deque
+from dataclasses import dataclass
 from math import sqrt
-from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union
+from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
 import mxnet as mx
-from mxnet.contrib import amp
 import numpy as np
+from mxnet.contrib import amp
 
-from .checkpoint_decoder import CheckpointDecoder
+from . import average
 from . import constants as C
 from . import data_io
 from . import horovod_mpi
 from . import loss
 from . import lr_scheduler
+from . import parallel
 from . import utils
 from . import vocab
-from . import parallel
+from .checkpoint_decoder import CheckpointDecoder
 from .config import Config
 from .model import SockeyeModel
 from .optimizers import OptimizerConfig
@@ -50,43 +53,28 @@ def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
     return sqrt(sum(norm.asscalar() for norm in norms))
 
 
+@dataclass
 class TrainerConfig(Config):
-    def __init__(self,
-                 output_dir: str,
-                 early_stopping_metric: str,
-                 max_params_files_to_keep: int,
-                 keep_initializations: bool,
-                 checkpoint_interval: int,
-                 max_num_checkpoint_not_improved: int,
-                 checkpoint_improvement_threshold: float,
-                 max_checkpoints: Optional[int] = None,
-                 min_samples: Optional[int] = None,
-                 max_samples: Optional[int] = None,
-                 min_updates: Optional[int] = None,
-                 max_updates: Optional[int] = None,
-                 min_epochs: Optional[int] = None,
-                 max_epochs: Optional[int] = None,
-                 max_seconds: Optional[int] = None,
-                 update_interval: int = 1,
-                 stop_training_on_decoder_failure: bool = False) -> None:
-        super().__init__()
-        self.output_dir = output_dir
-        self.early_stopping_metric = early_stopping_metric
-        self.max_params_files_to_keep = max_params_files_to_keep
-        self.keep_initializations = keep_initializations
-        self.checkpoint_interval = checkpoint_interval
-        self.max_num_checkpoint_not_improved = max_num_checkpoint_not_improved
-        self.checkpoint_improvement_threshold = checkpoint_improvement_threshold
-        self.max_checkpoints = max_checkpoints
-        self.min_samples = min_samples
-        self.max_samples = max_samples
-        self.min_updates = min_updates
-        self.max_updates = max_updates
-        self.min_epochs = min_epochs
-        self.max_epochs = max_epochs
-        self.max_seconds = max_seconds
-        self.update_interval = update_interval
-        self.stop_training_on_decoder_failure = stop_training_on_decoder_failure
+    output_dir: str
+    early_stopping_metric: str
+    max_params_files_to_keep: int
+    keep_initializations: bool
+    max_params_files_to_cache: int
+    cache_strategy: str
+    cache_metric: str
+    checkpoint_interval: int
+    max_num_checkpoint_not_improved: int
+    checkpoint_improvement_threshold: float
+    max_checkpoints: Optional[int] = None
+    min_samples: Optional[int] = None
+    max_samples: Optional[int] = None
+    min_updates: Optional[int] = None
+    max_updates: Optional[int] = None
+    min_epochs: Optional[int] = None
+    max_epochs: Optional[int] = None
+    max_seconds: Optional[int] = None
+    update_interval: int = 1
+    stop_training_on_decoder_failure: bool = False
 
 
 class TrainState:
@@ -307,6 +295,7 @@ class GluonEarlyStoppingTrainer:
         if has_improved:
             self._update_best_params()
             self._save_trainer_states(self.best_optimizer_states_fname)
+            self._save_lr_scheduler(self.best_lr_scheduler_fname)
         self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
         for metric in train_metrics:
             metric.reset()
@@ -392,7 +381,7 @@ class GluonEarlyStoppingTrainer:
 
         # Optionally run the checkpoint decoder
         if checkpoint_decoder is not None:
-            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME % checkpoint)
+            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
             decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
             for metric_name, metric_value in decoder_metrics.items():
                 assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
@@ -527,7 +516,8 @@ class GluonEarlyStoppingTrainer:
                             self.state.best_checkpoint)
                 adjusted_lr = self.trainer.optimizer.lr_scheduler.lr
                 # trainer.load_states also reloads the parameters
-                self._load_trainer_states(self.best_optimizer_states_fname)
+                if os.path.exists(self.best_optimizer_states_fname):
+                    self._load_trainer_states(self.best_optimizer_states_fname)
                 # state loading replaces the lr_scheduler instance which then contains the old learning rate,
                 # overwriting here. TODO: make this better...
                 self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
@@ -575,8 +565,9 @@ class GluonEarlyStoppingTrainer:
         Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
         """
         self.model.save_parameters(self.current_params_fname)
-        utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
-                                   self.state.best_checkpoint, self.config.keep_initializations)
+        cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
+                             self.state.best_checkpoint, self.config.keep_initializations,
+                             self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
 
     def _save_trainer_states(self, fname):
         trainer_save_states_no_dump_optimizer(self.trainer, fname)
@@ -585,6 +576,20 @@ class GluonEarlyStoppingTrainer:
     def _load_trainer_states(self, fname):
         self.trainer.load_states(fname)
         logger.info('Loaded optimizer states from "%s"', fname)
+
+    def _save_lr_scheduler(self, fname):
+        if self.trainer.optimizer.lr_scheduler is not None:
+            with open(fname, "wb") as fp:
+                pickle.dump(self.trainer.optimizer.lr_scheduler, fp)
+            logger.info("Saved '%s' to '%s'", self.trainer.optimizer.lr_scheduler, fname)
+
+    def _load_lr_scheduler(self, fname):
+        if os.path.exists(fname):
+            with open(fname, "rb") as fp:
+                self.trainer.optimizer.lr_scheduler = pickle.load(fp)
+            logger.info("Loaded '%s' from '%s'", self.trainer.optimizer.lr_scheduler, fname)
+        self.trainer.optimizer.begin_num_update = self.state.updates
+        self.trainer.optimizer.num_update = self.state.updates
 
     def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
@@ -619,6 +624,10 @@ class GluonEarlyStoppingTrainer:
 
         # (5) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
+
+        # (5.5) lr_scheduler
+        lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
+        self._save_lr_scheduler(lr_scheduler_fname)
 
         # (6) AMP loss scaler state
         if self.using_amp:
@@ -671,6 +680,10 @@ class GluonEarlyStoppingTrainer:
         # (5) Training state
         self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
+        # (5.5) lr_scheduler
+        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
+        self._load_lr_scheduler(lr_scheduler_fname)
+
         # (6) AMP loss scaler state
         if self.using_amp:
             # Load loss scaler state
@@ -688,14 +701,17 @@ class GluonEarlyStoppingTrainer:
         """
         Cleans parameter files, training state directory and waits for remaining decoding processes.
         """
-        utils.cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep,
-                                   self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations)
+        cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep,
+                             self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations,
+                             self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
 
         if not keep_training_state:
             if os.path.exists(self.training_state_dirname):
                 shutil.rmtree(self.training_state_dirname)
             if os.path.exists(self.best_optimizer_states_fname):
                 os.remove(self.best_optimizer_states_fname)
+            if os.path.exists(self.best_lr_scheduler_fname):
+                os.remove(self.best_lr_scheduler_fname)
 
     @property
     def metrics_fname(self) -> str:
@@ -716,6 +732,10 @@ class GluonEarlyStoppingTrainer:
     @property
     def best_optimizer_states_fname(self) -> str:
         return os.path.join(self.config.output_dir, C.OPT_STATES_BEST)
+
+    @property
+    def best_lr_scheduler_fname(self) -> str:
+        return os.path.join(self.config.output_dir, C.LR_SCHEDULER_BEST)
 
 
 class ParallelModel(parallel.Parallelizable):
@@ -826,7 +846,7 @@ class Speedometer:
         self.auto_reset = auto_reset
         self.samples = 0
         self.tokens = 0
-        self.msg = 'Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec %.2f tokens/sec %.2f updates/sec'
+        self.msg = 'E=%d B=%d\ts/sec=%.2f tok/sec=%.2f u/sec=%.2f\t'
 
     def __call__(self, epoch: int, batches: int, updates: int, samples: int,
                  tokens: int, metrics: Optional[Iterable[loss.LossMetric]] = None):
@@ -850,10 +870,10 @@ class Speedometer:
                 if metrics is not None:
                     metric_values = []  # type: List[Tuple[str, float]]
                     for metric in metrics:
-                        metric_values.append((metric.name, metric.get()))
+                        metric_values.append((metric.short_name, metric.get()))
                         if self.auto_reset:
                             metric.reset()
-                    logger.info(self.msg + '\t%s=%f' * len(metric_values),
+                    logger.info(self.msg + '%s=%f ' * len(metric_values),
                                 epoch, count, samples_per_sec, tokens_per_sec, updates_per_sec, *sum(metric_values, ()))
 
                 else:
@@ -907,3 +927,63 @@ def trainer_save_states_no_dump_optimizer(trainer: mx.gluon.Trainer, fname: str)
     else:
         with open(fname, 'wb') as fout:
             fout.write(trainer._updaters[0].get_states(dump_optimizer=False))
+
+
+def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int, keep_first: bool,
+                         max_params_files_to_cache: int, cache_metric: str, cache_strategy: str):
+    """
+    Deletes oldest parameter files from a model folder.
+
+    :param output_folder: Folder where param files are located.
+    :param max_to_keep: Maximum number of files to keep, negative to keep all.
+    :param checkpoint: Current checkpoint (i.e. index of last params file created).
+    :param best_checkpoint: Best checkpoint. The parameter file corresponding to this checkpoint will not be deleted.
+    :param keep_first: Don't delete the first checkpoint.
+    :param max_params_files_to_cache: Maximum number of best param files to cache.
+    :param cache_metric: Metric to determine best param files.
+    :param cache_strategy: Strategy to select 'best' param files.
+    """
+    if max_to_keep <= 0:
+        return
+
+    # make sure we keep N best params files from .metrics file according to strategy.
+    top_n: Set[int] = set()
+    metrics_path = os.path.join(output_folder, C.METRICS_NAME)
+
+    if max_params_files_to_cache > 0 and os.path.exists(metrics_path):
+        maximize = C.METRIC_MAXIMIZE[cache_metric]
+        points = utils.get_validation_metric_points(model_path=output_folder, metric=cache_metric)
+
+        if cache_strategy == C.AVERAGE_BEST:
+            # N best scoring points
+            top = average.strategy_best(points, max_params_files_to_cache, maximize)
+
+        elif cache_strategy == C.AVERAGE_LAST:
+            # N sequential points ending with overall best
+            top = average.strategy_last(points, max_params_files_to_cache, maximize)
+
+        elif cache_strategy == C.AVERAGE_LIFESPAN:
+            # Track lifespan of every "new best" point
+            # Points dominated by a previous better point have lifespan 0
+            top = average.strategy_lifespan(points, max_params_files_to_cache, maximize)
+        else:
+            raise RuntimeError("Unknown strategy, options are: %s" % C.AVERAGE_CHOICES)
+
+        top_n = set([x[1] for x in top])
+
+    # get rid of params files that are neither among the latest, nor among the best
+    existing_files = glob.glob(os.path.join(output_folder, C.PARAMS_PREFIX + "*"))
+    params_name_with_dir = os.path.join(output_folder, C.PARAMS_NAME)
+
+    for n in range(1 if keep_first else 0, max(1, checkpoint - max_to_keep + 1)):
+        if n != best_checkpoint:
+            param_fname_n = params_name_with_dir % n
+            if param_fname_n in existing_files and n not in top_n:
+                try:
+                    os.remove(param_fname_n)
+                except FileNotFoundError:
+                    # This can be occur on file systems with higher latency,
+                    # such as distributed file systems.  While repeated
+                    # occurrences of this warning may indicate a problem, seeing
+                    # one or two warnings during training is usually fine.
+                    logger.warning('File has already been removed: %s', param_fname_n)

@@ -17,6 +17,7 @@ import sockeye.constants as C
 import sockeye.decoder
 import sockeye.transformer
 
+
 @pytest.mark.parametrize('lhuc', [
     (False,),
     (True,)
@@ -36,7 +37,7 @@ def test_get_decoder(lhuc):
         postprocess_sequence='test_post_seq',
         max_seq_len_source=60,
         max_seq_len_target=70,
-        lhuc=lhuc)
+        use_lhuc=lhuc)
     decoder = sockeye.decoder.get_decoder(config, inference_only=False, prefix='test_')
 
     assert type(decoder) == sockeye.decoder.TransformerDecoder
