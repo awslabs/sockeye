@@ -328,8 +328,7 @@ def test_beam_search():
         inference=inference,
         beam_search_stop=C.BEAM_SEARCH_STOP_ALL,
         global_avoid_trie=None,
-        sample=None,
-        prevent_unk=True)
+        sample=None)
 
     # inputs
     batch_size = 1

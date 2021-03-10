@@ -56,11 +56,13 @@ class _SingleModelInference(_Inference):
                  model: SockeyeModel,
                  skip_softmax: bool = False,
                  constant_length_ratio: float = 0.0,
+                 prevent_unk: bool = False,
                  softmax_temperature: Optional[float] = None) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
         self._softmax_temperature = softmax_temperature
+        self._masked_unk = mx.nd.empty(0) if prevent_unk else None
 
     def state_structure(self) -> List:
         return [self._model.state_structure()]
@@ -78,6 +80,12 @@ class _SingleModelInference(_Inference):
         if not self._skip_softmax:
             logits = logits.log_softmax(axis=-1, temperature=self._softmax_temperature)
         scores = -logits
+        if self._masked_unk is not None:
+            # Only reinitialize the mask if needed
+            if self._masked_unk.shape != scores.shape:
+                self._masked_unk = mx.nd.zeros_like(scores)
+                self._masked_unk[:, C.UNK_ID] = np.inf
+            scores += self._masked_unk
 
         target_factors = None  # type: Optional[mx.nd.NDArray]
         if target_factor_outputs:
@@ -95,6 +103,7 @@ class _EnsembleInference(_Inference):
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
                  constant_length_ratio: float = 0.0,
+                 prevent_unk: bool = False,
                  softmax_temperature: Optional[float] = None) -> None:
         self._models = models
         if ensemble_mode == 'linear':
@@ -105,6 +114,7 @@ class _EnsembleInference(_Inference):
             raise ValueError()
         self._const_lr = constant_length_ratio
         self._softmax_temperature = softmax_temperature
+        self._masked_unk = mx.nd.empty(0) if prevent_unk else None
 
     def state_structure(self) -> List:
         structure = []
@@ -141,6 +151,12 @@ class _EnsembleInference(_Inference):
             factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
+        if self._masked_unk is not None:
+            # Only reinitialize the mask if needed
+            if self._masked_unk.shape != scores.shape:
+                self._masked_unk = mx.nd.zeros_like(scores)
+                self._masked_unk[:, C.UNK_ID] = np.inf
+            scores += self._masked_unk
 
         target_factors = None  # type: Optional[mx.nd.NDArray]
 
@@ -510,8 +526,7 @@ class BeamSearch(mx.gluon.Block):
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
-                 sample: Optional[int] = None,
-                 prevent_unk: bool = False,) -> None:
+                 sample: Optional[int] = None) -> None:
         super().__init__(prefix='beam_search_')
         self.beam_size = beam_size
         self.dtype = dtype
@@ -524,7 +539,6 @@ class BeamSearch(mx.gluon.Block):
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
         self.global_avoid_trie = global_avoid_trie
-        self.prevent_unk = prevent_unk
 
         with self.name_scope():
             self._sort_states = SortStates(state_structure=self._inference.state_structure(),
@@ -679,12 +693,7 @@ class BeamSearch(mx.gluon.Block):
             target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
                                                                                      model_states,
                                                                                      vocab_slice_ids)
-            # Do not generate <unk> token if prevent_unk is specified
-            if self.prevent_unk:
-                if target_dists.ndim == 1:
-                    target_dists[C.UNK_ID] = float('inf')
-                else:
-                    target_dists[:, C.UNK_ID] = float('inf')
+
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
@@ -809,11 +818,13 @@ def get_beam_search(models: List[SockeyeModel],
         inference = _SingleModelInference(model=models[0],
                                           skip_softmax=skip_softmax,
                                           constant_length_ratio=constant_length_ratio,
+                                          prevent_unk=prevent_unk,
                                           softmax_temperature=softmax_temperature)
     else:
         inference = _EnsembleInference(models=models,
                                        ensemble_mode=ensemble_mode,
                                        constant_length_ratio=constant_length_ratio,
+                                       prevent_unk=prevent_unk,
                                        softmax_temperature=softmax_temperature)
 
     global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
@@ -830,7 +841,6 @@ def get_beam_search(models: List[SockeyeModel],
         num_source_factors=models[0].num_source_factors,
         num_target_factors=models[0].num_target_factors,
         global_avoid_trie=global_avoid_trie,
-        prevent_unk=prevent_unk,
         inference=inference
     )
     bs.initialize()
