@@ -612,7 +612,7 @@ class BeamSearch(mx.gluon.Block):
         unk_dist = None
         if self.prevent_unk:
             unk_dist = mx.nd.zeros_like(eos_dist)
-            unk_dist[:, C.UNK_ID] = np.inf
+            unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
@@ -663,7 +663,7 @@ class BeamSearch(mx.gluon.Block):
             eos_dist[:, C.EOS_ID] = 0
             if unk_dist is not None:
                 unk_dist = mx.nd.zeros_like(eos_dist)
-                unk_dist[:, C.UNK_ID] = np.inf
+                unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.bos_id, self.eos_id)

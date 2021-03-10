@@ -257,7 +257,7 @@ def test_prevent_unk_update_scores():
     eos_dist = mx.nd.full((batch_beam_size, vocab_size), val=np.inf, dtype='float32')
     eos_dist[:, C.EOS_ID] = 0
     unk_dist = mx.nd.zeros_like(eos_dist)
-    unk_dist[:, C.UNK_ID] = np.inf
+    unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
     lengths = mx.nd.array([0, 1, 0], dtype='int32')
     max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
