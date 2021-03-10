@@ -227,8 +227,7 @@ def test_update_scores():
     pad_dist = mx.nd.full((batch_beam_size, vocab_size - 1), val=np.inf, dtype='float32')
     eos_dist = mx.nd.full((batch_beam_size, vocab_size), val=np.inf, dtype='float32')
     eos_dist[:, C.EOS_ID] = 0
-    unk_dist = mx.nd.full((batch_beam_size, vocab_size), val=0, dtype='float32')
-    unk_dist[:, C.UNK_ID] = np.inf
+    unk_dist = None
 
     lengths = mx.nd.array([0, 1, 0], dtype='int32')
     max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
@@ -250,6 +249,36 @@ def test_update_scores():
     assert (scores[1] == np.array([1.] + pad_dist[1].asnumpy().tolist())).all()  # 2 finished, force pad, keep score
     assert (scores[2] == (1. + target_dists[2]).asnumpy()).all()  # 3 scores + previous scores
 
+def test_prevent_unk_update_scores():
+    vocab_size = 10
+    batch_beam_size = 3
+    us = sockeye.beam_search.UpdateScores()
+    pad_dist = mx.nd.full((batch_beam_size, vocab_size - 1), val=np.inf, dtype='float32')
+    eos_dist = mx.nd.full((batch_beam_size, vocab_size), val=np.inf, dtype='float32')
+    eos_dist[:, C.EOS_ID] = 0
+    unk_dist = mx.nd.zeros_like(eos_dist)
+    unk_dist[:, C.UNK_ID] = np.inf
+
+    lengths = mx.nd.array([0, 1, 0], dtype='int32')
+    max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
+    scores_accumulated = mx.nd.ones((3, 1), dtype='float32')
+    finished = mx.nd.array([0,   # not finished
+                            1,   # finished
+                            0],  # not finished
+                           dtype='int32')
+    inactive = mx.nd.zeros_like(finished)
+    target_dists = mx.nd.uniform(0, 1, (3, vocab_size))
+
+    scores, lengths = us(target_dists, finished, inactive, scores_accumulated, lengths, max_lengths,
+                         unk_dist, pad_dist, eos_dist)
+    scores = scores.asnumpy()
+    lengths = lengths.asnumpy().reshape((-1,))
+
+    assert (lengths == np.array([[1], [1], [1]])).all()  # all lengths but finished updated + 1
+    assert (scores[0] == (1. + target_dists[0] + eos_dist).asnumpy()).all()  # 1 reached max length, force eos
+    assert (scores[1] == np.array([1.] + pad_dist[1].asnumpy().tolist())).all()  # 2 finished, force pad, keep score
+    assert (scores[2] == (1. + target_dists[2]).asnumpy()).all()  # 3 scores + previous scores
+    assert scores[2, C.UNK_ID] == np.inf    # 3 scores of <unk> should be np.inf
 
 class _TestInference(sockeye.beam_search._Inference):
 
@@ -258,7 +287,7 @@ class _TestInference(sockeye.beam_search._Inference):
         self.states = []
 
     def state_structure(self):
-        return C.STEP_STATE + C.STEP_STATE # is this the correct structure to use for self.states?
+        return C.STEP_STATE + C.STEP_STATE  # is this the correct structure to use for self.states?
 
     def encode_and_initialize(self,
                               inputs: mx.nd.NDArray,
