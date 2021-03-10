@@ -56,7 +56,7 @@ For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
 ## Research with Sockeye
 
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
-If you know more, please let us know or submit a pull request (last updated: October 2020).
+If you know more, please let us know or submit a pull request (last updated: March 2021).
 
 ### 2021
 
@@ -65,7 +65,8 @@ If you know more, please let us know or submit a pull request (last updated: Oct
 
 ### 2020
 
-* Dinu, Georgiana, Prashant Mathur, Marcello Federico, Stanislas Lauly, Yaser Al-Onaizan. "Joint translation and unit conversion for end-to-end localization." arXiv preprint arXiv:2004.05219 (2020)
+* Dinu, Georgiana, Prashant Mathur, Marcello Federico, Stanislas Lauly, Yaser Al-Onaizan. "Joint translation and unit conversion for end-to-end localization." Proceedings of IWSLT (2020)
+* Exel, Miriam, Bianka Buschbeck, Lauritz Brandt, Simona Doneva. "Terminology-Constrained Neural Machine Translation at SAP". Proceedings of EAMT (2020).
 * Hisamoto, Sorami, Matt Post, Kevin Duh. "Membership Inference Attacks on Sequence-to-Sequence Models: Is My Data In Your Machine Translation System?" Transactions of the Association for Computational Linguistics, Volume 8 (2020)
 * Naradowsky, Jason, Xuan Zhan, Kevin Duh. "Machine Translation System Selection from Bandit Feedback." arXiv preprint arXiv:2002.09646 (2020)
 * Niu, Xing, Prashant Mathur, Georgiana Dinu, Yaser Al-Onaizan. "Evaluating Robustness to Input Perturbations for Neural Machine Translation". arXiv preprint 	arXiv:2005.00580 (2020)
