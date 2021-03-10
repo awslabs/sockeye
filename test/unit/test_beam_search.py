@@ -227,6 +227,8 @@ def test_update_scores():
     pad_dist = mx.nd.full((batch_beam_size, vocab_size - 1), val=np.inf, dtype='float32')
     eos_dist = mx.nd.full((batch_beam_size, vocab_size), val=np.inf, dtype='float32')
     eos_dist[:, C.EOS_ID] = 0
+    unk_dist = mx.nd.full((batch_beam_size, vocab_size), val=0, dtype='float32')
+    unk_dist[:, C.UNK_ID] = np.inf
 
     lengths = mx.nd.array([0, 1, 0], dtype='int32')
     max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
@@ -238,7 +240,8 @@ def test_update_scores():
     inactive = mx.nd.zeros_like(finished)
     target_dists = mx.nd.uniform(0, 1, (3, vocab_size))
 
-    scores, lengths = us(target_dists, finished, inactive, scores_accumulated, lengths, max_lengths, pad_dist, eos_dist)
+    scores, lengths = us(target_dists, finished, inactive, scores_accumulated, lengths, max_lengths,
+                         unk_dist, pad_dist, eos_dist)
     scores = scores.asnumpy()
     lengths = lengths.asnumpy().reshape((-1,))
 
