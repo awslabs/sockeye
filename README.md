@@ -58,6 +58,11 @@ For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
 If you know more, please let us know or submit a pull request (last updated: October 2020).
 
+### 2021
+
+* Bergmanis, Toms, Mārcis Pinnis. "Facilitating Terminology Translation with Target Lemma Annotations". arXiv preprint arXiv:2101.10035 (2021)
+* Vu, Thuy, Alessandro Moschitti. "Machine Translation Customization via Automatic Training Data Selection from the Web". arXiv preprint arXiv:2102.1024 (2021)
+
 ### 2020
 
 * Dinu, Georgiana, Prashant Mathur, Marcello Federico, Stanislas Lauly, Yaser Al-Onaizan. "Joint translation and unit conversion for end-to-end localization." arXiv preprint arXiv:2004.05219 (2020)
@@ -71,6 +76,7 @@ via Self-Trained Contextual Embeddings." arXiv preprint arXiv:2010.07761 (2020).
 * Stafanovičs, Artūrs, Toms Bergmanis, Mārcis Pinnis. "Mitigating Gender Bias in Machine Translation with Target Gender
 Annotations." arXiv preprint arXiv:2010.06203 (2020)
 * Stojanovski, Dario, Alexander Fraser. "Addressing Zero-Resource Domains Using Document-Level Context in Neural Machine Translation." arXiv preprint arXiv preprint arXiv:2004.14927 (2020)
+* Stojanovski, Dario, Benno Krojer, Denis Peskov, Alexander Fraser. "ContraCAT: Contrastive Coreference Analytical Templates for Machine Translation". Proceedings of COLING (2020)
 * Zhang, Xuan, Kevin Duh. "Reproducible and Efficient Benchmarks for Hyperparameter Optimization of Neural Machine Translation Systems." Transactions of the Association for Computational Linguistics, Volume 8 (2020)
 * Swe Zin Moe, Ye Kyaw Thu, Hnin Aye Thant, Nandar Win Min, and Thepchai Supnithi, "Unsupervised Neural Machine Translation between Myanmar Sign Language and Myanmar Language", Journal of Intelligent Informatics and Smart Technology, April 1st Issue, 2020, pp. 53-61. (Submitted December 21, 2019; accepted March 6, 2020; revised March 16, 2020; published online April 30, 2020)
 * Thazin Myint Oo, Ye Kyaw Thu, Khin Mar Soe and Thepchai Supnithi, "Neural Machine Translation between Myanmar (Burmese) and Dawei (Tavoyan)", In Proceedings of the 18th International Conference on Computer Applications (ICCA 2020), Feb 27-28, 2020, Yangon, Myanmar, pp. 219-227
