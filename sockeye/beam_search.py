@@ -181,7 +181,7 @@ class UpdateScores(mx.gluon.HybridBlock):
                        unk_dist, pad_dist, eos_dist):
         # make sure to avoid generating <unk> if unk_dist is specified
         if unk_dist is not None:
-            target_dists += unk_dist
+            target_dists = target_dists + unk_dist
         # broadcast hypothesis score to each prediction.
         # scores_accumulated. Shape: (batch*beam, 1)
         # target_dists. Shape: (batch*beam, vocab_size)
