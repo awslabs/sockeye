@@ -277,8 +277,8 @@ def test_prevent_unk_update_scores():
     assert (lengths == np.array([[1], [1], [1]])).all()  # all lengths but finished updated + 1
     assert (scores[0] == (1. + target_dists[0] + eos_dist).asnumpy()).all()  # 1 reached max length, force eos
     assert (scores[1] == np.array([1.] + pad_dist[1].asnumpy().tolist())).all()  # 2 finished, force pad, keep score
-    assert (scores[2] == (1. + target_dists[2]).asnumpy()).all()  # 3 scores + previous scores
     assert scores[2, C.UNK_ID] == np.inf    # 3 scores of <unk> should be np.inf
+    assert (scores[2] == (1. + target_dists[2] + unk_dist[2]).asnumpy()).all()  # 3 scores + previous scores
 
 class _TestInference(sockeye.beam_search._Inference):
 
