@@ -54,7 +54,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
-     "--beam-size 1",
+     "--beam-size 1 --prevent-unk",
      False,
      1.02,
      0.98),
@@ -134,7 +134,7 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
      " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
-     "--beam-size 1",
+     "--beam-size 1 --prevent-unk",
      True, 0, 0,
      1.03,
      0.97),

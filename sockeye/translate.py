@@ -147,7 +147,8 @@ def run_translate(args: argparse.Namespace):
                                           max_input_length=args.max_input_length,
                                           max_output_length=args.max_output_length,
                                           hybridize=hybridize,
-                                          softmax_temperature=args.softmax_temperature)
+                                          softmax_temperature=args.softmax_temperature,
+                                          prevent_unk=args.prevent_unk)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,

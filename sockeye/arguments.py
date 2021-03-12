@@ -1315,6 +1315,10 @@ def add_inference_args(params):
                                action='store_true',
                                default=False,
                                help='Remove any <unk> symbols from outputs. Default: %(default)s.')
+    decode_params.add_argument('--prevent-unk',
+                               action='store_true',
+                               default=False,
+                               help='Avoid generating <unk> during decoding. Default: %(default)s.')
 
     decode_params.add_argument('--output-type',
                                default='translation',

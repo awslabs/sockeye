@@ -178,7 +178,10 @@ class UpdateScores(mx.gluon.HybridBlock):
     def hybrid_forward(self, F,
                        target_dists, finished, inactive,
                        scores_accumulated, lengths, max_lengths,
-                       pad_dist, eos_dist):
+                       unk_dist, pad_dist, eos_dist):
+        # make sure to avoid generating <unk> if unk_dist is specified
+        if unk_dist is not None:
+            target_dists = target_dists + unk_dist
         # broadcast hypothesis score to each prediction.
         # scores_accumulated. Shape: (batch*beam, 1)
         # target_dists. Shape: (batch*beam, vocab_size)
@@ -510,7 +513,8 @@ class BeamSearch(mx.gluon.Block):
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
-                 sample: Optional[int] = None) -> None:
+                 sample: Optional[int] = None,
+                 prevent_unk: bool = False) -> None:
         super().__init__(prefix='beam_search_')
         self.beam_size = beam_size
         self.dtype = dtype
@@ -523,6 +527,7 @@ class BeamSearch(mx.gluon.Block):
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
         self.global_avoid_trie = global_avoid_trie
+        self.prevent_unk = prevent_unk
 
         with self.name_scope():
             self._sort_states = SortStates(state_structure=self._inference.state_structure(),
@@ -604,6 +609,10 @@ class BeamSearch(mx.gluon.Block):
         eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
                               ctx=self.context, dtype=self.dtype)
         eos_dist[:, C.EOS_ID] = 0
+        unk_dist = None
+        if self.prevent_unk:
+            unk_dist = mx.nd.zeros_like(eos_dist)
+            unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
@@ -652,6 +661,9 @@ class BeamSearch(mx.gluon.Block):
             eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape),
                                   val=np.inf, ctx=self.context, dtype=self.dtype)
             eos_dist[:, C.EOS_ID] = 0
+            if unk_dist is not None:
+                unk_dist = mx.nd.zeros_like(eos_dist)
+                unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.bos_id, self.eos_id)
@@ -687,6 +699,7 @@ class BeamSearch(mx.gluon.Block):
                                                   scores_accumulated,
                                                   lengths,
                                                   max_output_lengths,
+                                                  unk_dist,
                                                   pad_dist,
                                                   eos_dist)
 
@@ -791,7 +804,8 @@ def get_beam_search(models: List[SockeyeModel],
                     avoid_list: Optional[str] = None,
                     sample: Optional[int] = None,
                     hybridize: bool = True,
-                    softmax_temperature: Optional[float] = None) -> BeamSearch:
+                    softmax_temperature: Optional[float] = None,
+                    prevent_unk: bool = False) -> BeamSearch:
 
     inference = None  # type: Optional[_Inference]
     if len(models) == 1:
@@ -822,6 +836,7 @@ def get_beam_search(models: List[SockeyeModel],
         num_source_factors=models[0].num_source_factors,
         num_target_factors=models[0].num_target_factors,
         global_avoid_trie=global_avoid_trie,
+        prevent_unk=prevent_unk,
         inference=inference
     )
     bs.initialize()
