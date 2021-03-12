@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.12]
+
+### Added
+- Added `--config` option to `prepare_data` CLI to allow setting commandline flags via a yaml config. 
+- Flags for the `prepare_data` CLI are now stored in the output folder under `args.yaml`
+  (equivalent to the behavior of `sockeye_train`)
+
 ## [2.3.11]
 
 ### Added
