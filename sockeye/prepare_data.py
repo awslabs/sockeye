@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    params = argparse.ArgumentParser(description='Preprocesses and shards training data.')
+    params = arguments.ConfigArgumentParser(description='Preprocesses and shards training data.')
     arguments.add_prepare_data_cli_args(params)
     args = params.parse_args()
     prepare_data(args)
@@ -39,6 +39,7 @@ def prepare_data(args: argparse.Namespace):
                       file_logging=not args.no_logfile,
                       path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
+    arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
     utils.seed_rngs(args.seed)
 
     minimum_num_shards = args.min_num_shards
