@@ -416,7 +416,9 @@ class TranslatorOutput:
                  'nbest_tokens',
                  'nbest_scores',
                  'factor_translations',
-                 'factor_tokens')
+                 'factor_tokens',
+                 'nbest_factor_translations',
+                 'nbest_factor_tokens')
 
     def __init__(self,
                  sentence_id: SentenceId,
@@ -429,7 +431,9 @@ class TranslatorOutput:
                  nbest_tokens: Optional[List[Tokens]] = None,
                  nbest_scores: Optional[List[float]] = None,
                  factor_translations: Optional[List[str]] = None,
-                 factor_tokens: Optional[List[Tokens]] = None) -> None:
+                 factor_tokens: Optional[List[Tokens]] = None,
+                 nbest_factor_translations: Optional[List[List[str]]] = None,
+                 nbest_factor_tokens: Optional[List[List[Tokens]]] = None) -> None:
         self.sentence_id = sentence_id
         self.translation = translation
         self.tokens = tokens
@@ -441,6 +445,8 @@ class TranslatorOutput:
         self.nbest_scores = nbest_scores
         self.factor_translations = factor_translations
         self.factor_tokens = factor_tokens
+        self.nbest_factor_translations = nbest_factor_translations
+        self.nbest_factor_tokens = nbest_factor_tokens
 
     def json(self) -> Dict:
         """
@@ -463,7 +469,14 @@ class TranslatorOutput:
 
         if self.factor_translations is not None:
             for i, factor in enumerate(self.factor_translations, 1):
-                _d['factor%d' % i] = factor
+                _d[f'factor{i}'] = factor
+
+        if self.nbest_factor_translations is not None and len(self.nbest_factor_translations) > 1:
+            _d['translations_factors'] = []
+            for factor_translations in self.nbest_factor_translations:
+                _d['translations_factors'].append(
+                    {f'factor{i}': factor_translation for i, factor_translation in enumerate(factor_translations, 1)})
+
         return _d
 
 
@@ -1017,14 +1030,17 @@ class Translator:
             nbest_translations = None
             nbest_tokens = None
             nbest_scores = None
+            nbest_factor_translations = None
+            nbest_factor_tokens = None
         else:
-            nbest_tokens, nbest_translations = [], []
+            nbest_tokens, nbest_translations, nbest_factor_tokens, nbest_factor_translations = [], [], [], []
             for nbest_target_ids in translation.nbest_translations.target_ids_list:
-                # TODO: also extract target factors for nbest translations
-                target_tokens_n, primary_translation_n, _, _ = \
+                ith_target_tokens, ith_primary_translation, ith_nbest_factor_tokens, ith_nbest_factor_translations = \
                     self._get_translation_tokens_and_factors(nbest_target_ids)
-                nbest_tokens.append(target_tokens_n)
-                nbest_translations.append(primary_translation_n)
+                nbest_tokens.append(ith_target_tokens)
+                nbest_translations.append(ith_primary_translation)
+                nbest_factor_tokens.append(ith_nbest_factor_tokens)
+                nbest_factor_translations.append(ith_nbest_factor_translations)
             nbest_scores = translation.nbest_translations.scores
 
         return TranslatorOutput(sentence_id=trans_input.sentence_id,
@@ -1037,7 +1053,9 @@ class Translator:
                                 nbest_tokens=nbest_tokens,
                                 nbest_scores=nbest_scores,
                                 factor_translations=factor_translations,
-                                factor_tokens=factor_tokens)
+                                factor_tokens=factor_tokens,
+                                nbest_factor_translations=nbest_factor_translations,
+                                nbest_factor_tokens=nbest_factor_tokens)
 
     def _translate_nd(self,
                       source: mx.nd.NDArray,
