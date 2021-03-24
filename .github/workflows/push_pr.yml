@@ -40,7 +40,7 @@ jobs:
       run: |
         pylint --version
         pylint --rcfile=.pylintrc sockeye
-        pylint --rcfile=.pylintrc test
+        pylint --rcfile=.pylintrc test --disable=E1102
     - name: MyPy
       run: |
         mypy --version

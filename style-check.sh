@@ -7,7 +7,7 @@ pylint --rcfile=.pylintrc sockeye
 SOCKEYE_LINT_RESULT=$?
 
 # Run pylint on test package, failing on any reported errors.
-pylint --rcfile=.pylintrc test
+pylint --rcfile=.pylintrc test --disable=E1102
 TESTS_LINT_RESULT=$?
 
 # Run mypy, we are currently limiting to modules in typechecked-files
