@@ -2,12 +2,12 @@
 
 # run this to perform code-style checking.
 
-# Run pylint on the sockeye package, failing on any reported errors.
-pylint --rcfile=pylintrc sockeye -E
+# Run pylint on the sockeye package, failing on any reported errors (as defined in pylintrc).
+pylint --rcfile=.pylintrc sockeye
 SOCKEYE_LINT_RESULT=$?
 
 # Run pylint on test package, failing on any reported errors.
-pylint --rcfile=pylintrc test -E --disable=E1102
+pylint --rcfile=.pylintrc test
 TESTS_LINT_RESULT=$?
 
 # Run mypy, we are currently limiting to modules in typechecked-files
