@@ -17,6 +17,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 - Updated to [MXNet 1.8.0](https://github.com/apache/incubator-mxnet/tree/1.8.0)
 - Removed dependency support for Cuda 9.2 (no longer supported by MXNet 1.8).
 - Added dependency support for Cuda 11.0 and 11.2.
+- Updated Python requirement to 3.7 and later. (Removed backporting `dataclasses` requirement)
 
 ## [2.3.13]
 
