@@ -16,7 +16,7 @@ jobs:
       max-parallel: 4
       fail-fast: false
       matrix:
-        python-version: [3.6, 3.7]
+        python-version: [3.7, 3.8]
         platform: [ubuntu-latest, macos-latest]
       
     # The type of runner that the job will run on
