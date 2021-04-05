@@ -3,7 +3,7 @@
 ## Dependencies
 
 Sockeye requires:
-- **Python3.6** or above
+- **Python3.7** or above
 - [MXNet 1.8.0](https://github.com/apache/incubator-mxnet/tree/1.8.0)
 - Numpy
 
