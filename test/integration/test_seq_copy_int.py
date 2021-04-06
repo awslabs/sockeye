@@ -178,7 +178,7 @@ def test_other_clis(train_params: str, translate_params: str):
                             dev_line_count=_DEV_LINE_COUNT,
                             dev_max_length=_LINE_MAX_LENGTH,
                             test_line_count=_TEST_LINE_COUNT,
-                            test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
+                            test_line_count_empty=0,
                             test_max_length=_TEST_MAX_LENGTH) as data:
         # train a minimal default model
         data = run_train_translate(train_params=train_params,
@@ -202,7 +202,7 @@ def _test_evaluate_cli(test_outputs: List[str], test_target_path: str):
         out_path = os.path.join(work_dir, 'hypotheses')
         with open(out_path, 'w') as fd:
             for output in test_outputs:
-                print(output, file=fd)
+                print(output['translation'], file=fd)
         # Run evaluate cli
         eval_params = "{} --hypotheses {hypotheses} --references {references} --metrics {metrics}".format(
             sockeye.evaluate.__file__,
