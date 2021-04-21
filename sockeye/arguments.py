@@ -1224,6 +1224,10 @@ def add_inference_args(params):
                                type=int_greater_or_equal(1),
                                default=5,
                                help='Size of the beam. Default: %(default)s.')
+    decode_params.add_argument('--greedy', '-g',
+                               action="store_true",
+                               default=False,
+                               help='Wheter to use alternative greedy search implementation')
 
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],

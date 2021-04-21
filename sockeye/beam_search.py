@@ -486,6 +486,131 @@ class SortStates(mx.gluon.HybridBlock):
         return sorted_states
 
 
+class GreedySearch(mx.gluon.Block):
+
+    def __init__(self,
+                 dtype: str,
+                 bos_id: int,
+                 eos_id: int,
+                 context: Union[mx.Context, List[mx.Context]],
+                 num_source_factors: int,
+                 num_target_factors: int,
+                 inference: _SingleModelInference):
+        super().__init__(prefix='greedy_search_')
+        self.bos_id = bos_id
+        self.eos_id = eos_id
+        self.context = context
+        self._inference = inference
+        self.num_source_factors = num_source_factors
+        self.num_target_factors = num_target_factors
+        self.global_avoid_trie = None
+        assert inference._skip_softmax
+
+        with self.name_scope():
+            self.work_block = GreedyWorkBlock()
+
+    def forward(self,
+                source: mx.nd.NDArray,
+                source_length: mx.nd.NDArray,
+                restrict_lexicon: Optional[lexicon.TopKLexicon],
+                raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                raw_avoid_list: List[Optional[constrained.RawConstraintList]],
+                max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
+                                                            np.ndarray,
+                                                            np.ndarray,
+                                                            np.ndarray,
+                                                            List[Optional[np.ndarray]],
+                                                            List[Optional[constrained.ConstrainedHypothesis]]]:
+        """
+        Translates multiple sentences using beam search.
+
+        :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
+        :param source_length: Valid source lengths. Shape: (batch_size,).
+        :param restrict_lexicon: Lexicon to use for vocabulary restriction.
+        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
+               that must appear in each output.
+        :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
+               that must NOT appear in each output.
+        :param max_output_lengths: NDArray of maximum output lengths per input in source.
+                Shape: (batch_size,). Dtype: int32.
+        :return List of best hypotheses indices, list of best word indices,
+                array of accumulated length-normalized negative log-probs, hypotheses lengths,
+                predicted lengths of references (if any), constraints (if any).
+        """
+        batch_size = source.shape[0]
+        logger.debug("greedy_search batch size: %d", batch_size)
+        assert batch_size == 1
+
+        # Maximum beam search iterations (determined by longest input with eos)
+        max_iterations = max_output_lengths.max().asscalar()
+        logger.debug("max greedy search iterations: %d", max_iterations)
+
+        # best word_indices (also act as input: (batch*beam, num_target_factors
+        best_word_index = mx.nd.full((batch_size, self.num_target_factors),
+                                     val=self.bos_id, ctx=self.context, dtype='int32')
+        outputs = []  # type: List[mx.nd.NDArray]
+
+        # If using a top-k lexicon, select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
+        if restrict_lexicon:
+            source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
+            vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
+            # Pad to a multiple of 8.
+            vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
+                                     mode='constant', constant_values=self.eos_id)
+            vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
+
+            vocab_slice_ids_shape = vocab_slice_ids.shape[0]
+            if vocab_slice_ids_shape < 1 + 1:
+                # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
+                # smaller than the beam size.
+                logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
+                               vocab_slice_ids_shape, 1)
+                n = 1 - vocab_slice_ids_shape + 1
+                vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
+                                               mx.nd.full((n,), val=self.eos_id, ctx=self.context, dtype='int32'),
+                                               dim=0)
+
+        # (0) encode source sentence, returns a list
+        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
+
+        t = 1
+        for t in range(1, max_iterations + 1):
+            scores, model_states, target_factors = self._inference.decode_step(best_word_index,
+                                                                               model_states,
+                                                                               vocab_slice_ids=vocab_slice_ids)
+            # shape: (batch*beam=1, 1)
+            best_word_index = self.work_block(scores, vocab_slice_ids, target_factors)
+            outputs.append(best_word_index)
+
+            if best_word_index == self.eos_id or best_word_index == C.PAD_ID:
+                break
+
+        logger.debug("Finished after %d out of %d steps.", t, max_iterations)
+
+        outputs = mx.nd.stack(*outputs, axis=2)  # shape: (1, num_factors, length)
+        length = np.array([t], dtype='int32')  # shape (1,)
+        hyp_indices = mx.nd.zeros((1, t + 1), dtype='int32')
+        score = np.array([5.])
+
+        return hyp_indices.asnumpy(), outputs.asnumpy(), score, length, None, []
+
+
+class GreedyWorkBlock(mx.gluon.HybridBlock):
+
+    def hybrid_forward(self, F, scores, vocab_slice_ids=None, target_factors=None):
+        # shape: (batch*beam=1, 1)
+        best_word_index = F.argmin(scores, axis=-1, keepdims=True)
+        # Map from restricted to full vocab ids if needed
+        if vocab_slice_ids is not None:
+            best_word_index = F.take(vocab_slice_ids, best_word_index)
+        if target_factors is not None:
+            best_word_index = F.concat(best_word_index, target_factors)
+        return best_word_index
+
+
+
 class BeamSearch(mx.gluon.Block):
     """
     Features:
@@ -843,3 +968,42 @@ def get_beam_search(models: List[SockeyeModel],
     if hybridize:
         bs.hybridize(static_alloc=True)
     return bs
+
+
+def get_greedy_search(models: List[SockeyeModel],
+                    beam_size: int,
+                    context: Union[mx.Context, List[mx.Context]],
+                    vocab_target: vocab.Vocab,
+                    output_scores: bool,
+                    scorer: CandidateScorer,
+                    ensemble_mode: str = 'linear',
+                    beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
+                    constant_length_ratio: float = 0.0,
+                    avoid_list: Optional[str] = None,
+                    sample: Optional[int] = None,
+                    hybridize: bool = True,
+                    softmax_temperature: Optional[float] = None,
+                    prevent_unk: bool = False) -> GreedySearch:
+    assert len(models) == 1
+    assert beam_size == 1
+    assert sample is None
+    skip_softmax = True
+    inference = _SingleModelInference(model=models[0],
+                                      skip_softmax=skip_softmax,
+                                      constant_length_ratio=constant_length_ratio,
+                                      softmax_temperature=softmax_temperature)
+
+    gs = GreedySearch(
+        dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
+        bos_id=C.BOS_ID,
+        eos_id=C.EOS_ID,
+        context=context,
+        num_source_factors=models[0].num_source_factors,
+        num_target_factors=models[0].num_target_factors,
+        inference=inference
+    )
+    gs.initialize()
+    if hybridize:
+        gs.hybridize(static_alloc=True)
+    return gs
+

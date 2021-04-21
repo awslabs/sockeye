@@ -48,8 +48,9 @@ def check_train_translate(train_params: str,
                                seed=seed)
 
     # Test equivalence of batch decoding
-    translate_params_batch = translate_params + " --batch-size 2"
-    test_translate_equivalence(data, translate_params_batch, compare_output)
+    if 'greedy' not in translate_params:
+        translate_params_batch = translate_params + " --batch-size 2"
+        test_translate_equivalence(data, translate_params_batch, compare_output)
 
     # Run translate with restrict-lexicon
     data = run_translate_restrict(data, translate_params)

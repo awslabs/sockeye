@@ -30,7 +30,7 @@ from . import lexical_constraints as constrained
 from . import lexicon
 from . import utils
 from . import vocab
-from .beam_search import get_beam_search, CandidateScorer
+from .beam_search import get_beam_search, get_greedy_search, CandidateScorer
 from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
@@ -708,7 +708,9 @@ class Translator:
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None,
                  softmax_temperature: Optional[float] = None,
-                 prevent_unk: bool = False) -> None:
+                 prevent_unk: bool = False,
+                 greedy: bool = False) -> None:
+        self.greedy = greedy
         self.context = context
         self.dtype = C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
         self._scorer = scorer
@@ -741,21 +743,41 @@ class Translator:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
 
-        self._beam_search = get_beam_search(
-            models=self.models,
-            beam_size=self.beam_size,
-            context=self.context,
-            vocab_target=target_vocabs[0],  # only primary target factor used for constrained decoding.
-            output_scores=output_scores,
-            sample=sample,
-            ensemble_mode=ensemble_mode,
-            beam_search_stop=beam_search_stop,
-            scorer=self._scorer,
-            constant_length_ratio=constant_length_ratio,
-            avoid_list=avoid_list,
-            hybridize=hybridize,
-            softmax_temperature=softmax_temperature,
-            prevent_unk=prevent_unk)
+
+        if self.greedy:
+            self._beam_search = get_greedy_search(
+                models=self.models,
+                beam_size=self.beam_size,
+                context=self.context,
+                vocab_target=target_vocabs[0],  # only primary target factor used for constrained decoding.
+                output_scores=output_scores,
+                sample=sample,
+                ensemble_mode=ensemble_mode,
+                beam_search_stop=beam_search_stop,
+                scorer=self._scorer,
+                constant_length_ratio=constant_length_ratio,
+                avoid_list=avoid_list,
+                hybridize=hybridize,
+                softmax_temperature=softmax_temperature,
+                prevent_unk=prevent_unk)
+        else:
+            self._beam_search = get_beam_search(
+                models=self.models,
+                beam_size=self.beam_size,
+                context=self.context,
+                vocab_target=target_vocabs[0],  # only primary target factor used for constrained decoding.
+                output_scores=output_scores,
+                sample=sample,
+                ensemble_mode=ensemble_mode,
+                beam_search_stop=beam_search_stop,
+                scorer=self._scorer,
+                constant_length_ratio=constant_length_ratio,
+                avoid_list=avoid_list,
+                hybridize=hybridize,
+                softmax_temperature=softmax_temperature,
+                prevent_unk=prevent_unk)
+
+
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,
