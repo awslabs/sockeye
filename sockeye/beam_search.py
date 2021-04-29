@@ -601,7 +601,9 @@ class GreedyWorkBlock(mx.gluon.HybridBlock):
 
     def hybrid_forward(self, F, scores, vocab_slice_ids=None, target_factors=None):
         # shape: (batch*beam=1, 1)
-        best_word_index = F.argmin(scores, axis=-1, keepdims=True)
+        # argmin has trouble with fp16 inputs on GPUs, using top1 instead
+        #best_word_index = F.argmin(scores, axis=-1, keepdims=True)
+        best_word_index = F.topk(scores, axis=-1, k=1, ret_typ='indices', is_ascend=True, dtype='int32')
         # Map from restricted to full vocab ids if needed
         if vocab_slice_ids is not None:
             best_word_index = F.take(vocab_slice_ids, best_word_index)
