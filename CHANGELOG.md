@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.15]
+
+### Changed
+- Optimization: Decoder class is now a complete HybridBlock (no forward method).
+
 ## [2.3.14]
 
 ### Changed
