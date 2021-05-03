@@ -495,7 +495,8 @@ class GreedySearch(mx.gluon.Block):
                  context: Union[mx.Context, List[mx.Context]],
                  num_source_factors: int,
                  num_target_factors: int,
-                 inference: _SingleModelInference):
+                 inference: _SingleModelInference,
+                 use_while: bool = False):
         super().__init__(prefix='greedy_search_')
         self.bos_id = bos_id
         self.eos_id = eos_id
@@ -504,6 +505,7 @@ class GreedySearch(mx.gluon.Block):
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
         self.global_avoid_trie = None
+        self.use_while = use_while
         assert inference._skip_softmax
 
         with self.name_scope():
@@ -548,8 +550,6 @@ class GreedySearch(mx.gluon.Block):
         # best word_indices (also act as input: (batch*beam, num_target_factors
         best_word_index = mx.nd.full((batch_size, self.num_target_factors),
                                      val=self.bos_id, ctx=self.context, dtype='int32')
-        outputs = []  # type: List[mx.nd.NDArray]
-
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
@@ -575,26 +575,47 @@ class GreedySearch(mx.gluon.Block):
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
 
-        t = 1
-        for t in range(1, max_iterations + 1):
-            scores, model_states, target_factors = self._inference.decode_step(best_word_index,
-                                                                               model_states,
-                                                                               vocab_slice_ids=vocab_slice_ids)
-            # shape: (batch*beam=1, 1)
-            best_word_index = self.work_block(scores, vocab_slice_ids, target_factors)
-            outputs.append(best_word_index)
+        if self.use_while:
+            loop_vars = (mx.nd.zeros((1,), dtype='int64', ctx=self.context),  # t = 0
+                         model_states,
+                         best_word_index)
+            cond = lambda t, s, b: b != self.eos_id and b != C.PAD_ID
+            def body(t, states, step_input):
+                scores, new_states, target_factors = self._inference.decode_step(step_input,
+                                                                                 states,
+                                                                                 vocab_slice_ids=vocab_slice_ids)
+                output = self.work_block(scores, vocab_slice_ids, target_factors)
+                return [output], [t + 1, new_states, output]
 
-            if best_word_index == self.eos_id or best_word_index == C.PAD_ID:
-                break
+            outputs, (steps, states, _) = mx.nd.contrib.while_loop(cond, body, loop_vars,
+                                                                   max_iterations=max_iterations + 1)
+            outputs = outputs[0].reshape((1, -1, max_iterations + 1)).asnumpy()
+            t = steps.asscalar()
+            logger.debug("Finished after %d out of %d steps.", t, max_iterations)
+            length = np.array([t], dtype='int32')  # shape (1,)
+            hyp_indices = np.zeros((1, t + 1), dtype='int32')
 
-        logger.debug("Finished after %d out of %d steps.", t, max_iterations)
+        else:
+            outputs = []
+            for t in range(1, max_iterations + 1):
+                scores, model_states, target_factors = self._inference.decode_step(best_word_index,
+                                                                                   model_states,
+                                                                                   vocab_slice_ids=vocab_slice_ids)
+                # shape: (batch*beam=1, 1)
+                best_word_index = self.work_block(scores, vocab_slice_ids, target_factors)
+                outputs.append(best_word_index)
 
-        outputs = mx.nd.stack(*outputs, axis=2)  # shape: (1, num_factors, length)
-        length = np.array([t], dtype='int32')  # shape (1,)
-        hyp_indices = mx.nd.zeros((1, t + 1), dtype='int32')
+                if best_word_index == self.eos_id or best_word_index == C.PAD_ID:
+                    break
+
+            logger.debug("Finished after %d out of %d steps.", t, max_iterations)
+
+            outputs = mx.nd.stack(*outputs, axis=2).asnumpy()  # shape: (1, num_factors, length)
+            length = np.array([t], dtype='int32')  # shape (1,)
+            hyp_indices = np.zeros((1, t + 1), dtype='int32')
         score = np.array([5.])
 
-        return hyp_indices.asnumpy(), outputs.asnumpy(), score, length, None, []
+        return hyp_indices, outputs, score, length, None, []
 
 
 class GreedyWorkBlock(mx.gluon.HybridBlock):
@@ -985,7 +1006,8 @@ def get_greedy_search(models: List[SockeyeModel],
                     sample: Optional[int] = None,
                     hybridize: bool = True,
                     softmax_temperature: Optional[float] = None,
-                    prevent_unk: bool = False) -> GreedySearch:
+                    prevent_unk: bool = False,
+                    use_while: bool = False) -> GreedySearch:
     assert len(models) == 1
     assert beam_size == 1
     assert sample is None
@@ -1002,7 +1024,8 @@ def get_greedy_search(models: List[SockeyeModel],
         context=context,
         num_source_factors=models[0].num_source_factors,
         num_target_factors=models[0].num_target_factors,
-        inference=inference
+        inference=inference,
+        use_while=use_while
     )
     gs.initialize()
     if hybridize:
