@@ -92,7 +92,8 @@ class Decoder(mx.gluon.Block):
     @abstractmethod
     def init_state_from_encoder(self,
                                 encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
+                                encoder_valid_length: Optional[mx.nd.NDArray] = None,
+                                target_embed: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
         raise NotImplementedError()
 
     @abstractmethod
@@ -174,7 +175,8 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
     def init_state_from_encoder(self,
                                 encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
+                                encoder_valid_length: Optional[mx.nd.NDArray] = None,
+                                target_embed: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
         """
         Returns the initial states given encoder output. States for teacher-forced training are encoder outputs
         and a valid length mask for encoder outputs.
@@ -185,21 +187,24 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         :param encoder_outputs: Encoder outputs. Shape: (batch, source_length, encoder_dim).
         :param encoder_valid_length: Valid lengths of encoder outputs. Shape: (batch,).
+        :param target_embed: Target-side embedding layer output. Shape: (batch, target_length, target_embedding_dim).
         :return: Initial states.
         """
-        # (batch_size, 1)
-        step = mx.nd.zeros_like(encoder_valid_length).expand_dims(axis=1, inplace=True)
+        if target_embed is None:  # Inference: initial step = 0. Shape: (batch_size, 1)
+            steps = mx.nd.zeros_like(encoder_valid_length).expand_dims(axis=1, inplace=True)
+        else:  # Training: steps up to target length. Shape: (1, target_length)
+            steps = mx.nd.contrib.arange_like(target_embed, axis=1).expand_dims(axis=0, inplace=True)
 
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
-            states = [step, encoder_valid_length]
+            states = [steps, encoder_valid_length]
 
             for layer in self.layers:
                 enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs)
                 states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
         else:
             # NO encoder projection caching
-            states = [step, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
+            states = [steps, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
 
         _batch_size = encoder_outputs.shape[0]
         _ctx = encoder_outputs.context
@@ -209,7 +214,6 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                                  for _ in range(layer.num_state_tensors)]
 
         states += dummy_autoregr_states
-
         return states
 
     def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
@@ -223,61 +227,6 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         """
         outputs, _ = self.forward(inputs, states)
         return outputs
-
-    def forward(self, step_input, states):
-        """
-        Run forward pass of the decoder.
-
-        step_input is either:
-             (batch, num_hidden): single decoder step at inference time
-             (batch, seq_len, num_hidden): full sequence decode during training.
-
-        states is either:
-            if self.inference_only == False: (Training and Checkpoint decoder during training)
-                steps, encoder_outputs, source_bias, layer_caches...
-            else: (during translation outside of training)
-                steps, source_bias, layer_caches..., projected encoder outputs...
-        """
-        input_shape = step_input.shape
-
-        is_inference = len(input_shape) == 2
-
-        if is_inference:
-            # Just add the length dimension:
-            # (batch, num_hidden) -> (batch, 1, num_hidden)
-            step_input = step_input.expand_dims(axis=1, inplace=True)
-        else:
-            assert not self.inference_only, "Decoder created with inference_only=True but used during training."
-            # Replace the single step by multiple steps for training
-            step, *states = states
-            # Create steps (1, trg_seq_len)
-            steps = mx.nd.contrib.arange_like(step_input, axis=1).expand_dims(axis=0, inplace=True)
-            states = [steps] + states
-
-        # run decoder op
-        target, autoregr_states = super().forward(step_input, states)
-
-        if is_inference:
-            # During inference, length dimension of decoder output has size 1, squeeze it
-            # (batch, num_hidden)
-            target = mx.nd.reshape(target, shape=(-1, self.get_num_hidden()))
-
-            # We also increment time step state (1st state in the list) and add new caches
-            step = states[0] + 1
-
-            if self.inference_only:
-                # pass in cached encoder states
-                encoder_attention_keys_values = states[2:2 + self.config.num_layers]
-                new_states = [step, states[1]] + encoder_attention_keys_values + autoregr_states
-            else:
-                encoder_outputs = states[1]
-                encoder_valid_length = states[2]
-                new_states = [step, encoder_outputs, encoder_valid_length] + autoregr_states
-
-            assert len(new_states) == len(states)
-        else:
-            new_states = None  # we don't care about states in training
-        return target, new_states
 
     def hybrid_forward(self, F, step_input, states):
         mask = None
@@ -323,7 +272,19 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         target = self.final_process(target, None)
         target = F.transpose(target, axes=(1, 0, 2))
 
-        return target, new_autoregr_states
+        # Inference: increment steps by 1 (discarded in training)
+        steps = steps + 1
+
+        if self.inference_only:
+            # pass in cached encoder states
+            encoder_attention_keys_values = states[2:2 + self.config.num_layers]
+            new_states = [steps, states[1]] + encoder_attention_keys_values + new_autoregr_states
+        else:
+            encoder_outputs = states[1]
+            encoder_valid_length = states[2]
+            new_states = [steps, encoder_outputs, encoder_valid_length] + new_autoregr_states
+
+        return target, new_states
 
     def get_num_hidden(self):
         return self.config.model_size

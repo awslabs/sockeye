@@ -217,7 +217,7 @@ class SockeyeModel(mx.gluon.Block):
         source_embed, source_embed_length = self.embedding_source(source, source_length)
         target_embed, target_embed_length = self.embedding_target(target, target_length)
         source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
-        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length)
+        states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         return source_encoded, source_encoded_length, target_embed, states
 
     def decode_step(self, step_input, states, vocab_slice_ids=None):
@@ -245,10 +245,8 @@ class SockeyeModel(mx.gluon.Block):
 
         valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
         target_embed, _ = self.embedding_target(step_input.reshape((0, 1, -1)), valid_length=valid_length)
-        target_embed = target_embed.squeeze(axis=1)
-
         decoder_out, new_states = self.decoder(target_embed, states)
-
+        decoder_out = decoder_out.squeeze(axis=1)
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
 
