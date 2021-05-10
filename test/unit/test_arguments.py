@@ -121,6 +121,7 @@ def test_device_args(test_params, expected_params):
               weight_tying_type="src_trg_softmax",
               transformer_attention_heads=(8, 8),
               transformer_feed_forward_num_hidden=(2048, 2048),
+              transformer_feed_forward_use_glu=False,
               transformer_activation_type=(C.RELU, C.RELU),
               transformer_model_size=(512, 512),
               transformer_positional_embedding_type="fixed",
