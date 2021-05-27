@@ -392,7 +392,7 @@ def test_get_best_word_indices_for_kth_hypotheses():
                          [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'), np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),
                           ([[[1]], [], [[3]], []], [None, None], np.array([1, 3], dtype='int32'), np.array([[1, 0, 0], [3, 2, 2]], dtype='int32'))
                           ])
-def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, expected_best_indices):
+def test_get_best_translations(raw_constraints, beam_histories, expected_best_ids, expected_best_indices):
     best_hyp_indices = np.array([[0, 1, 0, 1],
                                  [0, 1, 1, 0],
                                  [2, 3, 2, 3],
@@ -421,14 +421,14 @@ def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, 
 
     constraints = [sockeye.lexical_constraints.ConstrainedHypothesis(rc, _EOS) for rc in raw_constraints]
 
-    actual_result = sockeye.inference.Translator._get_best_from_beam(translator,
-                                                                     best_hyp_indices,
-                                                                     best_word_indices,
-                                                                     seq_scores,
-                                                                     lengths,
-                                                                     None,
-                                                                     constraints,
-                                                                     beam_histories)
+    actual_result = sockeye.inference.Translator._get_best_translations(translator,
+                                                                        best_hyp_indices,
+                                                                        best_word_indices,
+                                                                        seq_scores,
+                                                                        lengths,
+                                                                        None,
+                                                                        constraints,
+                                                                        beam_histories)
 
     for expected_translation, actual_translation in zip(expected_result, actual_result):
         assert expected_translation.target_ids == actual_translation.target_ids

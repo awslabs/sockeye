@@ -487,6 +487,10 @@ class SortStates(mx.gluon.HybridBlock):
 
 
 class GreedySearch(mx.gluon.Block):
+    """
+    Implements greedy search, not supporting various features from the BeamSearch class
+    (scoring, sampling, ensembling, lexical constraints, batch decoding).
+    """
 
     def __init__(self,
                  dtype: str,
@@ -497,6 +501,7 @@ class GreedySearch(mx.gluon.Block):
                  num_target_factors: int,
                  inference: _SingleModelInference):
         super().__init__(prefix='greedy_search_')
+        self.dtype = dtype
         self.bos_id = bos_id
         self.eos_id = eos_id
         self.context = context
@@ -504,10 +509,10 @@ class GreedySearch(mx.gluon.Block):
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
         self.global_avoid_trie = None
-        assert inference._skip_softmax
+        assert inference._skip_softmax, "skipping softmax must be enabled for GreedySearch"
 
         with self.name_scope():
-            self.work_block = GreedyWorkBlock()
+            self.work_block = GreedyTop1()
 
     def forward(self,
                 source: mx.nd.NDArray,
@@ -538,8 +543,7 @@ class GreedySearch(mx.gluon.Block):
                 predicted lengths of references (if any), constraints (if any).
         """
         batch_size = source.shape[0]
-        logger.debug("greedy_search batch size: %d", batch_size)
-        assert batch_size == 1
+        assert batch_size == 1, "Greedy Search does not support batch_size != 1"
 
         # Maximum beam search iterations (determined by longest input with eos)
         max_iterations = max_output_lengths.max().asscalar()
@@ -553,6 +557,7 @@ class GreedySearch(mx.gluon.Block):
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
+        # TODO: factor vocab_slice_ids preparation into a separate method to be shared among Greedy and BeamSearch.
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
             vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
@@ -573,7 +578,8 @@ class GreedySearch(mx.gluon.Block):
                                                dim=0)
 
         # (0) encode source sentence, returns a list
-        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
+        model_states, _ = self._inference.encode_and_initialize(source, source_length)
+        # TODO: check for disabled predicted output length
 
         t = 1
         for t in range(1, max_iterations + 1):
@@ -589,20 +595,23 @@ class GreedySearch(mx.gluon.Block):
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
-        outputs = mx.nd.stack(*outputs, axis=2)  # shape: (1, num_factors, length)
+        outputs = mx.nd.stack(*outputs, axis=2).asnumpy()  # shape: (1, num_factors, length)
         length = np.array([t], dtype='int32')  # shape (1,)
-        hyp_indices = mx.nd.zeros((1, t + 1), dtype='int32')
-        score = np.array([5.])
+        hyp_indices = np.zeros((1, t + 1), dtype='int32')
+        score = np.array([-1.])  # TODO: return unnormalized proper score
 
-        return hyp_indices.asnumpy(), outputs.asnumpy(), score, length, None, []
+        return hyp_indices, outputs, score, length, None, []
 
 
-class GreedyWorkBlock(mx.gluon.HybridBlock):
+class GreedyTop1(mx.gluon.HybridBlock):
+    """
+    Implements picking the highest scoring next word with support for vocabulary selection and target factors.
+    """
 
     def hybrid_forward(self, F, scores, vocab_slice_ids=None, target_factors=None):
         # shape: (batch*beam=1, 1)
         # argmin has trouble with fp16 inputs on GPUs, using top1 instead
-        #best_word_index = F.argmin(scores, axis=-1, keepdims=True)
+        # best_word_index = F.argmin(scores, axis=-1, keepdims=True)
         best_word_index = F.topk(scores, axis=-1, k=1, ret_typ='indices', is_ascend=True, dtype='int32')
         # Map from restricted to full vocab ids if needed
         if vocab_slice_ids is not None:
@@ -610,7 +619,6 @@ class GreedyWorkBlock(mx.gluon.HybridBlock):
         if target_factors is not None:
             best_word_index = F.concat(best_word_index, target_factors)
         return best_word_index
-
 
 
 class BeamSearch(mx.gluon.Block):
@@ -919,93 +927,80 @@ class BeamSearch(mx.gluon.Block):
             return finished.sum().asscalar() == batch_size * self.beam_size  # all finished
 
 
-def get_beam_search(models: List[SockeyeModel],
-                    beam_size: int,
-                    context: Union[mx.Context, List[mx.Context]],
-                    vocab_target: vocab.Vocab,
-                    output_scores: bool,
-                    scorer: CandidateScorer,
-                    ensemble_mode: str = 'linear',
-                    beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
-                    constant_length_ratio: float = 0.0,
-                    avoid_list: Optional[str] = None,
-                    sample: Optional[int] = None,
-                    hybridize: bool = True,
-                    softmax_temperature: Optional[float] = None,
-                    prevent_unk: bool = False) -> BeamSearch:
+def get_search_algorithm(models: List[SockeyeModel],
+                         beam_size: int,
+                         context: Union[mx.Context, List[mx.Context]],
+                         vocab_target: vocab.Vocab,
+                         output_scores: bool,
+                         scorer: CandidateScorer,
+                         ensemble_mode: str = 'linear',
+                         beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
+                         constant_length_ratio: float = 0.0,
+                         avoid_list: Optional[str] = None,
+                         sample: Optional[int] = None,
+                         hybridize: bool = True,
+                         softmax_temperature: Optional[float] = None,
+                         prevent_unk: bool = False,
+                         greedy: bool = False) -> Union[BeamSearch, GreedySearch]:
+    """
+    Returns an instance of BeamSearch or GreedySearch depending.
 
-    inference = None  # type: Optional[_Inference]
-    if len(models) == 1:
-        skip_softmax = beam_size == 1 and not output_scores and sample is None
-        if skip_softmax:
-            logger.info("Enabled skipping softmax for a single model and greedy decoding.")
-        inference = _SingleModelInference(model=models[0],
-                                          skip_softmax=skip_softmax,
-                                          constant_length_ratio=constant_length_ratio,
-                                          softmax_temperature=softmax_temperature)
+    """
+    # TODO: consider automatically selecting GreedySearch if flags to this method are compatible.
+    if greedy:
+        assert len(models) == 1, "Greedy search does not support ensemble decoding"
+        assert beam_size == 1, "Greedy search does not support beam_size > 1"
+        if output_scores:
+            logger.warning("Greedy Search does not return proper hypothesis scores")
+        assert constant_length_ratio == -1.0, "Greedy search does not support brevity penalty"
+        assert avoid_list is None, "Greedy Search does not support avoid constraints"
+        assert sample is None, "Greedy search does not support sampling"
+        assert not prevent_unk, "Greedy Search does not support prevention of unknown tokens"  # TODO: add support
+        search = GreedySearch(
+            dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
+            bos_id=C.BOS_ID,
+            eos_id=C.EOS_ID,
+            context=context,
+            num_source_factors=models[0].num_source_factors,
+            num_target_factors=models[0].num_target_factors,
+            inference=_SingleModelInference(model=models[0],
+                                            skip_softmax=True,
+                                            constant_length_ratio=0.0,
+                                            softmax_temperature=softmax_temperature))
     else:
-        inference = _EnsembleInference(models=models,
-                                       ensemble_mode=ensemble_mode,
-                                       constant_length_ratio=constant_length_ratio,
-                                       softmax_temperature=softmax_temperature)
+        if len(models) == 1:
+            skip_softmax = beam_size == 1 and not output_scores and sample is None
+            if skip_softmax:
+                logger.info("Enabled skipping softmax for a single model and greedy decoding.")
+            inference = _SingleModelInference(model=models[0],
+                                              skip_softmax=skip_softmax,
+                                              constant_length_ratio=constant_length_ratio,
+                                              softmax_temperature=softmax_temperature)
+        else:
+            inference = _EnsembleInference(models=models,
+                                           ensemble_mode=ensemble_mode,
+                                           constant_length_ratio=constant_length_ratio,
+                                           softmax_temperature=softmax_temperature)
 
-    global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
-    bs = BeamSearch(
-        beam_size=beam_size,
-        dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
-        bos_id=C.BOS_ID,
-        eos_id=C.EOS_ID,
-        context=context,
-        output_vocab_size=models[0].output_layer_vocab_size,
-        beam_search_stop=beam_search_stop,
-        scorer=scorer,
-        sample=sample,
-        num_source_factors=models[0].num_source_factors,
-        num_target_factors=models[0].num_target_factors,
-        global_avoid_trie=global_avoid_trie,
-        prevent_unk=prevent_unk,
-        inference=inference
-    )
-    bs.initialize()
+        global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
+        search = BeamSearch(
+            beam_size=beam_size,
+            dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
+            bos_id=C.BOS_ID,
+            eos_id=C.EOS_ID,
+            context=context,
+            output_vocab_size=models[0].output_layer_vocab_size,
+            beam_search_stop=beam_search_stop,
+            scorer=scorer,
+            sample=sample,
+            num_source_factors=models[0].num_source_factors,
+            num_target_factors=models[0].num_target_factors,
+            global_avoid_trie=global_avoid_trie,
+            prevent_unk=prevent_unk,
+            inference=inference
+        )
+
+    search.initialize()
     if hybridize:
-        bs.hybridize(static_alloc=True)
-    return bs
-
-
-def get_greedy_search(models: List[SockeyeModel],
-                    beam_size: int,
-                    context: Union[mx.Context, List[mx.Context]],
-                    vocab_target: vocab.Vocab,
-                    output_scores: bool,
-                    scorer: CandidateScorer,
-                    ensemble_mode: str = 'linear',
-                    beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
-                    constant_length_ratio: float = 0.0,
-                    avoid_list: Optional[str] = None,
-                    sample: Optional[int] = None,
-                    hybridize: bool = True,
-                    softmax_temperature: Optional[float] = None,
-                    prevent_unk: bool = False) -> GreedySearch:
-    assert len(models) == 1
-    assert beam_size == 1
-    assert sample is None
-    skip_softmax = True
-    inference = _SingleModelInference(model=models[0],
-                                      skip_softmax=skip_softmax,
-                                      constant_length_ratio=constant_length_ratio,
-                                      softmax_temperature=softmax_temperature)
-
-    gs = GreedySearch(
-        dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
-        bos_id=C.BOS_ID,
-        eos_id=C.EOS_ID,
-        context=context,
-        num_source_factors=models[0].num_source_factors,
-        num_target_factors=models[0].num_target_factors,
-        inference=inference
-    )
-    gs.initialize()
-    if hybridize:
-        gs.hybridize(static_alloc=True)
-    return gs
-
+        search.hybridize(static_alloc=True)
+    return search

@@ -30,7 +30,7 @@ from . import lexical_constraints as constrained
 from . import lexicon
 from . import utils
 from . import vocab
-from .beam_search import get_beam_search, get_greedy_search, CandidateScorer
+from .beam_search import get_search_algorithm, CandidateScorer, GreedySearch
 from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
@@ -710,7 +710,6 @@ class Translator:
                  softmax_temperature: Optional[float] = None,
                  prevent_unk: bool = False,
                  greedy: bool = False) -> None:
-        self.greedy = greedy
         self.context = context
         self.dtype = C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
         self._scorer = scorer
@@ -743,56 +742,38 @@ class Translator:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
 
-
-        if self.greedy:
-            self._beam_search = get_greedy_search(
-                models=self.models,
-                beam_size=self.beam_size,
-                context=self.context,
-                vocab_target=target_vocabs[0],  # only primary target factor used for constrained decoding.
-                output_scores=output_scores,
-                sample=sample,
-                ensemble_mode=ensemble_mode,
-                beam_search_stop=beam_search_stop,
-                scorer=self._scorer,
-                constant_length_ratio=constant_length_ratio,
-                avoid_list=avoid_list,
-                hybridize=hybridize,
-                softmax_temperature=softmax_temperature,
-                prevent_unk=prevent_unk)
-        else:
-            self._beam_search = get_beam_search(
-                models=self.models,
-                beam_size=self.beam_size,
-                context=self.context,
-                vocab_target=target_vocabs[0],  # only primary target factor used for constrained decoding.
-                output_scores=output_scores,
-                sample=sample,
-                ensemble_mode=ensemble_mode,
-                beam_search_stop=beam_search_stop,
-                scorer=self._scorer,
-                constant_length_ratio=constant_length_ratio,
-                avoid_list=avoid_list,
-                hybridize=hybridize,
-                softmax_temperature=softmax_temperature,
-                prevent_unk=prevent_unk)
-
-
+        self._search = get_search_algorithm(
+            models=self.models,
+            beam_size=self.beam_size,
+            context=self.context,
+            vocab_target=target_vocabs[0],  # only primary target factor used for constrained decoding.
+            output_scores=output_scores,
+            sample=sample,
+            ensemble_mode=ensemble_mode,
+            beam_search_stop=beam_search_stop,
+            scorer=self._scorer,
+            constant_length_ratio=constant_length_ratio,
+            avoid_list=avoid_list,
+            hybridize=hybridize,
+            softmax_temperature=softmax_temperature,
+            prevent_unk=prevent_unk,
+            greedy=greedy)
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,
                                             scorer=self._scorer)  # type: Callable
 
-        logger.info("Translator (%d model(s) beam_size=%d beam_search_stop=%s max_input_length=%s "
+        logger.info("Translator (%d model(s) beam_size=%d algorithm=%s, beam_search_stop=%s max_input_length=%s "
                     "nbest_size=%s ensemble_mode=%s max_batch_size=%d avoiding=%d dtype=%s softmax_temperature=%s)",
                     len(self.models),
                     self.beam_size,
+                    "GreedySearch" if isinstance(self._search, GreedySearch) else "BeamSearch",
                     self.beam_search_stop,
                     self.max_input_length,
                     self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.max_batch_size,
-                    0 if self._beam_search.global_avoid_trie is None else len(self._beam_search.global_avoid_trie),
+                    0 if self._search.global_avoid_trie is None else len(self._search.global_avoid_trie),
                     self.dtype,
                     softmax_temperature)
 
@@ -1087,30 +1068,30 @@ class Translator:
                       raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                       max_output_lengths: mx.nd.NDArray) -> List[Translation]:
         """
-        Translates source of source_length.
+        Translates source of source_length and returns list of Translations.
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Valid source lengths.
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param raw_constraints: A list of optional constraint lists.
 
-        :return: Sequence of translations.
+        :return: List of translations.
         """
-        return self._get_best_from_beam(*self._beam_search(source,
-                                                           source_length,
-                                                           restrict_lexicon,
-                                                           raw_constraints,
-                                                           raw_avoid_list,
-                                                           max_output_lengths))
+        return self._get_best_translations(*self._search(source,
+                                                         source_length,
+                                                         restrict_lexicon,
+                                                         raw_constraints,
+                                                         raw_avoid_list,
+                                                         max_output_lengths))
 
-    def _get_best_from_beam(self,
-                            best_hyp_indices: np.ndarray,
-                            best_word_indices: np.ndarray,
-                            seq_scores: np.ndarray,
-                            lengths: np.ndarray,
-                            estimated_reference_lengths: Optional[mx.nd.NDArray] = None,
-                            constraints: List[Optional[constrained.ConstrainedHypothesis]] = [],
-                            beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
+    def _get_best_translations(self,
+                               best_hyp_indices: np.ndarray,
+                               best_word_indices: np.ndarray,
+                               seq_scores: np.ndarray,
+                               lengths: np.ndarray,
+                               estimated_reference_lengths: Optional[mx.nd.NDArray] = None,
+                               constraints: List[Optional[constrained.ConstrainedHypothesis]] = [],
+                               beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
         Return the nbest (aka n top) entries from the n-best list.
 

@@ -1227,7 +1227,9 @@ def add_inference_args(params):
     decode_params.add_argument('--greedy', '-g',
                                action="store_true",
                                default=False,
-                               help='Wheter to use alternative greedy search implementation')
+                               help='Enables an alternative, faster greedy decoding implementation. It does not '
+                                    'batch decoding, lexical constraints, and hypothesis scores are not normalized. '
+                                    'Default: %(default)s.')
 
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
