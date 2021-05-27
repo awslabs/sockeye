@@ -595,12 +595,13 @@ class GreedySearch(mx.gluon.Block):
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
-        outputs = mx.nd.stack(*outputs, axis=2).asnumpy()  # shape: (1, num_factors, length)
+        # shape: (1, num_factors, length)
+        stacked_outputs = mx.nd.stack(*outputs, axis=2).asnumpy()  # type: np.ndarray
         length = np.array([t], dtype='int32')  # shape (1,)
         hyp_indices = np.zeros((1, t + 1), dtype='int32')
         score = np.array([-1.])  # TODO: return unnormalized proper score
 
-        return hyp_indices, outputs, score, length, None, []
+        return hyp_indices, stacked_outputs, score, length, [None], []
 
 
 class GreedyTop1(mx.gluon.HybridBlock):
@@ -968,6 +969,7 @@ def get_search_algorithm(models: List[SockeyeModel],
                                             constant_length_ratio=0.0,
                                             softmax_temperature=softmax_temperature))
     else:
+        inference = None  # type: Optional[_Inference]
         if len(models) == 1:
             skip_softmax = beam_size == 1 and not output_scores and sample is None
             if skip_softmax:
