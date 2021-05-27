@@ -617,7 +617,7 @@ class GreedySearch(mx.gluon.Block):
         hyp_indices = np.zeros((1, t + 1), dtype='int32')
         score = np.array([-1.])  # TODO: return unnormalized proper score
 
-        return hyp_indices, stacked_outputs, score, length, [None], []
+        return hyp_indices, stacked_outputs, score, length, None, []  # type: ignore
 
 
 class GreedyTop1(mx.gluon.HybridBlock):
