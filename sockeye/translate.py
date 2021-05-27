@@ -149,8 +149,7 @@ def run_translate(args: argparse.Namespace):
                                           hybridize=hybridize,
                                           softmax_temperature=args.softmax_temperature,
                                           prevent_unk=args.prevent_unk,
-                                          greedy=args.greedy,
-                                          use_while=args.use_while)
+                                          greedy=args.greedy)
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,

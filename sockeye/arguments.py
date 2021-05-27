@@ -1227,11 +1227,7 @@ def add_inference_args(params):
     decode_params.add_argument('--greedy', '-g',
                                action="store_true",
                                default=False,
-                               help='Whether to use alternative greedy search implementation')
-    decode_params.add_argument('--use-while', '-w',
-                               action="store_true",
-                               default=False,
-                               help='Whether to use while loop in greedy search implementation')
+                               help='Wheter to use alternative greedy search implementation')
 
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],

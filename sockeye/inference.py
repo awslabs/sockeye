@@ -709,8 +709,7 @@ class Translator:
                  max_output_length: Optional[int] = None,
                  softmax_temperature: Optional[float] = None,
                  prevent_unk: bool = False,
-                 greedy: bool = False,
-                 use_while: bool = False) -> None:
+                 greedy: bool = False) -> None:
         self.greedy = greedy
         self.context = context
         self.dtype = C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
@@ -760,8 +759,7 @@ class Translator:
                 avoid_list=avoid_list,
                 hybridize=hybridize,
                 softmax_temperature=softmax_temperature,
-                prevent_unk=prevent_unk,
-                use_while=use_while)
+                prevent_unk=prevent_unk)
         else:
             self._beam_search = get_beam_search(
                 models=self.models,
