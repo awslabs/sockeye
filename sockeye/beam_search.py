@@ -486,6 +486,37 @@ class SortStates(mx.gluon.HybridBlock):
         return sorted_states
 
 
+def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
+                        source_words: mx.nd.NDArray,
+                        raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                        eos_id: int,
+                        beam_size: int) -> Tuple[mx.nd.NDArray, int]:
+    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
+    ctx = source_words.context
+    if any(raw_constraint_list):
+        # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
+        constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
+        vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)  # type: ignore
+        full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
+        raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
+                               raw_constraint_list]
+    # Pad to a multiple of 8.
+    vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
+                             mode='constant', constant_values=eos_id)
+    vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=ctx, dtype='int32')
+
+    vocab_slice_ids_shape = vocab_slice_ids.shape[0]
+    if vocab_slice_ids_shape < beam_size + 1:
+        # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
+        # smaller than the beam size.
+        logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
+                       vocab_slice_ids_shape, beam_size)
+        n = beam_size - vocab_slice_ids_shape + 1
+        vocab_slice_ids = mx.nd.concat(vocab_slice_ids, mx.nd.full((n,), val=eos_id, ctx=ctx, dtype='int32'), dim=0)
+
+    return vocab_slice_ids, vocab_slice_ids_shape
+
+
 class GreedySearch(mx.gluon.Block):
     """
     Implements greedy search, not supporting various features from the BeamSearch class
@@ -554,28 +585,13 @@ class GreedySearch(mx.gluon.Block):
                                      val=self.bos_id, ctx=self.context, dtype='int32')
         outputs = []  # type: List[mx.nd.NDArray]
 
+        vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
-        vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
-        # TODO: factor vocab_slice_ids preparation into a separate method to be shared among Greedy and BeamSearch.
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
-            # Pad to a multiple of 8.
-            vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
-                                     mode='constant', constant_values=self.eos_id)
-            vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
-
-            vocab_slice_ids_shape = vocab_slice_ids.shape[0]
-            if vocab_slice_ids_shape < 1 + 1:
-                # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
-                # smaller than the beam size.
-                logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
-                               vocab_slice_ids_shape, 1)
-                n = 1 - vocab_slice_ids_shape + 1
-                vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
-                                               mx.nd.full((n,), val=self.eos_id, ctx=self.context, dtype='int32'),
-                                               dim=0)
+            vocab_slice_ids, _ = _get_vocab_slice_ids(restrict_lexicon, source_words,
+                                                      raw_constraint_list, self.eos_id, beam_size=1)
 
         # (0) encode source sentence, returns a list
         model_states, _ = self._inference.encode_and_initialize(source, source_length)
@@ -740,15 +756,6 @@ class BeamSearch(mx.gluon.Block):
         batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
         first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
         first_step_mask[batch_indices] = 0.0
-        pad_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size - 1), val=np.inf,
-                              ctx=self.context, dtype=self.dtype)
-        eos_dist = mx.nd.full((batch_size * self.beam_size, self.output_vocab_size), val=np.inf,
-                              ctx=self.context, dtype=self.dtype)
-        eos_dist[:, C.EOS_ID] = 0
-        unk_dist = None
-        if self.prevent_unk:
-            unk_dist = mx.nd.zeros_like(eos_dist)
-            unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
@@ -763,43 +770,25 @@ class BeamSearch(mx.gluon.Block):
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype=self.dtype)
 
+        output_vocab_size = self.output_vocab_size
+
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
-            if any(raw_constraint_list):
-                # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
-                constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
-                vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)  # type: ignore
-                full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
-                raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
-                                       raw_constraint_list]
-            # Pad to a multiple of 8.
-            vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
-                                     mode='constant', constant_values=self.eos_id)
-            vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=self.context, dtype='int32')
+            vocab_slice_ids, output_vocab_size = _get_vocab_slice_ids(restrict_lexicon, source_words,
+                                                                      raw_constraint_list, self.eos_id, beam_size=1)
 
-            vocab_slice_ids_shape = vocab_slice_ids.shape[0]
-            if vocab_slice_ids_shape < self.beam_size + 1:
-                # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
-                # smaller than the beam size.
-                logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
-                               vocab_slice_ids_shape, self.beam_size)
-                n = self.beam_size - vocab_slice_ids_shape + 1
-                vocab_slice_ids = mx.nd.concat(vocab_slice_ids,
-                                               mx.nd.full((n,), val=self.eos_id, ctx=self.context, dtype='int32'),
-                                               dim=0)
-
-            pad_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape - 1),
-                                  val=np.inf, ctx=self.context, dtype=self.dtype)
-            eos_dist = mx.nd.full((batch_size * self.beam_size, vocab_slice_ids_shape),
-                                  val=np.inf, ctx=self.context, dtype=self.dtype)
-            eos_dist[:, C.EOS_ID] = 0
-            if unk_dist is not None:
-                unk_dist = mx.nd.zeros_like(eos_dist)
-                unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
+        pad_dist = mx.nd.full((batch_size * self.beam_size, output_vocab_size - 1),
+                              val=np.inf, ctx=self.context, dtype=self.dtype)
+        eos_dist = mx.nd.full((batch_size * self.beam_size, output_vocab_size),
+                              val=np.inf, ctx=self.context, dtype=self.dtype)
+        eos_dist[:, C.EOS_ID] = 0
+        unk_dist = None
+        if self.prevent_unk:
+            unk_dist = mx.nd.zeros_like(eos_dist)
+            unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.bos_id, self.eos_id)
