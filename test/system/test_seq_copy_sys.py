@@ -64,7 +64,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
-     "--beam-size 1 --prevent-unk --greedy",
+     "--beam-size 1 --greedy",
      False,
      1.02,
      0.98),
