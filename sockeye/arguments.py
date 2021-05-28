@@ -690,6 +690,12 @@ def add_model_parameters(params):
                               default=(2048, 2048),
                               help='Number of hidden units in transformers feed forward layers. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
+    model_params.add_argument('--transformer-feed-forward-use-glu',
+                              action='store_true',
+                              default=False,
+                              help='Use Gated Linear Units in transformer feed forward networks (Daupin et al. 2016, '
+                                   'arxiv.org/abs/1612.08083; Shazeer 2020, arxiv.org/abs/2002.05202). Default: '
+                                   '%(default)s.')
     model_params.add_argument('--transformer-activation-type',
                               type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
                               default=(C.RELU, C.RELU),

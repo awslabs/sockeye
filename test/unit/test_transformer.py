@@ -11,6 +11,8 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import pytest
+
 import mxnet as mx
 import numpy as np
 
@@ -43,3 +45,19 @@ def test_auto_regressive_bias_output():
 
     expected = np.array([[0.0, -1.0e8], [0.0, 0.0]]).reshape((1, 2, 2))
     np.testing.assert_array_equal(bias.asnumpy(), expected)
+
+
+@pytest.mark.parametrize('use_glu', [(False), (True)])
+def test_transformer_feed_forward(use_glu):
+    block = sockeye.transformer.TransformerFeedForward(num_hidden=2,
+                                                       num_model=2,
+                                                       act_type=C.RELU,
+                                                       dropout=0.1,
+                                                       dtype=C.DTYPE_FP32,
+                                                       prefix='ff_',
+                                                       use_glu=use_glu)
+    block.initialize()
+    block.hybridize()
+
+    data = mx.nd.ones((1, 10, 2), dtype=C.DTYPE_FP32)
+    block(data)

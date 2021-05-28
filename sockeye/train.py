@@ -472,7 +472,8 @@ def create_encoder_config(args: argparse.Namespace,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
         use_lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
-        decoder_type=args.decoder)
+        decoder_type=args.decoder,
+        use_glu=args.transformer_feed_forward_use_glu)
     encoder_num_hidden = encoder_transformer_model_size
 
     return config_encoder, encoder_num_hidden
@@ -524,7 +525,8 @@ def create_decoder_config(args: argparse.Namespace,
         max_seq_len_target=max_seq_len_target,
         use_lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         depth_key_value=encoder_num_hidden,
-        decoder_type=args.decoder)
+        decoder_type=args.decoder,
+        use_glu=args.transformer_feed_forward_use_glu)
 
     return config_decoder
 

@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.16]
+
+### Added
+- Added option `--transformer-feed-forward-use-glu` to use Gated Linear Units in transformer feed forward networks ([Dauphin et al., 2016](https://arxiv.org/abs/1612.08083); [Shazeer, 2020](https://arxiv.org/abs/2002.05202)).
+
 ## [2.3.15]
 
 ### Changed
@@ -32,7 +37,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.3.12]
 
 ### Added
-- Added `--config` option to `prepare_data` CLI to allow setting commandline flags via a yaml config. 
+- Added `--config` option to `prepare_data` CLI to allow setting commandline flags via a yaml config.
 - Flags for the `prepare_data` CLI are now stored in the output folder under `args.yaml`
   (equivalent to the behavior of `sockeye_train`)
 

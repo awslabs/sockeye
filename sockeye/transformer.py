@@ -40,6 +40,7 @@ class TransformerConfig(config.Config):
     decoder_type: str = C.TRANSFORMER_TYPE
     use_lhuc: bool = False
     depth_key_value: int = 0
+    use_glu: bool = False
 
 
 class TransformerEncoderBlock(mx.gluon.HybridBlock):
@@ -79,7 +80,8 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                              act_type=config.act_type,
                                              dropout=config.dropout_act,
                                              prefix="ff_",
-                                             dtype=dtype)
+                                             dtype=dtype,
+                                             use_glu=config.use_glu)
             self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                    dropout=config.dropout_prepost,
                                                    prefix="ff_post_",
@@ -167,7 +169,8 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                              act_type=config.act_type,
                                              dropout=config.dropout_act,
                                              prefix="ff_",
-                                             dtype=dtype)
+                                             dtype=dtype,
+                                             use_glu=config.use_glu)
             self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                    dropout=config.dropout_prepost,
                                                    prefix="ff_post_",
@@ -292,19 +295,26 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
                  act_type: str,
                  dropout: float,
                  prefix: str,
-                 dtype: str) -> None:
+                 dtype: str,
+                 use_glu: bool = False) -> None:
         super().__init__(prefix=prefix)
         self.dropout = dropout
+        self.use_glu = use_glu
         with self.name_scope():
             self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_',
                                                      dtype=dtype)
             self.act = layers.get_activation(act_type)
+            if use_glu:
+                self.linear = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False,
+                                                            prefix='i2l_', dtype=dtype)
             self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_',
                                                      dtype=dtype)
 
     def hybrid_forward(self, F, x):
         h = self.ff1(x)
         h = self.act(h)
+        if self.use_glu:
+            h = h * self.linear(x)
         if self.dropout > 0.0:
             h = F.Dropout(h, p=self.dropout)
         y = self.ff2(h)
