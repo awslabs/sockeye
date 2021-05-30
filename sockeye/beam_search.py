@@ -558,17 +558,17 @@ class GreedySearch(mx.gluon.Block):
                                                             List[Optional[np.ndarray]],
                                                             List[Optional[constrained.ConstrainedHypothesis]]]:
         """
-        Translates multiple sentences using beam search.
+        Translates a single sentence (batch_size=1) using greedy search.
 
-        :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
-        :param source_length: Valid source lengths. Shape: (batch_size,).
+        :param source: Source ids. Shape: (batch_size=1, bucket_key, num_factors).
+        :param source_length: Valid source lengths. Shape: (batch_size=1,).
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
-               that must appear in each output.
+                that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
-               that must NOT appear in each output.
+                that must NOT appear in each output.
         :param max_output_lengths: NDArray of maximum output lengths per input in source.
-                Shape: (batch_size,). Dtype: int32.
+                Shape: (batch_size=1,). Dtype: int32.
         :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
                 predicted lengths of references (if any), constraints (if any).
@@ -628,7 +628,6 @@ class GreedyTop1(mx.gluon.HybridBlock):
     def hybrid_forward(self, F, scores, vocab_slice_ids=None, target_factors=None):
         # shape: (batch*beam=1, 1)
         # argmin has trouble with fp16 inputs on GPUs, using top1 instead
-        # best_word_index = F.argmin(scores, axis=-1, keepdims=True)
         best_word_index = F.topk(scores, axis=-1, k=1, ret_typ='indices', is_ascend=True, dtype='int32')
         # Map from restricted to full vocab ids if needed
         if vocab_slice_ids is not None:

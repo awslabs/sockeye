@@ -1234,8 +1234,8 @@ def add_inference_args(params):
                                action="store_true",
                                default=False,
                                help='Enables an alternative, faster greedy decoding implementation. It does not '
-                                    'support batch decoding, lexical constraints, and hypothesis scores are not normalized. '
-                                    'Default: %(default)s.')
+                                    'support batch decoding, ensembles, or lexical constraints, and hypothesis scores '
+                                    'are not normalized. Default: %(default)s.')
 
     decode_params.add_argument('--beam-search-stop',
                                choices=[C.BEAM_SEARCH_STOP_ALL, C.BEAM_SEARCH_STOP_FIRST],
