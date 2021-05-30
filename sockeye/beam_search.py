@@ -576,7 +576,7 @@ class GreedySearch(mx.gluon.Block):
         batch_size = source.shape[0]
         assert batch_size == 1, "Greedy Search does not support batch_size != 1"
 
-        # Maximum beam search iterations (determined by longest input with eos)
+        # Maximum  search iterations (determined by longest input with eos)
         max_iterations = max_output_lengths.max().asscalar()
         logger.debug("max greedy search iterations: %d", max_iterations)
 
