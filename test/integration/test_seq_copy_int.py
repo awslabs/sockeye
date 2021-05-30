@@ -65,9 +65,9 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
-     "--beam-size 1",
+     "--beam-size 1 --greedy",
      True, 0, 0),
-    # Basic transformer with source factor, beam-search-stop first decoding
+    # Basic transformer with source and target factors, beam-search-stop first decoding
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"

@@ -145,6 +145,7 @@ def test_model_parameters(test_params, expected_params):
                       output=None,
                       checkpoints=None,
                       models=['model'],
+                      greedy=False,
                       beam_size=5,
                       nbest_size=1,
                       batch_size=1,

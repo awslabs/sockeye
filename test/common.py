@@ -48,8 +48,9 @@ def check_train_translate(train_params: str,
                                seed=seed)
 
     # Test equivalence of batch decoding
-    translate_params_batch = translate_params + " --batch-size 2"
-    test_translate_equivalence(data, translate_params_batch, compare_output)
+    if 'greedy' not in translate_params:
+        translate_params_batch = translate_params + " --batch-size 2"
+        test_translate_equivalence(data, translate_params_batch, compare_output)
 
     # Run translate with restrict-lexicon
     data = run_translate_restrict(data, translate_params)
@@ -61,7 +62,8 @@ def check_train_translate(train_params: str,
     # Only run scoring under these conditions. Why?
     # - translate splits up too-long sentences and translates them in sequence, invalidating the score, so skip that
     # - scoring requires valid translation output to compare against
-    if '--max-input-length' not in translate_params and _translate_output_is_valid(data['test_outputs']):
+    if '--max-input-length' not in translate_params and _translate_output_is_valid(data['test_outputs']) \
+            and 'greedy' not in translate_params:
         test_scoring(data, translate_params, compare_output)
 
     # Test correct prediction of target factors if enabled
