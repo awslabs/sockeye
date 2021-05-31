@@ -28,7 +28,7 @@ from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
 import mxnet as mx
 import numpy as np
-from mxnet.contrib import amp
+from mxnet import amp
 
 from . import average
 from . import constants as C

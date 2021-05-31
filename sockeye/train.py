@@ -25,11 +25,11 @@ import shutil
 import sys
 import tempfile
 from contextlib import ExitStack
-from typing import cast, Callable, Optional, Dict, List, Tuple, Union
+from typing import cast, Callable, Optional, Dict, List, Tuple
 
 import mxnet as mx
 from mxnet import gluon
-from mxnet.contrib import amp
+from mxnet import amp
 
 from . import arguments
 from . import checkpoint_decoder
@@ -831,7 +831,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
 
 
 def set_grad_req_for_fixed_params(config: model.ModelConfig,
-                                  params: mx.gluon.ParameterDict,
+                                  params: C.ParameterDict,
                                   fixed_param_names: List[str],
                                   fixed_param_strategy: Optional[str] = None):
     utils.check_condition(not config.lhuc or fixed_param_strategy is None,
@@ -855,7 +855,7 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
 
 
 def fixed_param_names_from_stragegy(config: model.ModelConfig,
-                                    params: Union[Dict, mx.gluon.ParameterDict],
+                                    params: C.ParameterDict,
                                     strategy: str) -> List[str]:
     """
     Generate a fixed parameter list given a list of all parameter names and

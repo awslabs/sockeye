@@ -724,7 +724,7 @@ def _print_dtype(dtype):
     return _DTYPE_TO_STRING.get(dtype, str(dtype))
 
 
-def log_parameters(params: mx.gluon.ParameterDict):
+def log_parameters(params: C.ParameterDict):
     """
     Logs information about model parameters.
     """

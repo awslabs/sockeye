@@ -204,7 +204,7 @@ def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param:
     return b_max
 
 
-def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_store: str):
+def convert_weights_disk_format(params: C.ParameterDict, dtype_store: str):
     """
     Convert weights from float32 MXNet format (B^T in float32) to disk format
     (B^T in int8 format).
@@ -227,7 +227,7 @@ def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_
                     param.dtype = C.DTYPE_INT8
 
 
-def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
+def convert_weights_cpu_dependent(params: C.ParameterDict):
     """
     Convert weights from disk format to intgemm's CPU-dependent format for
     quantized matrix multiplication.

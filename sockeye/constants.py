@@ -15,6 +15,7 @@
 Defines various constants used throughout the project
 """
 import sys
+from typing import Dict
 
 import mxnet as mx
 import numpy as np
@@ -438,3 +439,5 @@ AVERAGE_CHOICES = [AVERAGE_BEST, AVERAGE_LAST, AVERAGE_LIFESPAN]
 BREVITY_PENALTY_CONSTANT = 'constant'
 BREVITY_PENALTY_LEARNED = 'learned'
 BREVITY_PENALTY_NONE = 'none'
+
+ParameterDict = Dict[mx.gluon.Parameter, int]
