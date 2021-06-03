@@ -41,4 +41,3 @@ def test_get_decoder(lhuc):
     decoder = sockeye.decoder.get_decoder(config, inference_only=False, prefix='test_')
 
     assert type(decoder) == sockeye.decoder.TransformerDecoder
-    assert decoder.prefix == 'test_' + C.TRANSFORMER_DECODER_PREFIX

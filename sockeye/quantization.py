@@ -97,33 +97,32 @@ class QuantizableDense(mx.gluon.HybridBlock):
     def __init__(self, units, dtype: str, activation=None, use_bias=True, flatten=True,
                  weight_initializer=None, bias_initializer='zeros',
                  in_units=0, **kwargs):
-        super(QuantizableDense, self).__init__(**kwargs)
+        super(QuantizableDense, self).__init__()
         self._flatten = flatten
         self._dtype = dtype
-        with self.name_scope():
-            self._units = units
-            self._in_units = in_units
-            if dtype == C.DTYPE_INT8:
-                self.scaling = self.params.get('scaling', shape=(1,),
-                                               #Initialize to an obviously wrong value so we can detect later
-                                               init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32,
-                                               allow_deferred_init=True)
-                weight_initializer = 'zeros' # Most initializers don't work for int8, but this is for inference anyway.
+        self._units = units
+        self._in_units = in_units
+        if dtype == C.DTYPE_INT8:
+            self.scaling = mx.gluon.Parameter('scaling', shape=(1,),
+                                              # Initialize to an obviously wrong value so we can detect later
+                                              init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32,
+                                              allow_deferred_init=True)
+            weight_initializer = 'zeros'  # Most initializers don't work for int8, but this is for inference anyway.
 
-            self.weight = self.params.get('weight', shape=(units, in_units),
-                                          init=weight_initializer, dtype=dtype,
-                                          allow_deferred_init=True)
+        self.weight = mx.gluon.Parameter('weight', shape=(units, in_units),
+                                         init=weight_initializer, dtype=dtype,
+                                         allow_deferred_init=True)
 
-            if use_bias:
-                self.bias = self.params.get('bias', shape=(units,),
-                                            init=bias_initializer, dtype = C.DTYPE_FP32,
-                                            allow_deferred_init=True)
-            else:
-                self.bias = None
-            if activation is not None:
-                self.act = Activation(activation, prefix=activation+'_')
-            else:
-                self.act = None
+        if use_bias:
+            self.bias = mx.gluon.Parameter('bias', shape=(units,),
+                                           init=bias_initializer, dtype=C.DTYPE_FP32,
+                                           allow_deferred_init=True)
+        else:
+            self.bias = None
+        if activation is not None:
+            self.act = Activation(activation)
+        else:
+            self.act = None
 
     def cast(self, dtype):
         if self._dtype != C.DTYPE_INT8:

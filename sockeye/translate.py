@@ -124,8 +124,7 @@ def run_translate(args: argparse.Namespace):
         scorer = inference.CandidateScorer(
             length_penalty_alpha=args.length_penalty_alpha,
             length_penalty_beta=args.length_penalty_beta,
-            brevity_penalty_weight=brevity_penalty_weight,
-            prefix='scorer_')
+            brevity_penalty_weight=brevity_penalty_weight)
 
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,

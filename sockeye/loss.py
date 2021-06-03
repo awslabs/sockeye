@@ -40,7 +40,7 @@ class Loss(mx.gluon.HybridBlock):
                  label_name: str,
                  weight: float = 1.0,
                  metric_prefix: str = '') -> None:
-        super().__init__(prefix=name)
+        super().__init__()
         self._name = name
         self._output_name = output_name
         self._label_name = label_name

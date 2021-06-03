@@ -56,4 +56,3 @@ def test_get_transformer_encoder(lhuc):
     encoder.hybridize(static_alloc=True)
 
     assert type(encoder) == sockeye.encoder.TransformerEncoder
-    assert encoder.prefix == prefix + C.TRANSFORMER_ENCODER_PREFIX

@@ -127,8 +127,7 @@ class CheckpointDecoder:
         scorer = inference.CandidateScorer(
             length_penalty_alpha=length_penalty_alpha,
             length_penalty_beta=length_penalty_beta,
-            brevity_penalty_weight=0.0,
-            prefix='scorer_')
+            brevity_penalty_weight=0.0)
 
         # TODO: possibly support decoding on multiple GPUs
         self.translator = inference.Translator(

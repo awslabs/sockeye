@@ -128,30 +128,29 @@ class Embedding(Encoder):
                  prefix: str,
                  embed_weight: Optional[mx.gluon.Parameter] = None,
                  dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.config = config
         self._dtype = dtype
         self._factor_weight_format_string = 'factor%d_weight'
 
-        with self.name_scope():
-            if embed_weight is None:
-                self.embed_weight = self.params.get('weight',
-                                                    shape=(self.config.vocab_size, self.config.num_embed),
-                                                    grad_stype='row_sparse',
-                                                    dtype=dtype)
-                self._use_sparse_grad = self.config.allow_sparse_grad
-            else:
-                self.embed_weight = embed_weight  # adds to self._reg_params
-                self.params.update({embed_weight.name: embed_weight})  # adds to self.params
-                self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
+        if embed_weight is None:
+            self.embed_weight = mx.gluon.Parameter('weight',
+                                                   shape=(self.config.vocab_size, self.config.num_embed),
+                                                   grad_stype='row_sparse',
+                                                   dtype=dtype)
+            self._use_sparse_grad = self.config.allow_sparse_grad
+        else:
+            self.embed_weight = embed_weight  # adds to self._reg_params
+            self.params.update({embed_weight.name: embed_weight})  # adds to self.params
+            self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
-            if self.config.factor_configs is not None:
-                for i, fc in enumerate(self.config.factor_configs, 1):
-                    factor_weight_name = self._factor_weight_format_string % i
-                    factor_weight = embed_weight if fc.share_embedding else \
-                        self.params.get(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
-                    # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
-                    setattr(self, factor_weight_name, factor_weight)
+        if self.config.factor_configs is not None:
+            for i, fc in enumerate(self.config.factor_configs, 1):
+                factor_weight_name = self._factor_weight_format_string % i
+                factor_weight = embed_weight if fc.share_embedding else \
+                    mx.gluon.Parameter(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
+                # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
+                setattr(self, factor_weight_name, factor_weight)
 
     def hybrid_forward(self, F, data, valid_length, embed_weight, **kwargs):  # pylint: disable=arguments-differ
         # We will catch the optional factor weights in kwargs
@@ -285,25 +284,24 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                  config: transformer.TransformerConfig,
                  prefix: str = C.TRANSFORMER_ENCODER_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.config = config
 
-        with self.name_scope():
-            self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                             num_embed=self.config.model_size,
-                                                             max_seq_len=self.config.max_seq_len_source,
-                                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX,
-                                                             scale_up_input=True,
-                                                             scale_down_positions=False)
+        self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                         num_embed=self.config.model_size,
+                                                         max_seq_len=self.config.max_seq_len_source,
+                                                         prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX,
+                                                         scale_up_input=True,
+                                                         scale_down_positions=False)
 
-            self.layers = mx.gluon.nn.HybridSequential()
-            for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i, dtype=dtype))
+        self.layers = mx.gluon.nn.HybridSequential()
+        for i in range(config.num_layers):
+            self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i, dtype=dtype))
 
-            self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                     dropout=config.dropout_prepost,
-                                                                     prefix="final_process_",
-                                                                     num_hidden=self.config.model_size)
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 prefix="final_process_",
+                                                                 num_hidden=self.config.model_size)
 
     def hybrid_forward(self, F, data, valid_length):
         # positional embedding

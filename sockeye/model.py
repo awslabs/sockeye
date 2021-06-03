@@ -31,6 +31,7 @@ from . import quantization
 from . import utils
 from . import vocab
 from dataclasses import dataclass
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,7 +95,8 @@ class SockeyeModel(mx.gluon.Block):
                  forward_pass_cache_size: int = 0,
                  prefix: str = '',
                  **kwargs) -> None:
-        super().__init__(prefix=prefix, **kwargs)
+        super().__init__(**kwargs)
+        self.prefix = prefix
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
         self.dtype = config.dtype
@@ -105,46 +107,45 @@ class SockeyeModel(mx.gluon.Block):
         if self.forward_pass_cache_size > 0:
             self.embed_and_encode = self._cache_wrapper(self._embed_and_encode)
 
-        with self.name_scope():
-            # source & target embeddings
-            self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
+        # source & target embeddings
+        self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
 
-            self.embedding_source = encoder.Embedding(config.config_embed_source,
-                                                      prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
-                                                      embed_weight=self.source_embed_weight)
-            self.embedding_target = encoder.Embedding(config.config_embed_target,
-                                                      prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
-                                                      embed_weight=self.target_embed_weight)
+        self.embedding_source = encoder.Embedding(config.config_embed_source,
+                                                  prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
+                                                  embed_weight=self.source_embed_weight)
+        self.embedding_target = encoder.Embedding(config.config_embed_target,
+                                                  prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
+                                                  embed_weight=self.target_embed_weight)
 
-            # encoder & decoder first (to know the decoder depth)
-            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
-                                               prefix=self.prefix, dtype=config.dtype)
+        # encoder & decoder first (to know the decoder depth)
+        self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
+                                           prefix=self.prefix, dtype=config.dtype)
 
-            self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                   vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight, dtype=config.dtype,
-                                                   prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                               vocab_size=self.config.vocab_target_size,
+                                               weight=self.output_weight, dtype=config.dtype,
+                                               prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
 
-            # Optional target factor output layers
-            for i, factor_config in enumerate(self.target_factor_configs, 1):
-                # Each target stream has its own, independent output layer
-                # TODO also consider weight tying with target factor input embeddings
-                output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                  vocab_size=factor_config.vocab_size,
-                                                  weight=None,
-                                                  dtype=config.dtype,
-                                                  prefix=self.prefix + C.TARGET_FACTOR_OUTPUT_LAYER_PREFIX % i)
-                # Register the layer as child block
-                setattr(self, self._output_layer_factor_format_string % i, output_layer)
+        # Optional target factor output layers
+        for i, factor_config in enumerate(self.target_factor_configs, 1):
+            # Each target stream has its own, independent output layer
+            # TODO also consider weight tying with target factor input embeddings
+            output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                              vocab_size=factor_config.vocab_size,
+                                              weight=None,
+                                              dtype=config.dtype,
+                                              prefix=self.prefix + C.TARGET_FACTOR_OUTPUT_LAYER_PREFIX % i)
+            # Register the layer as child block
+            setattr(self, self._output_layer_factor_format_string % i, output_layer)
 
-            self.length_ratio = None
-            if self.config.config_length_task is not None:
-                utils.check_condition(self.config.config_length_task.weight > 0.0,
-                                      'Auxiliary length task requested, but its loss weight is zero')
-                self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
-                                                       num_layers=self.config.config_length_task.num_layers,
-                                                       prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
+        self.length_ratio = None
+        if self.config.config_length_task is not None:
+            utils.check_condition(self.config.config_length_task.weight > 0.0,
+                                  'Auxiliary length task requested, but its loss weight is zero')
+            self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
+                                                   num_layers=self.config.config_length_task.num_layers,
+                                                   prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
 
     def cast(self, dtype):
         self.dtype = dtype
@@ -357,8 +358,8 @@ class SockeyeModel(mx.gluon.Block):
         <https://mxnet.incubator.apache.org/tutorials/gluon/save_load_params.html>`_
         """
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
-                                                     "This is either not a model directory or the first training "
-                                                     "checkpoint has not happened yet." % filename)
+                                                        "This is either not a model directory or the first training "
+                                                        "checkpoint has not happened yet." % filename)
         super().load_parameters(filename, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra,
                                 cast_dtype=cast_dtype, dtype_source=dtype_source)
         logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
@@ -421,29 +422,29 @@ class SockeyeModel(mx.gluon.Block):
         output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
 
         source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not tie_weights else 'default'
-        source_embed_weight = self.params.get(source_embed_name,
-                                              shape=(self.config.config_embed_source.vocab_size,
-                                                     self.config.config_embed_source.num_embed),
-                                              allow_deferred_init=True,
-                                              grad_stype=source_grad_stype)
+        source_embed_weight = mx.gluon.Parameter(source_embed_name,
+                                                 shape=(self.config.config_embed_source.vocab_size,
+                                                        self.config.config_embed_source.num_embed),
+                                                 allow_deferred_init=True,
+                                                 grad_stype=source_grad_stype)
 
         if share_embed:
             target_embed_weight = source_embed_weight
         else:
             target_grad_stype = 'row_sparse' if self.config.config_embed_target.allow_sparse_grad and not tie_weights else 'default'
-            target_embed_weight = self.params.get(target_embed_name,
-                                                  shape=(self.config.config_embed_target.vocab_size,
-                                                         self.config.config_embed_target.num_embed),
-                                                  allow_deferred_init=True,
-                                                  grad_stype=target_grad_stype)
+            target_embed_weight = mx.gluon.Parameter(target_embed_name,
+                                                     shape=(self.config.config_embed_target.vocab_size,
+                                                            self.config.config_embed_target.num_embed),
+                                                     allow_deferred_init=True,
+                                                     grad_stype=target_grad_stype)
 
         if tie_weights:
             output_weight = target_embed_weight
         else:
-            output_weight = self.params.get(output_embed_name,
-                                            shape=(self.config.config_embed_target.vocab_size,
-                                                   self.config.config_decoder.model_size),
-                                            allow_deferred_init=True)
+            output_weight = mx.gluon.Parameter(output_embed_name,
+                                               shape=(self.config.config_embed_target.vocab_size,
+                                                      self.config.config_decoder.model_size),
+                                               allow_deferred_init=True)
 
         return source_embed_weight, target_embed_weight, output_weight
 
@@ -507,6 +508,7 @@ class SockeyeModel(mx.gluon.Block):
         @lru_cache(maxsize=self.forward_pass_cache_size)
         def cache_func(*args):
             return class_func(*args)
+
         return cache_func
 
 
@@ -576,7 +578,7 @@ def load_model(model_folder: str,
     # Are we converting the model to 8-bit?
     quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
     if quantizing:
-        model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
+        model_config.dtype = C.DTYPE_INT8  # Ensure the scaling factor parameters are created.
 
     model = SockeyeModel(model_config, inference_only=inference_only, mc_dropout=mc_dropout,
                          forward_pass_cache_size=forward_pass_cache_size)

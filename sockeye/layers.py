@@ -63,9 +63,8 @@ class LHUC(mx.gluon.HybridBlock):
                  num_hidden: int,
                  prefix: str = C.LHUC_PREFIX,
                  weight_init: Union[str, mx.init.Initializer] = mx.init.Uniform(0.1)) -> None:
-        super().__init__(prefix=prefix)
-        with self.name_scope():
-            self.weight = self.params.get('weight', shape=(num_hidden,), init=weight_init)
+        super().__init__()
+        self.weight = mx.gluon.Parameter('weight', shape=(num_hidden,), init=weight_init)
 
     def hybrid_forward(self, F, data, weight) -> mx.sym.Symbol:
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
@@ -89,11 +88,10 @@ class WeightNormalization(mx.gluon.HybridBlock):
                  num_hidden: int,
                  ndim: int = 2,
                  prefix: str = 'wn_') -> None:
-        super().__init__(prefix=prefix)
-        with self.name_scope():
-            self.scale = self.params.get("scale",
-                                         shape=tuple([num_hidden] + [1] * (ndim - 1)),
-                                         init=mx.init.Constant(value=1.0))
+        super().__init__()
+        self.scale = mx.gluon.Parameter("scale",
+                                        shape=tuple([num_hidden] + [1] * (ndim - 1)),
+                                        init=mx.init.Constant(value=1.0))
 
     def hybrid_forward(self, F, weight, scale):
         return F.broadcast_mul(lhs=F.L2Normalization(weight, mode='instance'), rhs=scale)
@@ -121,34 +119,33 @@ class OutputLayer(mx.gluon.HybridBlock):
                  bias_initializer: str = 'zeros',
                  dtype: str = C.DTYPE_FP32,
                  prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.vocab_size = vocab_size
 
-        with self.name_scope():
-            if dtype == C.DTYPE_INT8:
-                self.scaling = self.params.get('scaling',
-                                               shape=(1,), init=mx.initializer.Constant(-1.0),
-                                               dtype=C.DTYPE_FP32, allow_deferred_init=False)
-                # This is only for inference but MXNet tries to create an
-                # initializer anyway, then fails because most random
-                # generators don't support int8 output.
-                weight_initializer = 'zeros'
-            if weight is None:
-                self.weight = self.params.get("weight",
-                                              shape=(vocab_size, hidden_size),
-                                              init=weight_initializer,
-                                              dtype=dtype,
-                                              allow_deferred_init=False)
-            else:
-                self.weight = weight  # adds to self._reg_params
-                self.params.update({weight.name: weight})  # adds to self.params
+        if dtype == C.DTYPE_INT8:
+            self.scaling = mx.gluon.Parameter('scaling',
+                                              shape=(1,), init=mx.initializer.Constant(-1.0),
+                                              dtype=C.DTYPE_FP32, allow_deferred_init=False)
+            # This is only for inference but MXNet tries to create an
+            # initializer anyway, then fails because most random
+            # generators don't support int8 output.
+            weight_initializer = 'zeros'
+        if weight is None:
+            self.weight = mx.gluon.Parameter("weight",
+                                             shape=(vocab_size, hidden_size),
+                                             init=weight_initializer,
+                                             dtype=dtype,
+                                             allow_deferred_init=False)
+        else:
+            self.weight = weight  # adds to self._reg_params
+            self.params.update({weight.name: weight})  # adds to self.params
 
-            self.bias = self.params.get("bias",
-                                        shape=(vocab_size,),
-                                        init=bias_initializer,
-                                        # Bias stays fp32 even with int8 weights.
-                                        dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32,
-                                        allow_deferred_init=False)
+        self.bias = mx.gluon.Parameter("bias",
+                                       shape=(vocab_size,),
+                                       init=bias_initializer,
+                                       # Bias stays fp32 even with int8 weights.
+                                       dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32,
+                                       allow_deferred_init=False)
 
     @lru_cache(maxsize=1)
     def _take_slice(self, vocab_slice_ids: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
@@ -216,18 +213,17 @@ class LengthRatio(mx.gluon.HybridBlock):
                  prefix: str = C.LENRATIOS_OUTPUT_LAYER_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.num_layers = num_layers
         self.hidden_size = hidden_size
 
-        with self.name_scope():
-            self.layers = mx.gluon.nn.HybridSequential()
-            for l in range(num_layers - 1):
-                self.layers.add(quantization.QuantizableDense(units=hidden_size, activation='tanh',
-                                                  flatten=False, prefix='dense%d_' % l, dtype=dtype))
-            # SoftReLU activation to ensure positiveness of the predicted length ratio
-            self.layers.add(quantization.QuantizableDense(units=1, activation='softrelu',
-                                              flatten=False, prefix='dense%d_' % (num_layers - 1), dtype=dtype))
+        self.layers = mx.gluon.nn.HybridSequential()
+        for l in range(num_layers - 1):
+            self.layers.add(quantization.QuantizableDense(units=hidden_size, activation='tanh',
+                                              flatten=False, prefix='dense%d_' % l, dtype=dtype))
+        # SoftReLU activation to ensure positiveness of the predicted length ratio
+        self.layers.add(quantization.QuantizableDense(units=1, activation='softrelu',
+                                          flatten=False, prefix='dense%d_' % (num_layers - 1), dtype=dtype))
 
     def hybrid_forward(self, F, source_encoded, source_encoded_length):
         """
@@ -256,7 +252,7 @@ class LengthRatio(mx.gluon.HybridBlock):
 class DotAttentionCell(mx.gluon.HybridBlock):
 
     def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.dropout = dropout
         self._dtype = C.DTYPE_FP32
 
@@ -324,7 +320,7 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
                  depth_out: int = 512,
                  dropout: float = 0.0,
                  dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         utils.check_condition(depth_att % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
         self.depth = depth_att
@@ -332,10 +328,9 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         self.depth_out = depth_out
         self.depth_per_head = self.depth // self.heads
 
-        with self.name_scope():
-            self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
-            self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out,
-                                                        flatten=False, use_bias=False, prefix='h2o_', dtype=dtype)
+        self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
+        self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out,
+                                                    flatten=False, use_bias=False, prefix='h2o_', dtype=dtype)
 
     def _attend(self,
                 F,
@@ -422,9 +417,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
         self.depth_att = depth_att
-        with self.name_scope():
-            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3,
-                                                       flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
+        self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3,
+                                                   flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
 
     @property
     def prefix(self) -> str:
@@ -504,11 +498,10 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  depth_key_value: int = 0) -> None:
         super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
 
-        with self.name_scope():
-            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att,
-                                                      flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
-            self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att,
-                                                       flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
+        self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att,
+                                                  flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
+        self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att,
+                                                   flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
@@ -541,9 +534,8 @@ class PlainDotAttention(mx.gluon.HybridBlock):
     Dot attention layer for queries independent from keys/values.
     """
     def __init__(self, prefix=''):
-        super().__init__(prefix=prefix)
-        with self.name_scope():
-            self.dot_att = DotAttentionCell()
+        super().__init__()
+        self.dot_att = DotAttentionCell()
 
     def hybrid_forward(self, F, queries, memory, memory_lengths):
         """
@@ -571,12 +563,11 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
                  prefix: str,
                  num_hidden: int,
                  dtype: str) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.num_hidden = num_hidden
-        with self.name_scope():
-            self.q2h = quantization.QuantizableDense(units=num_hidden, flatten=False, use_bias=True, dtype=dtype)
-            self.kv2h = quantization.QuantizableDense(units=num_hidden * 2, flatten=False, use_bias=True, dtype=dtype)
-            self.dot_att = DotAttentionCell()
+        self.q2h = quantization.QuantizableDense(units=num_hidden, flatten=False, use_bias=True, dtype=dtype)
+        self.kv2h = quantization.QuantizableDense(units=num_hidden * 2, flatten=False, use_bias=True, dtype=dtype)
+        self.dot_att = DotAttentionCell()
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
@@ -643,23 +634,22 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
                  weight_init: Optional[Union[str, mx.init.Initializer]] = None) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
                                                   "is however %d." % num_embed)
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.weight_type = weight_type
         self.num_embed = num_embed
         self.max_seq_len = max_seq_len
         self.scale_up_input = scale_up_input
         self.scale_down_positions = scale_down_positions
 
-        with self.name_scope():
-            if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
-                pos_weight = get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
-                if self.scale_down_positions:
-                    pos_weight *= self.num_embed ** -0.5
-                self.weight = self.params.get_constant('weight', pos_weight)
-            elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-                self.weight = self.params.get('weight', shape=(self.max_seq_len, self.num_embed), init=weight_init)
-            else:
-                raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
+        if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
+            pos_weight = get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
+            if self.scale_down_positions:
+                pos_weight *= self.num_embed ** -0.5
+            self.weight = mx.gluon.Constant(pos_weight)
+        elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+            self.weight = mx.gluon.Parameter('weight', shape=(self.max_seq_len, self.num_embed), init=weight_init)
+        else:
+            raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
 
     def hybrid_forward(self, F, data, steps, weight):  # pylint: disable=arguments-differ
         """
@@ -717,7 +707,7 @@ class SSRU(AutoregressiveLayer):
                  inference_only: bool,
                  prefix: str = C.SSRU_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
-        super(SSRU, self).__init__(prefix=prefix)
+        super(SSRU, self).__init__()
 
         self.model_size = model_size
         self.inference_only = inference_only
@@ -725,20 +715,19 @@ class SSRU(AutoregressiveLayer):
         self.cell_state_transform = self._inference_cell_state_transform \
                                     if inference_only else self._training_cell_state_transform
 
-        with self.name_scope():
-            self.forget_gate = quantization.QuantizableDense(in_units=model_size,
-                                                             units=model_size,
-                                                             activation="sigmoid",
-                                                             flatten=False,
-                                                             prefix="forget_gate_",
-                                                             dtype=dtype)
+        self.forget_gate = quantization.QuantizableDense(in_units=model_size,
+                                                         units=model_size,
+                                                         activation="sigmoid",
+                                                         flatten=False,
+                                                         prefix="forget_gate_",
+                                                         dtype=dtype)
 
-            self.linear = quantization.QuantizableDense(in_units=model_size,
-                                                        units=model_size,
-                                                        use_bias=False,
-                                                        flatten=False,
-                                                        prefix="linear_",
-                                                        dtype=dtype)
+        self.linear = quantization.QuantizableDense(in_units=model_size,
+                                                    units=model_size,
+                                                    use_bias=False,
+                                                    flatten=False,
+                                                    prefix="linear_",
+                                                    dtype=dtype)
 
     @property
     def prefix(self) -> str:

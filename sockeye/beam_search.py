@@ -283,14 +283,12 @@ class CandidateScorer(mx.gluon.HybridBlock):
     def __init__(self,
                  length_penalty_alpha: float = 1.0,
                  length_penalty_beta: float = 0.0,
-                 brevity_penalty_weight: float = 0.0,
-                 **kwargs) -> None:
-        super().__init__(**kwargs)
-        with self.name_scope():
-            self._lp = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
-            self._bp = None  # type: Optional[BrevityPenalty]
-            if brevity_penalty_weight > 0.0:
-                self._bp = BrevityPenalty(weight=brevity_penalty_weight)
+                 brevity_penalty_weight: float = 0.0) -> None:
+        super().__init__()
+        self._lp = LengthPenalty(alpha=length_penalty_alpha, beta=length_penalty_beta)
+        self._bp = None  # type: Optional[BrevityPenalty]
+        if brevity_penalty_weight > 0.0:
+            self._bp = BrevityPenalty(weight=brevity_penalty_weight)
 
     def forward(self, scores, lengths, reference_lengths):
         if isinstance(scores, mx.nd.NDArray) or isinstance(scores, mx.sym.Symbol):
@@ -463,8 +461,8 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
 
 class SortStates(mx.gluon.HybridBlock):
 
-    def __init__(self, state_structure, prefix):
-        mx.gluon.HybridBlock.__init__(self, prefix=prefix)
+    def __init__(self, state_structure):
+        mx.gluon.HybridBlock.__init__(self)
         self.flat_structure = functools.reduce(operator.add, state_structure)
 
     def hybrid_forward(self, F, best_hyp_indices, *states):
@@ -531,7 +529,7 @@ class GreedySearch(mx.gluon.Block):
                  num_source_factors: int,
                  num_target_factors: int,
                  inference: _SingleModelInference):
-        super().__init__(prefix='greedy_search_')
+        super().__init__()
         self.dtype = dtype
         self.bos_id = bos_id
         self.eos_id = eos_id
@@ -542,8 +540,7 @@ class GreedySearch(mx.gluon.Block):
         self.global_avoid_trie = None
         assert inference._skip_softmax, "skipping softmax must be enabled for GreedySearch"
 
-        with self.name_scope():
-            self.work_block = GreedyTop1()
+        self.work_block = GreedyTop1()
 
     def forward(self,
                 source: mx.nd.NDArray,
@@ -666,7 +663,7 @@ class BeamSearch(mx.gluon.Block):
                  global_avoid_trie: Optional[constrained.AvoidTrie] = None,
                  sample: Optional[int] = None,
                  prevent_unk: bool = False) -> None:
-        super().__init__(prefix='beam_search_')
+        super().__init__()
         self.beam_size = beam_size
         self.dtype = dtype
         self.bos_id = bos_id
@@ -680,24 +677,21 @@ class BeamSearch(mx.gluon.Block):
         self.global_avoid_trie = global_avoid_trie
         self.prevent_unk = prevent_unk
 
-        with self.name_scope():
-            self._sort_states = SortStates(state_structure=self._inference.state_structure(),
-                                           prefix='sort_states_')
-            self._update_scores = UpdateScores(prefix='update_scores_')
-            self._scorer = scorer
-            self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
-                prefix='sort_norm_and_update_finished_',
-                dtype=self.dtype,
-                pad_id=C.PAD_ID,
-                eos_id=eos_id,
-                scorer=scorer)
+        self._sort_states = SortStates(state_structure=self._inference.state_structure())
+        self._update_scores = UpdateScores()
+        self._scorer = scorer
+        self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
+            dtype=self.dtype,
+            pad_id=C.PAD_ID,
+            eos_id=eos_id,
+            scorer=scorer)
 
-            self._sample = None  # type: Optional[mx.gluon.HybridBlock]
-            self._top = None  # type: Optional[mx.gluon.HybridBlock]
-            if sample is not None:
-                self._sample = SampleK(sample)
-            else:
-                self._top = TopK(self.beam_size)
+        self._sample = None  # type: Optional[mx.gluon.HybridBlock]
+        self._top = None  # type: Optional[mx.gluon.HybridBlock]
+        if sample is not None:
+            self._sample = SampleK(sample)
+        else:
+            self._top = TopK(self.beam_size)
 
     def forward(self,
                 source: mx.nd.NDArray,
