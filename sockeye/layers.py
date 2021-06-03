@@ -160,36 +160,43 @@ class OutputLayer(mx.gluon.HybridBlock):
         if vocab_slice_ids is not None:
             # imperative, reduced matrix multiplication for vocabulary selection
             weight, bias = self._take_slice(vocab_slice_ids)
-            if self.weight.dtype == C.DTYPE_INT8:
-                return mx.nd.contrib.intgemm_fully_connected(data, weight, self.scaling.data(), bias,
-                                                             num_hidden=vocab_slice_ids.shape[0],
-                                                             flatten=False,
-                                                             name=C.LOGITS_NAME)
-            else:
-                return mx.nd.FullyConnected(data=data,
-                                            num_hidden=vocab_slice_ids.shape[0],
-                                            weight=weight,
-                                            bias=bias,
-                                            flatten=False,
-                                            name=C.LOGITS_NAME)
-        return super().forward(data)
-
-    def hybrid_forward(self, F, data, weight, bias, scaling=None):
-        if self.weight.dtype == C.DTYPE_INT8:
-            return F.contrib.intgemm_fully_connected(data=data,
-                                                     num_hidden=self.vocab_size,
-                                                     weight=weight,
-                                                     scaling=scaling,
-                                                     bias=bias,
-                                                     flatten=False,
-                                                     name=C.LOGITS_NAME)
+            num_hidden = vocab_slice_ids.shape[0]
         else:
-            return F.FullyConnected(data=data,
-                                    num_hidden=self.vocab_size,
-                                    weight=weight,
-                                    bias=bias,
-                                    flatten=False,
-                                    name=C.LOGITS_NAME)
+            weight = self.weight.data()
+            bias = self.bias.data()
+            num_hidden = self.vocab_size
+
+        if self.weight.dtype == C.DTYPE_INT8:
+            scaling = self.scaling.data()
+            return mx.nd.contrib.intgemm_fully_connected(data, weight, scaling, bias,
+                                                         num_hidden=num_hidden,
+                                                         flatten=False,
+                                                         name=C.LOGITS_NAME)
+        else:
+            return mx.nd.FullyConnected(data=data,
+                                        num_hidden=num_hidden,
+                                        weight=weight,
+                                        bias=bias,
+                                        flatten=False,
+                                        name=C.LOGITS_NAME)
+#        return super().forward(data)
+
+    # def hybrid_forward(self, F, data, weight, bias, scaling=None):
+    #     if self.weight.dtype == C.DTYPE_INT8:
+    #         return F.contrib.intgemm_fully_connected(data=data,
+    #                                                  num_hidden=self.vocab_size,
+    #                                                  weight=weight,
+    #                                                  scaling=scaling,
+    #                                                  bias=bias,
+    #                                                  flatten=False,
+    #                                                  name=C.LOGITS_NAME)
+    #     else:
+    #         return F.FullyConnected(data=data,
+    #                                 num_hidden=self.vocab_size,
+    #                                 weight=weight,
+    #                                 bias=bias,
+    #                                 flatten=False,
+    #                                 name=C.LOGITS_NAME)
 
 
 @dataclass
