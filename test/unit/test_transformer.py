@@ -54,7 +54,6 @@ def test_transformer_feed_forward(use_glu):
                                                        act_type=C.RELU,
                                                        dropout=0.1,
                                                        dtype=C.DTYPE_FP32,
-                                                       prefix='ff_',
                                                        use_glu=use_glu)
     block.initialize()
     block.hybridize()

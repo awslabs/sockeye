@@ -74,7 +74,6 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                          num_model=config.model_size,
                                          act_type=config.act_type,
                                          dropout=config.dropout_act,
-                                         prefix="ff_",
                                          dtype=dtype,
                                          use_glu=config.use_glu)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
@@ -156,7 +155,6 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                          num_model=config.model_size,
                                          act_type=config.act_type,
                                          dropout=config.dropout_act,
-                                         prefix="ff_",
                                          dtype=dtype,
                                          use_glu=config.use_glu)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
@@ -279,7 +277,6 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
                  num_model: int,
                  act_type: str,
                  dropout: float,
-                 prefix: str,
                  dtype: str,
                  use_glu: bool = False) -> None:
         super().__init__()
