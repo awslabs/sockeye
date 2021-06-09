@@ -61,7 +61,6 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                                             heads=config.attention_heads,
                                                             depth_out=config.model_size,
                                                             dropout=config.dropout_attention,
-                                                            prefix="att_self_",
                                                             dtype=dtype)
         self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                            dropout=config.dropout_prepost,
@@ -107,7 +106,6 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
     def __init__(self,
                  config: TransformerConfig,
                  inference_only: bool,
-                 prefix: str,
                  dtype: str) -> None:
         super().__init__()
         self.decoder_type = config.decoder_type
@@ -117,7 +115,6 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                                 heads=config.attention_heads,
                                                                 depth_out=config.model_size,
                                                                 dropout=config.dropout_attention,
-                                                                prefix="att_self_",
                                                                 dtype=dtype)
         elif self.decoder_type == C.SSRU_TRANSFORMER:
             self.autoregr_layer = layers.SSRU(model_size=config.model_size,
@@ -142,7 +139,6 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                        depth_out=config.model_size,
                                                        dropout=config.dropout_attention,
                                                        depth_key_value=config.depth_key_value,
-                                                       prefix="att_enc_",
                                                        dtype=dtype)
         self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                           dropout=config.dropout_prepost,
@@ -282,14 +278,12 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
         super().__init__()
         self.dropout = dropout
         self.use_glu = use_glu
-        self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_',
-                                                 dtype=dtype)
+        self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, dtype=dtype)
         self.act = layers.get_activation(act_type)
         if use_glu:
             self.linear = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False,
-                                                        prefix='i2l_', dtype=dtype)
-        self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_',
-                                                 dtype=dtype)
+                                                        dtype=dtype)
+        self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, dtype=dtype)
 
     def hybrid_forward(self, F, x):
         h = self.ff1(x)
@@ -303,7 +297,7 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
 
 
 class AutoRegressiveBias(mx.gluon.HybridBlock):
-    def __init__(self, prefix: str = '') -> None:
+    def __init__(self) -> None:
         super().__init__()
         self._dtype = 'float32'
 

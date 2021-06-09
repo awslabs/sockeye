@@ -57,7 +57,6 @@ class LHUC(mx.gluon.HybridBlock):
     Machine Translation Models" NAACL 2018
 
     :param num_hidden: Number of hidden units of the layer to be modified.
-    :param prefix: Optional prefix for created parameters (if not given as weight).
     """
     def __init__(self,
                  num_hidden: int,
@@ -80,13 +79,9 @@ class WeightNormalization(mx.gluon.HybridBlock):
 
     :param num_hidden: Size of the first dimension.
     :param ndim: The total number of dimensions of the weight tensor.
-    :param prefix: The prefix used for naming.
     """
 
-    def __init__(self,
-                 num_hidden: int,
-                 ndim: int = 2,
-                 prefix: str = 'wn_') -> None:
+    def __init__(self, num_hidden: int, ndim: int = 2) -> None:
         super().__init__()
         self.scale = mx.gluon.Parameter("scale",
                                         shape=tuple([num_hidden] + [1] * (ndim - 1)),
@@ -106,7 +101,6 @@ class OutputLayer(mx.gluon.HybridBlock):
     :param weight_initializer: Initializer for weight.
     :param bias_initializer: Initializer for bias.
     :param dtype: Data type.
-    :param prefix: Prefix used for naming.
     :params params: Optional parameter dict for shared parameters.
     """
 
@@ -116,8 +110,7 @@ class OutputLayer(mx.gluon.HybridBlock):
                  weight: Optional[mx.gluon.Parameter] = None,
                  weight_initializer: Optional[str] = None,
                  bias_initializer: str = 'zeros',
-                 dtype: str = C.DTYPE_FP32,
-                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
+                 dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.vocab_size = vocab_size
 
@@ -202,13 +195,11 @@ class LengthRatio(mx.gluon.HybridBlock):
 
     :param hidden_size: Encoder hidden size.
     :param num_layers: Number of layers.
-    :param prefix: Prefix used for naming.
     """
 
     def __init__(self,
                  hidden_size: int,
                  num_layers: int,
-                 prefix: str = C.LENRATIOS_OUTPUT_LAYER_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
         super().__init__()
@@ -218,10 +209,9 @@ class LengthRatio(mx.gluon.HybridBlock):
         self.layers = mx.gluon.nn.HybridSequential()
         for l in range(num_layers - 1):
             self.layers.add(quantization.QuantizableDense(units=hidden_size, activation='tanh',
-                                              flatten=False, prefix='dense%d_' % l, dtype=dtype))
+                                                          flatten=False, dtype=dtype))
         # SoftReLU activation to ensure positiveness of the predicted length ratio
-        self.layers.add(quantization.QuantizableDense(units=1, activation='softrelu',
-                                          flatten=False, prefix='dense%d_' % (num_layers - 1), dtype=dtype))
+        self.layers.add(quantization.QuantizableDense(units=1, activation='softrelu', flatten=False, dtype=dtype))
 
     def hybrid_forward(self, F, source_encoded, source_encoded_length):
         """
@@ -249,7 +239,7 @@ class LengthRatio(mx.gluon.HybridBlock):
 
 class DotAttentionCell(mx.gluon.HybridBlock):
 
-    def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
+    def __init__(self, dropout: float = 0.0) -> None:
         super().__init__()
         self.dropout = dropout
         self._dtype = C.DTYPE_FP32
@@ -304,7 +294,6 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
     """
     Base class for Multi-head attention.
 
-    :param prefix: Attention prefix.
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
@@ -312,7 +301,6 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
     :param dtype: Data type for weights
     """
     def __init__(self,
-                 prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
@@ -326,12 +314,11 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
         self.depth_out = depth_out
         self.depth_per_head = self.depth // self.heads
 
-        self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
+        self.dot_att = DotAttentionCell(dropout=dropout)
         self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out,
-                                                    flatten=False, use_bias=False, prefix='h2o_', dtype=dtype)
+                                                    flatten=False, use_bias=False, dtype=dtype)
 
     def _attend(self,
-                F,
                 queries: mx.sym.Symbol,
                 key_values: mx.sym.Symbol,
                 lengths: Optional[mx.sym.Symbol] = None,
@@ -356,11 +343,6 @@ class MultiHeadAttentionBase(mx.gluon.HybridBlock):
 
 
 class AutoregressiveLayer(mx.gluon.HybridBlock):
-    @property
-    @abstractmethod
-    def prefix(self) -> str:
-        raise NotImplementedError
-
     @property
     @abstractmethod
     def num_state_tensors(self) -> int:
@@ -398,7 +380,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     Multi-head self-attention. Independent linear projections of inputs serve as
     queries, keys, and values for the attention.
 
-    :param prefix: Attention prefix.
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
@@ -406,21 +387,16 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     :param dtype: Data type for weights
     """
     def __init__(self,
-                 prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
                  dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
+        super().__init__(depth_att, heads, depth_out, dropout, dtype)
 
         self.depth_att = depth_att
         self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3,
-                                                   flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
-
-    @property
-    def prefix(self) -> str:
-        return "att_self_"
+                                                   flatten=False, use_bias=False, dtype=dtype)
 
     @property
     def num_state_tensors(self) -> int:
@@ -470,14 +446,13 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
             updated_states = F.concat(previous_states, states, dim=0)
             states = F.slice(updated_states, begin=(1, None, None), end=(None, None, None))
 
-        return self._attend(F, queries, states, lengths=input_lengths, bias=bias), updated_states
+        return self._attend(queries, states, lengths=input_lengths, bias=bias), updated_states
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
     """
     Multi-head attention layer for queries independent from keys/values.
 
-    :param prefix: Attention prefix.
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
@@ -487,19 +462,18 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     """
 
     def __init__(self,
-                 prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
                  dtype: str = C.DTYPE_FP32,
                  depth_key_value: int = 0) -> None:
-        super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
+        super().__init__(depth_att, heads, depth_out, dropout, dtype)
 
         self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att,
-                                                  flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
+                                                  flatten=False, use_bias=False, dtype=dtype)
         self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att,
-                                                   flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
+                                                   flatten=False, use_bias=False, dtype=dtype)
 
     def hybrid_forward(self, F,
                        queries: mx.sym.Symbol,
@@ -524,14 +498,14 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         queries = self.ff_q(queries)
         kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(memory)
 
-        return self._attend(F, queries, kv, bias=bias, lengths=memory_lengths)
+        return self._attend(queries, kv, bias=bias, lengths=memory_lengths)
 
 
 class PlainDotAttention(mx.gluon.HybridBlock):
     """
     Dot attention layer for queries independent from keys/values.
     """
-    def __init__(self, prefix=''):
+    def __init__(self):
         super().__init__()
         self.dot_att = DotAttentionCell()
 
@@ -553,12 +527,10 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
     """
     Dot attention layer for queries independent from keys/values.
 
-    :param prefix: Attention prefix.
     :param num_hidden: Attention depth / number of hidden units.
     """
 
     def __init__(self,
-                 prefix: str,
                  num_hidden: int,
                  dtype: str) -> None:
         super().__init__()
@@ -616,7 +588,6 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
     :param weight_type: type of embeddings, fixed or learned.
     :param num_embed: Embedding size.
     :param max_seq_len: Maximum sequence length.
-    :param prefix: Name prefix for symbols of this encoder.
     :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
     :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
     :param weight_init: Optional initializer for learned embeddings.
@@ -626,7 +597,6 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
                  weight_type: str,
                  num_embed: int,
                  max_seq_len: int,
-                 prefix: str,
                  scale_up_input: bool,
                  scale_down_positions: bool,
                  weight_init: Optional[Union[str, mx.init.Initializer]] = None) -> None:
@@ -697,13 +667,11 @@ class SSRU(AutoregressiveLayer):
 
     :param model_size: number of hidden units
     :param inference_only: flag used to indicate execution at inference time
-    :param prefix: prefix prepended to the names of internal Symbol instances
     :param dtype: data type
     """
     def __init__(self,
                  model_size: int,
                  inference_only: bool,
-                 prefix: str = C.SSRU_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         super(SSRU, self).__init__()
 
@@ -717,19 +685,13 @@ class SSRU(AutoregressiveLayer):
                                                          units=model_size,
                                                          activation="sigmoid",
                                                          flatten=False,
-                                                         prefix="forget_gate_",
                                                          dtype=dtype)
 
         self.linear = quantization.QuantizableDense(in_units=model_size,
                                                     units=model_size,
                                                     use_bias=False,
                                                     flatten=False,
-                                                    prefix="linear_",
                                                     dtype=dtype)
-
-    @property
-    def prefix(self) -> str:
-        return C.SSRU_PREFIX
 
     @property
     def num_state_tensors(self) -> int:

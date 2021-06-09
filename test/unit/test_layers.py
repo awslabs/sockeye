@@ -46,7 +46,6 @@ def test_weight_normalization():
 def test_positional_embeddings():
     num_embed = 32
     max_seq_len = 10
-    prefix = ''
     scale_up_input = False
     scale_down_positions = False
     data_len = 5
@@ -57,7 +56,6 @@ def test_positional_embeddings():
     b = sockeye.layers.PositionalEmbeddings(weight_type='fixed',
                                             num_embed=num_embed,
                                             max_seq_len=max_seq_len,
-                                            prefix=prefix,
                                             scale_up_input=scale_up_input,
                                             scale_down_positions=scale_down_positions,
                                             weight_init=None)
@@ -77,7 +75,6 @@ def test_positional_embeddings():
     b = sockeye.layers.PositionalEmbeddings(weight_type='learned',
                                             num_embed=num_embed,
                                             max_seq_len=max_seq_len,
-                                            prefix=prefix,
                                             scale_up_input=scale_up_input,
                                             scale_down_positions=scale_down_positions,
                                             weight_init='ones')

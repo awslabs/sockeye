@@ -85,17 +85,14 @@ class SockeyeModel(mx.gluon.Block):
 
     :param config: Model configuration.
     :param inference_only: Use the model only for inference, enabling optimizations.
-    :param prefix: Name prefix for all parameters of this model.
     """
 
     def __init__(self,
                  config: ModelConfig,
                  inference_only: bool = False,
                  mc_dropout: bool = False,
-                 forward_pass_cache_size: int = 0,
-                 prefix: str = '') -> None:
+                 forward_pass_cache_size: int = 0) -> None:
         super().__init__()
-        self.prefix = prefix
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
         self.dtype = config.dtype
@@ -119,8 +116,7 @@ class SockeyeModel(mx.gluon.Block):
 
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
-                                               weight=output_weight, dtype=config.dtype,
-                                               prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+                                               weight=output_weight, dtype=config.dtype)
 
         # Optional target factor output layers
         for i, factor_config in enumerate(self.target_factor_configs, 1):
@@ -129,8 +125,7 @@ class SockeyeModel(mx.gluon.Block):
             output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                               vocab_size=factor_config.vocab_size,
                                               weight=None,
-                                              dtype=config.dtype,
-                                              prefix=self.prefix + C.TARGET_FACTOR_OUTPUT_LAYER_PREFIX % i)
+                                              dtype=config.dtype)
             # Register the layer as child block
             setattr(self, self._output_layer_factor_format_string % i, output_layer)
 
@@ -139,8 +134,7 @@ class SockeyeModel(mx.gluon.Block):
             utils.check_condition(self.config.config_length_task.weight > 0.0,
                                   'Auxiliary length task requested, but its loss weight is zero')
             self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
-                                                   num_layers=self.config.config_length_task.num_layers,
-                                                   prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
+                                                   num_layers=self.config.config_length_task.num_layers)
 
     def cast(self, dtype):
         self.dtype = dtype

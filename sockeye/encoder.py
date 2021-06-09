@@ -210,7 +210,7 @@ class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
     A sequence of encoders is itself an encoder.
     """
 
-    def __init__(self, prefix: str = '') -> None:
+    def __init__(self) -> None:
         Encoder.__init__(self)
         mx.gluon.nn.HybridSequential.__init__(self)
 
@@ -285,7 +285,6 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
                                                          num_embed=self.config.model_size,
                                                          max_seq_len=self.config.max_seq_len_source,
-                                                         prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX,
                                                          scale_up_input=True,
                                                          scale_down_positions=False)
 

@@ -137,14 +137,13 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
                                                          num_embed=self.config.model_size,
                                                          max_seq_len=self.config.max_seq_len_target,
-                                                         prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX,
                                                          scale_up_input=True,
                                                          scale_down_positions=False)
-        self.autoregressive_bias = transformer.AutoRegressiveBias(prefix="autoregressive_bias_")
+        self.autoregressive_bias = transformer.AutoRegressiveBias()
 
         self.layers = mx.gluon.nn.HybridSequential()
         for i in range(config.num_layers):
-            self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i, dtype=dtype,
+            self.layers.add(transformer.TransformerDecoderBlock(config, dtype=dtype,
                                                                 inference_only=self.inference_only))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
