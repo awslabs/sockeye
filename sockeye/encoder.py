@@ -119,13 +119,11 @@ class Embedding(Encoder):
     Thin wrapper around MXNet's Embedding symbol. Works with both time- and batch-major data layouts.
 
     :param config: Embedding config.
-    :param prefix: Name prefix for symbols of this encoder.
     :param dtype: Data type. Default: 'float32'.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
-                 prefix: str,
                  embed_weight: Optional[mx.gluon.Parameter] = None,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
@@ -213,7 +211,7 @@ class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
 
     def __init__(self, prefix: str = '') -> None:
         Encoder.__init__(self)
-        mx.gluon.nn.HybridSequential.__init__(self, prefix=prefix)
+        mx.gluon.nn.HybridSequential.__init__(self)
 
     def add(self, *encoders):
         """Adds block on top of the stack."""

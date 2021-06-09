@@ -111,11 +111,11 @@ def embeddings(args: argparse.Namespace):
 
     params = sockeye_model.collect_params()
     if args.side == "source":
-        logger.info("Loading %s", sockeye_model.source_embed_weight.name)
-        weights = params[sockeye_model.source_embed_weight.name].data()
+        logger.info("Loading %s", sockeye_model.embedding_source.embed_weight.name)
+        weights = params[sockeye_model.embedding_source.embed_weight.name].data()
     else:
-        logger.info("Loading %s", sockeye_model.target_embed_weight.name)
-        weights = params[sockeye_model.target_embed_weight.name].data()
+        logger.info("Loading %s", sockeye_model.embedding_target.embed_weight.name)
+        weights = params[sockeye_model.embedding_target.embed_weight.name].data()
     logger.info("Embedding size: %d", weights.shape[1])
 
     logger.info("Computing pairwise similarities...")

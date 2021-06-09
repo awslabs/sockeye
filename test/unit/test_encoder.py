@@ -27,7 +27,7 @@ import sockeye.transformer
 ])
 def test_embedding_encoder(dropout, factor_configs):
     config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, factor_configs=factor_configs)
-    embedding = sockeye.encoder.Embedding(config, prefix='embedding')
+    embedding = sockeye.encoder.Embedding(config)
     assert type(embedding) == sockeye.encoder.Embedding
 
 

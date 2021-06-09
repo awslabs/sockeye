@@ -93,9 +93,8 @@ class SockeyeModel(mx.gluon.Block):
                  inference_only: bool = False,
                  mc_dropout: bool = False,
                  forward_pass_cache_size: int = 0,
-                 prefix: str = '',
-                 **kwargs) -> None:
-        super().__init__(**kwargs)
+                 prefix: str = '') -> None:
+        super().__init__()
         self.prefix = prefix
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
@@ -107,15 +106,11 @@ class SockeyeModel(mx.gluon.Block):
         if self.forward_pass_cache_size > 0:
             self.embed_and_encode = self._cache_wrapper(self._embed_and_encode)
 
-        # source & target embeddings
-        self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
+        # source & target embeddings, potentially shared/tied
+        source_embed_weight, target_embed_weight, output_weight = self._get_embedding_weights()
 
-        self.embedding_source = encoder.Embedding(config.config_embed_source,
-                                                  prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
-                                                  embed_weight=self.source_embed_weight)
-        self.embedding_target = encoder.Embedding(config.config_embed_target,
-                                                  prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
-                                                  embed_weight=self.target_embed_weight)
+        self.embedding_source = encoder.Embedding(config.config_embed_source, embed_weight=source_embed_weight)
+        self.embedding_target = encoder.Embedding(config.config_embed_target, embed_weight=target_embed_weight)
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
@@ -124,7 +119,7 @@ class SockeyeModel(mx.gluon.Block):
 
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
-                                               weight=self.output_weight, dtype=config.dtype,
+                                               weight=output_weight, dtype=config.dtype,
                                                prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
 
         # Optional target factor output layers
