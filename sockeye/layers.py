@@ -61,7 +61,6 @@ class LHUC(mx.gluon.HybridBlock):
     """
     def __init__(self,
                  num_hidden: int,
-                 prefix: str = C.LHUC_PREFIX,
                  weight_init: Union[str, mx.init.Initializer] = mx.init.Uniform(0.1)) -> None:
         super().__init__()
         self.weight = mx.gluon.Parameter('weight', shape=(num_hidden,), init=weight_init)
