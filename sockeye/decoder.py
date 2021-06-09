@@ -149,7 +149,6 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
-                                                                 prefix="final_process_",
                                                                  num_hidden=self.config.model_size)
 
     def state_structure(self) -> str:

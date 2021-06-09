@@ -56,7 +56,6 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
         self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                           dropout=config.dropout_prepost,
-                                                          prefix="att_self_pre_",
                                                           num_hidden=config.model_size)
         self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
                                                             heads=config.attention_heads,
@@ -66,12 +65,10 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                                             dtype=dtype)
         self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                            dropout=config.dropout_prepost,
-                                                           prefix="att_self_post_",
                                                            num_hidden=config.model_size)
 
         self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                               dropout=config.dropout_prepost,
-                                              prefix="ff_pre_",
                                               num_hidden=config.model_size)
         self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                          num_model=config.model_size,
@@ -82,7 +79,6 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
                                          use_glu=config.use_glu)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                dropout=config.dropout_prepost,
-                                               prefix="ff_post_",
                                                num_hidden=config.model_size)
         self.lhuc = None
         if config.use_lhuc:
@@ -133,17 +129,14 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
 
         self.pre_autoregr_layer = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                           dropout=config.dropout_prepost,
-                                                          prefix=self.autoregr_layer.prefix + "pre_",
                                                           num_hidden=config.model_size)
 
         self.post_autoregr_layer = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                            dropout=config.dropout_prepost,
-                                                           prefix=self.autoregr_layer.prefix + "post_",
                                                            num_hidden=config.model_size)
 
         self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                          dropout=config.dropout_prepost,
-                                                         prefix="att_enc_pre_",
                                                          num_hidden=config.model_size)
         self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
                                                        heads=config.attention_heads,
@@ -154,12 +147,10 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                                        dtype=dtype)
         self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                           dropout=config.dropout_prepost,
-                                                          prefix="att_enc_post_",
                                                           num_hidden=config.model_size)
 
         self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                               dropout=config.dropout_prepost,
-                                              prefix="ff_pre_",
                                               num_hidden=config.model_size)
         self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
                                          num_model=config.model_size,
@@ -170,7 +161,6 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
                                          use_glu=config.use_glu)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                dropout=config.dropout_prepost,
-                                               prefix="ff_post_",
                                                num_hidden=config.model_size)
 
         self.lhuc = None
@@ -240,7 +230,6 @@ class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
     def __init__(self,
                  sequence: str,
                  dropout: float,
-                 prefix: str,
                  num_hidden: int = 0) -> None:
         super().__init__()
         self.sequence = sequence
