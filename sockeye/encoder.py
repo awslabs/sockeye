@@ -220,10 +220,10 @@ class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
             utils.check_condition(isinstance(encoder, Encoder), "%s is not of type Encoder" % encoder)
         mx.gluon.nn.HybridSequential.add(self, *encoders)
 
-    def hybrid_forward(self, F, data, valid_length):  # pylint: disable=arguments-differ
+    def forward(self, data, valid_length):  # pylint: disable=arguments-differ
         for block in self._children.values():
             data, valid_length = block(data, valid_length)
-        return data, F.identity(valid_length)  # identity: See https://github.com/apache/incubator-mxnet/issues/14228
+        return data, mx.nd.identity(valid_length)  # identity: See https://github.com/apache/incubator-mxnet/issues/14228
 
     def get_num_hidden(self) -> int:
         """

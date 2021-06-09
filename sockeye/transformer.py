@@ -82,7 +82,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
         if config.use_lhuc:
             self.lhuc = layers.LHUC(config.model_size)
 
-    def hybrid_forward(self, F, data: mx.sym.Symbol, lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+    def forward(self, data: mx.nd.NDArray, lengths: mx.nd.NDArray) -> mx.nd.NDArray:
         # self-attention
         data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, lengths, None)
         data = self.post_self_attention(data_self_att, data)
@@ -178,14 +178,13 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         """
         return self.autoregr_layer.get_state_shape(batch_size)
 
-    def hybrid_forward(self, F,
-                       target: mx.sym.Symbol,
-                       target_bias: mx.sym.Symbol,
-                       source: mx.sym.Symbol,
-                       source_att_lengths: mx.sym.Symbol,
-                       autoregr_states: mx.sym.Symbol,
-                       enc_att_kv: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
-                                                                            mx.sym.Symbol]:
+    def forward(self,
+                target: mx.nd.NDArray,
+                target_bias: mx.nd.NDArray,
+                source: mx.nd.NDArray,
+                source_att_lengths: mx.nd.NDArray,
+                autoregr_states: mx.nd.NDArray,
+                enc_att_kv: Optional[mx.nd.NDArray] = None) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
         target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
                                                                     autoregr_states,
                                                                     None,
@@ -232,7 +231,7 @@ class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
         if 'n' in sequence:
             self.layer_norm = mx.gluon.nn.LayerNorm(axis=-1, in_channels=num_hidden, epsilon=1e-06)
 
-    def hybrid_forward(self, F, data: mx.sym.Symbol, prev: Optional[mx.sym.Symbol]) -> mx.sym.Symbol:
+    def forward(self, data: mx.sym.Symbol, prev: Optional[mx.sym.Symbol]) -> mx.sym.Symbol:
         """
         Apply processing sequence to data with optional previous input.
 
@@ -256,7 +255,7 @@ class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
 
             elif step == "d":
                 if self.dropout > 0.0:
-                    data = F.Dropout(data, p=self.dropout)
+                    data = mx.nd.Dropout(data, p=self.dropout)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
@@ -285,13 +284,13 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
                                                         dtype=dtype)
         self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, dtype=dtype)
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         h = self.ff1(x)
         h = self.act(h)
         if self.use_glu:
             h = h * self.linear(x)
         if self.dropout > 0.0:
-            h = F.Dropout(h, p=self.dropout)
+            h = mx.nd.Dropout(h, p=self.dropout)
         y = self.ff2(h)
         return y
 
@@ -305,13 +304,13 @@ class AutoRegressiveBias(mx.gluon.HybridBlock):
         self._dtype = dtype
         super().cast(dtype)
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x):
         # Shape: (length, 1)
-        length_array = F.contrib.arange_like(x, axis=1)
+        length_array = mx.nd.contrib.arange_like(x, axis=1)
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         # Shape: (length, length)
-        bias = F.broadcast_greater(F.expand_dims(length_array, axis=0),
-                                   F.expand_dims(length_array, axis=1))
+        bias = mx.nd.broadcast_greater(mx.nd.expand_dims(length_array, axis=0),
+                                       mx.nd.expand_dims(length_array, axis=1))
         bias = bias * -C.LARGE_VALUES[self._dtype]
-        bias = F.expand_dims(bias, axis=0)
-        return F.BlockGrad(bias)
+        bias = mx.nd.expand_dims(bias, axis=0)
+        return mx.nd.BlockGrad(bias)

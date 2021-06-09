@@ -96,12 +96,14 @@ class QuantizableDense(mx.gluon.HybridBlock):
     """
     def __init__(self, units, dtype: str, activation=None, use_bias=True, flatten=True,
                  weight_initializer=None, bias_initializer='zeros',
-                 in_units=0, **kwargs):
+                 in_units=0):
         super(QuantizableDense, self).__init__()
         self._flatten = flatten
         self._dtype = dtype
         self._units = units
         self._in_units = in_units
+
+        self.scaling = None
         if dtype == C.DTYPE_INT8:
             self.scaling = mx.gluon.Parameter('scaling', shape=(1,),
                                               # Initialize to an obviously wrong value so we can detect later
@@ -113,16 +115,12 @@ class QuantizableDense(mx.gluon.HybridBlock):
                                          init=weight_initializer, dtype=dtype,
                                          allow_deferred_init=True)
 
-        if use_bias:
-            self.bias = mx.gluon.Parameter('bias', shape=(units,),
-                                           init=bias_initializer, dtype=C.DTYPE_FP32,
-                                           allow_deferred_init=True)
-        else:
-            self.bias = None
+        self.bias = mx.gluon.Parameter('bias', shape=(units,),
+                                       init=bias_initializer, dtype=C.DTYPE_FP32,
+                                       allow_deferred_init=True) if use_bias else None
+        self.act = Activation(activation) if activation is not None else None
         if activation is not None:
             self.act = Activation(activation)
-        else:
-            self.act = None
 
     def cast(self, dtype):
         if self._dtype != C.DTYPE_INT8:
@@ -132,19 +130,39 @@ class QuantizableDense(mx.gluon.HybridBlock):
             #No casting an already quantized matrix.
             logger.warning("Ignoring casting on int8 matrix")
 
-    def hybrid_forward(self, F, x, weight, scaling=None, bias=None):
+    def infer_shape(self, x, *args):
+        if self._flatten:
+            num_input = 1
+            for i in range(1, x.ndim):
+                num_input *= x.shape[i]
+            self.weight.shape = (self.weight.shape[0], num_input)
+        else:
+            self.weight.shape = (self.weight.shape[0], x.shape[x.ndim - 1])
+
+    def forward(self, x):
         if self._dtype == C.DTYPE_INT8:
-            if bias is not None:
-                act = F.contrib.intgemm_fully_connected(x, weight, scaling, bias, no_bias=False, num_hidden=self._units,
-                                                        flatten=self._flatten, name='fwd')
+            if self.bias is not None:
+                act = mx.nd.contrib.intgemm_fully_connected(data=x,
+                                                            weight=self.weight.data(),
+                                                            scaling=self.scaling.data(),
+                                                            bias=self.bias.data(), no_bias=False,
+                                                            num_hidden=self._units,
+                                                            flatten=self._flatten)
             else:
-                act = F.contrib.intgemm_fully_connected(x, weight, scaling, no_bias=True, num_hidden=self._units,
-                                                        flatten=self._flatten, name='fwd')
+                act = mx.nd.contrib.intgemm_fully_connected(data=x,
+                                                            weight=self.weight.data(),
+                                                            scaling=self.scaling.data(),
+                                                            no_bias=True,
+                                                            num_hidden=self._units,
+                                                            flatten=self._flatten)
         else:
             #Newer MXNet allows a numpy array.
             #fc = F.npx.fully_connected if is_np_array() else F.FullyConnected
-            act = F.FullyConnected(x, weight, bias, no_bias=bias is None, num_hidden=self._units,
-                     flatten=self._flatten, name='fwd')
+            act = mx.nd.FullyConnected(data=x,
+                                       weight=self.weight.data(),
+                                       bias=self.bias.data() if self.bias else None, no_bias=self.bias is None,
+                                       num_hidden=self._units,
+                                       flatten=self._flatten)
         if self.act is not None:
             act = self.act(act)
         return act

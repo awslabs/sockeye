@@ -64,12 +64,12 @@ class LHUC(mx.gluon.HybridBlock):
         super().__init__()
         self.weight = mx.gluon.Parameter('weight', shape=(num_hidden,), init=weight_init)
 
-    def hybrid_forward(self, F, data, weight) -> mx.sym.Symbol:
+    def forward(self, data) -> mx.sym.Symbol:
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
         # activation is dampened when the value of the sigmoid is close to 0, and
         # strengthened when it's close to 2 (see also original paper)
-        weight = 2 * F.Activation(weight, act_type="sigmoid")
-        return F.broadcast_mul(weight, data)
+        weight = 2 * mx.nd.Activation(self.weight.data(), act_type="sigmoid")
+        return mx.nd.broadcast_mul(weight, data)
 
 
 class WeightNormalization(mx.gluon.HybridBlock):
@@ -213,7 +213,7 @@ class LengthRatio(mx.gluon.HybridBlock):
         # SoftReLU activation to ensure positiveness of the predicted length ratio
         self.layers.add(quantization.QuantizableDense(units=1, activation='softrelu', flatten=False, dtype=dtype))
 
-    def hybrid_forward(self, F, source_encoded, source_encoded_length):
+    def forward(self, source_encoded, source_encoded_length):
         """
         Transformation to the length ratio. Returns a vector.
 
@@ -222,19 +222,19 @@ class LengthRatio(mx.gluon.HybridBlock):
         :return: Predictions of the ratio length(hypothesis)/length(reference). Shape(n, 1).
         """
         # source_masked: (n, source_encoded_length, hidden_size)
-        source_masked = F.SequenceMask(data=source_encoded,
-                                       axis=1,
-                                       sequence_length=source_encoded_length,
-                                       use_sequence_length=True,
-                                       value=0.)
+        source_masked = mx.nd.SequenceMask(data=source_encoded,
+                                           axis=1,
+                                           sequence_length=source_encoded_length,
+                                           use_sequence_length=True,
+                                           value=0.)
         # calculate the proper means of encoded sources
         # data: (n, hidden_size)
-        data = F.broadcast_div(F.sum(source_masked, axis=1, keepdims=False),
-                               F.reshape(source_encoded_length, shape=(-1, 1)))
+        data = mx.nd.broadcast_div(mx.nd.sum(source_masked, axis=1, keepdims=False),
+                                   mx.nd.reshape(source_encoded_length, shape=(-1, 1)))
         # MLP. Shape: (n, 1)
         data = self.layers(data)
         # Shape: (n,)
-        return F.squeeze(data)
+        return mx.nd.squeeze(data)
 
 
 class DotAttentionCell(mx.gluon.HybridBlock):
@@ -248,26 +248,26 @@ class DotAttentionCell(mx.gluon.HybridBlock):
         self._dtype = dtype
         super().cast(dtype)
 
-    def hybrid_forward(self, F, queries, key_values, heads, lengths=None, bias=None):
+    def forward(self, queries, key_values, heads, lengths=None, bias=None):
 
         # (n*h, lq, lk)
-        logits = F.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
+        logits = mx.nd.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
         if bias is not None:
-            logits = F.broadcast_add(logits, bias)
+            logits = mx.nd.broadcast_add(logits, bias)
 
         if lengths is not None:
             # required shape for lengths: (n*h, lq); required dtype: int32
-            probs = F.softmax(logits, axis=-1, length=lengths, use_length=True)
+            probs = mx.nd.softmax(logits, axis=-1, length=lengths, use_length=True)
         else:
-            probs = F.softmax(logits, axis=-1)
+            probs = mx.nd.softmax(logits, axis=-1)
 
-        probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
+        probs = mx.nd.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
         
         # key_values: (lk, n, dv * 2)
         # probs: (n*h, lq, lk)
         # result: (n, lq, dv)
-        return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
+        return mx.nd.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
 def prepare_source_valid_lengths(valid_length, query_data, num_heads: int):
@@ -364,11 +364,10 @@ class AutoregressiveLayer(mx.gluon.HybridBlock):
         raise NotImplementedError
 
     @abstractmethod
-    def hybrid_forward(self, F, inputs: mx.sym.Symbol, previous_states: mx.sym.Symbol, *args) -> Tuple:
+    def forward(self, inputs: mx.nd.NDArray, previous_states: mx.nd.NDArray, *args) -> Tuple:
         """
-        :param F: ndarray or Symbol
         :param inputs: layer input
-        :param previous_states: Symbol or list of Symbols
+        :param previous_states: Previous states array or list of arrays
         :param args: layer-specific arguments and/or arguments to be ignored
         :return: layer output and new states
         """
@@ -416,12 +415,12 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         # shape: (length, batch, key_depth + value_depth)
         return 1, batch_size, self.depth_out * 2
 
-    def hybrid_forward(self, F,
-                       inputs: mx.sym.Symbol,
-                       previous_states: Optional[mx.sym.Symbol] = None,
-                       input_lengths: Optional[mx.sym.Symbol] = None,
-                       bias: Optional[mx.sym.Symbol] = None,
-                       *args):  # mypy: ignore
+    def forward(self,
+                inputs: mx.sym.Symbol,
+                previous_states: Optional[mx.sym.Symbol] = None,
+                input_lengths: Optional[mx.sym.Symbol] = None,
+                bias: Optional[mx.sym.Symbol] = None,
+                *args):  # mypy: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -438,13 +437,13 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         """
 
         proj = self.ff_in(inputs)
-        queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
-        states = F.concat(kv_1, kv_2, dim=2)
+        queries, kv_1, kv_2 = mx.nd.split(proj, num_outputs=3, axis=2)
+        states = mx.nd.concat(kv_1, kv_2, dim=2)
 
         updated_states = states
         if previous_states is not None:
-            updated_states = F.concat(previous_states, states, dim=0)
-            states = F.slice(updated_states, begin=(1, None, None), end=(None, None, None))
+            updated_states = mx.nd.concat(previous_states, states, dim=0)
+            states = mx.nd.slice(updated_states, begin=(1, None, None), end=(None, None, None))
 
         return self._attend(queries, states, lengths=input_lengths, bias=bias), updated_states
 
@@ -472,15 +471,14 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
         self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att,
                                                   flatten=False, use_bias=False, dtype=dtype)
-        self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att,
+        self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2 * depth_att,
                                                    flatten=False, use_bias=False, dtype=dtype)
 
-    def hybrid_forward(self, F,
-                       queries: mx.sym.Symbol,
-                       memory: mx.sym.Symbol,
-                       memory_lengths: Optional[mx.sym.Symbol] = None,
-                       bias: Optional[mx.sym.Symbol] = None,
-                       projected_memory_kv: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:  # mypy: ignore
+    def forward(self, queries: mx.nd.NDArray,
+                memory: mx.nd.NDArray,
+                memory_lengths: Optional[mx.nd.NDArray] = None,
+                bias: Optional[mx.nd.NDArray] = None,
+                projected_memory_kv: Optional[mx.nd.NDArray] = None) -> mx.nd.NDArray:  # mypy: ignore
         """
         Computes multi-head attention for queries given a memory tensor.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -509,7 +507,7 @@ class PlainDotAttention(mx.gluon.HybridBlock):
         super().__init__()
         self.dot_att = DotAttentionCell()
 
-    def hybrid_forward(self, F, queries, memory, memory_lengths):
+    def forward(self, queries, memory, memory_lengths):
         """
         Returns a symbol of shape (batch, max_length, output_depth).
 
@@ -539,10 +537,9 @@ class ProjectedDotAttention(mx.gluon.HybridBlock):
         self.kv2h = quantization.QuantizableDense(units=num_hidden * 2, flatten=False, use_bias=True, dtype=dtype)
         self.dot_att = DotAttentionCell()
 
-    def hybrid_forward(self, F,
-                       queries: mx.sym.Symbol,
-                       memory: mx.sym.Symbol,
-                       memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+    def forward(self, queries: mx.sym.Symbol,
+                      memory: mx.sym.Symbol,
+                      memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
         """
         Apply project, apply dot attention and return new context vectors.
 
@@ -619,7 +616,7 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
         else:
             raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
 
-    def hybrid_forward(self, F, data, steps, weight):  # pylint: disable=arguments-differ
+    def forward(self, data, steps):  # pylint: disable=arguments-differ
         """
         Applies positional embeddings to input data.
 
@@ -631,18 +628,18 @@ class PositionalEmbeddings(mx.gluon.HybridBlock):
         # (length, num_embed)
         if steps is None:
             # (batch, length, num_embed)
-            pos_embedding = F.slice_like(F.expand_dims(weight, axis=0), data, axes=(1,))
+            pos_embedding = mx.nd.slice_like(mx.nd.expand_dims(self.weight.data(), axis=0), data, axes=(1,))
         else:
             # (batch_size or 1, seq_len, num_embed)
-            pos_embedding = F.Embedding(steps, weight, self.max_seq_len, self.num_embed)
+            pos_embedding = mx.nd.Embedding(steps, self.weight.data(), self.max_seq_len, self.num_embed)
 
         if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
-            pos_embedding = F.BlockGrad(pos_embedding)
+            pos_embedding = mx.nd.BlockGrad(pos_embedding)
 
         if self.scale_up_input:
             data = data * (self.num_embed ** 0.5)
 
-        return F.broadcast_add(data, pos_embedding)
+        return mx.nd.broadcast_add(data, pos_embedding)
 
 
 class SSRU(AutoregressiveLayer):
@@ -711,8 +708,9 @@ class SSRU(AutoregressiveLayer):
         return 1, batch_size, self.model_size
 
     @staticmethod
-    def _training_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
+    def _training_cell_state_transform(previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
         """Update SSRU cell at training time"""
+
         def _time_step_update(step_input_and_forget_rate, previous_step_state) -> Tuple:
             """
             Recurrently update the SSRU cell state for one time step.
@@ -727,21 +725,20 @@ class SSRU(AutoregressiveLayer):
             return current_step_state, current_step_state
 
         # (max_length, batch, input_depth), (batch, input_depth)
-        cell_state, last_step_state = F.contrib.foreach(_time_step_update,
-                                                        [weighted_inputs, forget_rates],
-                                                        F.squeeze(previous_cell_state, axis=0))
+        cell_state, last_step_state = mx.nd.contrib.foreach(_time_step_update,
+                                                            [weighted_inputs, forget_rates],
+                                                            mx.nd.squeeze(previous_cell_state, axis=0))
 
-        return cell_state, F.expand_dims(last_step_state, axis=0)
+        return cell_state, mx.nd.expand_dims(last_step_state, axis=0)
 
     @staticmethod
-    def _inference_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
+    def _inference_cell_state_transform(previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
         """Update SSRU cell at inference time"""
         new_step_state = forget_rates * previous_cell_state + weighted_inputs  # (1, batch, input_depth)
         return new_step_state, new_step_state
 
-    def hybrid_forward(self, F, inputs: mx.sym.Symbol, previous_states: mx.sym.Symbol, *args) -> Tuple:
+    def forward(self, inputs: mx.sym.Symbol, previous_states: mx.sym.Symbol, *args) -> Tuple:
         """
-        :param F: ndarray or Symbol
         :param inputs: input data. Shape: (max_length, batch, input_depth).
         :param previous_states: previous cell states. Shape: (max_length, batch, input_depth)
         :return: cell output and new cell states.  Both with shape (max_length, batch, input_depth).
@@ -749,6 +746,6 @@ class SSRU(AutoregressiveLayer):
         forget_rates = self.forget_gate(inputs)
         weighted_inputs = (1 - forget_rates) * self.linear(inputs)
 
-        cell_state, last_step_state = self.cell_state_transform(F, previous_states, weighted_inputs, forget_rates)
+        cell_state, last_step_state = self.cell_state_transform(previous_states, weighted_inputs, forget_rates)
 
-        return F.relu(cell_state), last_step_state
+        return mx.nd.relu(cell_state), last_step_state
