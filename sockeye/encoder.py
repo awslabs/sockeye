@@ -140,31 +140,33 @@ class Embedding(Encoder):
             self.embed_weight = embed_weight
             self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
+        self.factor_weights = []  # type: List[mx.gluon.Parameter]
         if self.config.factor_configs is not None:
             for i, fc in enumerate(self.config.factor_configs, 1):
                 factor_weight_name = self._factor_weight_format_string % i
                 factor_weight = embed_weight if fc.share_embedding else \
                     mx.gluon.Parameter(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
-                # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
+                # We set the attribute of the class to register the parameter with the block
                 setattr(self, factor_weight_name, factor_weight)
+                self.factor_weights.append(factor_weight)
 
-    def hybrid_forward(self, F, data, valid_length, embed_weight, **kwargs):  # pylint: disable=arguments-differ
+    def forward(self, data, valid_length):  # pylint: disable=arguments-differ
         # We will catch the optional factor weights in kwargs
         average_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         concat_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         sum_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
-            data, *data_factors = F.split(data=data,
-                                          num_outputs=self.config.num_factors,
-                                          axis=2,
-                                          squeeze_axis=True)
+            data, *data_factors = mx.nd.split(data=data,
+                                              num_outputs=self.config.num_factors,
+                                              axis=2,
+                                              squeeze_axis=True)
             for i, (factor_data, factor_config) in enumerate(zip(data_factors,
-                                                                 self.config.factor_configs), 1):
-                factor_weight = kwargs[self._factor_weight_format_string % i]
-                factor_embedding = F.Embedding(data=factor_data,
-                                               input_dim=factor_config.vocab_size,
-                                               weight=factor_weight,
-                                               output_dim=factor_config.num_embed)
+                                                                 self.config.factor_configs)):
+                factor_weight = self.factor_weights[i]
+                factor_embedding = mx.nd.Embedding(data=factor_data,
+                                                   input_dim=factor_config.vocab_size,
+                                                   weight=factor_weight.data(),
+                                                   output_dim=factor_config.num_embed)
                 if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
                     concat_factors_embeds.append(factor_embedding)
                 elif factor_config.combine == C.FACTORS_COMBINE_SUM:
@@ -174,27 +176,27 @@ class Embedding(Encoder):
                 else:
                     raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
         else:
-            data = F.squeeze(data, axis=2)
+            data = mx.nd.squeeze(data, axis=2)
 
-        embed = F.Embedding(data,
-                            weight=embed_weight,
-                            input_dim=self.config.vocab_size,
-                            output_dim=self.config.num_embed,
-                            dtype=self._dtype,
-                            sparse_grad=self._use_sparse_grad)
+        embed = mx.nd.Embedding(data,
+                                weight=self.embed_weight.data(),
+                                input_dim=self.config.vocab_size,
+                                output_dim=self.config.num_embed,
+                                dtype=self._dtype,
+                                sparse_grad=self._use_sparse_grad)
 
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
             if average_factors_embeds:
-                embed = F.add_n(embed, *average_factors_embeds) / (len(average_factors_embeds) + 1)
+                embed = mx.nd.add_n(embed, *average_factors_embeds) / (len(average_factors_embeds) + 1)
             if sum_factors_embeds:
-                embed = F.add_n(embed, *sum_factors_embeds)
+                embed = mx.nd.add_n(embed, *sum_factors_embeds)
             if concat_factors_embeds:
-                embed = F.concat(embed, *concat_factors_embeds, dim=2)
+                embed = mx.nd.concat(embed, *concat_factors_embeds, dim=2)
 
         if self.config.dropout > 0:
-            embed = F.Dropout(data=embed, p=self.config.dropout)
+            embed = mx.nd.Dropout(data=embed, p=self.config.dropout)
 
-        return embed, F.identity(valid_length)  # identity: See https://github.com/apache/incubator-mxnet/issues/14228
+        return embed, mx.nd.identity(valid_length)  # identity: See https://github.com/apache/incubator-mxnet/issues/14228
 
     def get_num_hidden(self) -> int:
         """
