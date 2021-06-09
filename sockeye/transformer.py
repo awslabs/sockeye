@@ -51,7 +51,6 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: TransformerConfig,
-                 prefix: str,
                  dtype: str) -> None:
         super().__init__()
 

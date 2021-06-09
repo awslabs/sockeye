@@ -36,7 +36,6 @@ def test_embedding_encoder(dropout, factor_configs):
     (True,)
 ])
 def test_get_transformer_encoder(lhuc):
-    prefix = "test_"
     config = sockeye.transformer.TransformerConfig(model_size=20,
                                                    attention_heads=10,
                                                    feed_forward_num_hidden=30,
@@ -51,7 +50,7 @@ def test_get_transformer_encoder(lhuc):
                                                    max_seq_len_source=50,
                                                    max_seq_len_target=60,
                                                    use_lhuc=lhuc)
-    encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix, dtype = C.DTYPE_FP32)
+    encoder = sockeye.encoder.get_transformer_encoder(config, dtype=C.DTYPE_FP32)
     encoder.initialize()
     encoder.hybridize(static_alloc=True)
 

@@ -34,20 +34,19 @@ logger = logging.getLogger(__name__)
 ImageEncoderConfig = None
 
 
-def get_encoder(config: 'EncoderConfig', prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Encoder':
-    return get_transformer_encoder(config, prefix, dtype)
+def get_encoder(config: 'EncoderConfig', dtype: str = C.DTYPE_FP32) -> 'Encoder':
+    return get_transformer_encoder(config, dtype)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str, dtype: str) -> 'Encoder':
+def get_transformer_encoder(config: transformer.TransformerConfig, dtype) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
     positional encodings and a TransformerEncoder instance.
 
     :param config: Configuration for transformer encoder.
-    :param prefix: Prefix for variable names.
     :return: Encoder instance.
     """
-    return TransformerEncoder(config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX, dtype=dtype)
+    return TransformerEncoder(config=config, dtype=dtype)
 
 
 class Encoder(ABC, mx.gluon.HybridBlock):
@@ -260,7 +259,6 @@ class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
         if infer_hidden:
             params['num_hidden'] = self.get_num_hidden()
 
-        sig_params = inspect.signature(cls.__init__).parameters
         encoder = cls(**params)
         self.add(encoder)
         return encoder
@@ -274,12 +272,10 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf).
 
     :param config: Configuration for transformer encoder.
-    :param prefix: Name prefix for operations in this encoder.
     """
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__()
         self.config = config
@@ -293,29 +289,29 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
 
         self.layers = mx.gluon.nn.HybridSequential()
         for i in range(config.num_layers):
-            self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i, dtype=dtype))
+            self.layers.add(transformer.TransformerEncoderBlock(config, dtype=dtype))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  prefix="final_process_",
                                                                  num_hidden=self.config.model_size)
 
-    def hybrid_forward(self, F, data, valid_length):
+    def forward(self, data, valid_length):
         # positional embedding
         data = self.pos_embedding(data, None)
 
         if self.config.dropout_prepost > 0.0:
-            data = F.Dropout(data=data, p=self.config.dropout_prepost)
+            data = mx.nd.Dropout(data=data, p=self.config.dropout_prepost)
 
         # (batch_size * heads, seq_len)
-        att_valid_length = layers.prepare_source_valid_lengths(F, valid_length, data,
+        att_valid_length = layers.prepare_source_valid_lengths(mx.nd, valid_length, data,
                                                                num_heads=self.config.attention_heads)
 
-        data = F.transpose(data, axes=(1, 0, 2))
+        data = mx.nd.transpose(data, axes=(1, 0, 2))
         for block in self.layers:
             data = block(data, att_valid_length)
         data = self.final_process(data, None)
-        data = F.transpose(data, axes=(1, 0, 2))
+        data = mx.nd.transpose(data, axes=(1, 0, 2))
         return data, valid_length
 
     def get_num_hidden(self) -> int:
