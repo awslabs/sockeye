@@ -87,8 +87,8 @@ class WeightNormalization(mx.gluon.HybridBlock):
                                         shape=tuple([num_hidden] + [1] * (ndim - 1)),
                                         init=mx.init.Constant(value=1.0))
 
-    def hybrid_forward(self, F, weight, scale):
-        return F.broadcast_mul(lhs=F.L2Normalization(weight, mode='instance'), rhs=scale)
+    def forward(self, weight):
+        return mx.nd.broadcast_mul(lhs=mx.nd.L2Normalization(weight, mode='instance'), rhs=self.scale.data())
 
 
 class OutputLayer(mx.gluon.HybridBlock):
