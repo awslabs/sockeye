@@ -41,7 +41,7 @@ class BatchScorer(mx.gluon.HybridBlock):
                  constant_length_ratio: Optional[float] = None,
                  prefix='BatchScorer_',
                  softmax_temperature: Optional[float] = None) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.score_type = score_type
         self.scorer = scorer
         self.constant_length_ratio = constant_length_ratio

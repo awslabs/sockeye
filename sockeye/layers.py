@@ -137,8 +137,7 @@ class OutputLayer(mx.gluon.HybridBlock):
                                              dtype=dtype,
                                              allow_deferred_init=False)
         else:
-            self.weight = weight  # adds to self._reg_params
-            self.params.update({weight.name: weight})  # adds to self.params
+            self.weight = weight
 
         self.bias = mx.gluon.Parameter("bias",
                                        shape=(vocab_size,),

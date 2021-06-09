@@ -140,8 +140,7 @@ class Embedding(Encoder):
                                                    dtype=dtype)
             self._use_sparse_grad = self.config.allow_sparse_grad
         else:
-            self.embed_weight = embed_weight  # adds to self._reg_params
-            self.params.update({embed_weight.name: embed_weight})  # adds to self.params
+            self.embed_weight = embed_weight
             self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
         if self.config.factor_configs is not None:
