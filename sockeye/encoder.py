@@ -306,7 +306,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
             data = mx.nd.Dropout(data=data, p=self.config.dropout_prepost)
 
         # (batch_size * heads, seq_len)
-        att_valid_length = layers.prepare_source_valid_lengths(mx.nd, valid_length, data,
+        att_valid_length = layers.prepare_source_valid_lengths(valid_length, data,
                                                                num_heads=self.config.attention_heads)
 
         data = mx.nd.transpose(data, axes=(1, 0, 2))

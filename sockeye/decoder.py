@@ -29,9 +29,8 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False,
-                prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
-    return Decoder.get_decoder(config, inference_only, prefix, dtype)
+def get_decoder(config: DecoderConfig, inference_only: bool = False, dtype: str = C.DTYPE_FP32) -> 'Decoder':
+    return Decoder.get_decoder(config, inference_only, dtype)
 
 
 class Decoder(mx.gluon.Block):
@@ -44,32 +43,30 @@ class Decoder(mx.gluon.Block):
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
 
-    __registry = {}  # type: Dict[Type[DecoderConfig], Tuple[Type['Decoder'], str]]
+    __registry = {}  # type: Dict[Type[DecoderConfig], Type['Decoder']]
 
     @classmethod
-    def register(cls, config_type: Type[DecoderConfig], suffix: str):
+    def register(cls, config_type: Type[DecoderConfig]):
         """
         Registers decoder type for configuration. Suffix is appended to decoder prefix.
 
         :param config_type: Configuration type for decoder.
-        :param suffix: String to append to decoder prefix.
 
         :return: Class decorator.
         """
         def wrapper(target_cls):
-            cls.__registry[config_type] = (target_cls, suffix)
+            cls.__registry[config_type] = target_cls
             return target_cls
 
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str, dtype: str) -> 'Decoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool, dtype: str) -> 'Decoder':
         """
         Creates decoder based on config type.
 
         :param config: Decoder config.
         :param inference_only: Create a decoder that is only used for inference.
-        :param prefix: Prefix to prepend for decoder.
         :param dtype: Data type for weights.
 
         :return: Decoder instance.
@@ -77,9 +74,9 @@ class Decoder(mx.gluon.Block):
         config_type = type(config)
         if config_type not in cls.__registry:
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
-        decoder_cls, suffix = cls.__registry[config_type]
+        decoder_cls = cls.__registry[config_type]
         # TODO: move final suffix/prefix construction logic into config builder
-        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix, dtype=dtype)  # type: ignore
+        return decoder_cls(config=config, inference_only=inference_only, dtype=dtype)  # type: ignore
 
     @abstractmethod
     def __init__(self):
@@ -113,7 +110,7 @@ class Decoder(mx.gluon.Block):
         raise NotImplementedError()
 
 
-@Decoder.register(transformer.TransformerConfig, C.TRANSFORMER_DECODER_PREFIX)
+@Decoder.register(transformer.TransformerConfig)
 class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
@@ -131,7 +128,6 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_DECODER_PREFIX,
                  inference_only: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
         Decoder.__init__(self)
@@ -227,7 +223,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         outputs, _ = self.forward(inputs, states)
         return outputs
 
-    def hybrid_forward(self, F, step_input, states):
+    def forward(self, step_input, states):
         mask = None
         if self.inference_only:
             steps, source_valid_length, *other = states
@@ -246,16 +242,16 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
 
         # (batch_size * heads, query_length)
-        source_valid_length = layers.prepare_source_valid_lengths(F, source_valid_length, step_input,
+        source_valid_length = layers.prepare_source_valid_lengths(source_valid_length, step_input,
                                                                   num_heads=self.config.attention_heads)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
         # (length, batch_size, model_size)
-        target = F.transpose(target, axes=(1, 0, 2))
+        target = mx.nd.transpose(target, axes=(1, 0, 2))
 
         if self.config.dropout_prepost > 0.0:
-            target = F.Dropout(data=target, p=self.config.dropout_prepost)
+            target = mx.nd.Dropout(data=target, p=self.config.dropout_prepost)
 
         new_autoregr_states = []
         for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
@@ -269,7 +265,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             new_autoregr_states += [*new_layer_autoregr_state]
 
         target = self.final_process(target, None)
-        target = F.transpose(target, axes=(1, 0, 2))
+        target = mx.nd.transpose(target, axes=(1, 0, 2))
 
         # Inference: increment steps by 1 (discarded in training)
         steps = steps + 1

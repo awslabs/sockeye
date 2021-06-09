@@ -38,6 +38,6 @@ def test_get_decoder(lhuc):
         max_seq_len_source=60,
         max_seq_len_target=70,
         use_lhuc=lhuc)
-    decoder = sockeye.decoder.get_decoder(config, inference_only=False, prefix='test_')
+    decoder = sockeye.decoder.get_decoder(config, inference_only=False)
 
     assert type(decoder) == sockeye.decoder.TransformerDecoder

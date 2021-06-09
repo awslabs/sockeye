@@ -115,7 +115,7 @@ class SockeyeModel(mx.gluon.Block):
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_encoder(self.config.config_encoder, dtype=config.dtype)
         self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
-                                           prefix=self.prefix, dtype=config.dtype)
+                                           dtype=config.dtype)
 
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
