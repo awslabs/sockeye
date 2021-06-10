@@ -171,29 +171,28 @@ class UpdateScores(mx.gluon.HybridBlock):
     All other options are set to infinity.
     """
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self):
+        super().__init__()
         assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
 
-    def hybrid_forward(self, F,
-                       target_dists, finished, inactive,
-                       scores_accumulated, lengths, max_lengths,
-                       unk_dist, pad_dist, eos_dist):
+    def forward(self, target_dists, finished, inactive,
+                      scores_accumulated, lengths, max_lengths,
+                      unk_dist, pad_dist, eos_dist):
         # make sure to avoid generating <unk> if unk_dist is specified
         if unk_dist is not None:
             target_dists = target_dists + unk_dist
         # broadcast hypothesis score to each prediction.
         # scores_accumulated. Shape: (batch*beam, 1)
         # target_dists. Shape: (batch*beam, vocab_size)
-        scores = F.broadcast_add(target_dists, scores_accumulated)
+        scores = mx.nd.broadcast_add(target_dists, scores_accumulated)
 
         # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
         # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
         # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
         # pad_dist. Shape: (batch*beam, vocab_size)
-        pad_dist = F.concat(scores_accumulated, pad_dist)
-        scores = F.where(F.broadcast_logical_or(finished, inactive), pad_dist, scores)
+        pad_dist = mx.nd.concat(scores_accumulated, pad_dist)
+        scores = mx.nd.where(mx.nd.broadcast_logical_or(finished, inactive), pad_dist, scores)
 
         # Update lengths of all items, except those that were already finished. This updates
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
@@ -202,7 +201,7 @@ class UpdateScores(mx.gluon.HybridBlock):
         # Items that are at their maximum length and not finished now are forced to produce the <eos> symbol.
         # That is, we keep scores for hypotheses below max length or finished, and 'force-eos' the rest.
         below_max_length = lengths < max_lengths
-        scores = F.where(F.broadcast_logical_or(below_max_length, finished), scores, eos_dist + scores)
+        scores = mx.nd.where(mx.nd.broadcast_logical_or(below_max_length, finished), scores, eos_dist + scores)
 
         return scores, lengths
 
@@ -219,8 +218,8 @@ class LengthPenalty(mx.gluon.HybridBlock):
     :param beta: The beta factor for the length penalty (see above).
     """
 
-    def __init__(self, alpha: float = 1.0, beta: float = 0.0, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, alpha: float = 1.0, beta: float = 0.0) -> None:
+        super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.denominator = (self.beta + 1.) ** self.alpha
@@ -322,41 +321,40 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
                  dtype: str,
                  pad_id: int,
                  eos_id: int,
-                 scorer: CandidateScorer,
-                 **kwargs) -> None:
-        super().__init__(**kwargs)
+                 scorer: CandidateScorer) -> None:
+        super().__init__()
         self.dtype = dtype
         self.pad_id = pad_id
         self.eos_id = eos_id
         self._scorer = scorer
 
-    def hybrid_forward(self, F, best_hyp_indices, best_word_indices,
-                       finished, scores_accumulated, lengths, reference_lengths,
-                       factors=None):
+    def forward(self, best_hyp_indices, best_word_indices,
+                finished, scores_accumulated, lengths, reference_lengths,
+                factors=None):
 
         # Reorder fixed-size beam data according to best_hyp_indices (ascending)
-        finished = F.take(finished, best_hyp_indices)
-        lengths = F.take(lengths, best_hyp_indices)
-        reference_lengths = F.take(reference_lengths, best_hyp_indices)
+        finished = mx.nd.take(finished, best_hyp_indices)
+        lengths = mx.nd.take(lengths, best_hyp_indices)
+        reference_lengths = mx.nd.take(reference_lengths, best_hyp_indices)
 
         # Normalize hypotheses that JUST finished
-        all_finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
-        newly_finished = F.broadcast_logical_xor(all_finished, finished)
-        scores_accumulated = F.where(newly_finished,
-                                     self._scorer(scores_accumulated,
-                                                  F.cast(F.expand_dims(lengths, axis=1), self.dtype),
-                                                  reference_lengths),
-                                     scores_accumulated)
+        all_finished = mx.nd.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = mx.nd.broadcast_logical_xor(all_finished, finished)
+        scores_accumulated = mx.nd.where(newly_finished,
+                                         self._scorer(scores_accumulated,
+                                                      mx.nd.cast(mx.nd.expand_dims(lengths, axis=1), self.dtype),
+                                                      reference_lengths),
+                                         scores_accumulated)
 
         # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
-        finished = F.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        finished = mx.nd.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
 
         # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
-        best_word_indices = F.expand_dims(best_word_indices, axis=1)
+        best_word_indices = mx.nd.expand_dims(best_word_indices, axis=1)
 
         if factors is not None:
-            secondary_factors = F.take(factors, best_hyp_indices)
-            best_word_indices = F.concat(best_word_indices, secondary_factors)
+            secondary_factors = mx.nd.take(factors, best_hyp_indices)
+            best_word_indices = mx.nd.concat(best_word_indices, secondary_factors)
 
         return best_word_indices, finished, scores_accumulated, lengths, reference_lengths
 
@@ -368,11 +366,11 @@ class TopK(mx.gluon.HybridBlock):
     during translation (due to variable batch size and potential vocabulary selection).
     """
 
-    def __init__(self, k: int, **kwargs) -> None:
+    def __init__(self, k: int) -> None:
         """
         :param k: The number of smallest scores to return.
         """
-        super().__init__(**kwargs)
+        super().__init__()
         self.k = k
 
     def forward(self, scores, offset):
@@ -387,28 +385,27 @@ class TopK(mx.gluon.HybridBlock):
         batch_size = int(batch_times_beam / self.k)
         # Shape: (batch size, beam_size * vocab_size)
         batchwise_scores = scores.reshape(shape=(batch_size, self.k * vocab_size))
-        indices, values = super().forward(batchwise_scores)
+        # BEGIN former hybrid_forward code
+        values, indices = mx.nd.topk(batchwise_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
+        # Project indices back into original shape (which is different for t==1 and t>1)
+        values, indices = mx.nd.reshape(values, shape=(-1, 1)), mx.nd.reshape(indices, shape=(-1,))
+        # END former hybrid_forward code
         best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * self.k, vocab_size))
         if batch_size > 1:
             # Offsetting the indices to match the shape of the scores matrix
-            best_hyp_indices += offset
+            best_hyp_indices = best_hyp_indices + offset
         return best_hyp_indices, best_word_indices, values
-
-    def hybrid_forward(self, F, scores):
-        values, indices = F.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
-        # Project indices back into original shape (which is different for t==1 and t>1)
-        return F.reshape(indices, shape=(-1,)), F.reshape(values, shape=(-1, 1))
 
 
 class SampleK(mx.gluon.HybridBlock):
     """
     A HybridBlock for selecting a random word from each hypothesis according to its distribution.
     """
-    def __init__(self, n, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, n) -> None:
+        super().__init__()
         self.n = n
 
-    def hybrid_forward(self, F, scores, target_dists, finished, best_hyp_indices):
+    def forward(self, scores, target_dists, finished, best_hyp_indices):
         """
         Choose an extension of each hypothesis from its softmax distribution.
 
@@ -419,24 +416,24 @@ class SampleK(mx.gluon.HybridBlock):
         :return: The row indices, column indices, and values of the sampled words.
         """
         # Map the negative logprobs to probabilities so as to have a distribution
-        target_dists = F.exp(-target_dists)
+        target_dists = mx.nd.exp(-target_dists)
 
         # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
         if self.n != 0:
             # select the top n in each row, via a mask
-            masked_items = F.topk(target_dists, k=self.n, ret_typ='mask', axis=1, is_ascend=False)
+            masked_items = mx.nd.topk(target_dists, k=self.n, ret_typ='mask', axis=1, is_ascend=False)
             # set unmasked items to 0
-            masked_items = F.where(masked_items, target_dists, masked_items)
+            masked_items = mx.nd.where(masked_items, target_dists, masked_items)
             # renormalize
-            target_dists = F.broadcast_div(masked_items, F.sum(masked_items, axis=1, keepdims=True))
+            target_dists = mx.nd.broadcast_div(masked_items, mx.nd.sum(masked_items, axis=1, keepdims=True))
 
         # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
-        best_word_indices = F.random.multinomial(target_dists, get_prob=False)
+        best_word_indices = mx.nd.random.multinomial(target_dists, get_prob=False)
         # Zeroes for finished hypotheses.
-        best_word_indices = F.where(finished, F.zeros_like(best_word_indices), best_word_indices)
-        values = F.pick(scores, best_word_indices, axis=1, keepdims=True)
+        best_word_indices = mx.nd.where(finished, mx.nd.zeros_like(best_word_indices), best_word_indices)
+        values = mx.nd.pick(scores, best_word_indices, axis=1, keepdims=True)
 
-        best_hyp_indices = F.slice_like(best_hyp_indices, best_word_indices, axes=(0,))
+        best_hyp_indices = mx.nd.slice_like(best_hyp_indices, best_word_indices, axes=(0,))
 
         return best_hyp_indices, best_word_indices, values
 
@@ -462,19 +459,19 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
 class SortStates(mx.gluon.HybridBlock):
 
     def __init__(self, state_structure):
-        mx.gluon.HybridBlock.__init__(self)
+        super().__init__()
         self.flat_structure = functools.reduce(operator.add, state_structure)
 
-    def hybrid_forward(self, F, best_hyp_indices, *states):
+    def forward(self, best_hyp_indices, *states):
         sorted_states = []
         assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
         for state, state_format in zip(states, self.flat_structure):
             if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
                 # Steps and source_bias have batch dimension on axis 0
-                sorted_state = F.take(state, best_hyp_indices)
+                sorted_state = mx.nd.take(state, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
                 # Decoder and encoder layer states have batch dimension on axis 1
-                sorted_state = F.take(state, best_hyp_indices, axis=1)
+                sorted_state = mx.nd.take(state, best_hyp_indices, axis=1)
             elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
                 sorted_state = state
@@ -485,10 +482,10 @@ class SortStates(mx.gluon.HybridBlock):
 
 
 def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
-                        source_words: mx.nd.NDArray,
-                        raw_constraint_list: List[Optional[constrained.RawConstraintList]],
-                        eos_id: int,
-                        beam_size: int) -> Tuple[mx.nd.NDArray, int]:
+                         source_words: mx.nd.NDArray,
+                         raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                         eos_id: int,
+                         beam_size: int) -> Tuple[mx.nd.NDArray, int]:
     vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
     ctx = source_words.context
     if any(raw_constraint_list):
@@ -622,15 +619,15 @@ class GreedyTop1(mx.gluon.HybridBlock):
     Implements picking the highest scoring next word with support for vocabulary selection and target factors.
     """
 
-    def hybrid_forward(self, F, scores, vocab_slice_ids=None, target_factors=None):
+    def forward(self, scores, vocab_slice_ids=None, target_factors=None):
         # shape: (batch*beam=1, 1)
         # argmin has trouble with fp16 inputs on GPUs, using top1 instead
-        best_word_index = F.topk(scores, axis=-1, k=1, ret_typ='indices', is_ascend=True, dtype='int32')
+        best_word_index = mx.nd.topk(scores, axis=-1, k=1, ret_typ='indices', is_ascend=True, dtype='int32')
         # Map from restricted to full vocab ids if needed
         if vocab_slice_ids is not None:
-            best_word_index = F.take(vocab_slice_ids, best_word_index)
+            best_word_index = mx.nd.take(vocab_slice_ids, best_word_index)
         if target_factors is not None:
-            best_word_index = F.concat(best_word_index, target_factors)
+            best_word_index = mx.nd.concat(best_word_index, target_factors)
         return best_word_index
 
 
