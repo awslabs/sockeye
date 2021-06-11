@@ -174,7 +174,7 @@ class CrossEntropyLoss(Loss):
         # (batch, len)
         pred = pred * valid_mask
         # (1,)
-        ce = -mx.nd.sum(pred)
+        ce = -mx.nd.sum(pred)  # pylint: disable=invalid-unary-operand-type
         return ce, mx.nd.sum(valid_mask)
 
     def create_metric(self) -> 'LossMetric':
@@ -211,7 +211,9 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
         pred = mx.nd.log_softmax(logits, axis=-1)
 
         # (batch, len)
-        neg_log_likelihood = - mx.nd.pick(pred, labels, axis=-1, keepdims=False)
+        neg_log_likelihood = -mx.nd.pick(pred,  # pylint: disable=invalid-unary-operand-type
+                                         labels,
+                                         axis=-1, keepdims=False)
 
         # label smoothing as in
         # https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4

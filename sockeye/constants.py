@@ -440,4 +440,4 @@ BREVITY_PENALTY_CONSTANT = 'constant'
 BREVITY_PENALTY_LEARNED = 'learned'
 BREVITY_PENALTY_NONE = 'none'
 
-ParameterDict = Dict[mx.gluon.Parameter, int]
+ParameterDict = Dict[str, mx.gluon.Parameter]
