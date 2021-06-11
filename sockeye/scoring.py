@@ -39,7 +39,6 @@ class BatchScorer(mx.gluon.HybridBlock):
                  scorer: CandidateScorer,
                  score_type: str = C.SCORING_TYPE_DEFAULT,
                  constant_length_ratio: Optional[float] = None,
-                 prefix='BatchScorer_',
                  softmax_temperature: Optional[float] = None) -> None:
         super().__init__()
         self.score_type = score_type
@@ -47,10 +46,8 @@ class BatchScorer(mx.gluon.HybridBlock):
         self.constant_length_ratio = constant_length_ratio
         self.softmax_temperature = softmax_temperature
 
-    def hybrid_forward(self, F, logits, labels, length_ratio, source_length, target_length):
+    def forward(self, logits, labels, length_ratio, source_length, target_length):
         """
-
-        :param F: MXNet Namespace
         :param logits: Model logits. Shape: (batch, length, vocab_size).
         :param labels: Gold targets. Shape: (batch, length).
         :param length_ratio: Length Ratios. Shape: (batch,).
@@ -58,17 +55,17 @@ class BatchScorer(mx.gluon.HybridBlock):
         :param target_length: Target lengths. Shape: (batch,).
         :return: Sequence scores. Shape: (batch,).
         """
-        logprobs = F.log_softmax(logits, axis=-1, temperature=self.softmax_temperature)
+        logprobs = mx.nd.log_softmax(logits, axis=-1, temperature=self.softmax_temperature)
 
         # Select the label probability, then take their logs.
         # probs and scores: (batch_size, target_seq_len)
-        token_scores = F.pick(logprobs, labels, axis=-1)
+        token_scores = mx.nd.pick(logprobs, labels, axis=-1)
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
             token_scores = token_scores * -1
 
         # Sum, then apply length penalty. The call to `mx.sym.where` masks out invalid values from scores.
         # zeros and sums: (batch_size,)
-        scores = F.sum(F.where(labels != 0, token_scores, F.zeros_like(token_scores)), axis=1)
+        scores = mx.nd.sum(mx.nd.where(labels != 0, token_scores, mx.nd.zeros_like(token_scores)), axis=1)
 
         if self.constant_length_ratio is not None and self.constant_length_ratio > 0.0:
             predicted_output_length = source_length * self.constant_length_ratio

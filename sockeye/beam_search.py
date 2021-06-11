@@ -224,18 +224,17 @@ class LengthPenalty(mx.gluon.HybridBlock):
         self.beta = beta
         self.denominator = (self.beta + 1.) ** self.alpha
 
-    def forward(self, lengths):
-        if isinstance(lengths, mx.nd.NDArray) or isinstance(lengths, mx.sym.Symbol):
-            return super().forward(lengths)
-        else:
-            return self.hybrid_forward(None, lengths)
+    def __call__(self, *args):
+        if all(isinstance(a, (int, float)) for a in args):
+            return self.forward(*args)
+        return super().__call__(*args)
 
-    def hybrid_forward(self, F, lengths):
+    def forward(self, lengths):
         if self.alpha == 0.0:
-            if F is None:
+            if isinstance(lengths, (int, float)):
                 return 1.0
             else:
-                return F.ones_like(lengths)
+                return mx.nd.ones_like(lengths)
         else:
             numerator = self.beta + lengths if self.beta != 0.0 else lengths
             numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
@@ -250,30 +249,29 @@ class BrevityPenalty(mx.gluon.HybridBlock):
     :param weight: Linear weight.
     """
 
-    def __init__(self, weight: float = 0.0, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(self, weight: float = 0.0) -> None:
+        super().__init__()
         self.weight = weight
 
-    def forward(self, hyp_lengths, reference_lengths):
-        if isinstance(hyp_lengths, mx.nd.NDArray) or isinstance(hyp_lengths, mx.sym.Symbol):
-            return super().forward(hyp_lengths, reference_lengths)
-        else:
-            return self.hybrid_forward(None, hyp_lengths, reference_lengths)
+    def __call__(self, *args):
+        if all(isinstance(a, (int, float)) for a in args):
+            return self.forward(*args)
+        return super().__call__(*args)
 
-    def hybrid_forward(self, F, hyp_lengths, reference_lengths):
+    def forward(self, hyp_lengths, reference_lengths):
         if self.weight == 0.0:
-            if F is None:
+            if isinstance(hyp_lengths, (int, float)):
                 return 0.0
             else:
                 # subtract to avoid MxNet's warning of not using both arguments
                 # this branch should not and is not used during inference
-                return F.zeros_like(hyp_lengths - reference_lengths)
+                return mx.nd.zeros_like(hyp_lengths - reference_lengths)
         else:
             # log_bp is always <= 0.0
-            if F is None:
+            if isinstance(hyp_lengths, (int, float)):
                 log_bp = min(0.0, 1.0 - reference_lengths / hyp_lengths)
             else:
-                log_bp = F.minimum(F.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
+                log_bp = mx.nd.minimum(mx.nd.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
             return self.weight * log_bp
 
 
@@ -289,22 +287,21 @@ class CandidateScorer(mx.gluon.HybridBlock):
         if brevity_penalty_weight > 0.0:
             self._bp = BrevityPenalty(weight=brevity_penalty_weight)
 
-    def forward(self, scores, lengths, reference_lengths):
-        if isinstance(scores, mx.nd.NDArray) or isinstance(scores, mx.sym.Symbol):
-            return super().forward(scores, lengths, reference_lengths)
-        else:
-            return self.hybrid_forward(None, scores, lengths, reference_lengths)
+    def __call__(self, *args):
+        if all(isinstance(a, (int, float)) for a in args):
+            return self.forward(*args)
+        return super().__call__(*args)
 
-    def hybrid_forward(self, F, scores, lengths, reference_lengths):
+    def forward(self, scores, lengths, reference_lengths):
         lp = self._lp(lengths)
         if self._bp is not None:
             bp = self._bp(lengths, reference_lengths)
         else:
-            if F is None:
+            if isinstance(scores, (int, float)):
                 bp = 0.0
             else:
                 # avoid warning for unused input
-                bp = F.zeros_like(reference_lengths) if reference_lengths is not None else 0.0
+                bp = mx.nd.zeros_like(reference_lengths) if reference_lengths is not None else 0.0
         return scores / lp - bp
 
     def unnormalize(self, scores, lengths, reference_lengths):
