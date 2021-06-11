@@ -32,6 +32,8 @@ jobs:
       run: pip install -r requirements/requirements.txt
     - name: Development requirements
       run: pip install -r requirements/requirements.dev.txt
+    - name: Install MX2
+      run: pip install --pre -f https://dist.mxnet.io/python mxnet --upgrade 
     - name: Unit tests
       run: |
         pytest --version
