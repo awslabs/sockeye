@@ -343,7 +343,7 @@ class GluonEarlyStoppingTrainer:
                 # Multi-batch updates sum gradients for each batch instead of
                 # overwriting, so gradients must be manually zeroed after each
                 # update.
-                self.model.collect_params().zero_grad()
+                self.model.zero_grad()
             self.state.updates += 1
             did_grad_step = True
 
