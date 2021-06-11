@@ -288,7 +288,8 @@ class CandidateScorer(mx.gluon.HybridBlock):
             self._bp = BrevityPenalty(weight=brevity_penalty_weight)
 
     def __call__(self, *args):
-        if all(isinstance(a, (int, float)) for a in args):
+        scores, lengths, _ = args
+        if isinstance(scores, (float, int)) and isinstance(lengths, (float, int)):
             return self.forward(*args)
         return super().__call__(*args)
 
