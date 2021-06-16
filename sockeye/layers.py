@@ -147,7 +147,7 @@ class OutputLayer(mx.gluon.HybridBlock):
         bias = self.bias.data().take(vocab_slice_ids)
         return weight, bias
 
-    def forward(self, data, vocab_slice_ids):
+    def __call__(self, data: mx.nd.NDArray, vocab_slice_ids: Optional[mx.nd.NDArray] = None):
         if vocab_slice_ids is not None:
             # imperative, reduced matrix multiplication for vocabulary selection
             weight, bias = self._take_slice(vocab_slice_ids)
@@ -163,24 +163,24 @@ class OutputLayer(mx.gluon.HybridBlock):
                                             bias=bias,
                                             flatten=False,
                                             name=C.LOGITS_NAME)
-        return super().forward(data)
+        return super().__call__(data)
 
-    def hybrid_forward(self, F, data, weight, bias, scaling=None):
+    def forward(self, data: mx.nd.NDArray):
         if self.weight.dtype == C.DTYPE_INT8:
-            return F.contrib.intgemm_fully_connected(data=data,
-                                                     num_hidden=self.vocab_size,
-                                                     weight=weight,
-                                                     scaling=scaling,
-                                                     bias=bias,
-                                                     flatten=False,
-                                                     name=C.LOGITS_NAME)
+            return mx.nd.contrib.intgemm_fully_connected(data=data,
+                                                         num_hidden=self.vocab_size,
+                                                         weight=self.weight.data(),
+                                                         scaling=self.scaling.data(),
+                                                         bias=self.bias.data(),
+                                                         flatten=False,
+                                                         name=C.LOGITS_NAME)
         else:
-            return F.FullyConnected(data=data,
-                                    num_hidden=self.vocab_size,
-                                    weight=weight,
-                                    bias=bias,
-                                    flatten=False,
-                                    name=C.LOGITS_NAME)
+            return mx.nd.FullyConnected(data=data,
+                                        num_hidden=self.vocab_size,
+                                        weight=self.weight.data(),
+                                        bias=self.bias.data(),
+                                        flatten=False,
+                                        name=C.LOGITS_NAME)
 
 
 @dataclass
