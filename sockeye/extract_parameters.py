@@ -20,8 +20,7 @@ import os
 import logging
 from typing import Dict, List
 
-import mxnet as mx
-import numpy as np
+from mxnet import np, npx
 
 from . import arguments
 from . import constants as C
@@ -32,13 +31,13 @@ logger = logging.getLogger(__name__)
 
 
 def _extract(param_names: List[str],
-             params: Dict[str, mx.nd.NDArray],
+             params: Dict[str, np.ndarray],
              ext_params: Dict[str, np.ndarray]) -> List[str]:
     """
     Extract specific parameters from a given base.
 
     :param param_names: Names of parameters to be extracted.
-    :param params: Mapping from parameter names to the actual NDArrays parameters.
+    :param params: Mapping from parameter names to the actual ndarray parameters.
     :param ext_params: Extracted parameter dictionary.
     :return: Remaining names of parameters to be extracted.
     """
@@ -63,7 +62,7 @@ def extract(param_path: str,
     :return: Extracted parameter dictionary.
     """
     logger.info("Loading parameters from '%s'", param_path)
-    params = mx.nd.load(param_path)
+    params = npx.load(param_path)
 
     ext_params = {}  # type: Dict[str, np.ndarray]
     param_names = _extract(param_names, params, ext_params)
@@ -108,7 +107,7 @@ def extract_parameters(args: argparse.Namespace):
     if len(extracted_parameters) > 0:
         utils.check_condition(args.output is not None, "An output filename must be specified. (Use --output)")
         logger.info("Writing extracted parameters to '%s'", args.output)
-        np.savez_compressed(args.output, **extracted_parameters)
+        npx.savez(args.output, **extracted_parameters)
 
 
 if __name__ == "__main__":

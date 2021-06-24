@@ -15,6 +15,7 @@ import logging
 import math
 
 import mxnet as mx
+from mxnet import np, npx
 from mxnet.gluon.nn.activations import Activation
 
 from . import constants as C
@@ -142,27 +143,25 @@ class QuantizableDense(mx.gluon.HybridBlock):
     def forward(self, x):
         if self._dtype == C.DTYPE_INT8:
             if self.bias is not None:
-                act = mx.nd.contrib.intgemm_fully_connected(data=x,
-                                                            weight=self.weight.data(),
-                                                            scaling=self.scaling.data(),
-                                                            bias=self.bias.data(), no_bias=False,
-                                                            num_hidden=self._units,
-                                                            flatten=self._flatten)
+                act = npx.intgemm_fully_connected(x,
+                                                  weight=self.weight.data(),
+                                                  scaling=self.scaling.data(),
+                                                  bias=self.bias.data(), no_bias=False,
+                                                  num_hidden=self._units,
+                                                  flatten=self._flatten)
             else:
-                act = mx.nd.contrib.intgemm_fully_connected(data=x,
-                                                            weight=self.weight.data(),
-                                                            scaling=self.scaling.data(),
-                                                            no_bias=True,
-                                                            num_hidden=self._units,
-                                                            flatten=self._flatten)
+                act = npx.intgemm_fully_connected(x,
+                                                  weight=self.weight.data(),
+                                                  scaling=self.scaling.data(),
+                                                  no_bias=True,
+                                                  num_hidden=self._units,
+                                                  flatten=self._flatten)
         else:
-            #Newer MXNet allows a numpy array.
-            #fc = F.npx.fully_connected if is_np_array() else F.FullyConnected
-            act = mx.nd.FullyConnected(data=x,
-                                       weight=self.weight.data(),
-                                       bias=self.bias.data() if self.bias else None, no_bias=self.bias is None,
-                                       num_hidden=self._units,
-                                       flatten=self._flatten)
+            act = npx.fully_connected(x,
+                                      weight=self.weight.data(),
+                                      bias=self.bias.data() if self.bias else None, no_bias=self.bias is None,
+                                      num_hidden=self._units,
+                                      flatten=self._flatten)
         if self.act is not None:
             act = self.act(act)
         return act
@@ -185,20 +184,20 @@ def optimize_quantization_mse(tensor, rounds=10):
     """
     best_mse = math.inf
     best_top = None
-    maxabs = mx.nd.contrib.intgemm_maxabsolute(tensor)
+    maxabs = npx.intgemm_maxabsolute(tensor)
     low = 0.0
     high = maxabs
     for _ in range(rounds):
         value = (low + high) / 2.0
-        quant = mx.nd.contrib.intgemm_prepare_data(tensor, value)
-        quant_float = mx.nd.cast(quant, dtype=C.DTYPE_FP32)
+        quant = npx.intgemm_prepare_data(tensor, value)
+        quant_float = quant.astype(C.DTYPE_FP32)
         mse = (quant_float * (value / 127.0) - tensor).norm().asscalar() / math.sqrt(float(tensor.size))
         if mse < best_mse:
             best_mse = mse
             best_top = value
         # This optimizes scaling subject to cluster assignment.
         # It can be used for EM but the step is really slow, so use it for direction.
-        scale = mx.nd.sum(quant_float * quant_float) / mx.nd.sum(quant_float * tensor)
+        scale = np.sum(quant_float * quant_float) / np.sum(quant_float * tensor)
         top = 127.0 / scale.asscalar()
         if top < value:
             high = value
@@ -239,7 +238,7 @@ def convert_weights_disk_format(params: C.ParameterDict, dtype_store: str):
             if scaling_name in params:
                 b_max = extract_quant_max(param, params[scaling_name])
                 if dtype_store == C.DTYPE_INT8:
-                    quantized = mx.nd.contrib.intgemm_prepare_data(param.data(), b_max)
+                    quantized = npx.intgemm_prepare_data(param.data(), b_max)
                     param.set_data(quantized)
                     param.dtype = C.DTYPE_INT8
 
@@ -259,10 +258,10 @@ def convert_weights_cpu_dependent(params: C.ParameterDict):
             if scaling_name in params:
                 if param.dtype == C.DTYPE_INT8:
                     # Already fully quantized, just rearrange.
-                    weight = mx.nd.contrib.intgemm_prepare_weight(param.data(), already_quantized = True)
+                    weight = npx.intgemm_prepare_weight(param.data(), already_quantized=True)
                 else:
                     # Use offline scaling factor if available.
                     b_max = extract_quant_max(param, params[scaling_name])
-                    weight = mx.nd.contrib.intgemm_prepare_weight(param.data(), b_max)
+                    weight = npx.intgemm_prepare_weight(param.data(), b_max)
                 param.set_data(weight)
                 param.dtype = C.DTYPE_INT8

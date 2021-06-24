@@ -27,8 +27,8 @@ from math import sqrt
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
 import mxnet as mx
-import numpy as np
-from mxnet import amp
+import numpy as onp
+from mxnet import amp, np, npx, gluon
 
 from . import average
 from . import constants as C
@@ -47,9 +47,9 @@ from .optimizers import OptimizerConfig
 logger = logging.getLogger(__name__)
 
 
-def global_norm(ndarrays: List[mx.nd.NDArray]) -> float:
+def global_norm(ndarrays: List[np.ndarray]) -> float:
     # accumulate in a list, as asscalar is blocking and this way we can run the norm calculation in parallel.
-    norms = [mx.nd.square(mx.nd.norm(arr)) for arr in ndarrays if arr is not None]
+    norms = [np.square(np.linalg.norm(arr)) for arr in ndarrays if arr is not None]
     return sqrt(sum(norm.asscalar() for norm in norms))
 
 
@@ -98,7 +98,7 @@ class TrainState:
         self.updates = 0
         self.samples = 0
         self.gradient_norm = None  # type: Optional[float]
-        self.gradients = {}  # type: Dict[str, List[mx.nd.NDArray]]
+        self.gradients = {}  # type: Dict[str, List[np.ndarray]]
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
         self.start_tic = time.time()
@@ -156,7 +156,7 @@ class GluonEarlyStoppingTrainer:
                  config: TrainerConfig,
                  optimizer_config: OptimizerConfig,
                  sockeye_model: SockeyeModel,
-                 trainer: mx.gluon.Trainer,
+                 trainer: gluon.Trainer,
                  loss_functions: List[loss.Loss],
                  context: List[mx.context.Context],
                  dtype: str,
@@ -287,7 +287,7 @@ class GluonEarlyStoppingTrainer:
         logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
                     "\t".join("Train-%s" % str(metric) for metric in train_metrics))
         val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
-        mx.nd.waitall()
+        npx.waitall()
         has_improved = self._determine_improvement(val_metrics)
         self.state.converged = self._determine_convergence()
         self.state.diverged = self._determine_divergence(val_metrics)
@@ -326,7 +326,7 @@ class GluonEarlyStoppingTrainer:
 
         # sum loss values (on the cpu) and number of samples for each loss function
         output_per_loss_function = [
-            tuple(mx.nd.add_n(*(s.as_in_context(mx.cpu()) for s in shard)) for shard in zip(*outs)) for outs in
+            tuple(npx.add_n(*(s.as_in_context(mx.cpu()) for s in shard)) for shard in zip(*outs)) for outs in
             sharded_outputs_per_loss_function]
         return output_per_loss_function
 
@@ -349,7 +349,7 @@ class GluonEarlyStoppingTrainer:
 
         self.state.samples += batch.samples
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
-            loss_func.metric.update(loss_value.asscalar(), num_samples.asscalar())
+            loss_func.metric.update(loss_value.item(), num_samples.item())
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
         return did_grad_step
@@ -364,20 +364,20 @@ class GluonEarlyStoppingTrainer:
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
             batch = batch.split_and_load(ctx=self.context)
-            sharded_loss_outputs = []  # type: List[List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]]
+            sharded_loss_outputs = []  # type: List[List[Tuple[np.ndarray, np.ndarray]]]
             for inputs, labels in batch.shards():
-                outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
+                outputs = self.model(*inputs)  # type: Dict[str, np.ndarray]
                 loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
                 sharded_loss_outputs.append(loss_outputs)
 
             # repack outputs into a list of loss_values (length = number of shards) for each loss function
             sharded_loss_outputs_per_loss_function = list(zip(*sharded_loss_outputs))
             # sum loss values (on the cpu) and number of samples for each loss function
-            output_per_loss_function = [tuple(mx.nd.add_n(*(s.as_in_context(mx.cpu()) for s in shard))
+            output_per_loss_function = [tuple(npx.add_n(*(s.as_in_context(mx.cpu()) for s in shard))
                                         for shard in zip(*outs)) for outs in sharded_loss_outputs_per_loss_function]
             # update validation metrics for batch
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, output_per_loss_function):
-                loss_metric.update(loss_value.asscalar(), num_samples.asscalar())
+                loss_metric.update(loss_value.item(), num_samples.item())
 
         # Optionally run the checkpoint decoder
         if checkpoint_decoder is not None:
@@ -615,12 +615,12 @@ class GluonEarlyStoppingTrainer:
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
         # (4) Random generators
-        # RNG states: python's random and np.random provide functions for
+        # RNG states: python's random and onp.random provide functions for
         # storing the state, mxnet does not, but inside our code mxnet's RNG is
         # not used AFAIK
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
-            pickle.dump(np.random.get_state(), fp)
+            pickle.dump(onp.random.get_state(), fp)
 
         # (5) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
@@ -670,12 +670,12 @@ class GluonEarlyStoppingTrainer:
         train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
         # (4) Random generators
-        # RNG states: python's random and np.random provide functions for
+        # RNG states: python's random and onp.random provide functions for
         # storing the state, mxnet does not, but inside our code mxnet's RNG is
         # not used AFAIK
         with open(os.path.join(self.training_state_dirname, C.RNG_STATE_NAME), "rb") as fp:
             random.setstate(pickle.load(fp))
-            np.random.set_state(pickle.load(fp))
+            onp.random.set_state(pickle.load(fp))
 
         # (5) Training state
         self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
@@ -743,23 +743,23 @@ class ParallelModel(parallel.Parallelizable):
     def __init__(self,
                  model: Callable,
                  loss_functions: List[loss.Loss],
-                 trainer: mx.gluon.Trainer,
+                 trainer: gluon.Trainer,
                  using_amp: bool = False) -> None:
         self.model = model
         self.loss_functions = loss_functions
         self.trainer = trainer
         self.using_amp = using_amp
 
-    def forward_backward(self, shard: Tuple) -> List[Tuple[mx.nd.NDArray, mx.nd.NDArray]]:
+    def forward_backward(self, shard: Tuple) -> List[Tuple[np.ndarray, np.ndarray]]:
         """
         Applies forward-backward pass for a single shard of a batch (data-parallel training).
         """
         inputs, labels = shard
         with mx.autograd.record():
-            outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
+            outputs = self.model(*inputs)  # type: Dict[str, np.ndarray]
             loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
             loss_values = (v for v, _ in loss_outputs)
-            sum_losses = mx.nd.add_n(*loss_values)
+            sum_losses = npx.add_n(*loss_values)
             if self.using_amp:
                 # AMP applies dynamic loss scaling to the losses (scale up) and
                 # the Trainer (scale down).
@@ -796,13 +796,13 @@ class TensorboardLogger:
             logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
             self._writer = None
 
-    def log_metrics(self, metrics: Dict[str, Union[float, int, mx.nd.NDArray]], checkpoint: int):
+    def log_metrics(self, metrics: Dict[str, Union[float, int, np.ndarray]], checkpoint: int):
         if self._writer is None:
             return
 
         for name, value in metrics.items():
-            if isinstance(value, mx.nd.NDArray):
-                if mx.nd.contrib.isfinite(value).sum().asscalar() == value.size:
+            if isinstance(value, np.ndarray):
+                if np.isfinite(value).sum().item() == value.size:
                     self._writer.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                 else:
                     logger.warning("Histogram of %s not logged to tensorboard because of infinite data.")
@@ -812,22 +812,17 @@ class TensorboardLogger:
                 self._writer.add_scalar(tag=name, value=value, global_step=checkpoint)
         self._writer.flush()
 
-    def log_graph(self, symbol: mx.sym.Symbol):
-        if self._writer is None:
-            return
-        self._writer.add_graph(symbol)
-
-    def log_source_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+    def log_source_embedding(self, embedding: np.ndarray, checkpoint: int):
         if self._writer is None or self.source_labels is None:
             return
         self._writer.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
 
-    def log_target_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+    def log_target_embedding(self, embedding: np.ndarray, checkpoint: int):
         if self._writer is None or self.target_labels is None:
             return
         self._writer.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
 
-    def log_output_embedding(self, embedding: mx.nd.NDArray, checkpoint: int):
+    def log_output_embedding(self, embedding: np.ndarray, checkpoint: int):
         if self._writer is None or self.target_labels is None:
             return
         self._writer.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
@@ -903,7 +898,7 @@ def safe_custom_metrics_logger(logging_function: Callable,
         logging.warning("Didn't use custom metrics logger, exception '{}' occurred".format(str(e)))
 
 
-def trainer_save_states_no_dump_optimizer(trainer: mx.gluon.Trainer, fname: str):
+def trainer_save_states_no_dump_optimizer(trainer: gluon.Trainer, fname: str):
     """
     Otherwise exact copy of `Trainer.save_states` that does not include a
     pickled optimizer instance as part of the state.  This is compatible with

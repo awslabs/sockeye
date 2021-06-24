@@ -30,7 +30,8 @@ from functools import reduce
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import mxnet as mx
-import numpy as np
+from mxnet import np
+import numpy as onp
 import portalocker
 
 from . import __version__, constants as C
@@ -38,9 +39,6 @@ from . import horovod_mpi
 from .log import log_sockeye_version, log_mxnet_version
 
 logger = logging.getLogger(__name__)
-
-
-NDarrayOrSymbol = Union[mx.nd.NDArray, mx.sym.Symbol]
 
 
 class SockeyeError(Exception):
@@ -111,7 +109,7 @@ def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = No
            14 for gpu(1). See https://beta.mxnet.io/api/gluon-related/_autogen/mxnet.random.seed.html.
     """
     logger.info("Random seed: %d", seed)
-    np.random.seed(seed)
+    onp.random.seed(seed)
     random.seed(seed)
     if ctx is None:
         mx.random.seed(seed, ctx='all')
@@ -132,28 +130,6 @@ def check_condition(condition: bool, error_message: str):
     """
     if not condition:
         raise SockeyeError(error_message)
-
-
-def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
-    """
-    Dumps computation graph visualization to .pdf and .dot file.
-
-    :param symbol: The symbol representing the computation graph.
-    :param filename: The filename to save the graphic to.
-    :param hide_weights: If true the weights will not be shown.
-    """
-    dot = mx.viz.plot_network(symbol, hide_weights=hide_weights)
-    dot.render(filename=filename)
-
-
-def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
-    """
-    Computes sequence lengths of PAD_ID-padded data in sequence_data.
-
-    :param sequence_data: Input data. Shape: (batch_size, seq_len).
-    :return: Length data. Shape: (batch_size,).
-    """
-    return mx.sym.sum(sequence_data != C.PAD_ID, axis=1)
 
 
 class OnlineMeanAndVariance:
@@ -238,19 +214,19 @@ def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str
         return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
-def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
+def average_arrays(arrays: List[np.ndarray]) -> np.ndarray:
     """
     Take a list of arrays of the same shape and take the element wise average.
 
-    :param arrays: A list of NDArrays with the same shape that will be averaged.
-    :return: The average of the NDArrays in the same context as arrays[0].
+    :param arrays: A list of ndarrays with the same shape that will be averaged.
+    :return: The average of the ndarrays in the same context as arrays[0].
     """
     if not arrays:
         raise ValueError("arrays is empty.")
     if len(arrays) == 1:
         return arrays[0]
     check_condition(all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match")
-    return mx.nd.add_n(*arrays) / len(arrays)
+    return npx.add_n(*arrays) / len(arrays)
 
 
 def get_num_gpus() -> int:
@@ -622,36 +598,11 @@ def metric_value_is_better(new: float, old: float, metric: str) -> bool:
         return new < old
 
 
-def split(data: mx.nd.NDArray,
-          num_outputs: int,
-          axis: int = 1,
-          squeeze_axis: bool = False) -> List[mx.nd.NDArray]:
-    """
-    Version of mxnet.ndarray.split that always returns a list.  The original
-    implementation only returns a list if num_outputs > 1:
-    https://mxnet.incubator.apache.org/api/python/ndarray/ndarray.html#mxnet.ndarray.split
-
-    Splits an array along a particular axis into multiple sub-arrays.
-
-    :param data: The input.
-    :param num_outputs: Number of splits. Note that this should evenly divide
-                        the length of the axis.
-    :param axis: Axis along which to split.
-    :param squeeze_axis: If true, Removes the axis with length 1 from the shapes
-                         of the output arrays.
-    :return: List of NDArrays resulting from the split.
-    """
-    ndarray_or_list = data.split(num_outputs=num_outputs, axis=axis, squeeze_axis=squeeze_axis)
-    if num_outputs == 1:
-        return [ndarray_or_list]
-    return ndarray_or_list
-
-
 _DTYPE_TO_STRING = {
-    np.float32: 'float32',
-    np.float16: 'float16',
-    np.int8: 'int8',
-    np.int32: 'int32'
+    onp.float32: 'float32',
+    onp.float16: 'float16',
+    onp.int8: 'int8',
+    onp.int32: 'int32'
 }
 
 

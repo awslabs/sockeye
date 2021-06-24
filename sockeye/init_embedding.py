@@ -61,12 +61,11 @@ import sys
 import logging
 from typing import Dict
 
-import numpy as np
 import mxnet as mx
+from mxnet import np, npx
 
 from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
-from . import utils
 from . import vocab
 
 logger = logging.getLogger(__name__)
@@ -87,7 +86,7 @@ def init_weight(weight: np.ndarray,
     """
     shape = list(weight.shape)
     shape[0] = len(vocab_out)
-    weight_init = mx.nd.empty(tuple(shape), dtype='float32')
+    weight_init = np.empty(tuple(shape), dtype='float32')
     weight_desc = mx.init.InitDesc("vocabulary_sized_weight")
     initializer(weight_desc, weight_init)
     for token in vocab_out:
@@ -109,15 +108,15 @@ def load_weight(weight_file: str,
     """
     logger.info('Loading input weight file: %s', weight_file)
     if weight_file.endswith(".npy"):
-        return np.load(weight_file)
+        return npx.load(weight_file)
     elif weight_file.endswith(".npz"):
         if weight_file not in weight_file_cache:
-            weight_file_cache[weight_file] = np.load(weight_file)
+            weight_file_cache[weight_file] = npx.load(weight_file)
         return weight_file_cache[weight_file][weight_name]
     else:
         if weight_file not in weight_file_cache:
-            weight_file_cache[weight_file] = mx.nd.load(weight_file)
-        return weight_file_cache[weight_file]['arg:%s' % weight_name].asnumpy()
+            weight_file_cache[weight_file] = npx.load(weight_file)
+        return weight_file_cache[weight_file]['arg:%s' % weight_name]
 
 
 def main():

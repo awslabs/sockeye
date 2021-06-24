@@ -14,13 +14,13 @@
 """
 Encoders for sequence-to-sequence models.
 """
-import inspect
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
 import mxnet as mx
+from mxnet import np, npx
 
 from . import config
 from . import constants as C
@@ -152,21 +152,18 @@ class Embedding(Encoder):
 
     def forward(self, data, valid_length):  # pylint: disable=arguments-differ
         # We will catch the optional factor weights in kwargs
-        average_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
-        concat_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
-        sum_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
+        average_factors_embeds = []  # type: List[np.ndarray]
+        concat_factors_embeds = []  # type: List[np.ndarray]
+        sum_factors_embeds = []  # type: List[np.ndarray]
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
-            data, *data_factors = mx.nd.split(data=data,
-                                              num_outputs=self.config.num_factors,
-                                              axis=2,
-                                              squeeze_axis=True)
+            data, *data_factors = np.split(data, self.config.num_factors, axis=2)
             for i, (factor_data, factor_config) in enumerate(zip(data_factors,
                                                                  self.config.factor_configs)):
                 factor_weight = self.factor_weights[i]
-                factor_embedding = mx.nd.Embedding(data=factor_data,
-                                                   input_dim=factor_config.vocab_size,
-                                                   weight=factor_weight.data(),
-                                                   output_dim=factor_config.num_embed)
+                factor_embedding = npx.embedding(np.squeeze(factor_data),
+                                                 input_dim=factor_config.vocab_size,
+                                                 weight=factor_weight.data(),
+                                                 output_dim=factor_config.num_embed)
                 if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
                     concat_factors_embeds.append(factor_embedding)
                 elif factor_config.combine == C.FACTORS_COMBINE_SUM:
@@ -176,27 +173,27 @@ class Embedding(Encoder):
                 else:
                     raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
         else:
-            data = mx.nd.squeeze(data, axis=2)
+            data = np.squeeze(data, axis=2)
 
-        embed = mx.nd.Embedding(data,
-                                weight=self.embed_weight.data(),
-                                input_dim=self.config.vocab_size,
-                                output_dim=self.config.num_embed,
-                                dtype=self._dtype,
-                                sparse_grad=self._use_sparse_grad)
+        embed = npx.embedding(data,
+                              weight=self.embed_weight.data(),
+                              input_dim=self.config.vocab_size,
+                              output_dim=self.config.num_embed,
+                              dtype=self._dtype,
+                              sparse_grad=self._use_sparse_grad)
 
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
             if average_factors_embeds:
-                embed = mx.nd.add_n(embed, *average_factors_embeds) / (len(average_factors_embeds) + 1)
+                embed = npx.add_n(embed, *average_factors_embeds) / (len(average_factors_embeds) + 1)
             if sum_factors_embeds:
-                embed = mx.nd.add_n(embed, *sum_factors_embeds)
+                embed = npx.add_n(embed, *sum_factors_embeds)
             if concat_factors_embeds:
-                embed = mx.nd.concat(embed, *concat_factors_embeds, dim=2)
+                embed = np.concatenate((embed, *concat_factors_embeds), axis=2)
 
         if self.config.dropout > 0:
-            embed = mx.nd.Dropout(data=embed, p=self.config.dropout)
+            embed = npx.dropout(data=embed, p=self.config.dropout)
 
-        return embed, mx.nd.identity(valid_length)  # identity: See https://github.com/apache/incubator-mxnet/issues/14228
+        return embed, np.copy(valid_length)  # TODO: do we need the copy? See https://github.com/apache/incubator-mxnet/issues/14228
 
     def get_num_hidden(self) -> int:
         """
@@ -223,7 +220,7 @@ class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
     def forward(self, data, valid_length):  # pylint: disable=arguments-differ
         for block in self._children.values():
             data, valid_length = block(data, valid_length)
-        return data, mx.nd.identity(valid_length)  # identity: See https://github.com/apache/incubator-mxnet/issues/14228
+        return data, np.copy(valid_length)  # TODO: do we need the copy? See https://github.com/apache/incubator-mxnet/issues/14228
 
     def get_num_hidden(self) -> int:
         """
@@ -301,17 +298,17 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         data = self.pos_embedding(data, None)
 
         if self.config.dropout_prepost > 0.0:
-            data = mx.nd.Dropout(data=data, p=self.config.dropout_prepost)
+            data = npx.dropout(data=data, p=self.config.dropout_prepost)
 
         # (batch_size * heads, seq_len)
         att_valid_length = layers.prepare_source_valid_lengths(valid_length, data,
                                                                num_heads=self.config.attention_heads)
 
-        data = mx.nd.transpose(data, axes=(1, 0, 2))
+        data = np.transpose(data, axes=(1, 0, 2))
         for block in self.layers:
             data = block(data, att_valid_length)
         data = self.final_process(data, None)
-        data = mx.nd.transpose(data, axes=(1, 0, 2))
+        data = np.transpose(data, axes=(1, 0, 2))
         return data, valid_length
 
     def get_num_hidden(self) -> int:

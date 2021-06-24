@@ -16,8 +16,7 @@ import random
 from tempfile import TemporaryDirectory
 from typing import Optional, List, Tuple
 
-import mxnet as mx
-import numpy as np
+from mxnet import np
 import pytest
 
 from sockeye import constants as C
@@ -324,9 +323,9 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
         bucket_counts = [None for _ in buckets]
     bucket_counts = [random.randint(min_count, max_count) if given_count is None else given_count
                      for given_count in bucket_counts]
-    source = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0]), 1))) for count, bucket in
+    source = [np.array(np.random.randint(0, 10, (count, random.randint(1, bucket[0]), 1))) for count, bucket in
               zip(bucket_counts, buckets)]
-    target = [mx.nd.array(np.random.randint(0, 10, (count, random.randint(2, bucket[1]), 1))) for count, bucket in
+    target = [np.array(np.random.randint(0, 10, (count, random.randint(2, bucket[1]), 1))) for count, bucket in
               zip(bucket_counts, buckets)]
     return source, target
 
@@ -338,7 +337,7 @@ def test_parallel_data_set():
     def check_equal(arrays1, arrays2):
         assert len(arrays1) == len(arrays2)
         for a1, a2 in zip(arrays1, arrays2):
-            assert np.array_equal(a1.asnumpy(), a2.asnumpy())
+            assert np.array_equal(a1, a2)
 
     with TemporaryDirectory() as work_dir:
         dataset = data_io.ParallelDataSet(source, target)
@@ -376,10 +375,10 @@ def test_get_permutations():
     assert len(permutation) == len(inverse_permutation) == len(bucket_counts) == len(data)
 
     for d, p, pi in zip(data, permutation, inverse_permutation):
-        p = p.asnumpy().astype(np.int)
-        pi = pi.asnumpy().astype(np.int)
-        p_set = set(p)
-        pi_set = set(pi)
+        p = p.astype(np.int32)
+        pi = pi.astype(np.int32)
+        p_set = set(p.tolist())
+        pi_set = set(pi.tolist())
         assert len(p_set) == len(p)
         assert len(pi_set) == len(pi)
         assert p_set - pi_set == set()
@@ -409,8 +408,8 @@ def test_parallel_data_set_permute():
     for buck_idx in range(len(dataset)):
         num_samples = dataset.source[buck_idx].shape[0]
         if num_samples:
-            assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).asnumpy().all()
-            assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).asnumpy().all()
+            assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).all()
+            assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).all()
         else:
             assert not dataset_restored.source[buck_idx]
             assert not dataset_restored.target[buck_idx]
@@ -560,10 +559,10 @@ def test_get_training_data_iters():
             while train_iter.iter_next():
                 batch = train_iter.next()
                 assert isinstance(batch, data_io.Batch)
-                source = batch.source.asnumpy()
-                target = batch.target.asnumpy()
-                label = batch.labels[C.TARGET_LABEL_NAME].asnumpy()  # TODO: still 2-shape: (batch, length)
-                length_ratio_label = batch.labels[C.LENRATIO_LABEL_NAME].asnumpy()
+                source = batch.source
+                target = batch.target
+                label = batch.labels[C.TARGET_LABEL_NAME]  # TODO: still 2-shape: (batch, length)
+                length_ratio_label = batch.labels[C.LENRATIO_LABEL_NAME]
                 assert source.shape[0] == target.shape[0] == label.shape[0] == batch_size
                 assert source.shape[2] == target.shape[2] == num_source_factors == num_target_factors
                 # target first symbol should be BOS
@@ -579,10 +578,10 @@ def test_get_training_data_iters():
 
 def _data_batches_equal(db1: data_io.Batch, db2: data_io.Batch) -> bool:
     equal = True
-    equal = equal and np.allclose(db1.source.asnumpy(), db2.source.asnumpy())
-    equal = equal and np.allclose(db1.source_length.asnumpy(), db2.source_length.asnumpy())
-    equal = equal and np.allclose(db1.target.asnumpy(), db2.target.asnumpy())
-    equal = equal and np.allclose(db1.target_length.asnumpy(), db2.target_length.asnumpy())
+    equal = equal and np.allclose(db1.source, db2.source)
+    equal = equal and np.allclose(db1.source_length, db2.source_length)
+    equal = equal and np.allclose(db1.target, db2.target)
+    equal = equal and np.allclose(db1.target_length, db2.target_length)
     equal = equal and db1.labels.keys() == db2.labels.keys()
     equal = equal and db1.samples == db2.samples
     equal = equal and db1.tokens == db2.tokens
@@ -798,16 +797,16 @@ def test_sharded_and_parallel_iter_same_num_batches():
 
 
 def test_create_target_and_shifted_label_sequences():
-    target_and_label = mx.nd.array([[C.BOS_ID, 4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
+    target_and_label = np.array([[C.BOS_ID, 4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
                                     [C.BOS_ID, 15, 23, 23, 77, 55, 22, C.EOS_ID],
                                     [C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]])
-    target_and_label = target_and_label.expand_dims(axis=2)
-    expected_lengths = mx.nd.array([5, 7, 2])
+    target_and_label = np.expand_dims(target_and_label, axis=2)
+    expected_lengths = np.array([5, 7, 2])
 
     target, label = data_io.create_target_and_shifted_label_sequences(target_and_label)
 
     assert target.shape[0] == label.shape[0] == target_and_label.shape[0]
     assert target.shape[1] == label.shape[1] == target_and_label.shape[1] - 1
     lengths = (target != C.PAD_ID).sum(axis=1).squeeze()
-    assert np.allclose(lengths.asnumpy(), expected_lengths.asnumpy())
+    assert np.allclose(lengths, expected_lengths)
 

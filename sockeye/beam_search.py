@@ -18,7 +18,8 @@ from abc import abstractmethod, ABC
 from typing import Tuple, Optional, List, Union
 
 import mxnet as mx
-import numpy as np
+from mxnet import gluon, np, npx
+import numpy as onp
 
 from . import constants as C
 from . import lexical_constraints as constrained
@@ -38,15 +39,15 @@ class _Inference(ABC):
 
     @abstractmethod
     def encode_and_initialize(self,
-                              inputs: mx.nd.NDArray,
-                              valid_length: Optional[mx.nd.NDArray] = None):
+                              inputs: np.ndarray,
+                              valid_length: Optional[np.ndarray] = None):
         raise NotImplementedError()
 
     @abstractmethod
     def decode_step(self,
-                    step_input: mx.nd.NDArray,
+                    step_input: np.ndarray,
                     states: List,
-                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+                    vocab_slice_ids: Optional[np.ndarray] = None):
         raise NotImplementedError()
 
 
@@ -65,27 +66,27 @@ class _SingleModelInference(_Inference):
     def state_structure(self) -> List:
         return [self._model.state_structure()]
 
-    def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
+    def encode_and_initialize(self, inputs: np.ndarray, valid_length: Optional[np.ndarray] = None):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
-        predicted_output_length = predicted_output_length.expand_dims(axis=1, inplace=True)
+        predicted_output_length = np.expand_dims(predicted_output_length, axis=1)
         return states, predicted_output_length
 
     def decode_step(self,
-                    step_input: mx.nd.NDArray,
+                    step_input: np.ndarray,
                     states: List,
-                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+                    vocab_slice_ids: Optional[np.ndarray] = None):
         logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
-            logits = logits.log_softmax(axis=-1, temperature=self._softmax_temperature)
+            logits = npx.log_softmax(logits, axis=-1, temperature=self._softmax_temperature)
         scores = -logits
 
-        target_factors = None  # type: Optional[mx.nd.NDArray]
+        target_factors = None  # type: Optional[np.ndarray]
         if target_factor_outputs:
             # target factors are greedily 'decoded'.
-            factor_predictions = [mx.nd.cast(tfo.argmax(axis=-1, keepdims=True), dtype='int32') for tfo in
+            factor_predictions = [npx.cast(np.argmax(tfo, axis=-1, keepdims=True), dtype='int32') for tfo in
                                   target_factor_outputs]
             target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
-                else mx.nd.concat(*factor_predictions, dim=1)
+                else np.concatenate(factor_predictions, axis=1)
         return scores, states, target_factors
 
 
@@ -112,58 +113,57 @@ class _EnsembleInference(_Inference):
             structure.append(model.state_structure())
         return structure
 
-    def encode_and_initialize(self, inputs: mx.nd.NDArray, valid_length: Optional[mx.nd.NDArray] = None):
-        model_states = []  # type: List[mx.nd.NDArray]
-        predicted_output_lengths = []  # type: List[mx.nd.NDArray]
+    def encode_and_initialize(self, inputs: np.ndarray, valid_length: Optional[np.ndarray] = None):
+        model_states = []  # type: List[np.ndarray]
+        predicted_output_lengths = []  # type: List[np.ndarray]
         for model in self._models:
             states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
             predicted_output_lengths.append(predicted_output_length)
             model_states += states
         # average predicted output lengths, (batch, 1)
-        predicted_output_lengths = mx.nd.mean(mx.nd.stack(*predicted_output_lengths, axis=1), axis=1, keepdims=True)
+        predicted_output_lengths = np.mean(np.stack(*predicted_output_lengths, axis=1), axis=1, keepdims=True)
         return model_states, predicted_output_lengths
 
     def decode_step(self,
-                    step_input: mx.nd.NDArray,
-                    states: List,
-                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
-        outputs = []  # type: List[mx.nd.NDArray]
-        new_states = []  # type: List[mx.nd.NDArray]
-        factor_outputs = []  # type: List[List[mx.nd.NDArray]]
+                    step_input: np.ndarray,
+                    states: List[np.ndarray],
+                    vocab_slice_ids: Optional[np.ndarray] = None):
+        outputs = []  # type: List[np.ndarray]
+        new_states = []  # type: List[np.ndarray]
+        factor_outputs = []  # type: List[List[np.ndarray]]
         state_index = 0
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
             logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
-            probs = logits.softmax(axis=-1, temperature=self._softmax_temperature)
+            probs = npx.softmax(logits, axis=-1, temperature=self._softmax_temperature)
             outputs.append(probs)
-            target_factor_probs = [tfo.softmax(axis=-1) for tfo in target_factor_outputs]
+            target_factor_probs = [npx.softmax(tfo, axis=-1) for tfo in target_factor_outputs]
             factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
 
-        target_factors = None  # type: Optional[mx.nd.NDArray]
-
+        target_factors = None  # type: Optional[np.ndarray]
         if factor_outputs:
             # target factors are greedily 'decoded'.
-            factor_predictions = [mx.nd.cast(self._interpolation(fs).argmin(axis=-1, keepdims=True), dtype='int32')
+            factor_predictions = [npx.cast(np.argmin(self._interpolation(fs), axis=-1, keepdims=True), dtype='int32')
                                   for fs in zip(*factor_outputs)]
             if factor_predictions:
                 target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
-                    else mx.nd.concat(*factor_predictions, dim=1)
+                    else np.concatenate(factor_predictions, axis=1)
         return scores, new_states, target_factors
 
     @staticmethod
     def linear_interpolation(predictions):
-        return -mx.nd.log(utils.average_arrays(predictions))  # pylint: disable=invalid-unary-operand-type
+        return -np.log(utils.average_arrays(predictions))  # pylint: disable=invalid-unary-operand-type
 
     @staticmethod
     def log_linear_interpolation(predictions):
-        log_probs = utils.average_arrays([p.log() for p in predictions])
-        return -log_probs.log_softmax()  # pylint: disable=invalid-unary-operand-type
+        log_probs = utils.average_arrays([np.log(p) for p in predictions])
+        return -npx.log_softmax(log_probs)  # pylint: disable=invalid-unary-operand-type
 
 
-class UpdateScores(mx.gluon.HybridBlock):
+class UpdateScores(gluon.HybridBlock):
     """
     A HybridBlock that updates the scores from the decoder step with accumulated scores.
     Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
@@ -184,15 +184,15 @@ class UpdateScores(mx.gluon.HybridBlock):
         # broadcast hypothesis score to each prediction.
         # scores_accumulated. Shape: (batch*beam, 1)
         # target_dists. Shape: (batch*beam, vocab_size)
-        scores = mx.nd.broadcast_add(target_dists, scores_accumulated)
+        scores = target_dists + scores_accumulated
 
         # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
         # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
         # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
         # pad_dist. Shape: (batch*beam, vocab_size)
-        pad_dist = mx.nd.concat(scores_accumulated, pad_dist)
-        scores = mx.nd.where(mx.nd.broadcast_logical_or(finished, inactive), pad_dist, scores)
+        pad_dist = np.concatenate(scores_accumulated, pad_dist, axis=1)
+        scores = np.where(np.logical_or(finished, inactive), pad_dist, scores)
 
         # Update lengths of all items, except those that were already finished. This updates
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
@@ -201,12 +201,12 @@ class UpdateScores(mx.gluon.HybridBlock):
         # Items that are at their maximum length and not finished now are forced to produce the <eos> symbol.
         # That is, we keep scores for hypotheses below max length or finished, and 'force-eos' the rest.
         below_max_length = lengths < max_lengths
-        scores = mx.nd.where(mx.nd.broadcast_logical_or(below_max_length, finished), scores, eos_dist + scores)
+        scores = np.where(np.logical_or(below_max_length, finished), scores, eos_dist + scores)
 
         return scores, lengths
 
 
-class LengthPenalty(mx.gluon.HybridBlock):
+class LengthPenalty(gluon.HybridBlock):
     """
     Calculates the length penalty as:
     (beta + len(Y))**alpha / (beta + 1)**alpha
@@ -234,14 +234,14 @@ class LengthPenalty(mx.gluon.HybridBlock):
             if isinstance(lengths, (int, float)):
                 return 1.0
             else:
-                return mx.nd.ones_like(lengths)
+                return np.ones_like(lengths)
         else:
             numerator = self.beta + lengths if self.beta != 0.0 else lengths
             numerator = numerator ** self.alpha if self.alpha != 1.0 else numerator
             return numerator / self.denominator
 
 
-class BrevityPenalty(mx.gluon.HybridBlock):
+class BrevityPenalty(gluon.HybridBlock):
     """
     Calculates the logarithmic brevity penalty as:
       weight * log min(1, exp(1 - ref_len / hyp_len)) = weight * min(0, 1 - ref_len / hyp_len).
@@ -265,17 +265,17 @@ class BrevityPenalty(mx.gluon.HybridBlock):
             else:
                 # subtract to avoid MxNet's warning of not using both arguments
                 # this branch should not and is not used during inference
-                return mx.nd.zeros_like(hyp_lengths - reference_lengths)
+                return np.zeros_like(hyp_lengths - reference_lengths)
         else:
             # log_bp is always <= 0.0
             if isinstance(hyp_lengths, (int, float)):
                 log_bp = min(0.0, 1.0 - reference_lengths / hyp_lengths)
             else:
-                log_bp = mx.nd.minimum(mx.nd.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
+                log_bp = np.minimum(np.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
             return self.weight * log_bp
 
 
-class CandidateScorer(mx.gluon.HybridBlock):
+class CandidateScorer(gluon.HybridBlock):
 
     def __init__(self,
                  length_penalty_alpha: float = 1.0,
@@ -302,7 +302,7 @@ class CandidateScorer(mx.gluon.HybridBlock):
                 bp = 0.0
             else:
                 # avoid warning for unused input
-                bp = mx.nd.zeros_like(reference_lengths) if reference_lengths is not None else 0.0
+                bp = np.zeros_like(reference_lengths) if reference_lengths is not None else 0.0
         return scores / lp - bp
 
     def unnormalize(self, scores, lengths, reference_lengths):
@@ -310,7 +310,7 @@ class CandidateScorer(mx.gluon.HybridBlock):
         return (scores + bp) * self._lp(lengths)
 
 
-class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
+class SortNormalizeAndUpdateFinished(gluon.HybridBlock):
     """
     A HybridBlock for normalizing newly finished hypotheses scores with LengthPenalty.
     """
@@ -331,33 +331,33 @@ class SortNormalizeAndUpdateFinished(mx.gluon.HybridBlock):
                 factors=None):
 
         # Reorder fixed-size beam data according to best_hyp_indices (ascending)
-        finished = mx.nd.take(finished, best_hyp_indices)
-        lengths = mx.nd.take(lengths, best_hyp_indices)
-        reference_lengths = mx.nd.take(reference_lengths, best_hyp_indices)
+        finished = np.take(finished, best_hyp_indices, axis=0)
+        lengths = np.take(lengths, best_hyp_indices, axis=0)
+        reference_lengths = np.take(reference_lengths, best_hyp_indices, axis=0)
 
         # Normalize hypotheses that JUST finished
-        all_finished = mx.nd.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
-        newly_finished = mx.nd.broadcast_logical_xor(all_finished, finished)
-        scores_accumulated = mx.nd.where(newly_finished,
-                                         self._scorer(scores_accumulated,
-                                                      mx.nd.cast(mx.nd.expand_dims(lengths, axis=1), self.dtype),
-                                                      reference_lengths),
-                                         scores_accumulated)
+        all_finished = np.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = np.logical_xor(all_finished, finished)
+        scores_accumulated = np.where(newly_finished,
+                                      self._scorer(scores_accumulated,
+                                                   npx.cast(np.expand_dims(lengths, axis=1), self.dtype),
+                                                   reference_lengths),
+                                      scores_accumulated)
 
         # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
-        finished = mx.nd.broadcast_logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        finished = np.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
 
         # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
-        best_word_indices = mx.nd.expand_dims(best_word_indices, axis=1)
+        best_word_indices = np.expand_dims(best_word_indices, axis=1)
 
         if factors is not None:
-            secondary_factors = mx.nd.take(factors, best_hyp_indices)
-            best_word_indices = mx.nd.concat(best_word_indices, secondary_factors)
+            secondary_factors = np.take(factors, best_hyp_indices, axis=0)
+            best_word_indices = np.concatenate((best_word_indices, secondary_factors), axis=1)
 
         return best_word_indices, finished, scores_accumulated, lengths, reference_lengths
 
 
-class TopK(mx.gluon.HybridBlock):
+class TopK(gluon.HybridBlock):
     """
     Batch-wise topk operation.
     Forward method uses imperative shape inference, since both batch_size and vocab_size are dynamic
@@ -382,20 +382,20 @@ class TopK(mx.gluon.HybridBlock):
         batch_times_beam, vocab_size = scores.shape
         batch_size = int(batch_times_beam / self.k)
         # Shape: (batch size, beam_size * vocab_size)
-        batchwise_scores = scores.reshape(shape=(batch_size, self.k * vocab_size))
+        batchwise_scores = np.reshape(scores, (batch_size, self.k * vocab_size))
         # BEGIN former hybrid_forward code
-        values, indices = mx.nd.topk(batchwise_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
+        values, indices = npx.topk(batchwise_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
         # Project indices back into original shape (which is different for t==1 and t>1)
-        values, indices = mx.nd.reshape(values, shape=(-1, 1)), mx.nd.reshape(indices, shape=(-1,))
+        values, indices = np.reshape(values, (-1, 1)), np.reshape(indices, (-1,))
         # END former hybrid_forward code
-        best_hyp_indices, best_word_indices = mx.nd.unravel_index(indices, shape=(batch_size * self.k, vocab_size))
+        best_hyp_indices, best_word_indices = np.unravel_index(indices, shape=(batch_size * self.k, vocab_size))
         if batch_size > 1:
             # Offsetting the indices to match the shape of the scores matrix
             best_hyp_indices = best_hyp_indices + offset
         return best_hyp_indices, best_word_indices, values
 
 
-class SampleK(mx.gluon.HybridBlock):
+class SampleK(gluon.HybridBlock):
     """
     A HybridBlock for selecting a random word from each hypothesis according to its distribution.
     """
@@ -414,24 +414,25 @@ class SampleK(mx.gluon.HybridBlock):
         :return: The row indices, column indices, and values of the sampled words.
         """
         # Map the negative logprobs to probabilities so as to have a distribution
-        target_dists = mx.nd.exp(-target_dists)
+        target_dists = np.exp(-target_dists)
 
         # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
         if self.n != 0:
             # select the top n in each row, via a mask
-            masked_items = mx.nd.topk(target_dists, k=self.n, ret_typ='mask', axis=1, is_ascend=False)
+            masked_items = npx.topk(target_dists, k=self.n, ret_typ='mask', axis=1, is_ascend=False)
             # set unmasked items to 0
-            masked_items = mx.nd.where(masked_items, target_dists, masked_items)
+            masked_items = np.where(masked_items, target_dists, masked_items)
             # renormalize
-            target_dists = mx.nd.broadcast_div(masked_items, mx.nd.sum(masked_items, axis=1, keepdims=True))
+            target_dists = masked_items / np.sum(masked_items, axis=1, keepdims=True)
 
         # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
-        best_word_indices = mx.nd.random.multinomial(target_dists, get_prob=False)
+        # TODO: MX2 WHAT TO DO HERE?
+        best_word_indices = np.random.multinomial(target_dists, get_prob=False)
         # Zeroes for finished hypotheses.
-        best_word_indices = mx.nd.where(finished, mx.nd.zeros_like(best_word_indices), best_word_indices)
-        values = mx.nd.pick(scores, best_word_indices, axis=1, keepdims=True)
+        best_word_indices = np.where(finished, np.zeros_like(best_word_indices), best_word_indices)
+        values = npx.pick(scores, best_word_indices, axis=1, keepdims=True)
 
-        best_hyp_indices = mx.nd.slice_like(best_hyp_indices, best_word_indices, axes=(0,))
+        best_hyp_indices = npx.slice_like(best_hyp_indices, best_word_indices, axes=(0,))
 
         return best_hyp_indices, best_word_indices, values
 
@@ -454,7 +455,7 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
     return repeated_states
 
 
-class SortStates(mx.gluon.HybridBlock):
+class SortStates(gluon.HybridBlock):
 
     def __init__(self, state_structure):
         super().__init__()
@@ -466,10 +467,10 @@ class SortStates(mx.gluon.HybridBlock):
         for state, state_format in zip(states, self.flat_structure):
             if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
                 # Steps and source_bias have batch dimension on axis 0
-                sorted_state = mx.nd.take(state, best_hyp_indices)
+                sorted_state = np.take(state, best_hyp_indices, axis=0)
             elif state_format == C.DECODER_STATE:
                 # Decoder and encoder layer states have batch dimension on axis 1
-                sorted_state = mx.nd.take(state, best_hyp_indices, axis=1)
+                sorted_state = np.take(state, best_hyp_indices, axis=1)
             elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
                 sorted_state = state
@@ -480,23 +481,22 @@ class SortStates(mx.gluon.HybridBlock):
 
 
 def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
-                         source_words: mx.nd.NDArray,
+                         source_words: np.ndarray,
                          raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                          eos_id: int,
-                         beam_size: int) -> Tuple[mx.nd.NDArray, int]:
-    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
-    ctx = source_words.context
+                         beam_size: int) -> Tuple[np.ndarray, int, List[Optional[constrained.RawConstraintList]]]:
+    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32", copy=False))
+    ctx = source_words.ctx
     if any(raw_constraint_list):
         # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
-        constraint_ids = np.array([word_id for sent in raw_constraint_list for phr in sent for word_id in phr])
-        vocab_slice_ids = np.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)  # type: ignore
+        constraint_ids = np.array(word_id for sent in raw_constraint_list for phr in sent for word_id in phr)
+        vocab_slice_ids = onp.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)  # type: ignore
         full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
         raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                raw_constraint_list]
     # Pad to a multiple of 8.
     vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
                              mode='constant', constant_values=eos_id)
-    vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=ctx, dtype='int32')
 
     vocab_slice_ids_shape = vocab_slice_ids.shape[0]
     if vocab_slice_ids_shape < beam_size + 1:
@@ -505,12 +505,12 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
                        vocab_slice_ids_shape, beam_size)
         n = beam_size - vocab_slice_ids_shape + 1
-        vocab_slice_ids = mx.nd.concat(vocab_slice_ids, mx.nd.full((n,), val=eos_id, ctx=ctx, dtype='int32'), dim=0)
+        vocab_slice_ids = np.concatenate(vocab_slice_ids, np.full((n,), val=eos_id, ctx=ctx, dtype='int32'), axis=0)
 
-    return vocab_slice_ids, vocab_slice_ids_shape
+    return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list
 
 
-class GreedySearch(mx.gluon.Block):
+class GreedySearch(gluon.Block):
     """
     Implements greedy search, not supporting various features from the BeamSearch class
     (scoring, sampling, ensembling, lexical constraints, batch decoding).
@@ -538,17 +538,17 @@ class GreedySearch(mx.gluon.Block):
         self.work_block = GreedyTop1()
 
     def forward(self,
-                source: mx.nd.NDArray,
-                source_length: mx.nd.NDArray,
+                source: np.ndarray,
+                source_length: np.ndarray,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
                 raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                 raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
-                                                            np.ndarray,
-                                                            np.ndarray,
-                                                            np.ndarray,
-                                                            List[Optional[np.ndarray]],
-                                                            List[Optional[constrained.ConstrainedHypothesis]]]:
+                max_output_lengths: np.ndarray) -> Tuple[np.ndarray,
+                                                         np.ndarray,
+                                                         np.ndarray,
+                                                         np.ndarray,
+                                                         List[Optional[np.ndarray]],
+                                                         List[Optional[constrained.ConstrainedHypothesis]]]:
         """
         Translates a single sentence (batch_size=1) using greedy search.
 
@@ -559,7 +559,7 @@ class GreedySearch(mx.gluon.Block):
                 that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
                 that must NOT appear in each output.
-        :param max_output_lengths: NDArray of maximum output lengths per input in source.
+        :param max_output_lengths: ndarray of maximum output lengths per input in source.
                 Shape: (batch_size=1,). Dtype: int32.
         :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
@@ -569,21 +569,21 @@ class GreedySearch(mx.gluon.Block):
         assert batch_size == 1, "Greedy Search does not support batch_size != 1"
 
         # Maximum  search iterations (determined by longest input with eos)
-        max_iterations = max_output_lengths.max().asscalar()
+        max_iterations = max_output_lengths.max().item()
         logger.debug("max greedy search iterations: %d", max_iterations)
 
         # best word_indices (also act as input: (batch*beam, num_target_factors
-        best_word_index = mx.nd.full((batch_size, self.num_target_factors),
-                                     val=self.bos_id, ctx=self.context, dtype='int32')
-        outputs = []  # type: List[mx.nd.NDArray]
+        best_word_index = np.full((batch_size, self.num_target_factors),
+                                  val=self.bos_id, ctx=self.context, dtype='int32')
+        outputs = []  # type: List[np.ndarray]
 
-        vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
+        vocab_slice_ids = None  # type: Optional[np.ndarray]
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         if restrict_lexicon:
-            source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            vocab_slice_ids, _ = _get_vocab_slice_ids(restrict_lexicon, source_words,
-                                                      raw_constraint_list, self.eos_id, beam_size=1)
+            source_words = np.split(source, self.num_source_factors, axis=2)[0]
+            vocab_slice_ids, _, _ = _get_vocab_slice_ids(restrict_lexicon, source_words,
+                                                         raw_constraint_list, self.eos_id, beam_size=1)
 
         # (0) encode source sentence, returns a list
         model_states, _ = self._inference.encode_and_initialize(source, source_length)
@@ -604,7 +604,7 @@ class GreedySearch(mx.gluon.Block):
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
         # shape: (1, num_factors, length)
-        stacked_outputs = mx.nd.stack(*outputs, axis=2).asnumpy()  # type: np.ndarray
+        stacked_outputs = np.stack(outputs, axis=2)
         length = np.array([t], dtype='int32')  # shape (1,)
         hyp_indices = np.zeros((1, t + 1), dtype='int32')
         score = np.array([-1.])  # TODO: return unnormalized proper score
@@ -612,24 +612,27 @@ class GreedySearch(mx.gluon.Block):
         return hyp_indices, stacked_outputs, score, length, None, []  # type: ignore
 
 
-class GreedyTop1(mx.gluon.HybridBlock):
+class GreedyTop1(gluon.HybridBlock):
     """
     Implements picking the highest scoring next word with support for vocabulary selection and target factors.
     """
 
-    def forward(self, scores, vocab_slice_ids=None, target_factors=None):
+    def forward(self,
+                scores: np.ndarray,
+                vocab_slice_ids: Optional[np.ndarray] = None,
+                target_factors: Optional[np.ndarray] = None) -> np.ndarray:
         # shape: (batch*beam=1, 1)
         # argmin has trouble with fp16 inputs on GPUs, using top1 instead
-        best_word_index = mx.nd.topk(scores, axis=-1, k=1, ret_typ='indices', is_ascend=True, dtype='int32')
+        best_word_index = npx.topk(scores, axis=-1, k=1, ret_typ='indices', is_ascend=True, dtype='int32')
         # Map from restricted to full vocab ids if needed
         if vocab_slice_ids is not None:
-            best_word_index = mx.nd.take(vocab_slice_ids, best_word_index)
+            best_word_index = np.take(vocab_slice_ids, best_word_index, axis=0)
         if target_factors is not None:
-            best_word_index = mx.nd.concat(best_word_index, target_factors)
+            best_word_index = np.concatenate(best_word_index, target_factors, axis=1)
         return best_word_index
 
 
-class BeamSearch(mx.gluon.Block):
+class BeamSearch(gluon.Block):
     """
     Features:
     - beam search stop
@@ -681,25 +684,25 @@ class BeamSearch(mx.gluon.Block):
             eos_id=eos_id,
             scorer=scorer)
 
-        self._sample = None  # type: Optional[mx.gluon.HybridBlock]
-        self._top = None  # type: Optional[mx.gluon.HybridBlock]
+        self._sample = None  # type: Optional[gluon.HybridBlock]
+        self._top = None  # type: Optional[gluon.HybridBlock]
         if sample is not None:
             self._sample = SampleK(sample)
         else:
             self._top = TopK(self.beam_size)
 
     def forward(self,
-                source: mx.nd.NDArray,
-                source_length: mx.nd.NDArray,
+                source: np.ndarray,
+                source_length: np.ndarray,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
                 raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                 raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                max_output_lengths: mx.nd.NDArray) -> Tuple[np.ndarray,
-                                                            np.ndarray,
-                                                            np.ndarray,
-                                                            np.ndarray,
-                                                            List[Optional[np.ndarray]],
-                                                            List[Optional[constrained.ConstrainedHypothesis]]]:
+                max_output_lengths: np.ndarray) -> Tuple[np.ndarray,
+                                                         np.ndarray,
+                                                         np.ndarray,
+                                                         np.ndarray,
+                                                         List[Optional[np.ndarray]],
+                                                         List[Optional[constrained.ConstrainedHypothesis]]]:
         """
         Translates multiple sentences using beam search.
 
@@ -710,7 +713,7 @@ class BeamSearch(mx.gluon.Block):
                that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must NOT appear in each output.
-        :param max_output_lengths: NDArray of maximum output lengths per input in source.
+        :param max_output_lengths: ndarray of maximum output lengths per input in source.
                 Shape: (batch_size,). Dtype: int32.
         :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
@@ -720,62 +723,65 @@ class BeamSearch(mx.gluon.Block):
         logger.debug("beam_search batch size: %d", batch_size)
 
         # Maximum beam search iterations (determined by longest input with eos)
-        max_iterations = max_output_lengths.max().asscalar()
+        max_iterations = max_output_lengths.max().item()
         logger.debug("max beam search iterations: %d", max_iterations)
 
         sample_best_hyp_indices = None
         if self._sample is not None:
             utils.check_condition(restrict_lexicon is None,
                                   "Sampling is not available when working with a restricted lexicon.")
-            sample_best_hyp_indices = mx.nd.arange(0, batch_size * self.beam_size, dtype='int32', ctx=self.context)
+            sample_best_hyp_indices = np.arange(0, batch_size * self.beam_size, dtype='int32', ctx=self.context)
 
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
 
         # best word_indices (also act as input: (batch*beam, num_target_factors
-        best_word_indices = mx.nd.full((batch_size * self.beam_size, self.num_target_factors), val=self.bos_id, ctx=self.context,
-                                       dtype='int32')
+        best_word_indices = np.full((batch_size * self.beam_size, self.num_target_factors),
+                                    val=self.bos_id, ctx=self.context, dtype='int32')
 
         # offset for hypothesis indices in batch decoding
-        offset = mx.nd.repeat(mx.nd.arange(0, batch_size * self.beam_size, self.beam_size,
-                                           dtype='int32', ctx=self.context), self.beam_size)
+        offset = np.repeat(np.arange(0, batch_size * self.beam_size, self.beam_size,
+                                     dtype='int32', ctx=self.context), self.beam_size)
 
         # locations of each batch item when first dimension is (batch * beam)
-        batch_indices = mx.nd.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
-        first_step_mask = mx.nd.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
+        batch_indices = np.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
+        first_step_mask = np.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
         first_step_mask[batch_indices] = 0.0
 
         # Best word and hypotheses indices across beam search steps from topk operation.
-        best_hyp_indices_list = []  # type: List[mx.nd.NDArray]
-        best_word_indices_list = []  # type: List[mx.nd.NDArray]
+        best_hyp_indices_list = []  # type: List[np.ndarray]
+        best_word_indices_list = []  # type: List[np.ndarray]
 
-        lengths = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
-        finished = mx.nd.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+        lengths = np.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+        finished = np.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
-        max_output_lengths = mx.nd.repeat(max_output_lengths, self.beam_size)
+        max_output_lengths = np.repeat(max_output_lengths, self.beam_size)
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
-        scores_accumulated = mx.nd.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype=self.dtype)
+        scores_accumulated = np.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype=self.dtype)
 
         output_vocab_size = self.output_vocab_size
 
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
-        vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
+        vocab_slice_ids = None  # type: Optional[np.ndarrays]
         if restrict_lexicon:
-            source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            vocab_slice_ids, output_vocab_size = _get_vocab_slice_ids(restrict_lexicon, source_words,
-                                                                      raw_constraint_list, self.eos_id, beam_size=1)
+            # TODO: squeeze?
+            source_words = np.split(source, self.num_source_factors, axis=2)[0]
+            vocab_slice_ids, output_vocab_size, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon,
+                                                                                           source_words,
+                                                                                           raw_constraint_list,
+                                                                                           self.eos_id, beam_size=1)
 
-        pad_dist = mx.nd.full((batch_size * self.beam_size, output_vocab_size - 1),
-                              val=np.inf, ctx=self.context, dtype=self.dtype)
-        eos_dist = mx.nd.full((batch_size * self.beam_size, output_vocab_size),
-                              val=np.inf, ctx=self.context, dtype=self.dtype)
+        pad_dist = np.full((batch_size * self.beam_size, output_vocab_size - 1),
+                           val=np.inf, ctx=self.context, dtype=self.dtype)
+        eos_dist = np.full((batch_size * self.beam_size, output_vocab_size),
+                           val=np.inf, ctx=self.context, dtype=self.dtype)
         eos_dist[:, C.EOS_ID] = 0
         unk_dist = None
         if self.prevent_unk:
-            unk_dist = mx.nd.zeros_like(eos_dist)
+            unk_dist = np.zeros_like(eos_dist)
             unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
@@ -794,7 +800,7 @@ class BeamSearch(mx.gluon.Block):
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
-        inactive = mx.nd.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
+        inactive = np.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
@@ -854,7 +860,7 @@ class BeamSearch(mx.gluon.Block):
 
             # Map from restricted to full vocab ids if needed
             if restrict_lexicon:
-                best_word_indices = vocab_slice_ids.take(best_word_indices)
+                best_word_indices = np.take(vocab_slice_ids, best_word_indices, axis=0)
 
             # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
@@ -881,28 +887,29 @@ class BeamSearch(mx.gluon.Block):
         scores_accumulated_shape = scores_accumulated.shape
         folded_accumulated_scores = scores_accumulated.reshape((batch_size,
                                                                 self.beam_size * scores_accumulated_shape[-1]))
-        indices = mx.nd.argsort(folded_accumulated_scores.astype('float32'), axis=1, dtype='int32').reshape((-1,))
-        best_hyp_indices, _ = mx.nd.unravel_index(indices, scores_accumulated_shape) + offset
+        indices = np.argsort(folded_accumulated_scores.astype('float32', copy=False),
+                             axis=1, dtype='int32').reshape((-1,))
+        best_hyp_indices, _ = np.unravel_index(indices, scores_accumulated_shape) + offset
         scores_accumulated = scores_accumulated.take(best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.take(best_hyp_indices)
-        all_best_hyp_indices = mx.nd.stack(*best_hyp_indices_list, axis=1)
-        all_best_word_indices = mx.nd.stack(*best_word_indices_list, axis=2)
-        constraints = [constraints[x] for x in best_hyp_indices.asnumpy()]
+        all_best_hyp_indices = np.stack(*best_hyp_indices_list, axis=1)
+        all_best_word_indices = np.stack(*best_word_indices_list, axis=2)
+        constraints = [constraints[x] for x in best_hyp_indices]
 
-        return all_best_hyp_indices.asnumpy(), \
-               all_best_word_indices.asnumpy(), \
-               scores_accumulated.asnumpy(), \
-               lengths.asnumpy().astype('int32'), \
-               estimated_reference_lengths.asnumpy(), \
+        return all_best_hyp_indices, \
+               all_best_word_indices, \
+               scores_accumulated, \
+               lengths.asnumpy().astype('int32', copy=False), \
+               estimated_reference_lengths, \
                constraints
 
     def _should_stop(self, finished, batch_size):
         if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
             at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
-            return at_least_one_finished.sum().asscalar() == batch_size
+            return at_least_one_finished.sum().item() == batch_size
         else:
-            return finished.sum().asscalar() == batch_size * self.beam_size  # all finished
+            return finished.sum().item() == batch_size * self.beam_size  # all finished
 
 
 def get_search_algorithm(models: List[SockeyeModel],

@@ -14,7 +14,7 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-import mxnet as mx
+from mxnet import gluon, npx, np
 
 from . import config
 from . import constants as C
@@ -43,7 +43,7 @@ class TransformerConfig(config.Config):
     use_glu: bool = False
 
 
-class TransformerEncoderBlock(mx.gluon.HybridBlock):
+class TransformerEncoderBlock(gluon.HybridBlock):
     """
     A transformer encoder block consists self-attention and a feed-forward layer with pre/post process blocks
     in between.
@@ -82,7 +82,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
         if config.use_lhuc:
             self.lhuc = layers.LHUC(config.model_size)
 
-    def forward(self, data: mx.nd.NDArray, lengths: mx.nd.NDArray) -> mx.nd.NDArray:
+    def forward(self, data: np.ndarray, lengths: np.ndarray) -> np.ndarray:
         # self-attention
         data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, lengths, None)
         data = self.post_self_attention(data_self_att, data)
@@ -97,7 +97,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
         return data
 
 
-class TransformerDecoderBlock(mx.gluon.HybridBlock):
+class TransformerDecoderBlock(gluon.HybridBlock):
     """
     A transformer decoder block consists of an autoregressive attention block, encoder attention,
     and a feed-forward layer with pre/post process blocks in between.
@@ -179,12 +179,12 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         return self.autoregr_layer.get_state_shape(batch_size)
 
     def forward(self,
-                target: mx.nd.NDArray,
-                target_bias: mx.nd.NDArray,
-                source: mx.nd.NDArray,
-                source_att_lengths: mx.nd.NDArray,
-                autoregr_states: mx.nd.NDArray,
-                enc_att_kv: Optional[mx.nd.NDArray] = None) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
+                target: np.ndarray,
+                target_bias: np.ndarray,
+                source: np.ndarray,
+                source_att_lengths: np.ndarray,
+                autoregr_states: np.ndarray,
+                enc_att_kv: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
         target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
                                                                     autoregr_states,
                                                                     None,
@@ -211,7 +211,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         return target, new_autoregr_states
 
 
-class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
+class TransformerProcessBlock(gluon.HybridBlock):
     """
     Block to perform pre/post processing on layer inputs.
     The processing steps are determined by the sequence argument, which can contain one of the three operations:
@@ -229,9 +229,9 @@ class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
         self.dropout = dropout
         self.layer_norm = None
         if 'n' in sequence:
-            self.layer_norm = mx.gluon.nn.LayerNorm(axis=-1, in_channels=num_hidden, epsilon=1e-06)
+            self.layer_norm = gluon.nn.LayerNorm(axis=-1, in_channels=num_hidden, epsilon=1e-06)
 
-    def forward(self, data: mx.sym.Symbol, prev: Optional[mx.sym.Symbol]) -> mx.sym.Symbol:
+    def forward(self, data: np.ndarray, prev: Optional[np.ndarray]) -> np.ndarray:
         """
         Apply processing sequence to data with optional previous input.
 
@@ -255,14 +255,14 @@ class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
 
             elif step == "d":
                 if self.dropout > 0.0:
-                    data = mx.nd.Dropout(data, p=self.dropout)
+                    data = npx.dropout(data, p=self.dropout)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
         return data
 
 
-class TransformerFeedForward(mx.gluon.HybridBlock):
+class TransformerFeedForward(gluon.HybridBlock):
     """
     Position-wise feed-forward block with activation.
     """
@@ -284,18 +284,18 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
                                                         dtype=dtype)
         self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, dtype=dtype)
 
-    def forward(self, x):
+    def forward(self, x: np.ndarray) -> np.ndarray:
         h = self.ff1(x)
         h = self.act(h)
         if self.use_glu:
             h = h * self.linear(x)
         if self.dropout > 0.0:
-            h = mx.nd.Dropout(h, p=self.dropout)
+            h = npx.Dropout(h, p=self.dropout)
         y = self.ff2(h)
         return y
 
 
-class AutoRegressiveBias(mx.gluon.HybridBlock):
+class AutoRegressiveBias(gluon.HybridBlock):
     def __init__(self) -> None:
         super().__init__()
         self._dtype = 'float32'
@@ -304,13 +304,13 @@ class AutoRegressiveBias(mx.gluon.HybridBlock):
         self._dtype = dtype
         super().cast(dtype)
 
-    def forward(self, x):
+    def forward(self, x: np.ndarray) -> np.ndarray:
         # Shape: (length, 1)
-        length_array = mx.nd.contrib.arange_like(x, axis=1)
+        length_array = npx.arange_like(x, axis=1)
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         # Shape: (length, length)
-        bias = mx.nd.broadcast_greater(mx.nd.expand_dims(length_array, axis=0),
-                                       mx.nd.expand_dims(length_array, axis=1))
+        bias = npx.broadcast_greater(np.expand_dims(length_array, axis=0),
+                                     np.expand_dims(length_array, axis=1))
         bias = bias * -C.LARGE_VALUES[self._dtype]
-        bias = mx.nd.expand_dims(bias, axis=0)
-        return mx.nd.BlockGrad(bias)
+        bias = np.expand_dims(bias, axis=0)
+        return npx.stop_gradient(bias)

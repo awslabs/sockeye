@@ -273,17 +273,6 @@ def test_metric_value_is_better(new, old, metric, result):
     assert utils.metric_value_is_better(new, old, metric) == result
 
 
-@pytest.mark.parametrize("num_factors", [1, 2, 3])
-def test_split(num_factors):
-    batch_size = 4
-    bucket_key = 10
-    # Simulates splitting factored input
-    data = mx.nd.random.normal(shape=(batch_size, bucket_key, num_factors))
-    result = utils.split(data, num_outputs=num_factors, axis=2, squeeze_axis=True)
-    assert isinstance(result, list)
-    assert result[0].shape == (batch_size, bucket_key)
-
-
 def test_get_num_gpus():
     assert utils.get_num_gpus() >= 0
 
@@ -318,14 +307,6 @@ def test_smart_open_without_suffix():
         _touch_file(fname, compressed=False, empty=False)
         with utils.smart_open(fname) as fin:
             assert len(fin.readlines()) == 10
-
-
-@pytest.mark.parametrize("data,expected_lengths", [
-    (mx.nd.array([[1, 2, 0], [1, 0, 0], [0, 0, 0]]), mx.nd.array([2, 1, 0]))
-])
-def test_compute_lengths(data, expected_lengths):
-    lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
-    assert np.allclose(lengths.asnumpy(), expected_lengths.asnumpy())
 
 
 @pytest.mark.parametrize("line_num,line,expected_metrics", [

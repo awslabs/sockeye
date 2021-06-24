@@ -19,7 +19,7 @@ import math
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
-import mxnet as mx
+from mxnet import gluon, np
 
 from . import constants as C
 from . import utils
@@ -27,7 +27,7 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-class Loss(mx.gluon.HybridBlock):
+class Loss(gluon.HybridBlock):
     """
     Generic Loss interface.
     A loss has a name, a configuration, and stores information about the output and label it requires from the model(s),
@@ -158,6 +158,7 @@ class CrossEntropyLoss(Loss):
         :return: Cross-entropy loss (1,), and number of valid tokens for normalization.
         """
         # computes softmax over the last axis, backpropagates ce gradients. Shape: (batch, len, vocab)
+        assert False
         softmax_out = mx.nd.SoftmaxOutput(data=logits,
                                           label=labels,
                                           ignore_label=self.ignore_label,
@@ -168,14 +169,14 @@ class CrossEntropyLoss(Loss):
                                           grad_scale=self.weight,
                                           preserve_shape=True)
         # (batch, len)
-        pred = mx.nd.log(mx.nd.pick(mx.nd.BlockGrad(softmax_out), labels, axis=-1, keepdims=False))
+        pred = np.log(npx.pick(npx.stop_gradient(softmax_out), labels, axis=-1, keepdims=False))
         # (batch, len,)
         valid_mask = labels != self.ignore_label
         # (batch, len)
         pred = pred * valid_mask
         # (1,)
-        ce = -mx.nd.sum(pred)  # pylint: disable=invalid-unary-operand-type
-        return ce, mx.nd.sum(valid_mask)
+        ce = -np.sum(pred)  # pylint: disable=invalid-unary-operand-type
+        return ce, np.sum(valid_mask)
 
     def create_metric(self) -> 'LossMetric':
         """
@@ -208,10 +209,10 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
         self._num_labels = num_labels
 
     def forward(self, logits, labels):
-        pred = mx.nd.log_softmax(logits, axis=-1)
+        pred = npx.log_softmax(logits, axis=-1)
 
         # (batch, len)
-        neg_log_likelihood = -mx.nd.pick(pred,  # pylint: disable=invalid-unary-operand-type
+        neg_log_likelihood = -npx.pick(pred,  # pylint: disable=invalid-unary-operand-type
                                          labels,
                                          axis=-1, keepdims=False)
 
@@ -228,13 +229,13 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
         loss = neg_log_likelihood * valid_mask
 
         # (1,)
-        num_valid = mx.nd.sum(valid_mask)
+        num_valid = np.sum(valid_mask)
 
         # (1,)
-        ce = mx.nd.sum(loss) * self.weight
+        ce = np.sum(loss) * self.weight
 
         # we need to divide by num_valid here to backpropagate a 'valid' normalized loss value like in SoftmaxOutput.
-        return ce / num_valid, mx.nd.ones((1,))
+        return ce / num_valid, np.ones((1,))
 
     def create_metric(self) -> 'LossMetric':
         """
@@ -279,10 +280,10 @@ class PoissonLoss(Loss):
         :return: Poisson loss of length predictions of the batch, and number of samples (batch size).
         """
         # (batch_size,)
-        loss = length_predictions - labels * mx.nd.log(mx.nd.maximum(1e-10, length_predictions))
+        loss = length_predictions - labels * np.log(np.maximum(1e-10, length_predictions))
         # (1,)
-        loss = mx.nd.sum(loss * self.weight)
-        num_samples = mx.nd.sum(mx.nd.ones_like(length_predictions))
+        loss = np.sum(loss * self.weight)
+        num_samples = np.sum(np.ones_like(length_predictions))
         return loss, num_samples
 
     def create_metric(self) -> 'LossMetric':
@@ -311,10 +312,10 @@ class MSELoss(Loss):
         :return: MSE loss of length predictions of the batch.
         """
         # (batch_size,)
-        loss = (self.weight / 2) * mx.nd.square(length_predictions - labels)
+        loss = (self.weight / 2) * np.square(length_predictions - labels)
         # (1,)
-        loss = mx.nd.sum(loss)
-        num_samples = mx.nd.sum(mx.nd.ones_like(length_predictions))
+        loss = np.sum(loss)
+        num_samples = np.sum(np.ones_like(length_predictions))
         return loss, num_samples
 
     def create_metric(self) -> 'LossMetric':

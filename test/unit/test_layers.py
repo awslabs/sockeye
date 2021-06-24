@@ -12,7 +12,8 @@
 # permissions and limitations under the License.
 
 import mxnet as mx
-import numpy as np
+from mxnet import np
+import numpy as onp
 
 import sockeye.layers
 
@@ -20,27 +21,27 @@ import sockeye.layers
 def test_lhuc():
     num_hidden = 50
     batch_size = 10
-    inp = mx.nd.random_uniform(shape=(batch_size, num_hidden))
+    inp = np.random.uniform(0, 1, size=(batch_size, num_hidden))
 
     lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init='zeros')
     lhuc.initialize()
     out = lhuc(inp)
-    assert np.allclose(inp.asnumpy(), out.asnumpy())
+    assert onp.allclose(inp, out)
 
     lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mx.init.Constant(value=20.0))
     lhuc.initialize()
     out = lhuc(inp)
-    assert np.allclose(2 * inp.asnumpy(), out.asnumpy())
+    assert onp.allclose(2 * inp, out)
 
 
 def test_weight_normalization():
     expected_norm = np.array([1., 1.])
-    weight = mx.nd.array([[1., 2.],
-                          [3., 4.]])
+    weight = np.array([[1., 2.],
+                       [3., 4.]])
     weight_norm = sockeye.layers.WeightNormalization(num_hidden=2)
     weight_norm.initialize()
-    norm_weight = weight_norm(weight).asnumpy()
-    assert np.allclose(np.linalg.norm(norm_weight, axis=1), expected_norm)
+    norm_weight = weight_norm(weight)
+    assert onp.allclose(np.linalg.norm(norm_weight, axis=1), expected_norm)
 
 
 def test_positional_embeddings():
@@ -49,7 +50,7 @@ def test_positional_embeddings():
     scale_up_input = False
     scale_down_positions = False
     data_len = 5
-    data = mx.nd.zeros((2, data_len, num_embed))
+    data = np.zeros((2, data_len, num_embed))
 
     # fixed embeddings
     expected_fixed_embedding = sockeye.layers.get_positional_embeddings(data_len, num_embed)
@@ -66,10 +67,10 @@ def test_positional_embeddings():
     assert np.allclose(out[1], expected_fixed_embedding)
 
     # steps
-    steps = mx.nd.expand_dims(mx.nd.array([2, 3]), axis=1)
-    out = b(data, steps).asnumpy()
-    assert np.allclose(out[0], expected_fixed_embedding[2])
-    assert np.allclose(out[1], expected_fixed_embedding[3])
+    steps = np.expand_dims(np.array([2, 3]), axis=1)
+    out = b(data, steps)
+    assert onp.allclose(out[0], expected_fixed_embedding[2])
+    assert onp.allclose(out[1], expected_fixed_embedding[3])
 
     # learned embeddings
     b = sockeye.layers.PositionalEmbeddings(weight_type='learned',
@@ -81,33 +82,34 @@ def test_positional_embeddings():
     b.initialize()
     expected_learned_embeddings = np.ones((data_len, num_embed))
     out = b(data, None).asnumpy()
-    assert np.allclose(out[0], expected_learned_embeddings)
+    assert onp.allclose(out[0], expected_learned_embeddings)
 
 
 def test_output_layer():
     num_hidden = 32
     vocab_size = 64
-    data = mx.nd.ones((2, 10, num_hidden))
-    vocab_slice_ids = mx.nd.array([4, 7, 23])
+    data = np.ones((2, 10, num_hidden))
+    vocab_slice_ids = np.array([4, 7, 23])
 
     b = sockeye.layers.OutputLayer(num_hidden, vocab_size)
     b.initialize()
+    assert b.weight.data().shape == (vocab_size, num_hidden)
 
     output = b(data, None)
     assert output.shape == (2, 10, vocab_size)
-    reduced_output = output.take(vocab_slice_ids, axis=-1).asnumpy()
+    reduced_output = output.take(vocab_slice_ids, axis=-1)
 
-    output_restricted = b(data, vocab_slice_ids).asnumpy()
+    output_restricted = b(data, vocab_slice_ids)
     assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
 
-    assert np.allclose(output_restricted, reduced_output)
+    assert onp.allclose(output_restricted, reduced_output)
 
     b.hybridize()
     output = b(data, None)
     assert output.shape == (2, 10, vocab_size)
-    reduced_output = output.take(vocab_slice_ids, axis=-1).asnumpy()
+    reduced_output = output.take(vocab_slice_ids, axis=-1)
 
-    output_restricted = b(data, vocab_slice_ids).asnumpy()
+    output_restricted = b(data, vocab_slice_ids)
     assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
 
-    assert np.allclose(output_restricted, reduced_output)
+    assert onp.allclose(output_restricted, reduced_output)

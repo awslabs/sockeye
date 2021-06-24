@@ -20,7 +20,8 @@ import logging
 from typing import Iterable, Tuple
 
 import mxnet as mx
-import numpy as np
+from mxnet import np, npx
+import numpy as onp
 
 from . import constants as C
 from . import model
@@ -33,27 +34,25 @@ from .vocab import reverse_vocab
 logger = logging.getLogger(__name__)
 
 
-def compute_sims(inputs: mx.nd.NDArray, normalize: bool) -> mx.nd.NDArray:
+def compute_sims(inputs: np.ndarray, normalize: bool) -> np.ndarray:
     """
     Returns a matrix with pair-wise similarity scores between inputs.
     Similarity score is (normalized) Euclidean distance. 'Similarity with self' is masked
     to large negative value.
 
-    :param inputs: NDArray of inputs.
+    :param inputs: ndarray of inputs.
     :param normalize: Whether to normalize to unit-length.
-    :return: NDArray with pairwise similarities of same shape as inputs.
+    :return: ndarray with pairwise similarities of same shape as inputs.
     """
     if normalize:
         logger.info("Normalizing embeddings to unit length")
-        inputs = mx.nd.L2Normalization(inputs, mode='instance')
-    sims = mx.nd.dot(inputs, inputs, transpose_b=True)
-    sims_np = sims.asnumpy()
-    np.fill_diagonal(sims_np, -9999999.)
-    sims = mx.nd.array(sims_np)
+        inputs = inputs / np.linalg.norm(inputs, axis=-1)
+    sims = np.dot(inputs, inputs)
+    np.fill_diagonal(sims, -9999999.)
     return sims
 
 
-def nearest_k(similarity_matrix: mx.nd.NDArray,
+def nearest_k(similarity_matrix: np.ndarray,
               query_word_id: int,
               k: int,
               gamma: float = 1.0) -> Iterable[Tuple[int, float]]:
@@ -67,8 +66,8 @@ def nearest_k(similarity_matrix: mx.nd.NDArray,
     :return: List of indices and values of k nearest elements.
     """
     # pylint: disable=unbalanced-tuple-unpacking
-    values, indices = mx.nd.topk(mx.nd.softmax(similarity_matrix[query_word_id] / gamma), k=k, ret_typ='both')
-    return zip(indices.asnumpy(), values.asnumpy())
+    values, indices = npx.topk(npx.softmax(similarity_matrix[query_word_id] / gamma), k=k, ret_typ='both')
+    return zip(indices, values)
 
 
 def get_embedding_parameter_names(config: model.ModelConfig) -> Tuple[str, str]:

@@ -17,9 +17,9 @@ Decoders for sequence-to-sequence models.
 import logging
 from abc import abstractmethod
 from itertools import islice
-from typing import Dict, List, Optional, Tuple, Union, Type
+from typing import Dict, List, Optional, Union, Type, Tuple
 
-import mxnet as mx
+from mxnet import gluon, np, npx
 
 from . import constants as C
 from . import layers
@@ -33,7 +33,7 @@ def get_decoder(config: DecoderConfig, inference_only: bool = False, dtype: str 
     return Decoder.get_decoder(config, inference_only, dtype)
 
 
-class Decoder(mx.gluon.Block):
+class Decoder(gluon.Block):
     """
     Generic decoder interface.
     A decoder needs to implement code to decode a target sequence known in advance (decode_sequence),
@@ -88,13 +88,13 @@ class Decoder(mx.gluon.Block):
 
     @abstractmethod
     def init_state_from_encoder(self,
-                                encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None,
-                                target_embed: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
+                                encoder_outputs: np.ndarray,
+                                encoder_valid_length: Optional[np.ndarray] = None,
+                                target_embed: Optional[np.ndarray] = None) -> List[np.ndarray]:
         raise NotImplementedError()
 
     @abstractmethod
-    def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
+    def decode_seq(self, inputs: np.ndarray, states: List[np.ndarray]) -> np.ndarray:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -111,7 +111,7 @@ class Decoder(mx.gluon.Block):
 
 
 @Decoder.register(transformer.TransformerConfig)
-class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
+class TransformerDecoder(Decoder, gluon.HybridBlock):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
     In training, computation scores for each position of the known target sequence are computed in parallel,
@@ -121,7 +121,6 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     time-step ensures correct self-attention scores and is updated with every step.
 
     :param config: Transformer configuration.
-    :param prefix: Name prefix for symbols of this decoder.
     :param inference_only: Only use the model for inference enabling some optimizations,
                            such as disabling the auto-regressive mask.
     """
@@ -131,7 +130,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                  inference_only: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
         Decoder.__init__(self)
-        mx.gluon.HybridBlock.__init__(self)
+        gluon.HybridBlock.__init__(self)
         self.config = config
         self.inference_only = inference_only
         self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
@@ -141,7 +140,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
                                                          scale_down_positions=False)
         self.autoregressive_bias = transformer.AutoRegressiveBias()
 
-        self.layers = mx.gluon.nn.HybridSequential()
+        self.layers = gluon.nn.HybridSequential()
         for i in range(config.num_layers):
             self.layers.add(transformer.TransformerDecoderBlock(config, dtype=dtype,
                                                                 inference_only=self.inference_only))
@@ -167,9 +166,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         return structure
 
     def init_state_from_encoder(self,
-                                encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None,
-                                target_embed: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
+                                encoder_outputs: np.ndarray,
+                                encoder_valid_length: Optional[np.ndarray] = None,
+                                target_embed: Optional[np.ndarray] = None) -> List[np.ndarray]:
         """
         Returns the initial states given encoder output. States for teacher-forced training are encoder outputs
         and a valid length mask for encoder outputs.
@@ -184,9 +183,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         :return: Initial states.
         """
         if target_embed is None:  # Inference: initial step = 0. Shape: (batch_size, 1)
-            steps = mx.nd.zeros_like(encoder_valid_length).expand_dims(axis=1, inplace=True)
+            steps = np.expand_dims(np.zeros_like(encoder_valid_length), axis=1)
         else:  # Training: steps up to target length. Shape: (1, target_length)
-            steps = mx.nd.contrib.arange_like(target_embed, axis=1).expand_dims(axis=0, inplace=True)
+            steps = np.expand_dims(npx.arange_like(target_embed, axis=1), axis=0)
 
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
@@ -194,22 +193,22 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
             for layer in self.layers:
                 enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs)
-                states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
+                states.append(np.transpose(enc_att_kv, axes=(1, 0, 2)))
         else:
             # NO encoder projection caching
-            states = [steps, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
+            states = [steps, np.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
 
         _batch_size = encoder_outputs.shape[0]
-        _ctx = encoder_outputs.context
+        _ctx = encoder_outputs.ctx
         _dtype = encoder_outputs.dtype
-        dummy_autoregr_states = [mx.nd.zeros(layer.get_states_shape(_batch_size), ctx=_ctx, dtype=_dtype)
+        dummy_autoregr_states = [np.zeros(layer.get_states_shape(_batch_size), ctx=_ctx, dtype=_dtype)
                                  for layer in self.layers
                                  for _ in range(layer.num_state_tensors)]
 
         states += dummy_autoregr_states
         return states
 
-    def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
+    def decode_seq(self, inputs: np.ndarray, states: List[np.ndarray]) -> np.ndarray:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -221,7 +220,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         outputs, _ = self.forward(inputs, states)
         return outputs
 
-    def forward(self, step_input, states):
+    def forward(self, step_input: np.ndarray, states: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         mask = None
         if self.inference_only:
             steps, source_valid_length, *other = states
@@ -246,10 +245,10 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
         # (length, batch_size, model_size)
-        target = mx.nd.transpose(target, axes=(1, 0, 2))
+        target = np.transpose(target, axes=(1, 0, 2))
 
         if self.config.dropout_prepost > 0.0:
-            target = mx.nd.Dropout(data=target, p=self.config.dropout_prepost)
+            target = npx.dropout(data=target, p=self.config.dropout_prepost)
 
         new_autoregr_states = []
         for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
@@ -263,7 +262,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             new_autoregr_states += [*new_layer_autoregr_state]
 
         target = self.final_process(target, None)
-        target = mx.nd.transpose(target, axes=(1, 0, 2))
+        target = np.transpose(target, axes=(1, 0, 2))
 
         # Inference: increment steps by 1 (discarded in training)
         steps = steps + 1

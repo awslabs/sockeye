@@ -25,6 +25,7 @@ import logging
 from typing import Dict, Iterable, List
 
 import mxnet as mx
+from mxnet import np, npx
 
 from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
@@ -34,17 +35,17 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
+def average(param_paths: Iterable[str]) -> Dict[str, np.ndarray]:
     """
     Averages parameters from a list of .params file paths.
 
     :param param_paths: List of paths to parameter files.
     :return: Averaged parameter dictionary.
     """
-    all_params = []  # type: List[Dict[str, mx.nd.NDArray]]
+    all_params = []  # type: List[Dict[str, np.ndarray]]
     for path in param_paths:
         logger.info("Loading parameters from '%s'", path)
-        params = mx.nd.load(path)
+        params = npx.load(path)
         all_params.append(params)
 
     logger.info("%d models loaded", len(all_params))
@@ -159,7 +160,7 @@ def average_parameters(args: argparse.Namespace):
                                        metric=args.metric)
         avg_params = average(param_paths)
 
-    mx.nd.save(args.output, avg_params)
+    npx.save(args.output, avg_params)
     logger.info("Averaged parameters written to '%s'", args.output)
 
 

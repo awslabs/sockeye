@@ -21,7 +21,8 @@ from operator import itemgetter
 from typing import Dict, Generator, Tuple, Optional
 
 import mxnet as mx
-import numpy as np
+from mxnet import np, npx
+import numpy as onp
 
 from . import arguments
 from . import constants as C
@@ -87,12 +88,12 @@ def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str
 
 class LexiconInitializer(mx.initializer.Initializer):
     """
-    Given a lexicon NDArray, initialize the variable named C.LEXICON_NAME with it.
+    Given a lexicon ndarray, initialize the variable named C.LEXICON_NAME with it.
 
     :param lexicon: Lexicon array.
     """
 
-    def __init__(self, lexicon: mx.nd.NDArray) -> None:
+    def __init__(self, lexicon: np.ndarray) -> None:
         super().__init__()
         self.lexicon = lexicon
 
@@ -118,7 +119,7 @@ class TopKLexicon:
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         # Shape: (vocab_source_size, k), k determined at create() or load()
-        self.lex = None  # type: np.ndarray
+        self.lex = None  # type: Optional[np.ndarray]
         # Always allow special vocab symbols in target vocab
         self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32')
 
@@ -156,8 +157,7 @@ class TopKLexicon:
 
         :param path: Path to Numpy array output file.
         """
-        with open(path, 'wb') as out:
-            np.save(out, self.lex)
+        npx.save(path, self.lex)
         logger.info("Saved top-k lexicon to \"%s\"", path)
 
     def load(self, path: str, k: Optional[int] = None):
@@ -168,8 +168,7 @@ class TopKLexicon:
         :param k: Optionally load less items than stored in path.
         """
         load_time_start = time.time()
-        with open(path, 'rb') as inp:
-            _lex = np.load(inp)
+        _lex = npx.load(path)
         loaded_k = _lex.shape[1]
         if k is not None:
             top_k = min(k, loaded_k)
@@ -191,9 +190,8 @@ class TopKLexicon:
         :param src_ids: Sequence(s) of source ids (any shape).
         :return: Possible target ids for source (unique sorted, always includes special symbols).
         """
-        # TODO: When MXNet adds support for set operations, we can migrate to avoid conversions to/from NumPy.
-        unique_src_ids = np.lib.arraysetops.unique(src_ids)  # type: ignore
-        trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))  # type: ignore
+        unique_src_ids = onp.lib.arraysetops.unique(src_ids)  # type: ignore
+        trg_ids = onp.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))  # type: ignore
         return trg_ids
 
 

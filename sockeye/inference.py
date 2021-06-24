@@ -21,8 +21,7 @@ import logging
 from functools import partial
 from typing import Any, Callable, Dict, Generator, List, Optional, NamedTuple, Set, Tuple, Union
 
-import mxnet as mx
-import numpy as np
+from mxnet import np, context
 
 from . import constants as C
 from . import data_io
@@ -687,7 +686,7 @@ class Translator:
     """
 
     def __init__(self,
-                 context: mx.context.Context,
+                 context: context.Context,
                  ensemble_mode: str,
                  scorer: CandidateScorer,
                  batch_size: int,
@@ -904,12 +903,12 @@ class Translator:
         return results
 
     def _get_inference_input(self,
-                             trans_inputs: List[TranslatorInput]) -> Tuple[mx.nd.NDArray,
+                             trans_inputs: List[TranslatorInput]) -> Tuple[np.ndarray,
                                                                            int,
                                                                            Optional[lexicon.TopKLexicon],
                                                                            List[Optional[constrained.RawConstraintList]],
                                                                            List[Optional[constrained.RawConstraintList]],
-                                                                           mx.nd.NDArray]:
+                                                                           np.ndarray]:
         """
         Assembles the numerical data for the batch. This comprises an NDArray for the source sentences,
         the bucket key (padded source length), and a list of raw constraint lists, one for each sentence in the batch,
@@ -917,16 +916,16 @@ class Translator:
         Each raw constraint list contains phrases in the form of lists of integers in the target language vocabulary.
 
         :param trans_inputs: List of TranslatorInputs.
-        :return NDArray of source ids (shape=(batch_size, bucket_key, num_factors)),
-                NDArray of valid source lengths, lexicon for vocabulary restriction, list of raw constraint
-                lists, and list of phrases to avoid, and an NDArray of maximum output
+        :return ndarray of source ids (shape=(batch_size, bucket_key, num_factors)),
+                ndarray of valid source lengths, lexicon for vocabulary restriction, list of raw constraint
+                lists, and list of phrases to avoid, and an ndarray of maximum output
                 lengths.
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
-        source_length = mx.nd.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
+        source_length = np.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
         max_length = max(len(inp) for inp in trans_inputs)
-        source_npy = np.zeros((batch_size, max_length, self.num_source_factors), dtype=np.float32)
+        source = np.zeros((batch_size, max_length, self.num_source_factors), dtype=np.float32)
 
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
@@ -936,7 +935,7 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
             max_output_lengths.append(self._get_max_output_length(num_tokens))
-            source_npy[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
+            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
@@ -946,7 +945,7 @@ class Translator:
             for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                 # fill in as many factors as there are tokens
 
-                source_npy[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
             # Check if vocabulary selection/restriction is enabled:
             # - First, see if the translator input provides a lexicon (used for multiple lexicons)
@@ -979,10 +978,10 @@ class Translator:
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        source = mx.nd.array(source_npy, ctx=self.context)
+        source = source.as_in_ctx(self.context)
 
         return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, \
-                mx.nd.array(max_output_lengths, ctx=self.context, dtype='int32')
+                np.array(max_output_lengths, ctx=self.context, dtype='int32')
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -1061,12 +1060,12 @@ class Translator:
                                 nbest_factor_tokens=nbest_factor_tokens)
 
     def _translate_nd(self,
-                      source: mx.nd.NDArray,
-                      source_length: mx.nd.NDArray,
+                      source: np.ndarray,
+                      source_length: np.ndarray,
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
                       raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                      max_output_lengths: mx.nd.NDArray) -> List[Translation]:
+                      max_output_lengths: np.ndarray) -> List[Translation]:
         """
         Translates source of source_length and returns list of Translations.
 
@@ -1089,7 +1088,7 @@ class Translator:
                                best_word_indices: np.ndarray,
                                seq_scores: np.ndarray,
                                lengths: np.ndarray,
-                               estimated_reference_lengths: Optional[mx.nd.NDArray] = None,
+                               estimated_reference_lengths: Optional[np.ndarray] = None,
                                constraints: List[Optional[constrained.ConstrainedHypothesis]] = [],
                                beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """
@@ -1118,10 +1117,10 @@ class Translator:
             # only check for constraints for 1-best translation for each sequence in batch
             if n == 0 and any(constraints):
                 # For constrained decoding, select from items that have met all constraints (might not be finished)
-                unmet = np.array([c.num_needed() if c is not None else 0 for c in constraints])
+                unmet = np.array(c.num_needed() if c is not None else 0 for c in constraints)
                 filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
                 filtered = filtered.reshape((batch_size, self.beam_size))
-                best_ids += np.argmin(filtered, axis=1).astype('int32')
+                best_ids += np.argmin(filtered, axis=1).astype('int32', copy=False)
 
             # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)

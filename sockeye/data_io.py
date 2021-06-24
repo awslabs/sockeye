@@ -29,7 +29,8 @@ from itertools import chain
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple, Set
 
 import mxnet as mx
-import numpy as np
+from mxnet import np, npx, gluon
+import numpy as onp
 
 from . import config
 from . import constants as C
@@ -567,10 +568,6 @@ class RawParallelDatasetLoader:
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
 
             bucket_sample_index[buck_index] += 1
-
-        for i in range(len(data_source)):
-            data_source[i] = mx.nd.from_numpy(data_source[i], zero_copy=True)
-            data_target[i] = mx.nd.from_numpy(data_target[i], zero_copy=True)
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
@@ -1415,8 +1412,8 @@ class ParallelDataSet:
     """
 
     def __init__(self,
-                 source: List[mx.nd.array],
-                 target: List[mx.nd.array]) -> None:
+                 source: List[np.ndarray],
+                 target: List[np.ndarray]) -> None:
         check_condition(len(source) == len(target),
                         "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
         self.source = source
@@ -1432,7 +1429,9 @@ class ParallelDataSet:
         """
         Saves the dataset to a binary .npy file.
         """
-        mx.nd.save(fname, self.source + self.target)
+        s = {'s{:0>5d}'.format(i): a for i, a in enumerate(self.source)}
+        t = {'t{:0>5d}'.format(i): a for i, a in enumerate(self.target)}
+        npx.savez(fname, **s, **t)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1441,10 +1440,11 @@ class ParallelDataSet:
         is sliced and each worker loads a different slice based on its rank.
         Specifically, each of N workers loads 1/N of each bucket.
         """
-        data = mx.nd.load(fname)
-        n = len(data) // 2
-        source = data[:n]
-        target = data[n:2 * n]
+        data = npx.load(fname)
+        source_keys = sorted(k for k in data.keys() if k.startswith('s'))
+        target_keys = sorted(k for k in data.keys() if k.startswith('t'))
+        source = [data[k] for k in source_keys]
+        target = [data[k] for k in target_keys]
         if horovod_mpi.using_horovod() and horovod_mpi.hvd.size() > 1:
             split_index = horovod_mpi.hvd.rank()
             total_splits = horovod_mpi.hvd.size()
@@ -1462,8 +1462,8 @@ class ParallelDataSet:
                     if num_copies > 1:
                         logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
                                     num_sentences, num_copies, total_splits)
-                        source[k] = mx.nd.repeat(source[k], repeats=num_copies, axis=0)
-                        target[k] = mx.nd.repeat(target[k], repeats=num_copies, axis=0)
+                        source[k] = np.repeat(source[k], repeats=num_copies, axis=0)
+                        target[k] = np.repeat(target[k], repeats=num_copies, axis=0)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
@@ -1489,7 +1489,7 @@ class ParallelDataSet:
         source = list(self.source)
         target = list(self.target)
 
-        rs = np.random.RandomState(seed)
+        rs = onp.random.RandomState(seed)
 
         for bucket_idx in range(len(self)):
             bucket_batch_size = bucket_batch_sizes[bucket_idx].batch_size
@@ -1514,14 +1514,13 @@ class ParallelDataSet:
             # Fill up the last batch by randomly sampling from the extant items.
             rest = target_num_samples - num_samples
             if rest > 0:
-                desired_indices_np = rs.randint(num_samples, size=rest)
-                desired_indices = mx.nd.from_numpy(desired_indices_np, zero_copy=True)
-                source[bucket_idx] = mx.nd.concat(bucket_source, bucket_source.take(desired_indices), dim=0)
-                target[bucket_idx] = mx.nd.concat(bucket_target, bucket_target.take(desired_indices), dim=0)
+                desired_indices = np.array(rs.randint(num_samples, size=rest))
+                source[bucket_idx] = np.concatenate((bucket_source, np.take(bucket_source, desired_indices, axis=0)), axis=0)
+                target[bucket_idx] = np.concatenate((bucket_target, np.take(bucket_target, desired_indices, axis=0)), axis=0)
 
         return ParallelDataSet(source, target)
 
-    def permute(self, permutations: List[mx.nd.NDArray]) -> 'ParallelDataSet':
+    def permute(self, permutations: List[np.ndarray]) -> 'ParallelDataSet':
         """
         Permutes the data within each bucket. The permutation is received as an argument,
         allowing the data to be unpermuted (i.e., restored) later on.
@@ -1530,17 +1529,14 @@ class ParallelDataSet:
         :return: A new, permuted ParallelDataSet.
         """
         assert len(self) == len(permutations)
-        source = []
-        target = []
+        source = []  # type: List[np.ndarray]
+        target = []  # type: List[np.ndarray]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
-            if num_samples:  # not empty bucket
+            if num_samples:  # not an empty bucket
                 permutation = permutations[buck_idx]
-                if isinstance(self.source[buck_idx], np.ndarray):
-                    source.append(self.source[buck_idx].take(np.int64(permutation.asnumpy())))
-                else:
-                    source.append(self.source[buck_idx].take(permutation))
-                target.append(self.target[buck_idx].take(permutation))
+                source.append(np.take(self.source[buck_idx], permutation, axis=0))
+                target.append(np.take(self.target[buck_idx], permutation, axis=0))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
@@ -1548,7 +1544,7 @@ class ParallelDataSet:
         return ParallelDataSet(source, target)
 
 
-def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.NDArray], List[mx.nd.NDArray]]:
+def get_permutations(bucket_counts: List[int]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
     """
     Returns the indices of a random permutation for each bucket and the corresponding inverse permutations that can
     restore the original order of the data if applied to the permuted data.
@@ -1556,18 +1552,15 @@ def get_permutations(bucket_counts: List[int]) -> Tuple[List[mx.nd.NDArray], Lis
     :param bucket_counts: The number of elements per bucket.
     :return: For each bucket a permutation and inverse permutation is returned.
     """
-    data_permutations = []  # type: List[mx.nd.NDArray]
-    inverse_data_permutations = []  # type: List[mx.nd.NDArray]
+    data_permutations = []  # type: List[np.ndarray]
+    inverse_data_permutations = []  # type: List[np.ndarray]
     for num_samples in bucket_counts:
         if num_samples == 0:
             num_samples = 1
         # new random order:
-        data_permutation = np.random.permutation(num_samples)
+        data_permutation = np.array(onp.random.permutation(num_samples))
         inverse_data_permutation = np.empty(num_samples, np.int32)
         inverse_data_permutation[data_permutation] = np.arange(num_samples)
-        inverse_data_permutation = mx.nd.from_numpy(inverse_data_permutation, zero_copy=True)
-        data_permutation = mx.nd.from_numpy(data_permutation, zero_copy=True)
-
         data_permutations.append(data_permutation)
         inverse_data_permutations.append(inverse_data_permutation)
     return data_permutations, inverse_data_permutations
@@ -1875,9 +1868,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.curr_batch_index = 0
 
         # Produces a permutation of the batches within each bucket, along with the permutation that inverts it.
-        self.inverse_data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
+        self.inverse_data_permutations = [np.arange(0, max(1, self.data.source[i].shape[0]))
                                           for i in range(len(self.data))]
-        self.data_permutations = [mx.nd.arange(0, max(1, self.data.source[i].shape[0]))
+        self.data_permutations = [np.arange(0, max(1, self.data.source[i].shape[0]))
                                   for i in range(len(self.data))]
 
         self.reset()
@@ -1935,8 +1928,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "wb") as fp:
             pickle.dump(self.batch_indices, fp)
             pickle.dump(self.curr_batch_index, fp)
-            np.save(fp, [a.asnumpy() for a in self.inverse_data_permutations], allow_pickle=True)
-            np.save(fp, [a.asnumpy() for a in self.data_permutations], allow_pickle=True)
+            onp.save(fp, [a for a in self.inverse_data_permutations], allow_pickle=True)
+            onp.save(fp, [a for a in self.data_permutations], allow_pickle=True)
 
     def load_state(self, fname: str):
         """
@@ -1951,8 +1944,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "rb") as fp:
             self.batch_indices = pickle.load(fp)
             self.curr_batch_index = pickle.load(fp)
-            inverse_data_permutations = np.load(fp, allow_pickle=True)
-            data_permutations = np.load(fp, allow_pickle=True)
+            inverse_data_permutations = onp.load(fp, allow_pickle=True)
+            data_permutations = onp.load(fp, allow_pickle=True)
 
         # Right after loading the iterator state, next() should be called
         self.curr_batch_index -= 1
@@ -1962,11 +1955,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.data_permutations = []
 
         for bucket in range(len(self.data)):
-            inverse_permutation = mx.nd.from_numpy(inverse_data_permutations[bucket], zero_copy=True)
-            self.inverse_data_permutations.append(inverse_permutation)
-
-            permutation = mx.nd.from_numpy(data_permutations[bucket], zero_copy=True)
-            self.data_permutations.append(permutation)
+            self.inverse_data_permutations.append(inverse_data_permutations[bucket])
+            self.data_permutations.append(data_permutations[bucket])
 
         self.data = self.data.permute(self.data_permutations)
 
@@ -1992,25 +1982,25 @@ class Batch:
         labels = {name: mx.gluon.utils.split_and_load(label, ctx, batch_axis=0) for name, label in self.labels.items()}
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
 
-    def shards(self) -> Iterable[Tuple[Tuple, Dict[str, mx.nd.NDArray]]]:
+    def shards(self) -> Iterable[Tuple[Tuple, Dict[str, np.ndarray]]]:
         assert isinstance(self.source, list), "Must call split_and_load() first"
         for i, inputs in enumerate(zip(self.source, self.source_length, self.target, self.target_length)):
             # model inputs, labels
             yield inputs, {name: label[i] for name, label in self.labels.items()}
 
 
-def create_target_and_shifted_label_sequences(target_and_label: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
+def create_target_and_shifted_label_sequences(target_and_label: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     Returns the target and label sequence from a joint array of varying-length sequences including both <bos> and <eos>.
     Both ndarrays returned have input size of second dimension - 1.
     """
     target = target_and_label[:, :-1, :]  # skip last column (for longest-possible sequence, this already removes <eos>)
-    target = mx.nd.where(target == C.EOS_ID, mx.nd.zeros_like(target), target)  # replace other <eos>'s with <pad>
+    target = np.where(target == C.EOS_ID, np.zeros_like(target), target)  # replace other <eos>'s with <pad>
     label = target_and_label[:, 1:, :]  # label skips <bos>
     return target, label
 
 
-def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArray, label: mx.nd.NDArray) -> Batch:
+def create_batch_from_parallel_sample(source: np.ndarray, target: np.ndarray, label: np.ndarray) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
@@ -2018,10 +2008,10 @@ def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArr
     :param target: Target array. Shape: (batch, target_length, num_target_factors).
     :param label: Time-shifted label array. Shape: (batch, target_length, num_target_factors).
     """
-    source_words = mx.nd.slice(source, begin=(None, None, 0), end=(None, None, 1)).squeeze(axis=2, inplace=True)
-    source_length = mx.nd.sum(source_words != C.PAD_ID, axis=1)
-    target_words = mx.nd.squeeze(mx.nd.slice(target, begin=(None, None, 0), end=(None, None, 1)), axis=2)
-    target_length = mx.nd.sum(target_words != C.PAD_ID, axis=1)
+    source_words = npx.slice(source, begin=(None, None, 0), end=(None, None, 1)).squeeze(axis=2)
+    source_length = np.sum(source_words != C.PAD_ID, axis=1)
+    target_words = np.squeeze(npx.slice(target, begin=(None, None, 0), end=(None, None, 1)), axis=2)
+    target_length = np.sum(target_words != C.PAD_ID, axis=1)
     length_ratio = source_length / target_length
 
     source_shape = source.shape
@@ -2031,9 +2021,9 @@ def create_batch_from_parallel_sample(source: mx.nd.NDArray, target: mx.nd.NDArr
     labels = {C.LENRATIO_LABEL_NAME: length_ratio}
 
     if label.shape[2] == 1:
-        labels[C.TARGET_LABEL_NAME] = mx.nd.squeeze(label, axis=2)
+        labels[C.TARGET_LABEL_NAME] = np.squeeze(label, axis=2)
     else:
-        primary_label, *factor_labels = mx.nd.split(label, num_outputs=label.shape[2], axis=2, squeeze_axis=True)
+        primary_label, *factor_labels = np.split(label, label.shape[2], axis=2)
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 

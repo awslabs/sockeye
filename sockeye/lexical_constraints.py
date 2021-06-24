@@ -20,8 +20,7 @@ from .data_io import read_content, tokens2ids
 from .vocab import Vocab
 from . import constants as C
 
-import mxnet as mx
-import numpy as np
+from mxnet import np
 
 logger = logging.getLogger(__name__)
 
@@ -194,26 +193,25 @@ class AvoidBatch:
             for raw_phrases in avoid_list:
                 self.local_avoid_states += [AvoidState(AvoidTrie(raw_phrases))] * beam_size
 
-    def reorder(self, indices: mx.nd.NDArray) -> None:
+    def reorder(self, indices: np.ndarray) -> None:
         """
         Reorders the avoid list according to the selected row indices.
         This can produce duplicates, but this is fixed if state changes occur in consume().
 
-        :param indices: An mx.nd.NDArray containing indices of hypotheses to select.
+        :param indices: An np.ndarray containing indices of hypotheses to select.
         """
         if self.global_avoid_states:
-            self.global_avoid_states = [self.global_avoid_states[x] for x in indices.asnumpy()]
+            self.global_avoid_states = [self.global_avoid_states[x] for x in indices]
 
         if self.local_avoid_states:
-            self.local_avoid_states = [self.local_avoid_states[x] for x in indices.asnumpy()]
+            self.local_avoid_states = [self.local_avoid_states[x] for x in indices]
 
-    def consume(self, word_ids: mx.nd.NDArray) -> None:
+    def consume(self, word_ids: np.ndarray) -> None:
         """
         Consumes a word for each trie, updating respective states.
 
         :param word_ids: The set of word IDs.
         """
-        word_ids = word_ids.asnumpy().tolist()
         for i, word_id in enumerate(word_ids):
             if self.global_avoid_states:
                 self.global_avoid_states[i] = self.global_avoid_states[i].consume(word_id)
@@ -503,12 +501,12 @@ class ConstrainedCandidate:
 def topk(timestep: int,
          batch_size: int,
          beam_size: int,
-         inactive: mx.nd.NDArray,
-         scores: mx.nd.NDArray,
+         inactive: np.ndarray,
+         scores: np.ndarray,
          hypotheses: List[ConstrainedHypothesis],
-         best_ids: mx.nd.NDArray,
-         best_word_ids: mx.nd.NDArray,
-         seq_scores: mx.nd.NDArray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[ConstrainedHypothesis], mx.nd.NDArray]:
+         best_ids: np.ndarray,
+         best_word_ids: np.ndarray,
+         seq_scores: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[ConstrainedHypothesis], np.ndarray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
@@ -531,8 +529,7 @@ def topk(timestep: int,
         rows = slice(sentno * beam_size, sentno * beam_size + beam_size)
         if hypotheses[rows.start] is not None and hypotheses[rows.start].size() > 0:
             best_ids[rows], best_word_ids[rows], seq_scores[rows], \
-                hypotheses[rows], inactive[rows] = _sequential_topk(timestep,
-                                                                    beam_size,
+                hypotheses[rows], inactive[rows] = _sequential_topk(beam_size,
                                                                     inactive[rows],
                                                                     scores[rows],
                                                                     hypotheses[rows],
@@ -550,21 +547,19 @@ def topk(timestep: int,
     return best_ids, best_word_ids, seq_scores, hypotheses, inactive
 
 
-def _sequential_topk(timestep: int,
-                     beam_size: int,
-                     inactive: mx.nd.NDArray,
-                     scores: mx.nd.NDArray,
+def _sequential_topk(beam_size: int,
+                     inactive: np.ndarray,
+                     scores: np.ndarray,
                      hypotheses: List[ConstrainedHypothesis],
-                     best_ids: mx.nd.NDArray,
-                     best_word_ids: mx.nd.NDArray,
-                     sequence_scores: mx.nd.NDArray) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
-                                                              List[ConstrainedHypothesis], mx.nd.NDArray]:
+                     best_ids: np.ndarray,
+                     best_word_ids: np.ndarray,
+                     sequence_scores: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray,
+                                                           List[ConstrainedHypothesis], np.ndarray]:
     """
     Builds a new topk list such that the beam contains hypotheses having completed different numbers of constraints.
     These items are built from three different types: (1) the best items across the whole
     scores matrix, (2) the set of words that must follow existing constraints, and (3) k-best items from each row.
 
-    :param timestep: The current decoder timestep.
     :param beam_size: The length of the beam for each segment.
     :param inactive: Array listing inactive rows (shape: (beam_size,)).
     :param scores: The scores array (shape: (beam_size, target_vocab_size)).
@@ -581,17 +576,17 @@ def _sequential_topk(timestep: int,
     candidates = set()
     # (1) Add all of the top-k items (which were passed) in as long as they pass the constraints
     for row, col, seq_score in zip(best_ids, best_word_ids, sequence_scores):
-        row = int(row.asscalar())
-        col = int(col.asscalar())
+        row = int(row.item())
+        col = int(col.item())
         if hypotheses[row] is not None and hypotheses[row].is_valid(col):
-            seq_score = float(seq_score.asscalar())
+            seq_score = float(seq_score.item())
             new_item = hypotheses[row].advance(col)
             cand = ConstrainedCandidate(row, col, seq_score, new_item)
             candidates.add(cand)
 
     # For each hypothesis, we add (2) all the constraints that could follow it and
     # (3) the best item (constrained or not) in that row
-    best_next = mx.nd.argmin(scores, axis=1)
+    best_next = np.argmin(scores, axis=1)
     for row in range(beam_size):
         if inactive[row]:
             continue
@@ -602,14 +597,14 @@ def _sequential_topk(timestep: int,
         nextones = hyp.allowed()
 
         # (3) add the single-best item after this (if it's valid)
-        col = int(best_next[row].asscalar())
+        col = int(best_next[row].item())
         if hyp.is_valid(col):
             nextones.add(col)
 
         # Now, create new candidates for each of these items
         for col in nextones:
             new_item = hyp.advance(col)
-            score = scores[row, col].asscalar()
+            score = scores[row, col].item()
             cand = ConstrainedCandidate(row, col, score, new_item)
             candidates.add(cand)
 
