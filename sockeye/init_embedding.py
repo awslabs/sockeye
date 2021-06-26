@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 def init_weight(weight: np.ndarray,
                 vocab_in: Dict[str, int],
                 vocab_out: Dict[str, int],
-                initializer: mx.initializer.Initializer=mx.init.Constant(value=0.0)) -> mx.nd.NDArray:
+                initializer: mx.initializer.Initializer=mx.init.Constant(value=0.0)) -> np.array:
     """
     Initialize vocabulary-sized weight by existing values given input and output vocabularies.
 
@@ -97,7 +97,7 @@ def init_weight(weight: np.ndarray,
 
 def load_weight(weight_file: str,
                 weight_name: str,
-                weight_file_cache: Dict[str, Dict]) -> mx.nd.NDArray:
+                weight_file_cache: Dict[str, Dict]) -> np.array:
     """
     Load wight from a file or the cache if it was loaded before.
 
@@ -146,7 +146,7 @@ def init_embeddings(args: argparse.Namespace):
                      "'output vocabularies' and 'Sockeye parameter names' should be provided.")
         sys.exit(1)
 
-    params = {}  # type: Dict[str, mx.nd.NDArray]
+    params = {}  # type: Dict[str, np.array]
     weight_file_cache = {}  # type: Dict[str, Dict[str, np.ndarray]]
     for weight_file, vocab_in_file, vocab_out_file, name in zip(args.weight_files, args.vocabularies_in,
                                                                 args.vocabularies_out, args.names):

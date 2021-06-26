@@ -30,9 +30,9 @@ from functools import reduce
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 
 import mxnet as mx
-from mxnet import np
 import numpy as onp
 import portalocker
+from mxnet import np, npx
 
 from . import __version__, constants as C
 from . import horovod_mpi

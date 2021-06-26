@@ -45,7 +45,7 @@ def _extract(param_names: List[str],
     for name in param_names:
         if name in params:
             logger.info("\tFound '%s': shape=%s", name, str(params[name].shape))
-            ext_params[name] = params[name].asnumpy()
+            ext_params[name] = params[name]
             remaining_param_names.remove(name)
     return remaining_param_names
 

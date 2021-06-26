@@ -13,7 +13,7 @@
 
 from unittest.mock import Mock
 
-import mxnet as mx
+from mxnet import np
 import pytest
 
 from sockeye.data_io import get_tokens, strids2ids
@@ -279,7 +279,7 @@ def test_avoid_list_batch(global_raw_phrase_list, raw_phrase_list, batch_size, b
     avoid_batch = AvoidBatch(batch_size, beam_size, avoid_list=raw_phrase_list, global_avoid_trie=global_avoid_trie)
 
     for word_id in strids2ids(get_tokens(prefix)):
-        avoid_batch.consume(mx.nd.array([word_id] * (batch_size * beam_size)))
+        avoid_batch.consume(np.array([word_id] * (batch_size * beam_size)))
 
     avoid = [(x, y) for x, y in zip(*avoid_batch.avoid())]
     assert set(avoid) == set(expected_avoid)

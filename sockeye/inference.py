@@ -868,7 +868,7 @@ class Translator:
                 batch = batch + [batch[0]] * rest
 
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
-            batch_translations = self._translate_nd(*self._get_inference_input(translator_inputs))
+            batch_translations = self._translate_np(*self._get_inference_input(translator_inputs))
 
             # truncate to remove filler translations
             if fill_up_batches and rest > 0:
@@ -923,9 +923,10 @@ class Translator:
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
-        source_length = np.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
+
         max_length = max(len(inp) for inp in trans_inputs)
-        source = np.zeros((batch_size, max_length, self.num_source_factors), dtype=np.float32)
+        # assembling source ids on cpu array (faster) and copy to Translator.context (potentially GPU) in one go below.
+        source = np.zeros((batch_size, max_length, self.num_source_factors), dtype=np.float32, ctx=context.cpu())
 
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
@@ -979,9 +980,9 @@ class Translator:
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
         source = source.as_in_ctx(self.context)
-
-        return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, \
-                np.array(max_output_lengths, ctx=self.context, dtype='int32')
+        source_length = np.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
+        max_output_lengths = np.array(max_output_lengths, ctx=self.context, dtype='int32')
+        return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -1059,7 +1060,7 @@ class Translator:
                                 nbest_factor_translations=nbest_factor_translations,
                                 nbest_factor_tokens=nbest_factor_tokens)
 
-    def _translate_nd(self,
+    def _translate_np(self,
                       source: np.ndarray,
                       source_length: np.ndarray,
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
@@ -1108,7 +1109,7 @@ class Translator:
         nbest_translations = []  # type: List[List[Translation]]
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
         reference_lengths = estimated_reference_lengths if estimated_reference_lengths is not None \
-                                                        else np.full(self.batch_size * self.beam_size, None)
+                                                        else np.zeros((self.batch_size * self.beam_size, 1))
         for n in range(0, self.nbest_size):
 
             # Initialize the best_ids to the first item in each batch, plus current nbest index
@@ -1117,7 +1118,7 @@ class Translator:
             # only check for constraints for 1-best translation for each sequence in batch
             if n == 0 and any(constraints):
                 # For constrained decoding, select from items that have met all constraints (might not be finished)
-                unmet = np.array(c.num_needed() if c is not None else 0 for c in constraints)
+                unmet = np.array([c.num_needed() if c is not None else 0 for c in constraints])
                 filtered = np.where(unmet == 0, seq_scores.flatten(), np.inf)
                 filtered = filtered.reshape((batch_size, self.beam_size))
                 best_ids += np.argmin(filtered, axis=1).astype('int32', copy=False)
@@ -1204,7 +1205,7 @@ def _unshift_target_factors(sequence: np.ndarray, fill_last_with: int = C.EOS_ID
         return sequence.tolist()
     num_factors_to_shift = sequence.shape[1] - 1
     _fillvalue = num_factors_to_shift * [fill_last_with]
-    _words = sequence[:, 0]  # tokens from t==0 onwards
-    _next_factors = sequence[1:, 1:]  # factors from t==1 onwards
+    _words = sequence[:, 0].tolist()  # tokens from t==0 onwards
+    _next_factors = sequence[1:, 1:].tolist()  # factors from t==1 onwards
     sequence = [(w, *fs) for w, fs in itertools.zip_longest(_words, _next_factors, fillvalue=_fillvalue)]  # type: ignore
     return sequence

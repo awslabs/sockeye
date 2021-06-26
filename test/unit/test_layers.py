@@ -62,7 +62,7 @@ def test_positional_embeddings():
                                             weight_init=None)
     b.initialize()
     # no steps
-    out = b(data, None).asnumpy()
+    out = b(data, None)
     assert np.allclose(out[0], expected_fixed_embedding)
     assert np.allclose(out[1], expected_fixed_embedding)
 
@@ -81,7 +81,7 @@ def test_positional_embeddings():
                                             weight_init='ones')
     b.initialize()
     expected_learned_embeddings = np.ones((data_len, num_embed))
-    out = b(data, None).asnumpy()
+    out = b(data, None)
     assert onp.allclose(out[0], expected_learned_embeddings)
 
 

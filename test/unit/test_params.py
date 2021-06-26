@@ -114,8 +114,8 @@ def test_set_parameters_context():
     p.initialize(init='xavier', ctx=mx.cpu(2))
     model.set_parameters({'embedding_source.embed_weight': p})
     for i in range(2):
-        assert mx.test_utils.same(model.collect_params()['embedding_source.embed_weight'].data(mx.cpu(i)),
-                                  p.data(mx.cpu(2)))
+        assert mx.test_utils.same(model.collect_params()['embedding_source.embed_weight'].data(mx.cpu(i)).asnumpy(),
+                                  p.data(mx.cpu(2)).asnumpy())
 
 
 def test_set_parameters_shape():

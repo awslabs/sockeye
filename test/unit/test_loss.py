@@ -14,8 +14,9 @@
 import math
 
 import mxnet as mx
-import numpy as np
 import pytest
+from mxnet import np
+
 import sockeye.constants as C
 import sockeye.loss
 import sockeye.model
@@ -24,7 +25,7 @@ import sockeye.utils
 
 # Dummy loss for testing
 class DummyLoss(sockeye.loss.Loss):
-    def hybrid_forward(self, F, outputs, labels):
+    def forward(self, outputs, labels):
         return (outputs + labels) * self.weight
 
     def create_metric(self):
@@ -41,15 +42,15 @@ def test_loss_block():
 
     # check required outputs/labels not found
     with pytest.raises(sockeye.utils.SockeyeError) as _:
-        b({'unknown_output': mx.nd.zeros((1,))}, {'label': mx.nd.zeros((1,))})
+        b({'unknown_output': np.zeros((1,))}, {'label': np.zeros((1,))})
     with pytest.raises(sockeye.utils.SockeyeError) as _:
-        b({'output': mx.nd.zeros((1,))}, {'unknown_label': mx.nd.zeros((1,))})
+        b({'output': np.zeros((1,))}, {'unknown_label': np.zeros((1,))})
 
     metric = b.create_metric()
     assert isinstance(metric, sockeye.loss.LossMetric)
     assert metric.name == 'test_metric'
 
-    loss_out = b({'output': mx.nd.ones((1,))}, {'label': mx.nd.ones((1,))}).asscalar()
+    loss_out = b({'output': np.ones((1,))}, {'label': np.ones((1,))}).item()
     assert loss_out == 4.0
 
 
@@ -65,42 +66,6 @@ def test_loss_metric():
     assert np.isnan(metric.get())
 
 
-def test_cross_entropy_loss():
-    b = sockeye.loss.CrossEntropyLoss()
-    b.initialize()
-    assert b.ignore_label == C.PAD_ID
-    assert b.name == C.CROSS_ENTROPY
-    assert b.weight == 1.0
-    assert b._dtype == C.DTYPE_FP32
-    assert b.output_name == C.LOGITS_NAME
-    assert b.label_name == C.TARGET_LABEL_NAME
-    assert b._alpha == 0.0
-
-    logits = mx.nd.array([[1, 1, 1, 1],
-                          [4, 2, 2, 2],
-                          [1, 1, 1, 1],
-                          [1, 1, 1, 1]])
-    logits.attach_grad()
-    labels = mx.nd.array([1, 0, 2, 3])
-    labels.attach_grad()
-
-    with mx.autograd.record():
-        loss_value, loss_samples = b({C.LOGITS_NAME: logits, 'other_stuff': None},
-                                     {C.TARGET_LABEL_NAME: labels, 'other_stuff': None})
-    loss_value.backward()
-    assert loss_samples.asscalar() == (C.PAD_ID != labels).sum().asscalar()
-
-    expected_logits_grad = [[0.08333334, -0.25,        0.08333334,  0.08333334],
-                            [0.,          0.,          0.,          0.],
-                            [0.08333334,  0.08333334, -0.25,        0.08333334],
-                            [0.08333334,  0.08333334,  0.08333334, -0.25]]
-    expected_loss_value = -(math.log(1/4) * 3)  # 3 valid rows, all uniform
-
-    assert np.isclose(loss_value.asscalar(), expected_loss_value)
-    assert np.allclose(logits.grad.asnumpy(), expected_logits_grad)
-    assert labels.grad.sum().asscalar() == 0
-
-
 def test_cross_entropy_loss_without_softmax_output():
     b = sockeye.loss.CrossEntropyLossWithoutSoftmaxOutput(ignore_label=C.PAD_ID, label_smoothing=0.0, num_labels=4)
     b.initialize()
@@ -112,71 +77,30 @@ def test_cross_entropy_loss_without_softmax_output():
     assert b.label_name == C.TARGET_LABEL_NAME
     assert b._alpha == 0.0
 
-    logits = mx.nd.array([[1, 1, 1, 1],
-                          [4, 2, 2, 2],
-                          [1, 1, 1, 1],
-                          [1, 1, 1, 1]])
+    logits = np.array([[1, 1, 1, 1],
+                       [4, 2, 2, 2],
+                       [1, 1, 1, 1],
+                       [1, 1, 1, 1]])
     logits.attach_grad()
-    labels = mx.nd.array([1, 0, 2, 3])
+    labels = np.array([1, 0, 2, 3])
     labels.attach_grad()
 
     with mx.autograd.record():
         loss_value, loss_samples = b({C.LOGITS_NAME: logits, 'other_stuff': None},
                                      {C.TARGET_LABEL_NAME: labels, 'other_stuff': None})
     loss_value.backward()
-    assert loss_samples.asscalar() == 1  # this loss returns always 1
+    assert loss_samples.item() == 1  # this loss returns always 1
 
     expected_logits_grad = [[0.08333334, -0.25,        0.08333334,  0.08333334],
                             [0.,          0.,          0.,          0.],
                             [0.08333334,  0.08333334, -0.25,        0.08333334],
                             [0.08333334,  0.08333334,  0.08333334, -0.25]]
-    num_valid = (C.PAD_ID != labels).sum().asscalar()
+    num_valid = (C.PAD_ID != labels).sum().item()
     expected_loss_value = -(math.log(1/4) * 3) / num_valid  # 3 valid rows, all uniform, divided by num_valid
 
-    assert np.isclose(loss_value.asscalar(), expected_loss_value)
-    assert np.allclose(logits.grad.asnumpy(), expected_logits_grad)
-    assert labels.grad.sum().asscalar() == 0
-
-
-@pytest.mark.parametrize("label_smoothing", [0.0, 0.1])
-def test_cross_entropy_loss_implementations(label_smoothing):
-    np.random.seed(1)
-    _logits = np.random.uniform(0, 10, (1, 5, 6))
-    logits_ce = mx.nd.array(_logits)
-    logits_ce_without_softmax_output = mx.nd.array(_logits)
-    logits_ce.attach_grad()
-    logits_ce_without_softmax_output.attach_grad()
-
-    labels = mx.nd.array([[3, 2, 1, 5, 0]])
-
-    loss_ce = sockeye.loss.CrossEntropyLoss(ignore_label=0, label_smoothing=label_smoothing)
-    loss_ce_without_softmax_output = sockeye.loss.CrossEntropyLossWithoutSoftmaxOutput(
-        ignore_label=0, label_smoothing=label_smoothing, num_labels=labels.sum().asscalar() + 1)
-    loss_ce.initialize()
-    loss_ce_without_softmax_output.initialize()
-
-    metric_ce = loss_ce.create_metric()
-    metric_ce_without_softmax_output = loss_ce_without_softmax_output.create_metric()
-
-    with mx.autograd.record():
-        ce, n = loss_ce({C.LOGITS_NAME: logits_ce},
-                        {C.TARGET_LABEL_NAME: labels})
-    ce.backward()
-    metric_ce.update(ce.asnumpy(), n.asscalar())
-
-    with mx.autograd.record():
-        ce_without_softmax_output, n = loss_ce_without_softmax_output({C.LOGITS_NAME: logits_ce_without_softmax_output},
-                                                                      {C.TARGET_LABEL_NAME: labels})
-    ce_without_softmax_output.backward()
-    metric_ce_without_softmax_output.update(ce_without_softmax_output.asnumpy(), n.asscalar())
-
-    if label_smoothing == 0.0:
-        # we expect equality for logit gradients, metric value (ppl), but not forward output.
-        assert np.allclose(logits_ce.grad.asnumpy(), logits_ce_without_softmax_output.grad.asnumpy())
-        assert np.isclose(metric_ce.get(), metric_ce_without_softmax_output.get())
-    else:
-        # we expect no equality due to bug in SoftmaxOutput
-        assert logits_ce.grad.shape == logits_ce_without_softmax_output.grad.shape
+    assert np.isclose(loss_value.item(), expected_loss_value)
+    assert np.allclose(logits.grad, expected_logits_grad)
+    assert labels.grad.sum().item() == 0
 
 
 def test_perplexity_metric():

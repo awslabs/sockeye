@@ -290,7 +290,7 @@ class TransformerFeedForward(gluon.HybridBlock):
         if self.use_glu:
             h = h * self.linear(x)
         if self.dropout > 0.0:
-            h = npx.Dropout(h, p=self.dropout)
+            h = npx.dropout(h, p=self.dropout)
         y = self.ff2(h)
         return y
 

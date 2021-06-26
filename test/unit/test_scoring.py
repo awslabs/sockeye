@@ -14,7 +14,7 @@
 import sockeye.scoring
 from sockeye.beam_search import CandidateScorer
 
-import mxnet as mx
+from mxnet import np, npx
 
 
 def test_batch_scorer():
@@ -22,10 +22,10 @@ def test_batch_scorer():
     batch = 2
     seq = 4
     nh = 6
-    logits = mx.nd.ones((batch, seq, nh))
-    label = mx.nd.ones((batch, seq))
-    length_ratio = mx.nd.ones((batch,))
-    source_length = mx.nd.cast(mx.nd.random.randint(0, seq, (batch,)), 'float32')
+    logits = np.ones((batch, seq, nh))
+    label = np.ones((batch, seq))
+    length_ratio = np.ones((batch,))
+    source_length = npx.cast(np.random.randint(0, seq, (batch,)), 'float32')
     target_length = source_length
     b = sockeye.scoring.BatchScorer(scorer=CandidateScorer(1.0, 0.0, 0.0),
                                     score_type='neglogprob',

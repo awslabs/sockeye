@@ -115,7 +115,7 @@ class EmbeddingConfig(config.Config):
 
 class Embedding(Encoder):
     """
-    Thin wrapper around MXNet's Embedding symbol. Works with both time- and batch-major data layouts.
+    Thin wrapper around MXNet's Embedding op. Works with both time- and batch-major data layouts.
 
     :param config: Embedding config.
     :param dtype: Data type. Default: 'float32'.
@@ -156,11 +156,11 @@ class Embedding(Encoder):
         concat_factors_embeds = []  # type: List[np.ndarray]
         sum_factors_embeds = []  # type: List[np.ndarray]
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
-            data, *data_factors = np.split(data, self.config.num_factors, axis=2)
+            data, *data_factors = (np.squeeze(x, axis=2) for x in np.split(data, self.config.num_factors, axis=2))
             for i, (factor_data, factor_config) in enumerate(zip(data_factors,
                                                                  self.config.factor_configs)):
                 factor_weight = self.factor_weights[i]
-                factor_embedding = npx.embedding(np.squeeze(factor_data),
+                factor_embedding = npx.embedding(factor_data,
                                                  input_dim=factor_config.vocab_size,
                                                  weight=factor_weight.data(),
                                                  output_dim=factor_config.num_embed)

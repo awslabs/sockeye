@@ -12,14 +12,14 @@
 # permissions and limitations under the License.
 
 """
-Functions to generate loss symbols for sequence-to-sequence models.
+Functions to generate loss blocks for sequence-to-sequence models.
 """
 import logging
 import math
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
-from mxnet import gluon, np
+from mxnet import gluon, np, npx
 
 from . import constants as C
 from . import utils
@@ -126,65 +126,6 @@ class LossMetric(ABC):
         self._num_inst = 0.0
 
 
-class CrossEntropyLoss(Loss):
-    """
-    Computes the cross-entropy loss.
-    Uses F.SoftmaxOutput to efficiently backpropagate cross-entropy gradients and do label smoothing.
-    """
-
-    def __init__(self,
-                 name: str = C.CROSS_ENTROPY,
-                 weight: float = 1.0,
-                 label_smoothing: float = 0.0,
-                 dtype: str = C.DTYPE_FP32,
-                 output_name: str = C.LOGITS_NAME,
-                 label_name: str = C.TARGET_LABEL_NAME,
-                 ignore_label: int = C.PAD_ID,
-                 metric_prefix: str = '') -> None:
-        super().__init__(name=name, output_name=output_name, label_name=label_name,
-                         weight=weight, metric_prefix=metric_prefix)
-        self.ignore_label = ignore_label
-        self._alpha = label_smoothing
-        self._normalization = "valid"
-        self._dtype = dtype
-
-    def forward(self, logits, labels):
-        """
-        Returns unnormalized cross-entropy loss of the batch.
-
-        :param F: MXNet API namespace.
-        :param logits: Logits. Shape: (batch_size, sequence_length, output_dim).
-        :param labels: Sparse labels. Shape: (batch_size, sequence_length)
-        :return: Cross-entropy loss (1,), and number of valid tokens for normalization.
-        """
-        # computes softmax over the last axis, backpropagates ce gradients. Shape: (batch, len, vocab)
-        assert False
-        softmax_out = mx.nd.SoftmaxOutput(data=logits,
-                                          label=labels,
-                                          ignore_label=self.ignore_label,
-                                          use_ignore=True,
-                                          normalization=self._normalization,
-                                          smooth_alpha=self._alpha,
-                                          # see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
-                                          grad_scale=self.weight,
-                                          preserve_shape=True)
-        # (batch, len)
-        pred = np.log(npx.pick(npx.stop_gradient(softmax_out), labels, axis=-1, keepdims=False))
-        # (batch, len,)
-        valid_mask = labels != self.ignore_label
-        # (batch, len)
-        pred = pred * valid_mask
-        # (1,)
-        ce = -np.sum(pred)  # pylint: disable=invalid-unary-operand-type
-        return ce, np.sum(valid_mask)
-
-    def create_metric(self) -> 'LossMetric':
-        """
-        Create an instance of the EvalMetric that corresponds to this Loss function.
-        """
-        return PerplexityMetric(prefix=self._metric_prefix)
-
-
 class CrossEntropyLossWithoutSoftmaxOutput(Loss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
@@ -206,20 +147,19 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._dtype = dtype
-        self._num_labels = num_labels
+        self._num_labels = float(num_labels)
 
-    def forward(self, logits, labels):
+    def forward(self, logits: np.ndarray, labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         pred = npx.log_softmax(logits, axis=-1)
 
         # (batch, len)
-        neg_log_likelihood = -npx.pick(pred,  # pylint: disable=invalid-unary-operand-type
-                                         labels,
-                                         axis=-1, keepdims=False)
+        neg_log_likelihood = - npx.pick(pred,  # pylint: disable=invalid-unary-operand-type
+                                        labels, axis=-1, keepdims=False)
 
         # label smoothing as in
         # https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4
         if self._alpha > 0:
-            all_scores = pred.sum(axis=-1)
+            all_scores = np.sum(pred, axis=-1)
             neg_log_likelihood = (1 - self._alpha) * neg_log_likelihood - self._alpha / self._num_labels * all_scores
 
         # (batch, len,)
@@ -273,7 +213,7 @@ class PoissonLoss(Loss):
 
     def forward(self, length_predictions, labels):
         """
-        Returns Poisson loss and output symbol given data and expected integers as labels.
+        Returns Poisson loss and output given data and expected integers as labels.
 
         :param length_predictions: Length predictions. Shape: (batch_size,).
         :param labels: Targets. Shape: (batch_size,).

@@ -15,8 +15,8 @@ from typing import List, Optional
 from typing import Tuple
 
 import mxnet as mx
-import numpy as np
 import pytest
+from mxnet import np
 
 import sockeye.beam_search
 import sockeye.constants as C
@@ -29,25 +29,25 @@ import sockeye.utils
 
 
 def test_length_penalty_default():
-    lengths = mx.nd.array([[1], [2], [3]])
+    lengths = np.array([[1], [2], [3]])
     length_penalty = sockeye.beam_search.LengthPenalty(1.0, 0.0)
     expected_lp = np.array([[1.0], [2.], [3.]])
 
-    assert np.allclose(length_penalty(lengths).asnumpy(), expected_lp)
-    assert np.allclose(length_penalty(lengths).asnumpy(), expected_lp)
+    assert np.allclose(length_penalty(lengths), expected_lp)
+    assert np.allclose(length_penalty(lengths), expected_lp)
     length_penalty.hybridize()
-    assert np.allclose(length_penalty(lengths).asnumpy(), expected_lp)
+    assert np.allclose(length_penalty(lengths), expected_lp)
 
 
 def test_length_penalty():
-    lengths = mx.nd.array([[1], [2], [3]])
+    lengths = np.array([[1], [2], [3]])
     length_penalty = sockeye.beam_search.LengthPenalty(.2, 5.0)
     expected_lp = np.array([[6 ** 0.2 / 6 ** 0.2], [7 ** 0.2 / 6 ** 0.2], [8 ** 0.2 / 6 ** 0.2]])
 
-    assert np.allclose(length_penalty(lengths).asnumpy(), expected_lp)
-    assert np.allclose(length_penalty(lengths).asnumpy(), expected_lp)
+    assert np.allclose(length_penalty(lengths), expected_lp)
+    assert np.allclose(length_penalty(lengths), expected_lp)
     length_penalty.hybridize()
-    assert np.allclose(length_penalty(lengths).asnumpy(), expected_lp)
+    assert np.allclose(length_penalty(lengths), expected_lp)
 
 
 def test_length_penalty_int_input():
@@ -59,27 +59,27 @@ def test_length_penalty_int_input():
 
 
 def test_brevity_penalty_default():
-    hyp_lengths = mx.nd.array([[1], [2], [3]])
-    ref_lengths = mx.nd.array([[2], [3], [2]])
+    hyp_lengths = np.array([[1], [2], [3]])
+    ref_lengths = np.array([[2], [3], [2]])
     brevity_penalty = sockeye.beam_search.BrevityPenalty(0.0)
-    expected_bp = mx.nd.array([[0.0], [0.0], [0.0]])
+    expected_bp = np.array([[0.0], [0.0], [0.0]])
     expected_bp_np = np.array([0.0, 0.0, 0.0])
 
-    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp.asnumpy())
-    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp_np)
+    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
+    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp_np)
     brevity_penalty.hybridize()
-    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp.asnumpy())
+    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
 
 
 def test_brevity_penalty():
-    hyp_lengths = mx.nd.array([[1], [2], [3]])
-    ref_lengths = mx.nd.array([[7], [2], [91]])
+    hyp_lengths = np.array([[1], [2], [3]])
+    ref_lengths = np.array([[7], [2], [91]])
     brevity_penalty = sockeye.beam_search.BrevityPenalty(3.5)
     expected_bp = np.array([[3.5 * (1 - 7 / 1)], [0.0], [3.5 * (1 - 91 / 3)]])
 
-    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp)
+    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
     brevity_penalty.hybridize()
-    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths).asnumpy(), expected_bp)
+    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
 
 
 def test_brevity_penalty_int_input():
@@ -99,13 +99,13 @@ def test_candidate_scorer():
     scorer.hybridize(static_alloc=True)
 
     # NDArray input
-    raw_scores = mx.nd.random.uniform(0, 1, (5,))
-    lengths = mx.nd.array([1, 2, 3, 4, 5])
-    reference_lengths = mx.nd.array([2, 3, 4, 5, 6])
+    raw_scores = np.random.uniform(0, 1, (5,))
+    lengths = np.array([1, 2, 3, 4, 5])
+    reference_lengths = np.array([2, 3, 4, 5, 6])
 
     scores = scorer(raw_scores, lengths, reference_lengths)
     unnormalized_scores = scorer.unnormalize(scores, lengths, reference_lengths)
-    assert np.allclose(unnormalized_scores.asnumpy(), raw_scores.asnumpy())
+    assert np.allclose(unnormalized_scores, raw_scores)
 
     # int/float input
     raw_scores = 5.6
@@ -117,9 +117,9 @@ def test_candidate_scorer():
     assert np.allclose(unnormalized_scores, raw_scores)
 
 
-def numpy_topk(scores: mx.nd.NDArray,
+def numpy_topk(scores: np.ndarray,
                k: int,
-               offset: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray, mx.nd.NDArray]:
+               offset: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Get the lowest k elements per sentence from a `scores` matrix using an intermediary Numpy conversion.
     This should be equivalent to sockeye.utils.topk() and is used as a comparative implementation in testing.
@@ -133,14 +133,13 @@ def numpy_topk(scores: mx.nd.NDArray,
     folded_scores = scores.reshape((-1, k * scores.shape[-1]))
     batch_size = folded_scores.shape[0]
 
-    folded_scores = folded_scores.asnumpy()
     # Get the scores
     # Indexes into folded_scores: (batch_size, beam_size)
     flat_idxs = np.argpartition(folded_scores, range(k))[:, :k]
     # Score values: (batch_size, beam_size)
-    values = mx.nd.array(folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs], ctx=scores.context)
-    best_hyp_indices, best_word_indices = mx.nd.array(np.unravel_index(flat_idxs.ravel(), scores.shape),
-                                                      dtype='int32', ctx=scores.context)
+    values = np.array(folded_scores[np.arange(folded_scores.shape[0])[:, None], flat_idxs], ctx=scores.ctx)
+    best_hyp_indices, best_word_indices = np.array(np.unravel_index(np.ravel(flat_idxs), scores.shape),
+                                                      dtype='int32', ctx=scores.ctx)
 
     if batch_size > 1:
         # Offsetting the indices to match the shape of the scores matrix
@@ -158,25 +157,22 @@ def numpy_topk(scores: mx.nd.NDArray,
                          (10, 10, 100)])
 def test_topk_func(batch_size, beam_size, target_vocab_size):
     # Random model scores. Shape: (batch_size * beam_size, target_vocab_size)
-    scores = mx.nd.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
+    scores = np.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
     # offset for batch sizes > 1
-    offset = mx.nd.repeat(mx.nd.arange(0, batch_size * beam_size, beam_size, dtype='int32'), beam_size)
+    offset = np.repeat(np.arange(0, batch_size * beam_size, beam_size, dtype='int32'), beam_size)
 
     np_hyp, np_word, np_values = numpy_topk(scores, k=beam_size, offset=offset)
-    np_hyp, np_word, np_values = np_hyp.asnumpy(), np_word.asnumpy(), np_values.asnumpy()
 
     topk = sockeye.beam_search.TopK(k=beam_size)
     topk.initialize()
 
     mx_hyp, mx_word, mx_values = topk(scores, offset)
-    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert np.allclose(mx_hyp, np_hyp)
     assert np.allclose(mx_word, np_word)
     assert np.allclose(mx_values, np_values)
 
     topk.hybridize()
     mx_hyp, mx_word, mx_values = topk(scores, offset)
-    mx_hyp, mx_word, mx_values = mx_hyp.asnumpy(), mx_word.asnumpy(), mx_values.asnumpy()
     assert np.allclose(mx_hyp, np_hyp)
     assert np.allclose(mx_word, np_word)
     assert np.allclose(mx_values, np_values)
@@ -188,7 +184,7 @@ def test_greedytop1(target_vocab_size):
     beam_size = 1
     target_vocab_size = 50
     # Random model scores. Shape: (batch_size * beam_size, target_vocab_size)
-    scores = mx.nd.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
+    scores = np.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
     expected_hyp_index, expected_word_index, expected_value = numpy_topk(scores, k=beam_size, offset=None)
     assert expected_hyp_index[0] == 0
     assert expected_value.shape == (1, 1)
@@ -197,18 +193,14 @@ def test_greedytop1(target_vocab_size):
     greedy_top1.initialize()
 
     best_word_index = greedy_top1(scores, None, None)
-    best_word_index = best_word_index.asnumpy()
     assert best_word_index.shape == (1, 1)
     assert best_word_index[0, 0] == expected_word_index[0]
 
-    target_factors = mx.nd.ones((1, 1), dtype='int32')
+    target_factors = np.ones((1, 1), dtype='int32')
     best_word_index_with_factors = greedy_top1(scores, None, target_factors)
-    best_word_index_with_factors = best_word_index_with_factors.asnumpy()
     assert best_word_index_with_factors.shape == (1, 2)
     assert best_word_index_with_factors[0, 0] == expected_word_index[0]
-    assert best_word_index_with_factors[0, 1] == target_factors.asscalar()
-
-
+    assert best_word_index_with_factors[0, 1] == target_factors.item()
 
 
 @pytest.mark.parametrize("batch_size, beam_size, target_vocab_size, top_n",
@@ -218,18 +210,18 @@ def test_greedytop1(target_vocab_size):
                          (5, 100, 200, 5)])
 def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
     # arrange scores increasing values from left to right, so the best item is always index 0, next-best 1, and so on
-    scores = mx.nd.array([list(range(1, target_vocab_size + 1)) for _ in range(batch_size * beam_size)])
+    scores = np.array([list(range(1, target_vocab_size + 1)) for _ in range(batch_size * beam_size)])
     # normalize
-    target_dists = mx.nd.broadcast_div(scores, scores.sum(axis=1, keepdims=True))
+    target_dists = scores / scores.sum(axis=1, keepdims=True)
 
     samplek = sockeye.beam_search.SampleK(n=top_n)
     samplek.initialize()
 
-    sample_best_hyp_indices = mx.nd.arange(0, batch_size * beam_size, dtype='int32')
+    sample_best_hyp_indices = np.arange(0, batch_size * beam_size, dtype='int32')
 
     # 0..(batch_size * beam_size)-1
-    expected_hyps = mx.nd.array(range(batch_size * beam_size), dtype='int32')
-    finished = mx.nd.cast(mx.nd.random.uniform(0, 1, (batch_size * beam_size)) > 0.5, dtype='int32')
+    expected_hyps = np.array(range(batch_size * beam_size), dtype='int32')
+    finished = (np.random.uniform(0, 1, (batch_size * beam_size)) > 0.5).astype('int32')
 
     for i in [1, 2]:
         if i == 2:
@@ -239,76 +231,76 @@ def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
         assert hyps.shape[0] == batch_size * beam_size
 
         # The indices should always be the integers from 0 to batch*beam-1
-        assert sum(hyps == expected_hyps).asscalar() == (batch_size * beam_size)
+        assert sum(hyps == expected_hyps).item() == (batch_size * beam_size)
         if top_n != 0:
             # Scores are increasing left-to-right, so best items are all the lowest word IDs.
             # No word id greater than the cap (top_n) should be selected
-            assert mx.nd.sum(words >= top_n)[0].asscalar() == 0
+            assert np.sum(words >= top_n).item() == 0
 
         # word index should be zero for all finished hypotheses
-        assert mx.nd.sum(mx.nd.where(finished, words, finished))[0].asscalar() == 0
+        assert np.sum(np.where(finished, words, finished)).item() == 0
 
 
 def test_update_scores():
     vocab_size = 10
     batch_beam_size = 3
     us = sockeye.beam_search.UpdateScores()
-    pad_dist = mx.nd.full((batch_beam_size, vocab_size - 1), val=np.inf, dtype='float32')
-    eos_dist = mx.nd.full((batch_beam_size, vocab_size), val=np.inf, dtype='float32')
+    pad_dist = np.full((batch_beam_size, vocab_size - 1), fill_value=np.inf, dtype='float32')
+    eos_dist = np.full((batch_beam_size, vocab_size), fill_value=np.inf, dtype='float32')
     eos_dist[:, C.EOS_ID] = 0
     unk_dist = None
 
-    lengths = mx.nd.array([0, 1, 0], dtype='int32')
-    max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
-    scores_accumulated = mx.nd.ones((3, 1), dtype='float32')
-    finished = mx.nd.array([0,   # not finished
-                            1,   # finished
-                            0],  # not finished
-                           dtype='int32')
-    inactive = mx.nd.zeros_like(finished)
-    target_dists = mx.nd.uniform(0, 1, (3, vocab_size))
+    lengths = np.array([[0], [1], [0]], dtype='int32')
+    max_lengths = np.array([[1], [2], [3]], dtype='int32')  # first on reaches max length
+    scores_accumulated = np.ones((3, 1), dtype='float32')
+    finished = np.array([[0],  # not finished
+                         [1],  # finished
+                         [0]],  # not finished
+                        dtype='int32')
+    inactive = np.zeros_like(finished)
+    target_dists = np.random.uniform(0, 1, (3, vocab_size))
 
     scores, lengths = us(target_dists, finished, inactive, scores_accumulated, lengths, max_lengths,
                          unk_dist, pad_dist, eos_dist)
-    scores = scores.asnumpy()
-    lengths = lengths.asnumpy().reshape((-1,))
+    scores = scores
+    lengths = lengths.reshape((-1,))
 
     assert (lengths == np.array([[1], [1], [1]])).all()  # all lengths but finished updated + 1
-    assert (scores[0] == (1. + target_dists[0] + eos_dist).asnumpy()).all()  # 1 reached max length, force eos
-    assert (scores[1] == np.array([1.] + pad_dist[1].asnumpy().tolist())).all()  # 2 finished, force pad, keep score
-    assert (scores[2] == (1. + target_dists[2]).asnumpy()).all()  # 3 scores + previous scores
+    assert (scores[0] == (1. + target_dists[0] + eos_dist)).all()  # 1 reached max length, force eos
+    assert (scores[1] == np.array([1.] + pad_dist[1].tolist())).all()  # 2 finished, force pad, keep score
+    assert (scores[2] == (1. + target_dists[2])).all()  # 3 scores + previous scores
 
 
 def test_prevent_unk_update_scores():
     vocab_size = 10
     batch_beam_size = 3
     us = sockeye.beam_search.UpdateScores()
-    pad_dist = mx.nd.full((batch_beam_size, vocab_size - 1), val=np.inf, dtype='float32')
-    eos_dist = mx.nd.full((batch_beam_size, vocab_size), val=np.inf, dtype='float32')
+    pad_dist = np.full((batch_beam_size, vocab_size - 1), fill_value=np.inf, dtype='float32')
+    eos_dist = np.full((batch_beam_size, vocab_size), fill_value=np.inf, dtype='float32')
     eos_dist[:, C.EOS_ID] = 0
-    unk_dist = mx.nd.zeros_like(eos_dist)
+    unk_dist = np.zeros_like(eos_dist)
     unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
 
-    lengths = mx.nd.array([0, 1, 0], dtype='int32')
-    max_lengths = mx.nd.array([1, 2, 3], dtype='int32')  # first on reaches max length
-    scores_accumulated = mx.nd.ones((3, 1), dtype='float32')
-    finished = mx.nd.array([0,   # not finished
-                            1,   # finished
-                            0],  # not finished
-                           dtype='int32')
-    inactive = mx.nd.zeros_like(finished)
-    target_dists = mx.nd.uniform(0, 1, (3, vocab_size))
+    lengths = np.array([[0], [1], [0]], dtype='int32')
+    max_lengths = np.array([[1], [2], [3]], dtype='int32')  # first on reaches max length
+    scores_accumulated = np.ones((3, 1), dtype='float32')
+    finished = np.array([[0],  # not finished
+                         [1],  # finished
+                         [0]],  # not finished
+                        dtype='int32')
+    inactive = np.zeros_like(finished)
+    target_dists = np.random.uniform(0, 1, (3, vocab_size))
 
     scores, lengths = us(target_dists, finished, inactive, scores_accumulated, lengths, max_lengths,
                          unk_dist, pad_dist, eos_dist)
-    scores = scores.asnumpy()
-    lengths = lengths.asnumpy().reshape((-1,))
+    scores = scores
+    lengths = lengths.reshape((-1,))
 
     assert (lengths == np.array([[1], [1], [1]])).all()  # all lengths but finished updated + 1
-    assert (scores[0] == (1. + target_dists[0] + eos_dist).asnumpy()).all()  # 1 reached max length, force eos
-    assert (scores[1] == np.array([1.] + pad_dist[1].asnumpy().tolist())).all()  # 2 finished, force pad, keep score
+    assert (scores[0] == (1. + target_dists[0] + eos_dist)).all()  # 1 reached max length, force eos
+    assert (scores[1] == np.array([1.] + pad_dist[1].tolist())).all()  # 2 finished, force pad, keep score
     assert scores[2, C.UNK_ID] == np.inf    # 3 scores of <unk> should be np.inf
-    assert (scores[2] == (1. + target_dists[2] + unk_dist[2]).asnumpy()).all()  # 3 scores + previous scores
+    assert (scores[2] == (1. + target_dists[2] + unk_dist[2])).all()  # 3 scores + previous scores
 
 
 class _TestInference(sockeye.beam_search._Inference):
@@ -321,47 +313,47 @@ class _TestInference(sockeye.beam_search._Inference):
         return C.STEP_STATE + C.STEP_STATE  # is this the correct structure to use for self.states?
 
     def encode_and_initialize(self,
-                              inputs: mx.nd.NDArray,
-                              valid_length: Optional[mx.nd.NDArray] = None):
+                              inputs: np.ndarray,
+                              valid_length: Optional[np.ndarray] = None):
         batch_size = inputs.shape[0]
         # 'lengths'
-        internal_lengths = mx.nd.zeros((batch_size, 1), dtype='int32')
-        num_decode_step_calls = mx.nd.zeros((1, ), dtype='int32')
+        internal_lengths = np.zeros((batch_size, 1), dtype='int32')
+        num_decode_step_calls = np.zeros((1, ), dtype='int32')
         self.states = [internal_lengths, num_decode_step_calls]  # TODO add nested states
-        predicted_output_length = mx.nd.ones((batch_size, 1))  # does that work?
+        predicted_output_length = np.ones((batch_size, 1))  # does that work?
         return self.states, predicted_output_length
 
     def decode_step(self,
-                    step_input: mx.nd.NDArray,
+                    step_input: np.ndarray,
                     states: List,
-                    vocab_slice_ids: Optional[mx.nd.NDArray] = None):
+                    vocab_slice_ids: Optional[np.ndarray] = None):
         batch_beam_size, num_target_factors = step_input.shape
-        print('step_input', step_input.asnumpy())
+        print('step_input', step_input)
 
         internal_lengths, num_decode_step_calls = states
-        num_decode_step_calls = num_decode_step_calls.asscalar()
+        num_decode_step_calls = num_decode_step_calls.item()
         if num_decode_step_calls == 0:  # first call to decode_step, we expect step input to be all <bos>
-            assert (step_input.asnumpy() == C.BOS_ID).all()
+            assert (step_input == C.BOS_ID).all()
 
-        if step_input[: ,0].asscalar() == C.BOS_ID:
+        if step_input[:, 0].item() == C.BOS_ID:
             # predict word id 4 given <bos>
-            scores = mx.nd.array([0, 0, 0, 0, 1])
-        elif step_input[: ,0].asscalar() == C.EOS_ID:
+            scores = np.array([0, 0, 0, 0, 1])
+        elif step_input[:, 0].item() == C.EOS_ID:
             # predict pad given <eos>
-            scores = mx.nd.array([1, 0, 0, 0, 0])
+            scores = np.array([1, 0, 0, 0, 0])
         else:
             # otherwise always predict pad
-            scores = mx.nd.array([0, 0, 0, 0, 1])
+            scores = np.array([0, 0, 0, 0, 1])
 
         # topk is minimizing
         scores *= -1
-        #outputs = mx.nd.array([self.predictor.get(inp, C.PAD_ID) for inp in step_input.asnumpy().tolist()], ctx=step_input.context)
-        #scores = mx.nd.one_hot(outputs, depth=self.output_vocab_size)
+        #outputs = np.array([self.predictor.get(inp, C.PAD_ID) for inp in step_input.tolist()], ctx=step_input.context)
+        #scores = npx.one_hot(outputs, depth=self.output_vocab_size)
 
         internal_lengths += 1
         num_decode_step_calls += 1
 
-        self.states = states = [internal_lengths, mx.nd.array([num_decode_step_calls], dtype='int32')]
+        self.states = states = [internal_lengths, np.array([num_decode_step_calls], dtype='int32')]
         return scores, states, None
 
 
@@ -396,20 +388,20 @@ def test_beam_search():
     # inputs
     batch_size = 1
     max_length = 3
-    source = mx.nd.array([[C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID]], ctx=context, dtype=dtype).reshape((0, -1, 1))
+    source = np.array([[C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID]], ctx=context, dtype=dtype).reshape((1, -1, 1))
     source_length = (source != C.PAD_ID).sum(axis=1).reshape((-1,))  # (batch_size,)
 
     restrict_lexicon = None
     raw_constraints = [None] * batch_size
     raw_avoid_list = [None] * batch_size
-    max_output_lengths = mx.nd.array([max_length], ctx=context, dtype='int32')
+    max_output_lengths = np.array([max_length], ctx=context, dtype='int32')
 
     bs_out = bs(source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths)
     best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
 
     print('beam search lengths', lengths)
-    print('internal lengths', inference.states[0].asnumpy())
-    assert np.allclose(lengths, inference.states[0].asnumpy())
+    print('internal lengths', inference.states[0])
+    assert np.allclose(lengths, inference.states[0])
     assert inference.states[1] == max_length
 
     print(best_hyp_indices)

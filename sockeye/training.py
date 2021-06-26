@@ -48,9 +48,9 @@ logger = logging.getLogger(__name__)
 
 
 def global_norm(ndarrays: List[np.ndarray]) -> float:
-    # accumulate in a list, as asscalar is blocking and this way we can run the norm calculation in parallel.
+    # accumulate in a list, as item() is blocking and this way we can run the norm calculation in parallel.
     norms = [np.square(np.linalg.norm(arr)) for arr in ndarrays if arr is not None]
-    return sqrt(sum(norm.asscalar() for norm in norms))
+    return sqrt(sum(norm.item() for norm in norms))
 
 
 @dataclass

@@ -175,6 +175,7 @@ class OutputLayer(gluon.HybridBlock):
                                            num_hidden=vocab_slice_ids.shape[0],
                                            weight=weight,
                                            bias=bias,
+                                           no_bias=False,
                                            flatten=False,
                                            name=C.LOGITS_NAME)
         return super().__call__(data)
@@ -193,6 +194,7 @@ class OutputLayer(gluon.HybridBlock):
                                        num_hidden=self.vocab_size,
                                        weight=self.weight.data(),
                                        bias=self.bias.data(),
+                                       no_bias=False,
                                        flatten=False,
                                        name=C.LOGITS_NAME)
 
@@ -265,9 +267,7 @@ class DotAttentionCell(gluon.HybridBlock):
                 lengths: Optional[np.ndarray] = None, bias: Optional[np.ndarray] = None):
 
         # (n*h, lq, lk)
-        # TODO: MX2 OP MISSING
-        assert False, "MX2 OP MISSING"
-        logits = mx.nd.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
+        logits = npx.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
 
         if bias is not None:
             logits = logits + bias
@@ -283,9 +283,7 @@ class DotAttentionCell(gluon.HybridBlock):
         # key_values: (lk, n, dv * 2)
         # probs: (n*h, lq, lk)
         # result: (n, lq, dv)
-        # TODO: MX2 OP MISSING
-        assert False, "MX2 OP MISSING"
-        return mx.nd.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
+        return npx.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
 def prepare_source_valid_lengths(valid_length: np.ndarray, query_data: np.ndarray, num_heads: int) -> np.ndarray:
@@ -431,6 +429,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
         # shape: (length, batch, key_depth + value_depth)
+        # TODO MX2: set this to 0, batch_size, self.depth_out * 2
         return 1, batch_size, self.depth_out * 2
 
     def forward(self,
@@ -460,8 +459,9 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
 
         updated_states = states
         if previous_states is not None:
-            updated_states = np.concatenate(previous_states, states, dim=0)
-            states = mx.nd.slice(updated_states, begin=(1, None, None), end=(None, None, None))
+            updated_states = np.concatenate((previous_states, states), axis=0)
+            # TODO: MX2: we can remove the slicing if initial states have sequence length 0 (as now supported by ndarrays)
+            states = npx.slice(updated_states, begin=(1, None, None), end=(None, None, None))
 
         return self._attend(queries, states, lengths=input_lengths, bias=bias), updated_states
 
@@ -642,14 +642,16 @@ class PositionalEmbeddings(gluon.HybridBlock):
 
         :return: Data with positional embeddings added
         """
+        # (length, num_embed)
         if steps is None:
-            # (1, data length)
-            steps = np.expand_dims(npx.arange_like(data, axis=1), axis=0)
-        # (batch_size or 1, seq_len, num_embed)
-        pos_embedding = npx.embedding(steps, self.weight.data(), self.max_seq_len, self.num_embed)
+            # (batch, length, num_embed)
+            pos_embedding = npx.slice_like(np.expand_dims(self.weight.data(), axis=0), data, axes=(1,))
+        else:
+            # (batch_size or 1, seq_len, num_embed)
+            pos_embedding = npx.embedding(steps, self.weight.data(), self.max_seq_len, self.num_embed)
 
         if self.weight_type == 'fixed':
-            pos_embedding = pos_embedding.detach()
+            pos_embedding = npx.stop_gradient(pos_embedding)
 
         if self.scale_up_input:
             data = data * (self.num_embed ** 0.5)

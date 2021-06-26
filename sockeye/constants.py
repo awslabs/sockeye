@@ -17,8 +17,7 @@ Defines various constants used throughout the project
 import sys
 from typing import Dict
 
-import mxnet as mx
-import numpy as np
+from mxnet import gluon, np
 
 # MXNet environment variables
 MXNET_SAFE_ACCUMULATION = 'MXNET_SAFE_ACCUMULATION'
@@ -164,13 +163,13 @@ SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
 # Monitor constants
-STAT_FUNC_DEFAULT = "mx_default"  # default MXNet monitor stat func: mx.nd.norm(x)/mx.nd.sqrt(x.size)
+STAT_FUNC_DEFAULT = "mx_default"  # default MXNet monitor stat func: np.norm(x)/np.sqrt(x.size)
 STAT_FUNC_MAX = 'max'
 STAT_FUNC_MIN = 'min'
 STAT_FUNC_MEAN = 'mean'
 MONITOR_STAT_FUNCS = {STAT_FUNC_DEFAULT: None,
-                      STAT_FUNC_MAX: lambda x: mx.nd.max(x),
-                      STAT_FUNC_MEAN: lambda x: mx.nd.mean(x)}
+                      STAT_FUNC_MAX: lambda x: np.max(x),
+                      STAT_FUNC_MEAN: lambda x: np.mean(x)}
 
 # Inference constants
 DEFAULT_BEAM_SIZE = 5
@@ -416,7 +415,7 @@ SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-PREPARED_DATA_VERSION = 4
+PREPARED_DATA_VERSION = 5
 
 # reranking
 RERANK_BLEU = "bleu"
@@ -440,4 +439,4 @@ BREVITY_PENALTY_CONSTANT = 'constant'
 BREVITY_PENALTY_LEARNED = 'learned'
 BREVITY_PENALTY_NONE = 'none'
 
-ParameterDict = Dict[str, mx.gluon.Parameter]
+ParameterDict = Dict[str, gluon.Parameter]

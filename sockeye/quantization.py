@@ -191,14 +191,14 @@ def optimize_quantization_mse(tensor, rounds=10):
         value = (low + high) / 2.0
         quant = npx.intgemm_prepare_data(tensor, value)
         quant_float = quant.astype(C.DTYPE_FP32)
-        mse = (quant_float * (value / 127.0) - tensor).norm().asscalar() / math.sqrt(float(tensor.size))
+        mse = (quant_float * (value / 127.0) - tensor).norm().item() / math.sqrt(float(tensor.size))
         if mse < best_mse:
             best_mse = mse
             best_top = value
         # This optimizes scaling subject to cluster assignment.
         # It can be used for EM but the step is really slow, so use it for direction.
         scale = np.sum(quant_float * quant_float) / np.sum(quant_float * tensor)
-        top = 127.0 / scale.asscalar()
+        top = 127.0 / scale.item()
         if top < value:
             high = value
         else:
@@ -211,7 +211,7 @@ def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param:
     Extract or tune the scaling factor for a parameter.
     """
     scaling = scaling_param.data()
-    if scaling.asscalar() < 0:
+    if scaling.item() < 0:
         # Bogus auto initialized scaling factor.
         b_max = optimize_quantization_mse(tensor_param.data())
         scaling_param.set_data(b_max / 127.0)

@@ -13,8 +13,7 @@
 
 import pytest
 
-import numpy as np
-import mxnet as mx
+from mxnet import np
 
 import sockeye.init_embedding as init_embedding
 
@@ -24,9 +23,8 @@ import sockeye.init_embedding as init_embedding
         (np.array([[1, 1, 1], [2, 2, 2], [3, 3, 3]]),
          {'w1': 0, 'w2': 1, 'w3': 2},
          {'w2': 0, 'w3': 1, 'w4': 2, 'w5': 3},
-         mx.nd.array([[2, 2, 2], [3, 3, 3], [0, 0, 0], [0, 0, 0]]))
+         np.array([[2, 2, 2], [3, 3, 3], [0, 0, 0], [0, 0, 0]]))
 ])
 def test_init_weight(embed, vocab_in, vocab_out, expected_embed_init):
     embed_init = init_embedding.init_weight(embed, vocab_in, vocab_out)
-
-    assert (embed_init == expected_embed_init).asnumpy().all()
+    assert (embed_init == expected_embed_init).all()

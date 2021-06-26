@@ -17,8 +17,7 @@ import os
 import re
 from tempfile import TemporaryDirectory
 
-import mxnet as mx
-import numpy as np
+from mxnet import np
 import pytest
 
 from sockeye import __version__
@@ -248,12 +247,11 @@ def test_average_arrays():
         expected_average += array
     expected_average /= 4
 
-    mx_arrays = [mx.nd.array(a) for a in arrays]
-    assert np.allclose(utils.average_arrays(mx_arrays).asnumpy(), expected_average)
+    assert np.allclose(utils.average_arrays(arrays), expected_average)
 
     with pytest.raises(utils.SockeyeError) as e:
         other_shape = (12, 13)
-        utils.average_arrays(mx_arrays + [mx.nd.zeros(other_shape)])
+        utils.average_arrays(arrays + [np.zeros(other_shape)])
     assert "nd array shapes do not match" == str(e.value)
 
 

@@ -168,8 +168,8 @@ def _print_mean_std_score(metrics: List[Tuple[str, Callable]], scores: Dict[str,
     scores_mean_std = []  # type: List[str]
     for name, _ in metrics:
         if len(scores[name]) > 1:
-            score_mean = np.asscalar(np.mean(scores[name]))
-            score_std = np.asscalar(np.std(scores[name], ddof=1))
+            score_mean = np.item(np.mean(scores[name]))
+            score_std = np.item(np.std(scores[name], ddof=1))
             scores_mean_std.append("%.3f\t%.3f" % (score_mean, score_std))
         else:
             score = scores[name][0]

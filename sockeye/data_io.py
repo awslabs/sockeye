@@ -2023,7 +2023,7 @@ def create_batch_from_parallel_sample(source: np.ndarray, target: np.ndarray, la
     if label.shape[2] == 1:
         labels[C.TARGET_LABEL_NAME] = np.squeeze(label, axis=2)
     else:
-        primary_label, *factor_labels = np.split(label, label.shape[2], axis=2)
+        primary_label, *factor_labels = (np.squeeze(x, axis=2) for x in np.split(label, label.shape[2], axis=2))
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 

@@ -19,7 +19,7 @@ from typing import cast, Dict, Optional, Tuple, Union, List
 from functools import lru_cache
 
 import mxnet as mx
-from mxnet import gluon, np
+from mxnet import gluon, np, npx
 from sockeye import __version__
 from sockeye.config import Config
 
@@ -244,7 +244,7 @@ class SockeyeModel(gluon.Block):
             _ = mx.autograd.set_training(True)
 
         valid_length = np.ones(shape=(step_input.shape[0],), ctx=step_input.ctx)
-        target_embed, _ = self.embedding_target(np.reshape(step_input, (0, 1, -1)), valid_length=valid_length)
+        target_embed, _ = self.embedding_target(np.expand_dims(step_input, axis=1), valid_length=valid_length)
         decoder_out, new_states = self.decoder(target_embed, states)
         decoder_out = np.squeeze(decoder_out, axis=1)
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
@@ -421,6 +421,11 @@ class SockeyeModel(gluon.Block):
         output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
 
         source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not tie_weights else 'default'
+        if source_grad_stype == 'row_sparse':
+            logger.warning(
+                "sparse gradient updates for source embeddings not supported yet with MXNet 2.0 & Numpy namespace. "
+                "Using 'default'")
+            source_grad_stype = 'default'
         source_embed_weight = gluon.Parameter(source_embed_name,
                                               shape=(self.config.config_embed_source.vocab_size,
                                                      self.config.config_embed_source.num_embed),
@@ -431,6 +436,11 @@ class SockeyeModel(gluon.Block):
             target_embed_weight = source_embed_weight
         else:
             target_grad_stype = 'row_sparse' if self.config.config_embed_target.allow_sparse_grad and not tie_weights else 'default'
+            if target_grad_stype == 'row_sparse':
+                logger.warning(
+                    "sparse gradient updates for target embeddings not supported yet with MXNet 2.0 & Numpy namespace. "
+                    "Using 'default'")
+                target_grad_stype = 'default'
             target_embed_weight = gluon.Parameter(target_embed_name,
                                                   shape=(self.config.config_embed_target.vocab_size,
                                                          self.config.config_embed_target.num_embed),

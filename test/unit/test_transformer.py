@@ -13,8 +13,8 @@
 
 import pytest
 
-import mxnet as mx
-import numpy as np
+from mxnet import np
+import numpy as onp
 
 import sockeye.transformer
 import sockeye.constants as C
@@ -25,7 +25,7 @@ def test_auto_regressive_bias_dtype():
     block.initialize()
     length = 10
     dtype = 'float32'
-    data = mx.nd.ones((2, length, 10), dtype=dtype)
+    data = np.ones((2, length, 10), dtype=dtype)
     bias = block(data)
     assert bias.dtype == np.float32
 
@@ -33,18 +33,18 @@ def test_auto_regressive_bias_dtype():
     block.cast(dtype)
     bias = block(data.astype(dtype))
     assert bias.dtype == np.float16
-    assert bias.min().asscalar() == -C.LARGE_VALUES[dtype]
+    assert bias.min().item() == -C.LARGE_VALUES[dtype]
 
 
 def test_auto_regressive_bias_output():
     block = sockeye.transformer.AutoRegressiveBias()
     block.initialize()
     length = 2
-    data = mx.nd.ones((2, length, 10), dtype='float32')
+    data = np.ones((2, length, 10), dtype='float32')
     bias = block(data)
 
     expected = np.array([[0.0, -1.0e8], [0.0, 0.0]]).reshape((1, 2, 2))
-    np.testing.assert_array_equal(bias.asnumpy(), expected)
+    onp.testing.assert_array_equal(bias, expected)
 
 
 @pytest.mark.parametrize('use_glu', [(False), (True)])
@@ -58,5 +58,5 @@ def test_transformer_feed_forward(use_glu):
     block.initialize()
     block.hybridize()
 
-    data = mx.nd.ones((1, 10, 2), dtype=C.DTYPE_FP32)
+    data = np.ones((1, 10, 2), dtype=C.DTYPE_FP32)
     block(data)

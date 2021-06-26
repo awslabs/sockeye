@@ -16,9 +16,9 @@ import json
 from math import ceil
 from unittest.mock import patch, Mock
 
-import mxnet as mx
-import numpy as np
+import numpy as onp
 import pytest
+from mxnet import np, npx
 
 import sockeye.beam_search
 import sockeye.constants as C
@@ -65,9 +65,9 @@ def mock_translator(batch_size: int = 1,
         translator.beam_size = beam_size
         translator.nbest_size = nbest_size
         translator.models = [mock_model()]
-        translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
-        translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
-        translator.inf_array = mx.nd.slice(translator.inf_array, begin=(0,), end=(beam_size,))
+        translator.zeros_array = np.zeros((beam_size,), dtype='int32')
+        translator.inf_array = np.full((batch_size * beam_size,), fill_value=np.inf, dtype='float32')
+        translator.inf_array = npx.slice(translator.inf_array, begin=(0,), end=(beam_size,))
         translator.restrict_lexicon = None
         return translator
 
@@ -111,7 +111,7 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     combined = sockeye.inference._concat_translations(translations, stop_ids={_EOS}, scorer=scorer)
 
     assert combined.target_ids == expected_target_ids
-    assert np.isclose(combined.score, expected_score)
+    assert onp.isclose(combined.score, expected_score)
     assert combined.beam_histories == expected_beam_histories
 
 

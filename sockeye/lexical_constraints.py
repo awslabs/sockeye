@@ -214,9 +214,9 @@ class AvoidBatch:
         """
         for i, word_id in enumerate(word_ids):
             if self.global_avoid_states:
-                self.global_avoid_states[i] = self.global_avoid_states[i].consume(word_id)
+                self.global_avoid_states[i] = self.global_avoid_states[i].consume(word_id.item())
             if self.local_avoid_states:
-                self.local_avoid_states[i] = self.local_avoid_states[i].consume(word_id)
+                self.local_avoid_states[i] = self.local_avoid_states[i].consume(word_id.item())
 
     def avoid(self) -> Tuple[Tuple[int], Tuple[int]]:
         """

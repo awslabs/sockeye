@@ -83,8 +83,7 @@ class _SingleModelInference(_Inference):
         target_factors = None  # type: Optional[np.ndarray]
         if target_factor_outputs:
             # target factors are greedily 'decoded'.
-            factor_predictions = [npx.cast(np.argmax(tfo, axis=-1, keepdims=True), dtype='int32') for tfo in
-                                  target_factor_outputs]
+            factor_predictions = [npx.cast(np.expand_dims(np.argmax(tfo, axis=1), axis=1), dtype='int32') for tfo in target_factor_outputs]
             target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
                 else np.concatenate(factor_predictions, axis=1)
         return scores, states, target_factors
@@ -121,7 +120,7 @@ class _EnsembleInference(_Inference):
             predicted_output_lengths.append(predicted_output_length)
             model_states += states
         # average predicted output lengths, (batch, 1)
-        predicted_output_lengths = np.mean(np.stack(*predicted_output_lengths, axis=1), axis=1, keepdims=True)
+        predicted_output_lengths = np.mean(np.stack(predicted_output_lengths, axis=1), axis=1)
         return model_states, predicted_output_lengths
 
     def decode_step(self,
@@ -146,7 +145,7 @@ class _EnsembleInference(_Inference):
         target_factors = None  # type: Optional[np.ndarray]
         if factor_outputs:
             # target factors are greedily 'decoded'.
-            factor_predictions = [npx.cast(np.argmin(self._interpolation(fs), axis=-1, keepdims=True), dtype='int32')
+            factor_predictions = [npx.cast(np.expand_dims(np.argmin(self._interpolation(fs), axis=-1), axis=1), dtype='int32')
                                   for fs in zip(*factor_outputs)]
             if factor_predictions:
                 target_factors = factor_predictions[0] if len(factor_predictions) == 1 \
@@ -191,7 +190,7 @@ class UpdateScores(gluon.HybridBlock):
         # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
         # pad_dist. Shape: (batch*beam, vocab_size)
-        pad_dist = np.concatenate(scores_accumulated, pad_dist, axis=1)
+        pad_dist = np.concatenate((scores_accumulated, pad_dist), axis=1)
         scores = np.where(np.logical_or(finished, inactive), pad_dist, scores)
 
         # Update lengths of all items, except those that were already finished. This updates
@@ -336,16 +335,20 @@ class SortNormalizeAndUpdateFinished(gluon.HybridBlock):
         reference_lengths = np.take(reference_lengths, best_hyp_indices, axis=0)
 
         # Normalize hypotheses that JUST finished
-        all_finished = np.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        all_finished = np.expand_dims(np.logical_or(best_word_indices == self.pad_id,
+                                                    best_word_indices == self.eos_id),
+                                      axis=1)
         newly_finished = np.logical_xor(all_finished, finished)
+
         scores_accumulated = np.where(newly_finished,
                                       self._scorer(scores_accumulated,
-                                                   npx.cast(np.expand_dims(lengths, axis=1), self.dtype),
+                                                   npx.cast(lengths, self.dtype),
                                                    reference_lengths),
                                       scores_accumulated)
 
         # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
         finished = np.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        finished = npx.cast(np.expand_dims(finished, axis=1), 'int32')
 
         # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
         best_word_indices = np.expand_dims(best_word_indices, axis=1)
@@ -371,28 +374,30 @@ class TopK(gluon.HybridBlock):
         super().__init__()
         self.k = k
 
-    def forward(self, scores, offset):
+    def __call__(self, scores, offset):
         """
-        Get the lowest k elements per sentence from a `scores` matrix.
+       Get the lowest k elements per sentence from a `scores` matrix.
 
-        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
-        :return: The row indices, column indices and values of the k smallest items in matrix.
-        """
+       :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+       :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
+       :return: The row indices, column indices and values of the k smallest items in matrix.
+       """
         batch_times_beam, vocab_size = scores.shape
         batch_size = int(batch_times_beam / self.k)
         # Shape: (batch size, beam_size * vocab_size)
         batchwise_scores = np.reshape(scores, (batch_size, self.k * vocab_size))
-        # BEGIN former hybrid_forward code
-        values, indices = npx.topk(batchwise_scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
-        # Project indices back into original shape (which is different for t==1 and t>1)
-        values, indices = np.reshape(values, (-1, 1)), np.reshape(indices, (-1,))
-        # END former hybrid_forward code
+        indices, values = super().__call__(batchwise_scores)
         best_hyp_indices, best_word_indices = np.unravel_index(indices, shape=(batch_size * self.k, vocab_size))
         if batch_size > 1:
             # Offsetting the indices to match the shape of the scores matrix
             best_hyp_indices = best_hyp_indices + offset
         return best_hyp_indices, best_word_indices, values
+
+    def forward(self, scores):
+        values, indices = npx.topk(scores, axis=1, k=self.k, ret_typ='both', is_ascend=True, dtype='int32')
+        # Project indices back into original shape (which is different for t==1 and t>1)
+        values, indices = np.reshape(values, (-1, 1)), np.reshape(indices, (-1,))
+        return indices, values
 
 
 class SampleK(gluon.HybridBlock):
@@ -426,8 +431,7 @@ class SampleK(gluon.HybridBlock):
             target_dists = masked_items / np.sum(masked_items, axis=1, keepdims=True)
 
         # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
-        # TODO: MX2 WHAT TO DO HERE?
-        best_word_indices = np.random.multinomial(target_dists, get_prob=False)
+        best_word_indices = npx.random.categorical(target_dists, get_prob=False)
         # Zeroes for finished hypotheses.
         best_word_indices = np.where(finished, np.zeros_like(best_word_indices), best_word_indices)
         values = npx.pick(scores, best_word_indices, axis=1, keepdims=True)
@@ -505,7 +509,8 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
                        vocab_slice_ids_shape, beam_size)
         n = beam_size - vocab_slice_ids_shape + 1
-        vocab_slice_ids = np.concatenate(vocab_slice_ids, np.full((n,), val=eos_id, ctx=ctx, dtype='int32'), axis=0)
+        vocab_slice_ids = np.concatenate((vocab_slice_ids, np.full((n,), fill_value=eos_id, ctx=ctx, dtype='int32')),
+                                         axis=0)
 
     return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list
 
@@ -574,14 +579,14 @@ class GreedySearch(gluon.Block):
 
         # best word_indices (also act as input: (batch*beam, num_target_factors
         best_word_index = np.full((batch_size, self.num_target_factors),
-                                  val=self.bos_id, ctx=self.context, dtype='int32')
+                                  fill_value=self.bos_id, ctx=self.context, dtype='int32')
         outputs = []  # type: List[np.ndarray]
 
         vocab_slice_ids = None  # type: Optional[np.ndarray]
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         if restrict_lexicon:
-            source_words = np.split(source, self.num_source_factors, axis=2)[0]
+            source_words = np.squeeze(np.split(source, self.num_source_factors, axis=2)[0], axis=2)
             vocab_slice_ids, _, _ = _get_vocab_slice_ids(restrict_lexicon, source_words,
                                                          raw_constraint_list, self.eos_id, beam_size=1)
 
@@ -628,7 +633,7 @@ class GreedyTop1(gluon.HybridBlock):
         if vocab_slice_ids is not None:
             best_word_index = np.take(vocab_slice_ids, best_word_index, axis=0)
         if target_factors is not None:
-            best_word_index = np.concatenate(best_word_index, target_factors, axis=1)
+            best_word_index = np.concatenate((best_word_index, target_factors), axis=1)
         return best_word_index
 
 
@@ -737,7 +742,7 @@ class BeamSearch(gluon.Block):
 
         # best word_indices (also act as input: (batch*beam, num_target_factors
         best_word_indices = np.full((batch_size * self.beam_size, self.num_target_factors),
-                                    val=self.bos_id, ctx=self.context, dtype='int32')
+                                    fill_value=self.bos_id, ctx=self.context, dtype='int32')
 
         # offset for hypothesis indices in batch decoding
         offset = np.repeat(np.arange(0, batch_size * self.beam_size, self.beam_size,
@@ -745,18 +750,19 @@ class BeamSearch(gluon.Block):
 
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = np.arange(0, batch_size * self.beam_size, self.beam_size, dtype='int32', ctx=self.context)
-        first_step_mask = np.full((batch_size * self.beam_size, 1), val=np.inf, ctx=self.context, dtype=self.dtype)
+        first_step_mask = np.full((batch_size * self.beam_size, 1),
+                                  fill_value=np.inf, ctx=self.context, dtype=self.dtype)
         first_step_mask[batch_indices] = 0.0
 
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[np.ndarray]
         best_word_indices_list = []  # type: List[np.ndarray]
 
-        lengths = np.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
-        finished = np.zeros((batch_size * self.beam_size,), ctx=self.context, dtype='int32')
+        lengths = np.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='int32')
+        finished = np.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype='int32')
 
-        # Extending max_output_lengths to shape (batch_size * beam_size,)
-        max_output_lengths = np.repeat(max_output_lengths, self.beam_size)
+        # Extending max_output_lengths to shape (batch_size * beam_size, 1)
+        max_output_lengths = np.repeat(np.expand_dims(max_output_lengths, axis=1), self.beam_size, axis=0)
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = np.zeros((batch_size * self.beam_size, 1), ctx=self.context, dtype=self.dtype)
@@ -767,17 +773,16 @@ class BeamSearch(gluon.Block):
         # target vocab for this sentence.
         vocab_slice_ids = None  # type: Optional[np.ndarrays]
         if restrict_lexicon:
-            # TODO: squeeze?
-            source_words = np.split(source, self.num_source_factors, axis=2)[0]
+            source_words = np.squeeze(np.split(source, self.num_source_factors, axis=2)[0], axis=2)
             vocab_slice_ids, output_vocab_size, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon,
                                                                                            source_words,
                                                                                            raw_constraint_list,
                                                                                            self.eos_id, beam_size=1)
 
         pad_dist = np.full((batch_size * self.beam_size, output_vocab_size - 1),
-                           val=np.inf, ctx=self.context, dtype=self.dtype)
+                           fill_value=np.inf, ctx=self.context, dtype=self.dtype)
         eos_dist = np.full((batch_size * self.beam_size, output_vocab_size),
-                           val=np.inf, ctx=self.context, dtype=self.dtype)
+                           fill_value=np.inf, ctx=self.context, dtype=self.dtype)
         eos_dist[:, C.EOS_ID] = 0
         unk_dist = None
         if self.prevent_unk:
@@ -797,10 +802,12 @@ class BeamSearch(gluon.Block):
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
         # repeat states to beam_size
         model_states = _repeat_states(model_states, self.beam_size, self._inference.state_structure())
+        # repeat estimated_reference_lengths to shape (batch_size * beam_size, 1)
+        estimated_reference_lengths = np.repeat(estimated_reference_lengths, self.beam_size, axis=0)
 
         # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
         # item on the beam for each sentence
-        inactive = np.zeros((batch_size * self.beam_size), dtype='int32', ctx=self.context)
+        inactive = np.zeros((batch_size * self.beam_size, 1), dtype='int32', ctx=self.context)
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
@@ -885,26 +892,24 @@ class BeamSearch(gluon.Block):
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
         scores_accumulated_shape = scores_accumulated.shape
-        folded_accumulated_scores = scores_accumulated.reshape((batch_size,
-                                                                self.beam_size * scores_accumulated_shape[-1]))
-        indices = np.argsort(folded_accumulated_scores.astype('float32', copy=False),
-                             axis=1, dtype='int32').reshape((-1,))
-        best_hyp_indices, _ = np.unravel_index(indices, scores_accumulated_shape) + offset
-        scores_accumulated = scores_accumulated.take(best_hyp_indices)
+        folded_accumulated_scores = scores_accumulated.reshape((batch_size, -1))
+        indices = np.argsort(folded_accumulated_scores.astype('float32', copy=False), axis=1).reshape((-1,))
+        best_hyp_indices = np.unravel_index(indices, scores_accumulated_shape)[0].astype('int32') + offset
+        scores_accumulated = scores_accumulated.take(best_hyp_indices, axis=0)
         best_hyp_indices_list.append(best_hyp_indices)
-        lengths = lengths.take(best_hyp_indices)
-        all_best_hyp_indices = np.stack(*best_hyp_indices_list, axis=1)
-        all_best_word_indices = np.stack(*best_word_indices_list, axis=2)
-        constraints = [constraints[x] for x in best_hyp_indices]
+        lengths = lengths.take(best_hyp_indices, axis=0)
+        all_best_hyp_indices = np.stack(best_hyp_indices_list, axis=1)
+        all_best_word_indices = np.stack(best_word_indices_list, axis=2)
+        constraints = [constraints[x] for x in best_hyp_indices.tolist()]
 
         return all_best_hyp_indices, \
                all_best_word_indices, \
                scores_accumulated, \
-               lengths.asnumpy().astype('int32', copy=False), \
+               lengths.astype('int32', copy=False), \
                estimated_reference_lengths, \
                constraints
 
-    def _should_stop(self, finished, batch_size):
+    def _should_stop(self, finished: np.ndarray, batch_size: int) -> bool:
         if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
             at_least_one_finished = finished.reshape((batch_size, self.beam_size)).sum(axis=1) > 0
             return at_least_one_finished.sum().item() == batch_size
