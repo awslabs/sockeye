@@ -429,8 +429,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
         # shape: (length, batch, key_depth + value_depth)
-        # TODO MX2: set this to 0, batch_size, self.depth_out * 2
-        return 1, batch_size, self.depth_out * 2
+        return 0, batch_size, self.depth_out * 2
 
     def forward(self,
                 inputs: np.ndarray,
@@ -460,8 +459,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         updated_states = states
         if previous_states is not None:
             updated_states = np.concatenate((previous_states, states), axis=0)
-            # TODO: MX2: we can remove the slicing if initial states have sequence length 0 (as now supported by ndarrays)
-            states = npx.slice(updated_states, begin=(1, None, None), end=(None, None, None))
 
         return self._attend(queries, states, lengths=input_lengths, bias=bias), updated_states
 
