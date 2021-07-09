@@ -193,7 +193,7 @@ class Embedding(Encoder):
         if self.config.dropout > 0:
             embed = npx.dropout(data=embed, p=self.config.dropout)
 
-        return embed, np.copy(valid_length)  # TODO: do we need the copy? See https://github.com/apache/incubator-mxnet/issues/14228
+        return embed, np.copy(valid_length)  # See https://github.com/apache/incubator-mxnet/issues/14228
 
     def get_num_hidden(self) -> int:
         """
@@ -220,7 +220,7 @@ class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
     def forward(self, data, valid_length):  # pylint: disable=arguments-differ
         for block in self._children.values():
             data, valid_length = block(data, valid_length)
-        return data, np.copy(valid_length)  # TODO: do we need the copy? See https://github.com/apache/incubator-mxnet/issues/14228
+        return data, np.copy(valid_length)  # See https://github.com/apache/incubator-mxnet/issues/14228
 
     def get_num_hidden(self) -> int:
         """
