@@ -75,7 +75,6 @@ class Decoder(gluon.Block):
         if config_type not in cls.__registry:
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls = cls.__registry[config_type]
-        # TODO: move final suffix/prefix construction logic into config builder
         return decoder_cls(config=config, inference_only=inference_only, dtype=dtype)  # type: ignore
 
     @abstractmethod
