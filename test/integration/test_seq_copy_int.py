@@ -221,7 +221,7 @@ def _test_extract_parameters_cli(model_path: str):
         output=os.path.join(model_path, "params.extracted"), input=model_path)
     with patch.object(sys, "argv", extract_params.split()):
         sockeye.extract_parameters.main()
-    with np.load(os.path.join(model_path, "params.extracted.npz")) as data:
+    with np.load(os.path.join(model_path, "params.extracted")) as data:
         assert "output_layer.bias" in data
 
 

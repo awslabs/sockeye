@@ -270,7 +270,7 @@ class BrevityPenalty(gluon.HybridBlock):
             if isinstance(hyp_lengths, (int, float)):
                 log_bp = min(0.0, 1.0 - reference_lengths / hyp_lengths)
             else:
-                log_bp = np.minimum(np.zeros_like(hyp_lengths), 1.0 - reference_lengths / hyp_lengths)
+                log_bp = np.minimum(np.zeros_like(hyp_lengths, dtype='float32'), 1.0 - reference_lengths / hyp_lengths)
             return self.weight * log_bp
 
 
