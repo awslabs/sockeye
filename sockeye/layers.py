@@ -456,11 +456,10 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         queries, kv_1, kv_2 = np.split(proj, 3, axis=2)
         states = np.concatenate((kv_1, kv_2), axis=2)
 
-        updated_states = states
         if previous_states is not None:
-            updated_states = np.concatenate((previous_states, states), axis=0)
+            states = np.concatenate((previous_states, states), axis=0)
 
-        return self._attend(queries, states, lengths=input_lengths, bias=bias), updated_states
+        return self._attend(queries, states, lengths=input_lengths, bias=bias), states
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
