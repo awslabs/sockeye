@@ -25,6 +25,7 @@ import pprint
 import random
 import sys
 import time
+from collections import defaultdict
 from contextlib import contextmanager, ExitStack
 from functools import reduce
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
@@ -618,6 +619,7 @@ def log_parameters(params: C.ParameterDict):
     learned_parameter_names = []
     total_learned = 0
     total_fixed = 0
+    visited = defaultdict(list)
     for name, param in sorted(params.items()):
         repr = "%s [%s, %s]" % (name, param.shape, _print_dtype(param.dtype))
         size = reduce(lambda x, y: x * y, param.shape)
@@ -627,12 +629,18 @@ def log_parameters(params: C.ParameterDict):
             fixed_parameter_names.append(repr)
             total_fixed += size
         else:
-            total_learned += size
+            total_learned += size if param not in visited else 0
             learned_parameter_names.append(repr)
+        visited[param].append(name)
+    shared_parameter_names = []
+    for param, names in visited.items():
+        if len(names) > 1:
+            shared_parameter_names.append(" = ".join(names))
     total_parameters = total_learned + total_fixed
     logger.info("# of parameters: %d | trainable: %d (%.2f%%) | fixed: %d (%.2f%%)",
                 total_parameters,
                 total_learned, total_learned / total_parameters * 100,
                 total_fixed, total_fixed / total_parameters * 100)
     logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
+    logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names))
     logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))

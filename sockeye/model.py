@@ -416,17 +416,13 @@ class SockeyeModel(gluon.Block):
 
         tie_weights = C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type
 
-        source_embed_name = C.SOURCE_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
-        target_embed_name = C.TARGET_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
-        output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
-
         source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not tie_weights else 'default'
         if source_grad_stype == 'row_sparse':
             logger.warning(
                 "sparse gradient updates for source embeddings not supported yet with MXNet 2.0 & Numpy namespace. "
                 "Using 'default'")
             source_grad_stype = 'default'
-        source_embed_weight = gluon.Parameter(source_embed_name,
+        source_embed_weight = gluon.Parameter('weight',
                                               shape=(self.config.config_embed_source.vocab_size,
                                                      self.config.config_embed_source.num_embed),
                                               allow_deferred_init=True,
@@ -441,7 +437,7 @@ class SockeyeModel(gluon.Block):
                     "sparse gradient updates for target embeddings not supported yet with MXNet 2.0 & Numpy namespace. "
                     "Using 'default'")
                 target_grad_stype = 'default'
-            target_embed_weight = gluon.Parameter(target_embed_name,
+            target_embed_weight = gluon.Parameter('weight',
                                                   shape=(self.config.config_embed_target.vocab_size,
                                                          self.config.config_embed_target.num_embed),
                                                   allow_deferred_init=True,
@@ -450,7 +446,7 @@ class SockeyeModel(gluon.Block):
         if tie_weights:
             output_weight = target_embed_weight
         else:
-            output_weight = gluon.Parameter(output_embed_name,
+            output_weight = gluon.Parameter('weight',
                                             shape=(self.config.config_embed_target.vocab_size,
                                                    self.config.config_decoder.model_size),
                                             allow_deferred_init=True)

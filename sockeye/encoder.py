@@ -131,13 +131,13 @@ class Embedding(Encoder):
         self._factor_weight_format_string = 'factor%d_weight'
 
         if embed_weight is None:
-            self.embed_weight = mx.gluon.Parameter('weight',
-                                                   shape=(self.config.vocab_size, self.config.num_embed),
-                                                   grad_stype='row_sparse',
-                                                   dtype=dtype)
+            self.weight = mx.gluon.Parameter('weight',
+                                             shape=(self.config.vocab_size, self.config.num_embed),
+                                             grad_stype='row_sparse',
+                                             dtype=dtype)
             self._use_sparse_grad = self.config.allow_sparse_grad
         else:
-            self.embed_weight = embed_weight
+            self.weight = embed_weight
             self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
 
         self.factor_weights = []  # type: List[mx.gluon.Parameter]
@@ -176,7 +176,7 @@ class Embedding(Encoder):
             data = np.squeeze(data, axis=2)
 
         embed = npx.embedding(data,
-                              weight=self.embed_weight.data(),
+                              weight=self.weight.data(),
                               input_dim=self.config.vocab_size,
                               output_dim=self.config.num_embed,
                               dtype=self._dtype,

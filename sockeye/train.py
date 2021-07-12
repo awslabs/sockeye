@@ -834,7 +834,7 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
                           "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
     if config.lhuc:
         # fix everything except LHUC-related parameters
-        fixed_param_names += [name for name in params if not name.endswith(C.LHUC_PREFIX + "weight")]
+        fixed_param_names += [name for name in params if not name.endswith("lhuc.weight")]
         logger.info("LHUC enabled, fixing all non-LHUC parameters")
     elif fixed_param_strategy is not None:
         fixed_param_names += fixed_param_names_from_stragegy(config, params, fixed_param_strategy)
@@ -867,27 +867,29 @@ def fixed_param_names_from_stragegy(config: model.ModelConfig,
             return not name.startswith(C.DECODER_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
             # First and last encoder and decoder layers.
-            return not (name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, 0)) or
-                        name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, num_encoder_layers - 1)) or
-                        name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, 0)) or
-                        name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, num_decoder_layers - 1)))
+            first_encoder_prefix = f'{C.ENCODER_PREFIX}.layers.{0}'
+            last_encoder_prefix = f'{C.ENCODER_PREFIX}.layers.{num_encoder_layers - 1}'
+            first_decoder_prefix = f'{C.DECODER_PREFIX}.layers.{0}'
+            last_decoder_prefix = f'{C.DECODER_PREFIX}.layers.{num_decoder_layers - 1}'
+            return not (name.startswith(first_encoder_prefix) or
+                        name.startswith(last_encoder_prefix) or
+                        name.startswith(first_decoder_prefix) or
+                        name.startswith(last_decoder_prefix))
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
             # Any type of learned embedding.
-            return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
-                        name.startswith(C.TARGET_EMBEDDING_PREFIX) or
-                        name.startswith(C.SHARED_EMBEDDING_PREFIX))
+            return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or name.startswith(C.TARGET_EMBEDDING_PREFIX))
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
             # Target output projection.
             return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_FEED_FORWARD:
-            return not (name.endswith("_ff_h2o_bias") or name.endswith("_ff_h2o_weight") or
-                        name.endswith("_ff_i2h_bias") or name.endswith("_ff_i2h_weight"))
+            return not (name.endswith("ff.ff1.bias") or name.endswith("ff.ff1.weight") or
+                        name.endswith("ff.ff2.bias") or name.endswith("ff.ff2.weight"))
         if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_AND_SOURCE_EMBEDDINGS:
             return name.startswith(C.ENCODER_PREFIX) or name.startswith(C.SOURCE_EMBEDDING_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_HALF_AND_SOURCE_EMBEDDINGS:
             if name.startswith(C.ENCODER_PREFIX):
                 for i in range(num_encoder_layers // 2):
-                    if name.startswith("{}{}_".format(C.TRANSFORMER_ENCODER_PREFIX, i)):
+                    if name.startswith(f"{C.ENCODER_PREFIX}.layers.{i}"):
                         return True
             return name.startswith(C.SOURCE_EMBEDDING_PREFIX)
         raise ValueError("Unknown fixed parameter strategy: %s" % strategy)

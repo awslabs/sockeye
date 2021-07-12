@@ -46,25 +46,16 @@ ARG_SEPARATOR = ":"
 # TODO: make this configurable in the model, separately per target factor.
 TARGET_FACTOR_SHIFT = True
 
-ENCODER_PREFIX = "encoder_"
-DECODER_PREFIX = "decoder_"
-EMBEDDING_PREFIX = "embed_"
-ATTENTION_PREFIX = "att_"
-COVERAGE_PREFIX = "cov_"
-TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
-DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
-TARGET_FACTOR_OUTPUT_LAYER_PREFIX = "target_output_factor%d_"
-LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
+ENCODER_PREFIX = "encoder"
+DECODER_PREFIX = "decoder"
+DEFAULT_OUTPUT_LAYER_PREFIX = "output_layer"
 
 # SSRU
 SSRU_PREFIX = "ssru_"
 
 # embedding prefixes
-SOURCE_EMBEDDING_PREFIX = "source_" + EMBEDDING_PREFIX
-SOURCE_POSITIONAL_EMBEDDING_PREFIX = "source_pos_" + EMBEDDING_PREFIX
-TARGET_EMBEDDING_PREFIX = "target_" + EMBEDDING_PREFIX
-TARGET_POSITIONAL_EMBEDDING_PREFIX = "target_pos_" + EMBEDDING_PREFIX
-SHARED_EMBEDDING_PREFIX = "source_target_" + EMBEDDING_PREFIX
+SOURCE_EMBEDDING_PREFIX = "embedding_source"
+TARGET_EMBEDDING_PREFIX = "embedding_target"
 
 # source factors
 FACTORS_COMBINE_SUM = 'sum'
@@ -106,11 +97,6 @@ INIT_XAVIER_FACTOR_TYPES = [INIT_XAVIER_FACTOR_TYPE_IN, INIT_XAVIER_FACTOR_TYPE_
 RAND_TYPE_UNIFORM = 'uniform'
 RAND_TYPE_GAUSSIAN = 'gaussian'
 
-# Embedding init types
-EMBED_INIT_PATTERN = '(%s|%s|%s)weight' % (SOURCE_EMBEDDING_PREFIX, TARGET_EMBEDDING_PREFIX, SHARED_EMBEDDING_PREFIX)
-EMBED_INIT_DEFAULT = 'default'
-EMBED_INIT_NORMAL = 'normal'
-EMBED_INIT_TYPES = [EMBED_INIT_DEFAULT, EMBED_INIT_NORMAL]
 DEFAULT_NUM_EMBED = 512
 
 # weight tying components
@@ -384,7 +370,6 @@ LARGEST_INT = sys.maxsize
 # TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutput loss for CE.
 FIXED_GRAD_SCALE_FP16 = 1024.0
 
-LHUC_PREFIX = "lhuc."
 # lhuc application points
 LHUC_ENCODER = "encoder"
 LHUC_DECODER = "decoder"
