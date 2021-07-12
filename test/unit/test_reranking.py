@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -21,8 +21,8 @@ import sockeye.rerank as rerank
     (["No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
       "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
      "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
-     ['No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament',
-      'No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament'], "bleu"),
+     ['No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament',
+      'No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament'], "bleu"),
     # test chrf as metric
     (["No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
       "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
@@ -38,7 +38,9 @@ import sockeye.rerank as rerank
 ])
 def test_rerank_hypotheses(hypotheses, reference, expected_output, metric):
     reranker = rerank.Reranker(metric=metric, return_score=False)
-    hypotheses = {'translations': hypotheses}
+    hypotheses = {'sentence_id': 0,
+                  'translation': '',
+                  'translations': hypotheses}
     reranked_hypotheses = reranker.rerank(hypotheses, reference)
     assert reranked_hypotheses['translations'] == expected_output
 
@@ -47,11 +49,13 @@ def test_rerank_hypotheses(hypotheses, reference, expected_output, metric):
     (["Completely different",
       "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
      "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
-     [60.26404810093175, 0.0])
+     [61.69564583930634, 0.0])
 ])
 def test_rerank_return_score(hypotheses, reference, expected_scores):
     reranker = rerank.Reranker(metric="bleu", return_score=True)
-    hypotheses = {'translations': hypotheses}
+    hypotheses = {'sentence_id': 0,
+                  'translation': '',
+                  'translations': hypotheses}
     reranked_hypotheses = reranker.rerank(hypotheses, reference)
     assert 'scores' in reranked_hypotheses
     actual_scores = reranked_hypotheses['scores']

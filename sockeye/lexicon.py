@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -120,7 +120,7 @@ class TopKLexicon:
         # Shape: (vocab_source_size, k), k determined at create() or load()
         self.lex = None  # type: np.ndarray
         # Always allow special vocab symbols in target vocab
-        self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int)
+        self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32')
 
     def create(self, path: str, k: int = 20):
         """
@@ -129,7 +129,7 @@ class TopKLexicon:
         :param path: Path to lexicon file.
         :param k: Number of target entries per source to keep.
         """
-        self.lex = np.zeros((len(self.vocab_source), k), dtype=np.int)
+        self.lex = np.zeros((len(self.vocab_source), k), dtype='int32')
         src_unk_id = self.vocab_source[C.UNK_SYMBOL]
         trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
         num_insufficient = 0  # number of source tokens with insufficient number of translations given k
@@ -192,8 +192,8 @@ class TopKLexicon:
         :return: Possible target ids for source (unique sorted, always includes special symbols).
         """
         # TODO: When MXNet adds support for set operations, we can migrate to avoid conversions to/from NumPy.
-        unique_src_ids = np.lib.arraysetops.unique(src_ids)
-        trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))
+        unique_src_ids = np.lib.arraysetops.unique(src_ids)  # type: ignore
+        trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))  # type: ignore
         return trg_ids
 
 
@@ -205,7 +205,7 @@ def create(args):
     logger.info("Creating top-k lexicon from \"%s\"", args.input)
     logger.info("Reading source and target vocab from \"%s\"", args.model)
     vocab_source = vocab.load_source_vocabs(args.model)[0]
-    vocab_target = vocab.load_target_vocab(args.model)
+    vocab_target = vocab.load_target_vocabs(args.model)[0]
     logger.info("Building top-%d lexicon", args.k)
     lexicon = TopKLexicon(vocab_source, vocab_target)
     lexicon.create(args.input, args.k)

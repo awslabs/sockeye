@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -24,8 +24,7 @@ import sockeye.average as average
         ([(1.1, 4), (2.2, 3), (3.3, 2), (4.4, 1)], [(4.4, 1), (3.3, 2), (2.2, 3), (1.1, 4)], 5, True)
 ])
 def test_strategy_best(test_points, expected_top_n, size, maximize):
-    result = average._strategy_best(test_points, size, maximize)
-
+    result = average.strategy_best(test_points, size, maximize)
     assert result == expected_top_n
 
 
@@ -39,8 +38,7 @@ def test_strategy_best(test_points, expected_top_n, size, maximize):
         ([(1.1, 4), (2.2, 3), (3.3, 2), (4.4, 1)], [(1.1, 4), (2.2, 3), (3.3, 2), (4.4, 1)], 5, True)
 ])
 def test_strategy_last(test_points, expected_top_n, size, maximize):
-    result = average._strategy_last(test_points, size, maximize)
-
+    result = average.strategy_last(test_points, size, maximize)
     assert result == expected_top_n
 
 
@@ -55,6 +53,5 @@ def test_strategy_last(test_points, expected_top_n, size, maximize):
         ([(1.1, 4), (2.2, 3), (3.3, 2), (4.4, 1)], [[3, 1.1, 4], [0, 2.2, 3], [0, 3.3, 2], [0, 4.4, 1]], 5, False)
 ])
 def test_strategy_lifespan(test_points, expected_top_n, size, maximize):
-    result = average._strategy_lifespan(test_points, size, maximize)
-
+    result = average.strategy_lifespan(test_points, size, maximize)
     assert result == expected_top_n

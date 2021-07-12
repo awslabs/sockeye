@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,8 +12,8 @@
 # permissions and limitations under the License.
 
 import copy
-import inspect
 import logging
+from dataclasses import dataclass
 
 import yaml
 
@@ -29,100 +29,34 @@ class TaggedYamlObjectMetaclass(yaml.YAMLObjectMetaclass):
         super().__init__(name, bases, new_kwds)
 
 
+@dataclass
 class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
     """
-    Base configuration object that supports freezing of members and YAML (de-)serialization.
+    Base configuration object YAML (de-)serialization.
     Actual Configuration should subclass this object.
     """
     yaml_loader = yaml.UnsafeLoader  # type: ignore
 
-    def __init__(self):
-        self.__add_frozen()
-
-    def __setattr__(self, key, value):
-        if hasattr(self, '_frozen') and getattr(self, '_frozen'):
-            raise AttributeError("Cannot set '%s' in frozen config" % key)
-        if value == self:
-            raise AttributeError("Cannot set self as attribute")
-        object.__setattr__(self, key, value)
-
-    def __setstate__(self, state):
-        """Pickle protocol implementation."""
-        # We first take the serialized state:
-        self.__dict__.update(state)
-        # Then we take the constructors default values for missing arguments in order to stay backwards compatible
-        # This way we can add parameters to Config objects and still load old models.
-        init_signature = inspect.signature(self.__init__)
-        for param_name, param in init_signature.parameters.items():
-            if param.default is not param.empty:
-                if not hasattr(self, param_name):
-                    object.__setattr__(self, param_name, param.default)
-
-    def freeze(self):
-        """
-        Freezes this Config object, disallowing modification or addition of any parameters.
-        """
-        if getattr(self, '_frozen'):
-            return
-        object.__setattr__(self, "_frozen", True)
-        for k, v in self.__dict__.items():
-            if isinstance(v, Config) and k != "self":
-                v.freeze()  # pylint: disable= no-member
-
-    def __repr__(self):
-        return "Config[%s]" % ", ".join("%s=%s" % (str(k), str(v)) for k, v in sorted(self.__dict__.items()))
-
-    def __eq__(self, other):
-        if type(other) is not type(self):
-            return False
-        for k, v in self.__dict__.items():
-            if k != "self":
-                if k not in other.__dict__:
-                    return False
-                if self.__dict__[k] != other.__dict__[k]:
-                    return False
-        return True
-
-    def __del_frozen(self):
-        """
-        Removes _frozen attribute from this instance and all its child configurations.
-        """
-        self.__delattr__('_frozen')
-        for attr, val in self.__dict__.items():
-            if isinstance(val, Config) and hasattr(val, '_frozen'):
-                val.__del_frozen()  # pylint: disable= no-member
-
-    def __add_frozen(self):
-        """
-        Adds _frozen attribute to this instance and all its child configurations.
-        """
-        setattr(self, "_frozen", False)
-        for attr, val in self.__dict__.items():
-            if isinstance(val, Config):
-                val.__add_frozen()  # pylint: disable= no-member
-
     def save(self, fname: str):
         """
-        Saves this Config (without the frozen state) to a file called fname.
+        Saves this Config to a file called fname.
 
         :param fname: Name of file to store this Config in.
         """
         obj = copy.deepcopy(self)
-        obj.__del_frozen()
         with open(fname, 'w') as out:
             yaml.dump(obj, out, default_flow_style=False)
 
     @staticmethod
     def load(fname: str) -> 'Config':
         """
-        Returns a Config object loaded from a file. The loaded object is not frozen.
+        Returns a Config object loaded from a file.
 
         :param fname: Name of file to load the Config from.
         :return: Configuration.
         """
         with open(fname) as inp:
             obj = yaml.load(inp, Loader=yaml.UnsafeLoader)  # type: ignore
-            obj.__add_frozen()
             return obj
 
     def copy(self, **kwargs):

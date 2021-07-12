@@ -1,0 +1,160 @@
+!ModelConfig
+config_data: !DataConfig
+  data_statistics: !DataStatistics
+    average_len_target_per_bucket:
+    - null
+    - 13.540123456790127
+    - 20.306701030927847
+    - 27.874999999999996
+    - null
+    - null
+    - null
+    - null
+    - null
+    - null
+    - null
+    - null
+    buckets:
+    - !!python/tuple
+      - 8
+      - 8
+    - !!python/tuple
+      - 16
+      - 16
+    - !!python/tuple
+      - 24
+      - 24
+    - !!python/tuple
+      - 32
+      - 32
+    - !!python/tuple
+      - 40
+      - 40
+    - !!python/tuple
+      - 48
+      - 48
+    - !!python/tuple
+      - 56
+      - 56
+    - !!python/tuple
+      - 64
+      - 64
+    - !!python/tuple
+      - 72
+      - 72
+    - !!python/tuple
+      - 80
+      - 80
+    - !!python/tuple
+      - 88
+      - 88
+    - !!python/tuple
+      - 96
+      - 96
+    length_ratio_mean: 1.0
+    length_ratio_stats_per_bucket:
+    - &id001 !!python/tuple
+      - null
+      - null
+    - !!python/tuple
+      - 1.0
+      - 0.0
+    - !!python/tuple
+      - 1.0
+      - 0.0
+    - !!python/tuple
+      - 1.0
+      - 0.0
+    - *id001
+    - *id001
+    - *id001
+    - *id001
+    - *id001
+    - *id001
+    - *id001
+    - *id001
+    length_ratio_std: 0.0
+    max_observed_len_source: 31
+    max_observed_len_target: 31
+    num_discarded: 0
+    num_sents: 1000
+    num_sents_per_bucket:
+    - 0
+    - 324
+    - 388
+    - 288
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    - 0
+    num_tokens_source: 20294
+    num_tokens_target: 20294
+    num_unks_source: 0
+    num_unks_target: 0
+    size_vocab_source: 15
+    size_vocab_target: 15
+  max_seq_len_source: 96
+  max_seq_len_target: 96
+  num_source_factors: 1
+  num_target_factors: 1
+config_decoder: !TransformerConfig
+  act_type: relu
+  attention_heads: 2
+  decoder_type: transformer
+  depth_key_value: 16
+  dropout_act: 0.1
+  dropout_attention: 0.1
+  dropout_prepost: 0.1
+  feed_forward_num_hidden: 16
+  lhuc: false
+  max_seq_len_source: 96
+  max_seq_len_target: 96
+  model_size: 16
+  num_layers: 1
+  positional_embedding_type: fixed
+  postprocess_sequence: dr
+  preprocess_sequence: n
+  use_lhuc: false
+config_embed_source: !EmbeddingConfig
+  allow_sparse_grad: true
+  dropout: 0.0
+  factor_configs: null
+  num_embed: 16
+  num_factors: 1
+  vocab_size: 15
+config_embed_target: !EmbeddingConfig
+  allow_sparse_grad: true
+  dropout: 0.0
+  factor_configs: null
+  num_embed: 16
+  num_factors: 1
+  vocab_size: 15
+config_encoder: !TransformerConfig
+  act_type: relu
+  attention_heads: 2
+  decoder_type: transformer
+  depth_key_value: 0
+  dropout_act: 0.1
+  dropout_attention: 0.1
+  dropout_prepost: 0.1
+  feed_forward_num_hidden: 16
+  lhuc: false
+  max_seq_len_source: 96
+  max_seq_len_target: 96
+  model_size: 16
+  num_layers: 1
+  positional_embedding_type: fixed
+  postprocess_sequence: dr
+  preprocess_sequence: n
+  use_lhuc: false
+config_length_task: null
+dtype: float32
+intgemm_custom_lib: libintgemm.so
+lhuc: false
+vocab_source_size: 15
+vocab_target_size: 15
+weight_tying_type: src_trg_softmax

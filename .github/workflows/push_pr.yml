@@ -2,11 +2,9 @@ name: push and pull request testing
 on:
   push:
     branches:
-    - sockeye_2
     - master
   pull_request:
     branches:
-    - sockeye_2
     - master
 
 jobs:
@@ -15,7 +13,7 @@ jobs:
       max-parallel: 4
       fail-fast: false
       matrix:
-        python-version: [3.6, 3.7]
+        python-version: [3.7, 3.8]
         platform: [ubuntu-latest, macos-latest]
 
     runs-on: ${{ matrix.platform }}
@@ -41,8 +39,8 @@ jobs:
     - name: Pylint
       run: |
         pylint --version
-        pylint --rcfile=pylintrc sockeye -E
-        pylint --rcfile=pylintrc test -E
+        pylint --rcfile=.pylintrc sockeye
+        pylint --rcfile=.pylintrc test --disable=E1102
     - name: MyPy
       run: |
         mypy --version

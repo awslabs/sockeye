@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -15,124 +15,102 @@ import mxnet as mx
 import numpy as np
 
 import sockeye.layers
-import sockeye.rnn
-
-
-def test_layer_normalization():
-    batch_size = 32
-    other_dim = 10
-    num_hidden = 64
-    x_nd = mx.nd.uniform(0, 10, (batch_size, other_dim, num_hidden))
-    x_np = x_nd.asnumpy()
-
-    ln = sockeye.layers.LayerNormalization(prefix="")
-    ln.initialize()
-
-    expected_mean = np.mean(x_np, axis=-1, keepdims=True)
-    expected_var = np.var(x_np, axis=-1, keepdims=True)
-    expected_norm = (x_np - expected_mean) / np.sqrt(expected_var)
-
-    norm = ln(x_nd)
-    assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
-    ln.hybridize()
-    norm = ln(x_nd)
-    assert np.isclose(norm.asnumpy(), expected_norm, atol=1.e-6).all()
 
 
 def test_lhuc():
     num_hidden = 50
     batch_size = 10
+    inp = mx.nd.random_uniform(shape=(batch_size, num_hidden))
 
-    inp = mx.sym.Variable("inp")
-    params = mx.sym.Variable("params")
-    lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight=params)
-    with_lhuc = lhuc(inp)
+    lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init='zeros')
+    lhuc.initialize()
+    out = lhuc(inp)
+    assert np.allclose(inp.asnumpy(), out.asnumpy())
 
-    inp_nd = mx.nd.random_uniform(shape=(batch_size, num_hidden))
-    params_same_nd = mx.nd.zeros(shape=(num_hidden,))
-    params_double_nd = mx.nd.ones(shape=(num_hidden,)) * 20
-
-    out_same = with_lhuc.eval(inp=inp_nd, params=params_same_nd)[0]
-    assert np.isclose(inp_nd.asnumpy(), out_same.asnumpy()).all()
-
-    out_double = with_lhuc.eval(inp=inp_nd, params=params_double_nd)[0]
-    assert np.isclose(2 * inp_nd.asnumpy(), out_double.asnumpy()).all()
+    lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mx.init.Constant(value=20.0))
+    lhuc.initialize()
+    out = lhuc(inp)
+    assert np.allclose(2 * inp.asnumpy(), out.asnumpy())
 
 
 def test_weight_normalization():
-    # The norm after the operation should be equal to the scale factor.
-    expected_norm = np.asarray([1., 2.])
-    scale_factor = mx.nd.array([[1.], [2.]])
-    weight = mx.sym.Variable("weight")
-    weight_norm = sockeye.layers.WeightNormalization(weight,
-                                                     num_hidden=2)
-    norm_weight = weight_norm()
-    nd_norm_weight = norm_weight.eval(weight=mx.nd.array([[1., 2.],
-                                                          [3., 4.]]),
-                                      wn_scale=scale_factor)
-    assert np.isclose(np.linalg.norm(nd_norm_weight[0].asnumpy(), axis=1), expected_norm).all()
+    expected_norm = np.array([1., 1.])
+    weight = mx.nd.array([[1., 2.],
+                          [3., 4.]])
+    weight_norm = sockeye.layers.WeightNormalization(num_hidden=2)
+    weight_norm.initialize()
+    norm_weight = weight_norm(weight).asnumpy()
+    assert np.allclose(np.linalg.norm(norm_weight, axis=1), expected_norm)
 
 
-def test_length_ratio_average_sources():
-    # sources: (n=3, length=5, hidden_size=2)
-    sources = mx.nd.array([[[1, 5],
-                            [2, 6],
-                            [3, 7],
-                            [4, 8],
-                            [0, 9]],
-                          [[10, 0],
-                            [9, 1],
-                            [8, 3],
-                            [7, 5],
-                            [0, 7]],
-                          [[-1, 0],
-                           [-1, 0],
-                           [-1, 0],
-                           [0, -1],
-                           [0, -1]]])
-    lengths = mx.nd.array([3, 4, 5])
-    expected_averages = np.array([[2., 6.], [8.5, 2.25], [-0.6, -0.4]])
+def test_positional_embeddings():
+    num_embed = 32
+    max_seq_len = 10
+    prefix = ''
+    scale_up_input = False
+    scale_down_positions = False
+    data_len = 5
+    data = mx.nd.zeros((2, data_len, num_embed))
 
-    average = sockeye.layers.LengthRatio.average_sources(mx.sym.Variable('sources'),
-                                                         mx.sym.Variable('lengths'))
-    average = average.eval(sources=sources, lengths=lengths)[0]
-    assert np.isclose(average.asnumpy(), expected_averages).all()
+    # fixed embeddings
+    expected_fixed_embedding = sockeye.layers.get_positional_embeddings(data_len, num_embed)
+    b = sockeye.layers.PositionalEmbeddings(weight_type='fixed',
+                                            num_embed=num_embed,
+                                            max_seq_len=max_seq_len,
+                                            prefix=prefix,
+                                            scale_up_input=scale_up_input,
+                                            scale_down_positions=scale_down_positions,
+                                            weight_init=None)
+    b.initialize()
+    # no steps
+    out = b(data, None).asnumpy()
+    assert np.allclose(out[0], expected_fixed_embedding)
+    assert np.allclose(out[1], expected_fixed_embedding)
+
+    # steps
+    steps = mx.nd.expand_dims(mx.nd.array([2, 3]), axis=1)
+    out = b(data, steps).asnumpy()
+    assert np.allclose(out[0], expected_fixed_embedding[2])
+    assert np.allclose(out[1], expected_fixed_embedding[3])
+
+    # learned embeddings
+    b = sockeye.layers.PositionalEmbeddings(weight_type='learned',
+                                            num_embed=num_embed,
+                                            max_seq_len=max_seq_len,
+                                            prefix=prefix,
+                                            scale_up_input=scale_up_input,
+                                            scale_down_positions=scale_down_positions,
+                                            weight_init='ones')
+    b.initialize()
+    expected_learned_embeddings = np.ones((data_len, num_embed))
+    out = b(data, None).asnumpy()
+    assert np.allclose(out[0], expected_learned_embeddings)
 
 
-def test_length_ratio():
-    # sources: (n=3, length=5, hidden_size=2)
-    sources = mx.nd.array([[[1, 6],
-                            [2, 7],
-                            [3, 8],
-                            [4, 9],
-                            [5, 10]],
-                          [[10, 5],
-                            [9, 4],
-                            [8, 3],
-                            [7, 2],
-                            [6, 1]],
-                          [[-1, 1],
-                           [-1, 0],
-                           [-1, 2],
-                           [-1, -2],
-                           [1, 1]]])
-    lengths = mx.nd.array([5, 5, 4])
-    expected_averages = np.array([[3., 8.], [8., 3.], [-1., 0.25]])
-    weight = mx.nd.array([[1.1, 1.3]])
-    bias = mx.nd.array([8])
+def test_output_layer():
+    num_hidden = 32
+    vocab_size = 64
+    data = mx.nd.ones((2, 10, num_hidden))
+    vocab_slice_ids = mx.nd.array([4, 7, 23])
 
-    length_ratio = sockeye.layers.LengthRatio(hidden_size=2, num_layers=1, prefix="lr_")
+    b = sockeye.layers.OutputLayer(num_hidden, vocab_size)
+    b.initialize()
 
-    data = length_ratio(mx.sym.Variable('sources'), mx.sym.Variable('lengths'))
-    ratio = data.eval(sources=sources, lengths=lengths,
-                      lr_dense0_weight=weight, lr_dense0_bias=bias)[0]
+    output = b(data, None)
+    assert output.shape == (2, 10, vocab_size)
+    reduced_output = output.take(vocab_slice_ids, axis=-1).asnumpy()
 
-    average = sockeye.layers.LengthRatio.average_sources(mx.sym.Variable('sources'),
-                                                         mx.sym.Variable('lengths')).eval(sources=sources,
-                                                                                          lengths=lengths)[0]
-    assert np.isclose(average.asnumpy(), expected_averages).all()
+    output_restricted = b(data, vocab_slice_ids).asnumpy()
+    assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
 
-    softrelu = lambda x: np.log(1 + np.exp(x))
-    expected_softrelu = softrelu(np.dot(expected_averages, weight.asnumpy().T) + bias.asnumpy())
+    assert np.allclose(output_restricted, reduced_output)
 
-    assert np.isclose(ratio.asnumpy(), expected_softrelu).all()
+    b.hybridize()
+    output = b(data, None)
+    assert output.shape == (2, 10, vocab_size)
+    reduced_output = output.take(vocab_slice_ids, axis=-1).asnumpy()
+
+    output_restricted = b(data, vocab_slice_ids).asnumpy()
+    assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
+
+    assert np.allclose(output_restricted, reduced_output)

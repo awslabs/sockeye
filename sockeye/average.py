@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -41,30 +41,21 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
     :param param_paths: List of paths to parameter files.
     :return: Averaged parameter dictionary.
     """
-    all_arg_params = []
-    all_aux_params = []
+    all_params = []  # type: List[Dict[str, mx.nd.NDArray]]
     for path in param_paths:
         logger.info("Loading parameters from '%s'", path)
-        arg_params, aux_params = utils.load_params(path)
-        all_arg_params.append(arg_params)
-        all_aux_params.append(aux_params)
+        params = mx.nd.load(path)
+        all_params.append(params)
 
-    logger.info("%d models loaded", len(all_arg_params))
-    utils.check_condition(all(all_arg_params[0].keys() == p.keys() for p in all_arg_params),
-                          "arg_param names do not match across models")
-    utils.check_condition(all(all_aux_params[0].keys() == p.keys() for p in all_aux_params),
-                          "aux_param names do not match across models")
+    logger.info("%d models loaded", len(all_params))
+    utils.check_condition(all(all_params[0].keys() == p.keys() for p in all_params),
+                          "param names do not match across models")
 
     avg_params = {}
     # average arg_params
-    for k in all_arg_params[0]:
-        arrays = [p[k] for p in all_arg_params]
-        avg_params["arg:" + k] = utils.average_arrays(arrays)
-    # average aux_params
-    for k in all_aux_params[0]:
-        arrays = [p[k] for p in all_aux_params]
-        avg_params["aux:" + k] = utils.average_arrays(arrays)
-
+    for k in all_params[0]:
+        arrays = [p[k] for p in all_params]
+        avg_params[k] = utils.average_arrays(arrays)
     return avg_params
 
 
@@ -84,18 +75,18 @@ def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.P
     param_path = os.path.join(model_path, C.PARAMS_NAME)
     points = [(value, checkpoint) for value, checkpoint in points if os.path.exists(param_path % checkpoint)]
 
-    if strategy == "best":
+    if strategy == C.AVERAGE_BEST:
         # N best scoring points
-        top_n = _strategy_best(points, size, maximize)
+        top_n = strategy_best(points, size, maximize)
 
-    elif strategy == "last":
+    elif strategy == C.AVERAGE_LAST:
         # N sequential points ending with overall best
-        top_n = _strategy_last(points, size, maximize)
+        top_n = strategy_last(points, size, maximize)
 
-    elif strategy == "lifespan":
+    elif strategy == C.AVERAGE_LIFESPAN:
         # Track lifespan of every "new best" point
         # Points dominated by a previous better point have lifespan 0
-        top_n = _strategy_lifespan(points, size, maximize)
+        top_n = strategy_lifespan(points, size, maximize)
     else:
         raise RuntimeError("Unknown strategy, options: best last lifespan")
 
@@ -111,19 +102,19 @@ def find_checkpoints(model_path: str, size=4, strategy="best", metric: str = C.P
     return params_paths
 
 
-def _strategy_best(points, size, maximize):
+def strategy_best(points, size, maximize):
     top_n = sorted(points, reverse=maximize)[:size]
     return top_n
 
 
-def _strategy_last(points, size, maximize):
+def strategy_last(points, size, maximize):
     best = max if maximize else min
     after_top = points.index(best(points)) + 1
     top_n = points[max(0, after_top - size):after_top]
     return top_n
 
 
-def _strategy_lifespan(points, size, maximize):
+def strategy_lifespan(points, size, maximize):
     top_n = []
     cur_best = points[0]
     cur_lifespan = 0

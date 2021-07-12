@@ -1,4 +1,4 @@
-# Copyright 2017 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -103,12 +103,8 @@ LOGGING_CONFIGS = {
 }
 
 
-def is_python34() -> bool:
-    version = sys.version_info
-    return version[0] == 3 and version[1] == 4
-
-
-def setup_main_logger(file_logging=True, console=True, path: Optional[str] = None, level=logging.INFO):
+def setup_main_logger(file_logging=True, console=True, path: Optional[str] = None, level=logging.INFO,
+                      console_level=None):
     """
     Configures logging for the main application.
 
@@ -116,6 +112,7 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     :param console: Whether to log to the console.
     :param path: Optional path to write logfile to.
     :param level: Log level. Default: INFO.
+    :param console_level: Optionally specify a separate log level for the console.
     """
     if file_logging and console:
         log_config = LOGGING_CONFIGS["file_console"]  # type: ignore
@@ -133,16 +130,13 @@ def setup_main_logger(file_logging=True, console=True, path: Optional[str] = Non
     for _, handler_config in log_config['handlers'].items():  # type: ignore
         handler_config['level'] = level
 
+    if 'console' in log_config['handlers'] and console_level is not None:  # type: ignore
+        log_config['handlers']['console']['level'] = console_level  # type: ignore
+
     logging.config.dictConfig(log_config)  # type: ignore
 
     def exception_hook(exc_type, exc_value, exc_traceback):
-        if is_python34():
-            # Python3.4 does not seem to handle logger.exception() well
-            import traceback
-            traceback = "".join(traceback.format_tb(exc_traceback)) + exc_type.name
-            logging.error("Uncaught exception\n%s", traceback)
-        else:
-            logging.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+        logging.exception("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
     sys.excepthook = exception_hook
 

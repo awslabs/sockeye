@@ -16,13 +16,7 @@ git clone https://github.com/rsennrich/subword-nmt.git
 export PYTHONPATH=$(pwd)/subword-nmt:$PYTHONPATH
 ```
 
-For visualizating alignments we will need `matplotlib`.
-If you haven't installed the library yet you can do so by running:
-```bash
-pip install matplotlib
-```
-
-We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`. 
+We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`.
 Install it using:
 ```bash
 pip install tensorboard mxboard
@@ -101,24 +95,13 @@ We can now kick off the training process:
 python -m sockeye.train -d train_data \
                         -vs newstest2016.tc.BPE.de \
                         -vt newstest2016.tc.BPE.en \
-                        --encoder rnn \
-                        --decoder rnn \
-                        --num-embed 256 \
-                        --rnn-num-hidden 512 \
-                        --rnn-attention-type dot \
                         --max-seq-len 60 \
                         --decode-and-evaluate 500 \
                         --use-cpu \
                         -o wmt_model
 ```
 
-This will train a 1-layer bi-LSTM encoder, 1-layer LSTM decoder with dot attention.
-Sockeye offers a whole variety of different options regarding the model architecture,
-such as stacked RNNs with residual connections (`--num-layers`, `--rnn-residual-connections`),
-[Transformer](https://arxiv.org/abs/1706.03762) encoder and decoder (`--encoder transformer`, `--decoder transformer`),
-[ConvS2S](https://arxiv.org/pdf/1705.03122) (`--encoder cnn`, `--decoder cnn`),
-various RNN (`--rnn-cell-type`) and attention (`--attention-type`) types and more.  
-
+This will train a "base" [Transformer](https://arxiv.org/abs/1706.03762) model.
 There are also several parameters controlling training itself.
 Unless you specify a different optimizer (`--optimizer`) [Adam](https://arxiv.org/abs/1412.6980) will be used.
 Additionally, you can control the batch size (`--batch-size`), the learning rate schedule (`--learning-rate-schedule`) and other parameters relevant for training.
@@ -179,26 +162,6 @@ he is a great guy and a family father .
 
 At decoding time Sockeye will run a beam search.
 You can set the size of the beam (`--beam-size`) or change other decoding parameters such as `--softmax-temperature` and `--length-penalty-alpha`.
-
-### Alignment visualization
-
-Sockeye not only supports text output, but also other output types.
-The following command for example will plot the alignment matrix:
-
-
-```bash
-echo "er ist so ein toller Kerl und ein Familienvater ." | \
-  python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
-                                   --vocabulary-threshold 50 | \
-  python -m sockeye.translate -m wmt_model --output-type align_plot
-```
-
-This will create a file `align_1.png` that looks similar to this:
-
-![Alignment plot](wmt/align.png "Alignment plot")
-
-Note that the alignment plot shows the subword units instead of tokens, as this is the representation used by Sockeye during translation.
-Additionally you can see the special end-of-sentence symbol `</s>` being added to the target sentence.
 
 
 ### Embedding inspection

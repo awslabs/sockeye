@@ -1,0 +1,5 @@
+pyyaml>=5.1
+mxnet-cu112==1.8.0.post0
+numpy>1.16.0,<2.0.0
+portalocker
+sacrebleu==1.4.14
