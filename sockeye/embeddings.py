@@ -15,15 +15,13 @@
 Command-line tool to inspect model embeddings.
 """
 import argparse
-import sys
 import logging
+import sys
 from typing import Iterable, Tuple
 
-import mxnet as mx
 from mxnet import np, npx
-import numpy as onp
 
-from . import constants as C
+import sockeye.constants as C
 from . import model
 from . import utils
 from .data_io import tokens2ids
@@ -46,8 +44,8 @@ def compute_sims(inputs: np.ndarray, normalize: bool) -> np.ndarray:
     """
     if normalize:
         logger.info("Normalizing embeddings to unit length")
-        inputs = inputs / np.linalg.norm(inputs, axis=-1)
-    sims = np.dot(inputs, inputs)
+        inputs = inputs / np.linalg.norm(inputs, keepdims=True, axis=-1)
+    sims = np.dot(inputs, inputs.transpose())
     np.fill_diagonal(sims, -9999999.)
     return sims
 
@@ -67,7 +65,7 @@ def nearest_k(similarity_matrix: np.ndarray,
     """
     # pylint: disable=unbalanced-tuple-unpacking
     values, indices = npx.topk(npx.softmax(similarity_matrix[query_word_id] / gamma), k=k, ret_typ='both')
-    return zip(indices, values)
+    return zip(indices.tolist(), values.tolist())
 
 
 def main():
@@ -101,13 +99,10 @@ def embeddings(args: argparse.Namespace):
         vocab = target_vocabs[0]
     vocab_inv = reverse_vocab(vocab)
 
-    params = sockeye_model.collect_params()
     if args.side == "source":
-        logger.info("Loading %s", sockeye_model.embedding_source.weight.name)
-        weights = params[sockeye_model.embedding_source.weight.name].data()
+        weights = sockeye_model.embedding_source.weight.data()
     else:
-        logger.info("Loading %s", sockeye_model.embedding_target.weight.name)
-        weights = params[sockeye_model.embedding_target.weight.name].data()
+        weights = sockeye_model.embedding_target.weight.data()
     logger.info("Embedding size: %d", weights.shape[1])
 
     logger.info("Computing pairwise similarities...")
@@ -125,6 +120,7 @@ def embeddings(args: argparse.Namespace):
         print("Input:", line.rstrip())
         ids = tokens2ids(tokens, vocab)
         for token, token_id in zip(tokens, ids):
+            token = C.UNK_SYMBOL if token_id == C.UNK_ID else token
             print("%s id=%d" % (token, token_id))
             neighbours = nearest_k(sims, token_id, args.k, args.gamma)
             for i, (neighbour_id, score) in enumerate(neighbours, 1):
