@@ -1944,8 +1944,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "rb") as fp:
             self.batch_indices = pickle.load(fp)
             self.curr_batch_index = pickle.load(fp)
-            inverse_data_permutations = onp.load(fp, allow_pickle=True)
-            data_permutations = onp.load(fp, allow_pickle=True)
+            inverse_data_permutations = onp.load(fp, allow_pickle=True)  # pylint: disable=unexpected-keyword-arg
+            data_permutations = onp.load(fp, allow_pickle=True)  # pylint: disable=unexpected-keyword-arg
 
         # Right after loading the iterator state, next() should be called
         self.curr_batch_index -= 1

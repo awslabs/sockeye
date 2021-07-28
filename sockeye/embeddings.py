@@ -70,13 +70,6 @@ def nearest_k(similarity_matrix: np.ndarray,
     return zip(indices, values)
 
 
-def get_embedding_parameter_names(config: model.ModelConfig) -> Tuple[str, str]:
-    if C.WEIGHT_TYING_SRC in config.weight_tying_type and C.WEIGHT_TYING_SRC_TRG_SOFTMAX in config.weight_tying_type:
-        name = "%sweight" % C.SHARED_EMBEDDING_PREFIX
-        return name, name
-    return "%sweight" % C.SOURCE_EMBEDDING_PREFIX, "%sweight" % C.TARGET_EMBEDDING_PREFIX
-
-
 def main():
     """
     Command-line tool to inspect model embeddings.
@@ -110,11 +103,11 @@ def embeddings(args: argparse.Namespace):
 
     params = sockeye_model.collect_params()
     if args.side == "source":
-        logger.info("Loading %s", sockeye_model.embedding_source.embed_weight.name)
-        weights = params[sockeye_model.embedding_source.embed_weight.name].data()
+        logger.info("Loading %s", sockeye_model.embedding_source.weight.name)
+        weights = params[sockeye_model.embedding_source.weight.name].data()
     else:
-        logger.info("Loading %s", sockeye_model.embedding_target.embed_weight.name)
-        weights = params[sockeye_model.embedding_target.embed_weight.name].data()
+        logger.info("Loading %s", sockeye_model.embedding_target.weight.name)
+        weights = params[sockeye_model.embedding_target.weight.name].data()
     logger.info("Embedding size: %d", weights.shape[1])
 
     logger.info("Computing pairwise similarities...")
