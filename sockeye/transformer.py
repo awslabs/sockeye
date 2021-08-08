@@ -14,6 +14,7 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+import torch as pt
 from mxnet import gluon, npx, np
 
 from . import config
@@ -262,6 +263,96 @@ class TransformerProcessBlock(gluon.HybridBlock):
         return data
 
 
+class PyTorchTransformerProcessBlock(pt.nn.Module):
+    """
+    Block to perform pre/post processing on layer inputs.
+    The processing steps are determined by the sequence argument, which can contain one of the three operations:
+    n: layer normalization
+    r: residual connection
+    d: dropout
+    """
+
+    def __init__(self,
+                 sequence: str,
+                 dropout: float,
+                 num_hidden: int = 0) -> None:
+        super().__init__()
+        self.sequence = sequence
+        self.layer_norm = None
+        if 'n' in sequence:
+            self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
+        self.dropout = None
+        if dropout > 0.0:
+            self.dropout = pt.nn.Dropout(p=dropout)
+
+    def forward(self, data: pt.Tensor, prev: pt.Tensor) -> pt.Tensor:
+        """
+        Apply processing sequence to data with optional previous input.
+
+        :param data: Input data. Shape: (batch, length, num_hidden).
+        :param prev: Previous data. Shape: (batch, length, num_hidden).
+        :return: Processed data. Shape: (batch, length, num_hidden).
+        """
+        if not self.sequence:
+            return data
+
+        if prev is None:
+            assert 'r' not in self.sequence, "Residual connection not allowed if no previous value given."
+
+        for step in self.sequence:
+
+            if step == "r":
+                data = data + prev
+
+            elif step == "n":
+                data = self.layer_norm(data)
+
+            elif step == "d" and self.dropout is not None:
+                data = self.dropout(data)
+            else:
+                raise ValueError("Unknown step in sequence: %s" % step)
+
+        return data
+
+
+def init_weights(m):
+    if isinstance(m, pt.nn.Linear):
+        pt.nn.init.xavier_uniform_(m.weight)
+        m.bias.data.fill_(0.0)
+
+
+class PyTorchFeedForward(pt.nn.Module):
+
+    def __init__(self,
+                 num_hidden: int,
+                 num_model: int,
+                 act_type: str,
+                 dropout: float,
+                 dtype: str,
+                 use_glu: bool = False) -> None:
+        super().__init__()
+        assert dtype == C.DTYPE_FP32
+        self.dropout = dropout
+        self.use_glu = use_glu
+        self.ff1 = pt.nn.Linear(in_features=num_model, out_features=num_hidden)
+        self.act = layers.pytorch_get_activation(act_type)
+        if self.use_glu:
+            self.linear = pt.nn.Linear(in_features=num_model, out_features=num_hidden)
+        if self.dropout > 0.0:
+            self.drop = pt.nn.Dropout(p=self.dropout, inplace=True)
+        self.ff2 = pt.nn.Linear(in_features=num_hidden, out_features=num_model)
+
+    def forward(self, x):
+        h = self.ff1(x)
+        h = self.act(h)
+        if self.use_glu:
+            h = h * self.linear(x)
+        if self.dropout > 0.0:
+            h = self.drop(h)
+        y = self.ff2(h)
+        return y
+
+
 class TransformerFeedForward(gluon.HybridBlock):
     """
     Position-wise feed-forward block with activation.
@@ -314,3 +405,14 @@ class AutoRegressiveBias(gluon.HybridBlock):
         bias = bias * -C.LARGE_VALUES[self._dtype]
         bias = np.expand_dims(bias, axis=0)
         return npx.stop_gradient(bias)
+
+
+class PyTorchAutoRegressiveBias(pt.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self._dtype = 'float32'
+
+    def forward(self, x):
+        bias = pt.ones(x.shape[1], x.shape[1], device=x.device) * -C.LARGE_VALUES[self._dtype]
+        bias = pt.triu(bias, diagonal=1).unsqueeze(0).detach()
+        return bias

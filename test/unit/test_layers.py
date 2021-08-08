@@ -12,8 +12,10 @@
 # permissions and limitations under the License.
 
 import mxnet as mx
-from mxnet import np
 import numpy as onp
+import torch as pt
+from mxnet import np
+from functools import partial
 
 import sockeye.layers
 
@@ -34,6 +36,30 @@ def test_lhuc():
     assert onp.allclose(2 * inp, out)
 
 
+def test_mx_pt_eq_lhuc():
+    num_hidden = 50
+    batch_size = 10
+    inp_mx = np.random.uniform(0, 1, size=(batch_size, num_hidden))
+    inp_pt = pt.as_tensor(inp_mx.asnumpy())
+    b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init='zeros')
+    b_mx.initialize()
+    b_pt = sockeye.layers.PyTorchLHUC(num_hidden=num_hidden, weight_init=pt.nn.init.zeros_)
+
+    out_mx = b_mx(inp_mx).asnumpy()
+    out_pt = b_pt(inp_pt).detach().numpy()
+
+    assert onp.allclose(out_mx, out_pt)
+
+    b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mx.init.Constant(value=20.0))
+    b_mx.initialize()
+    b_pt = sockeye.layers.PyTorchLHUC(num_hidden=num_hidden, weight_init=partial(pt.nn.init.constant, val=20.0))
+
+    out_mx = b_mx(inp_mx).asnumpy()
+    out_pt = b_pt(inp_pt).detach().numpy()
+
+    assert onp.allclose(out_mx, out_pt)
+
+
 def test_weight_normalization():
     expected_norm = np.array([1., 1.])
     weight = np.array([[1., 2.],
@@ -42,6 +68,20 @@ def test_weight_normalization():
     weight_norm.initialize()
     norm_weight = weight_norm(weight)
     assert onp.allclose(np.linalg.norm(norm_weight, axis=1), expected_norm)
+
+
+def test_mx_pt_eq_weight_normalization():
+    num_hidden = 3
+    weight_mx = np.random.uniform(0, 1, size=(num_hidden, 4))
+    weight_pt = pt.as_tensor(weight_mx.asnumpy())
+    b_mx = sockeye.layers.WeightNormalization(num_hidden=num_hidden)
+    b_mx.initialize()
+    b_pt = sockeye.layers.PyTorchWeightNormalization(num_hidden=num_hidden)
+
+    result_mx = b_mx(weight_mx).asnumpy()
+    result_pt = b_pt(weight_pt).detach().numpy()
+
+    assert np.allclose(result_mx, result_pt)
 
 
 def test_positional_embeddings():

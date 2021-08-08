@@ -14,6 +14,8 @@
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
+from functools import partial
+from typing import Callable
 from typing import Optional, Union, Tuple
 
 import mxnet as mx
@@ -25,6 +27,16 @@ from . import quantization
 from . import utils
 
 logger = logging.getLogger(__name__)
+
+import torch as pt
+
+
+def pytorch_get_activation(act_type: str) -> pt.nn.Module:
+    if act_type == C.SWISH1:
+        return pt.nn.SiLU(inplace=True)
+    if act_type == C.GELU:
+        return pt.nn.GELU()
+    return pt.nn.ReLU(inplace=True)
 
 
 def get_activation(act_type: str) -> gluon.Block:
@@ -71,6 +83,35 @@ class LHUC(gluon.HybridBlock):
         return weight * data
 
 
+class PyTorchLHUC(pt.nn.Module):
+    """
+    Learning Hidden Unit Contribution
+
+    David Vilar. "Learning Hidden Unit Contribution for Adapting Neural
+    Machine Translation Models" NAACL 2018
+
+    :param num_hidden: Number of hidden units of the layer to be modified.
+    """
+
+    def __init__(self,
+                 num_hidden: int,
+                 weight_init: Callable = partial(pt.nn.init.uniform_, a=0.1)) -> None:
+        super().__init__()
+        self._weight_init = weight_init
+        self.weight = pt.nn.Parameter(pt.Tensor(num_hidden,))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self._weight_init(self.weight)
+
+    def forward(self, data: np.ndarray) -> np.ndarray:
+        # We use a sigmoid with amplitude 2 for weighting the hidden units. The
+        # activation is dampened when the value of the sigmoid is close to 0, and
+        # strengthened when it's close to 2 (see also original paper)
+        weight = 2 * pt.sigmoid(self.weight)
+        return weight * data
+
+
 class WeightNormalization(mx.gluon.HybridBlock):
     """
     Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).
@@ -87,6 +128,25 @@ class WeightNormalization(mx.gluon.HybridBlock):
 
     def forward(self, weight: np.ndarray) -> np.ndarray:
         return weight / np.linalg.norm(weight, keepdims=True, axis=self._axis_arg) * self.scale.data()
+
+
+class PyTorchWeightNormalization(pt.nn.Module):
+    """
+    Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).
+    For a given tensor the normalization is done per hidden dimension.
+
+    :param num_hidden: Size of the first dimension.
+    :param ndim: The total number of dimensions of the weight tensor.
+    """
+
+    def __init__(self, num_hidden: int, ndim: int = 2) -> None:
+        super().__init__()
+        _shape = tuple([num_hidden] + [1] * (ndim - 1))
+        self.scale = pt.ones(*_shape)
+        self._axis_arg = tuple(range(1, ndim))
+
+    def forward(self, weight: np.ndarray) -> np.ndarray:
+        return pt.nn.functional.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale
 
 
 class OutputLayer(gluon.HybridBlock):
