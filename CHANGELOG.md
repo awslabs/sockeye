@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.18]
+### Changed
+
+- Updated Docker builds and documentation.  See [sockeye_contrib/docker](sockeye_contrib/docker).
+
 ## [2.3.17]
 ### Added
 - Added an alternative, faster implementation of greedy search. The '--greedy' flag to `sockeye.translate` will enable it. This implementation does not support hypothesis scores, batch decoding, or lexical constraints."
