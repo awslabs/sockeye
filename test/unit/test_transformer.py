@@ -74,21 +74,13 @@ def test_pt_mx_eq_transformer_feed_forward(use_glu):
                                                       use_glu=use_glu)
     b_mx.initialize()
 
-    b_pt = sockeye.transformer.PyTorchFeedForward(num_hidden=4,
-                                                  num_model=2,
-                                                  act_type=C.RELU,
-                                                  dropout=0.0,
-                                                  dtype=C.DTYPE_FP32,
-                                                  use_glu=use_glu)
-
-    # use mxnet parameter initializations for pytorch block
-    b_pt.ff1.weight[:] = pt.as_tensor(b_mx.ff1.weight.data().asnumpy())
-    b_pt.ff2.weight[:] = pt.as_tensor(b_mx.ff2.weight.data().asnumpy())
-    b_pt.ff1.bias[:] = pt.as_tensor(b_mx.ff1.bias.data().asnumpy())
-    b_pt.ff2.bias[:] = pt.as_tensor(b_mx.ff2.bias.data().asnumpy())
-    if use_glu:
-        b_pt.linear.weight[:] = pt.as_tensor(b_mx.linear.weight.data().asnumpy())
-        b_pt.linear.bias[:] = pt.as_tensor(b_mx.linear.bias.data().asnumpy())
+    b_pt = sockeye.transformer.PyTorchTransformerFeedForward(num_hidden=4,
+                                                             num_model=2,
+                                                             act_type=C.RELU,
+                                                             dropout=0.0,
+                                                             dtype=C.DTYPE_FP32,
+                                                             use_glu=use_glu)
+    b_pt.weights_from_mxnet_block(b_mx)
 
     result_mx = b_mx(np.ones((2, 2, 2))).asnumpy()
     result_pt = b_pt(pt.ones(2, 2, 2)).detach().numpy()
@@ -114,17 +106,60 @@ def test_pt_mx_eq_autoregressive_bias(length):
 @pytest.mark.parametrize('sequence', ['rn', 'nr', 'r', 'n', ''])  # not testing dropout
 def test_pt_mx_eq_transformer_process_block(sequence):
     num_hidden = 32
-    x_mx = np.zeros((2, 10, num_hidden))
-    prev_mx = np.ones((2, 10, num_hidden))
-    x_pt = pt.zeros(2, 10, num_hidden)
-    prev_pt = pt.ones(2, 10, num_hidden)
+    x_mx = np.random.uniform(0, 1, (2, 10, num_hidden))
+    prev_mx = np.random.uniform(0, 1, (2, 10, num_hidden))
+    x_pt = pt.as_tensor(x_mx.asnumpy())
+    prev_pt = pt.as_tensor(prev_mx.asnumpy())
 
-    sequence = 'nr'
     b_mx = sockeye.transformer.TransformerProcessBlock(sequence, 0.0, num_hidden)
     b_mx.initialize()
     b_pt = sockeye.transformer.PyTorchTransformerProcessBlock(sequence, 0.0, num_hidden)
+    b_pt.weights_from_mxnet_block(b_mx)
 
     result_mx = b_mx(x_mx, prev_mx).asnumpy()
     result_pt = b_pt(x_pt, prev_pt).detach().numpy()
 
-    assert np.allclose(result_mx, result_pt)
+    assert np.allclose(result_mx, result_pt, atol=1e-06)
+
+
+@pytest.mark.parametrize('batch_size, input_len, model_size, heads, ff_hidden, num_layers, use_lhuc, '
+                         'preprocess_sequence, postprocess_sequence, use_glu',
+                         [
+                             (1, 100, 512, 8, 1024, 1, False, 'n', 'r', False),
+                             (5, 25, 128, 4, 32, 1, True, 'n', 'nr', True),
+                         ])
+def test_pt_mx_eq_transformer_encoder_block(batch_size, input_len, model_size, heads, ff_hidden, num_layers, use_lhuc, preprocess_sequence,
+                                            postprocess_sequence, use_glu):
+    config = sockeye.transformer.TransformerConfig(
+        model_size=model_size,
+        attention_heads=heads,
+        feed_forward_num_hidden=ff_hidden,
+        act_type=C.RELU,
+        num_layers=num_layers,
+        dropout_attention=0.0,
+        dropout_act=0.0,
+        dropout_prepost=0.0,
+        positional_embedding_type=C.FIXED_POSITIONAL_EMBEDDING,
+        preprocess_sequence=preprocess_sequence,
+        postprocess_sequence=postprocess_sequence,
+        max_seq_len_source=100,
+        max_seq_len_target=100,
+        decoder_type=C.TRANSFORMER_TYPE,
+        use_lhuc=use_lhuc,
+        depth_key_value=model_size,
+        use_glu=use_glu)
+
+    data_mx = np.random.uniform(0, 1, (batch_size, input_len, model_size))
+    data_mx = np.transpose(data_mx, axes=(1, 0, 2))
+    data_pt = pt.as_tensor(data_mx.asnumpy())
+    # we are not using valid lengths input, this is tested in the MX/PT equivalence test for the entire encoder
+
+    b_mx = sockeye.transformer.TransformerEncoderBlock(config, dtype=C.DTYPE_FP32)
+    b_mx.initialize()
+    r_mx = b_mx(data_mx, None).asnumpy()
+
+    b_pt = sockeye.transformer.PyTorchTransformerEncoderBlock(config, dtype=C.DTYPE_FP32)
+    b_pt.weights_from_mxnet_block(b_mx)
+    r_pt = b_pt(data_pt, None).detach().numpy()
+
+    assert np.allclose(r_mx, r_pt, atol=1e-05)

@@ -111,6 +111,9 @@ class PyTorchLHUC(pt.nn.Module):
         weight = 2 * pt.sigmoid(self.weight)
         return weight * data
 
+    def weights_from_mxnet_block(self, block_mx: 'LHUC'):
+        self.weight[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
+
 
 class WeightNormalization(mx.gluon.HybridBlock):
     """
@@ -662,6 +665,10 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
 
         return self._attend(queries, states, lengths=input_lengths, bias=bias), states
 
+    def weights_from_mxnet_block(self, block_mx: 'MultiHeadSelfAttention'):
+        self.ff_in.weight[:] = pt.as_tensor(block_mx.ff_in.weight.data().asnumpy())
+        self.ff_out.weight[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
+
 
 class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     """
@@ -783,6 +790,10 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
         queries = self.ff_q(queries)
         kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(memory)
         return self._attend(queries, kv, bias=bias, lengths=memory_lengths)
+
+    def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):
+        self.ff_q.weight[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
+        self.ff_out.weight[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):

@@ -235,9 +235,7 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
     b_mx = sockeye.layers.MultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
     b_mx.initialize()
     b_pt = sockeye.layers.PyTorchMultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
-    # use mxnet parameter initializations for pytorch block
-    b_pt.ff_in.weight[:] = pt.as_tensor(b_mx.ff_in.weight.data().asnumpy())
-    b_pt.ff_out.weight[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
+    b_pt.weights_from_mxnet_block(b_mx)
 
     r_mx, states_mx = b_mx(inputs_mx, None, None, None)
     r_pt, states_pt = b_pt(inputs_pt, previous_states=None, input_lengths=None, bias=None)
@@ -253,7 +251,7 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
                          [(10, 9, 1, 12, 4), (1, 1, 1, 4, 1), (3, 32, 15, 64, 2)])
-def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, heads):
+def test_mx_pt_eq_multi_head_attention(qlen, kvlen, batch_size, hidden, heads):
     queries_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
     queries_pt = pt.as_tensor(queries_mx.asnumpy())
     memory_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden))
@@ -264,11 +262,7 @@ def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, hea
     b_pt = sockeye.layers.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0)
 
     r_mx = b_mx(queries_mx, memory_mx, None, None, None)
-    # use mxnet parameter initializations for pytorch block (after the call to b_mx because of its deferred initialization
-    b_pt.ff_q.weight[:] = pt.as_tensor(b_mx.ff_q.weight.data().asnumpy())
-    b_pt.ff_kv.weight[:] = pt.as_tensor(b_mx.ff_kv.weight.data().asnumpy())
-    b_pt.ff_out.weight[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
-    r_pt = b_pt(queries_pt, memory_pt, memory_lengths=None, bias=None, projected_memory_kv=None)
+    b_pt.weights_from_mxnet_block(b_mx)
 
     r_mx = r_mx.asnumpy()
     r_pt = r_pt.detach().numpy()

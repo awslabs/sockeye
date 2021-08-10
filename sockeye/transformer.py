@@ -98,6 +98,70 @@ class TransformerEncoderBlock(gluon.HybridBlock):
         return data
 
 
+class PyTorchTransformerEncoderBlock(pt.nn.Module):
+    """
+    A transformer encoder block consists self-attention and a feed-forward layer with pre/post process blocks
+    in between.
+    """
+
+    def __init__(self,
+                 config: TransformerConfig,
+                 dtype: str) -> None:
+        super().__init__()
+
+        self.pre_self_attention = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=config.model_size)
+        self.self_attention = layers.PyTorchMultiHeadSelfAttention(depth_att=config.model_size,
+                                                                   heads=config.attention_heads,
+                                                                   depth_out=config.model_size,
+                                                                   dropout=config.dropout_attention,
+                                                                   dtype=dtype)
+        self.post_self_attention = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                                  dropout=config.dropout_prepost,
+                                                                  num_hidden=config.model_size)
+
+        self.pre_ff = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                     dropout=config.dropout_prepost,
+                                                     num_hidden=config.model_size)
+        self.ff = PyTorchTransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                                num_model=config.model_size,
+                                                act_type=config.act_type,
+                                                dropout=config.dropout_act,
+                                                dtype=dtype,
+                                                use_glu=config.use_glu)
+        self.post_ff = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                      dropout=config.dropout_prepost,
+                                                      num_hidden=config.model_size)
+        self.lhuc = None
+        if config.use_lhuc:
+            self.lhuc = layers.PyTorchLHUC(config.model_size)
+
+    def forward(self, data: pt.Tensor, lengths: pt.Tensor) -> pt.Tensor:
+        # self-attention
+        data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, lengths, None)
+        data = self.post_self_attention(data_self_att, data)
+
+        # feed-forward
+        data_ff = self.ff(self.pre_ff(data, None))
+
+        data = self.post_ff(data_ff, data)
+
+        if self.lhuc is not None:
+            data = self.lhuc(data)
+
+        return data
+
+    def weights_from_mxnet_block(self, block_mx: TransformerEncoderBlock):
+        self.pre_self_attention.weights_from_mxnet_block(block_mx.pre_self_attention)
+        self.self_attention.weights_from_mxnet_block(block_mx.self_attention)
+        self.post_self_attention.weights_from_mxnet_block(block_mx.post_self_attention)
+        self.ff.weights_from_mxnet_block(block_mx.ff)
+        self.post_ff.weights_from_mxnet_block(block_mx.post_ff)
+        if self.lhuc is not None:
+            self.lhuc.weights_from_mxnet_block(block_mx.lhuc)
+
+
 class TransformerDecoderBlock(gluon.HybridBlock):
     """
     A transformer decoder block consists of an autoregressive attention block, encoder attention,
@@ -314,14 +378,14 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
 
         return data
 
+    def weights_from_mxnet_block(self, block_mx: TransformerProcessBlock):
+        if 'n' in self.sequence:
+            assert 'n' in block_mx.sequence
+            self.layer_norm.bias[:] = pt.as_tensor(block_mx.layer_norm.beta.data().asnumpy())
+            self.layer_norm.weight[:] = pt.as_tensor(block_mx.layer_norm.gamma.data().asnumpy())
 
-def init_weights(m):
-    if isinstance(m, pt.nn.Linear):
-        pt.nn.init.xavier_uniform_(m.weight)
-        m.bias.data.fill_(0.0)
 
-
-class PyTorchFeedForward(pt.nn.Module):
+class PyTorchTransformerFeedForward(pt.nn.Module):
 
     def __init__(self,
                  num_hidden: int,
@@ -351,6 +415,15 @@ class PyTorchFeedForward(pt.nn.Module):
             h = self.drop(h)
         y = self.ff2(h)
         return y
+
+    def weights_from_mxnet_block(self, block_mx: 'TransformerFeedForward'):
+        self.ff1.weight[:] = pt.as_tensor(block_mx.ff1.weight.data().asnumpy())
+        self.ff2.weight[:] = pt.as_tensor(block_mx.ff2.weight.data().asnumpy())
+        self.ff1.bias[:] = pt.as_tensor(block_mx.ff1.bias.data().asnumpy())
+        self.ff2.bias[:] = pt.as_tensor(block_mx.ff2.bias.data().asnumpy())
+        if self.use_glu:
+            self.linear.weight[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())
+            self.linear.bias[:] = pt.as_tensor(block_mx.linear.bias.data().asnumpy())
 
 
 class TransformerFeedForward(gluon.HybridBlock):
