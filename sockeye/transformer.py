@@ -281,7 +281,7 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
         self.layer_norm = None
         if 'n' in sequence:
             self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
-        self.dropout = None
+        self.dropout = None  # type: Optional[pt.nn.Module]
         if dropout > 0.0:
             self.dropout = pt.nn.Dropout(p=dropout)
 

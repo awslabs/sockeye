@@ -11,11 +11,13 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+from functools import partial
+
 import mxnet as mx
 import numpy as onp
+import pytest
 import torch as pt
-from mxnet import np
-from functools import partial
+from mxnet import np, npx
 
 import sockeye.layers
 
@@ -153,3 +155,122 @@ def test_output_layer():
     assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
 
     assert onp.allclose(output_restricted, reduced_output)
+
+@pytest.mark.parametrize('qlen, kvlen, batch_size',
+                         [(10, 9, 1), (1, 1, 1), (3, 32, 128)])
+def test_mx_pt_eq_interleaved_matmul_encdec_qk(qlen, kvlen, batch_size):
+    hidden = 32
+    q_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
+    kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
+    heads = 4
+    q_pt = pt.as_tensor(q_mx.asnumpy())
+    kv_pt = pt.as_tensor(kv_mx.asnumpy())
+
+    assert np.allclose(q_pt.numpy(), q_mx.asnumpy())
+    assert np.allclose(kv_pt.numpy(), kv_mx.asnumpy())
+
+    r0 = npx.interleaved_matmul_encdec_qk(q_mx, kv_mx, heads=heads).asnumpy()
+    r1 = sockeye.layers.pytorch_interleaved_matmul_encdec_qk(q_pt, kv_pt, heads=heads).detach().numpy()
+    assert np.allclose(r0, r1)
+
+
+@pytest.mark.parametrize('qlen, kvlen, batch_size',
+                         [(10, 9, 1), (1, 1, 1), (3, 32, 128)])
+def test_mx_pt_eq_interleaved_matmul_encdec_valatt(qlen, kvlen, batch_size):
+    hidden = 32
+    kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
+    heads = 4
+    kv_pt = pt.as_tensor(kv_mx.asnumpy())
+    att = np.random.uniform(0, 1, (batch_size * heads, qlen, kvlen))
+    attpt = pt.as_tensor(att.asnumpy())
+    r0 = npx.interleaved_matmul_encdec_valatt(kv_mx, att, heads=heads).asnumpy()
+    r1 = sockeye.layers.pytorch_interleaved_matmul_encdec_valatt(kv_pt, attpt, heads=heads).numpy()
+    assert np.allclose(r0, r1)
+
+
+@pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
+                         [(10, 9, 1, 32, 8), (1, 1, 1, 4, 1), (3, 32, 128, 256, 2)])
+def test_mx_pt_eq_dot_attention_cell(qlen, kvlen, batch_size, hidden, heads):
+    q_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
+    kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
+    q_pt = pt.as_tensor(q_mx.asnumpy())
+    kv_pt = pt.as_tensor(kv_mx.asnumpy())
+    b_mx = sockeye.layers.DotAttentionCell()
+    b_mx.initialize()
+    b_pt = sockeye.layers.PyTorchDotAttentionCell()
+
+    # TODO test masked softmax once inmplemented (via bias and/or lengths)
+    r_mx = b_mx(q_mx, kv_mx, heads, None, None).asnumpy()
+    r_pt = b_pt(q_pt, kv_pt, heads=heads, lengths=None, bias=None).detach().numpy()
+
+    assert np.allclose(r_mx, r_pt)
+
+
+@pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
+                         [(10, 9, 1, 12, 4), (1, 1, 1, 4, 1), (3, 32, 15, 64, 2)])
+def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, heads):
+    q_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
+    kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
+    q_pt = pt.as_tensor(q_mx.asnumpy())
+    kv_pt = pt.as_tensor(kv_mx.asnumpy())
+
+    b_mx = sockeye.layers.MultiHeadAttentionBase(hidden, heads, hidden)
+    b_mx.initialize()
+    b_pt = sockeye.layers.PyTorchMultiHeadAttentionBase(hidden, heads, hidden)
+    # use mxnet parameter initializations for pytorch block
+    b_pt.ff_out.weight[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
+
+    r_mx = b_mx._attend(q_mx, kv_mx, None, None).asnumpy()
+    r_pt = b_pt._attend(q_pt, kv_pt, lengths=None, bias=None).detach().numpy()
+
+    assert np.allclose(r_mx, r_pt, atol=1e-06)
+
+
+@pytest.mark.parametrize('seq_len, batch_size, hidden, heads',
+                         [(10, 1, 12, 4), (1, 1, 4, 1), (3, 15, 64, 2)])
+def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
+    inputs_mx = np.random.uniform(0, 1, (seq_len, batch_size, hidden))
+    inputs_pt = pt.as_tensor(inputs_mx.asnumpy())
+
+    b_mx = sockeye.layers.MultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
+    b_mx.initialize()
+    b_pt = sockeye.layers.PyTorchMultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
+    # use mxnet parameter initializations for pytorch block
+    b_pt.ff_in.weight[:] = pt.as_tensor(b_mx.ff_in.weight.data().asnumpy())
+    b_pt.ff_out.weight[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
+
+    r_mx, states_mx = b_mx(inputs_mx, None, None, None)
+    r_pt, states_pt = b_pt(inputs_pt, previous_states=None, input_lengths=None, bias=None)
+
+    r_mx = r_mx.asnumpy()
+    states_mx = states_mx.asnumpy()
+    r_pt = r_pt.detach().numpy()
+    states_pt = states_pt.detach().numpy()
+
+    assert np.allclose(r_mx, r_pt, atol=1e-06)
+    assert np.allclose(states_mx, states_pt)
+
+
+@pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
+                         [(10, 9, 1, 12, 4), (1, 1, 1, 4, 1), (3, 32, 15, 64, 2)])
+def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, heads):
+    queries_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
+    queries_pt = pt.as_tensor(queries_mx.asnumpy())
+    memory_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden))
+    memory_pt = pt.as_tensor(memory_mx.asnumpy())
+
+    b_mx = sockeye.layers.MultiHeadAttention(hidden, heads, hidden, dropout=0.0)
+    b_mx.initialize()
+    b_pt = sockeye.layers.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0)
+
+    r_mx = b_mx(queries_mx, memory_mx, None, None, None)
+    # use mxnet parameter initializations for pytorch block (after the call to b_mx because of its deferred initialization
+    b_pt.ff_q.weight[:] = pt.as_tensor(b_mx.ff_q.weight.data().asnumpy())
+    b_pt.ff_kv.weight[:] = pt.as_tensor(b_mx.ff_kv.weight.data().asnumpy())
+    b_pt.ff_out.weight[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
+    r_pt = b_pt(queries_pt, memory_pt, memory_lengths=None, bias=None, projected_memory_kv=None)
+
+    r_mx = r_mx.asnumpy()
+    r_pt = r_pt.detach().numpy()
+
+    assert np.allclose(r_mx, r_pt, atol=1e-06)
