@@ -12,12 +12,12 @@
 # permissions and limitations under the License.
 
 from functools import partial
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, Union
 
 import torch as pt
 
 from sockeye import constants as C, utils
-from sockeye.layers import AutoregressiveLayer, SSRU
+from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings
 
 
 def pytorch_get_activation(act_type: str) -> pt.nn.Module:
@@ -77,6 +77,8 @@ class PyTorchWeightNormalization(pt.nn.Module):
 
     def forward(self, weight: pt.Tensor) -> pt.Tensor:
         return pt.nn.functional.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale
+
+# TODO: Port LengthRatio
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
@@ -169,6 +171,8 @@ class PyTorchDotAttentionCell(pt.nn.Module):
         # result: (n, lq, dv)
         return pytorch_interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
+
+# TODO: port prepare_source_valid_lengths
 
 class PyTorchMultiHeadAttentionBase(pt.nn.Module):
     """
@@ -348,6 +352,93 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):
         self.ff_q.weight[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
         self.ff_out.weight[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
+
+
+def pytorch_get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
+    utils.check_condition(depth % 2 == 0, "Positional embeddings require an even embedding size it "
+                                          "is however %d." % depth)
+    # (1, depth)
+    channels = pt.arange(depth // 2).unsqueeze(0)
+
+    # (length, 1)
+    positions = pt.arange(0, length).unsqueeze(1)
+    scaled_positions = positions / pt.pow(10000, (2 * channels) / depth)
+    # sinusoids:
+    sin = pt.sin(scaled_positions)
+    # cosines:
+    cos = pt.cos(scaled_positions)
+    # interleave: (length, num_embed)
+    encodings = pt.hstack([sin, cos])
+    return encodings
+
+
+class PyTorchPositionalEmbeddings(pt.nn.Module):
+    """
+    Takes an encoded sequence and adds sinusoidal or learned positional embeddings as in Vaswani et al, 2017 to it.
+
+    :param weight_type: type of embeddings, fixed or learned.
+    :param num_embed: Embedding size.
+    :param max_seq_len: Maximum sequence length.
+    :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
+    :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
+    :param weight_init: Optional initializer for learned embeddings.
+    """
+
+    def __init__(self,
+                 weight_type: str,
+                 num_embed: int,
+                 max_seq_len: int,
+                 scale_up_input: bool,
+                 scale_down_positions: bool,
+                 weight_init: Optional[Callable] = None) -> None:
+        utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
+                                                  "is however %d." % num_embed)
+        super().__init__()
+        self.weight_type = weight_type
+        self.num_embed = num_embed
+        self.max_seq_len = max_seq_len
+        self.scale_up_input = scale_up_input
+        self.scale_down_positions = scale_down_positions
+
+        if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
+            self.weight = pytorch_get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
+            if self.scale_down_positions:
+                self.weight *= self.num_embed ** -0.5
+        elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+            self.weight = pt.nn.Parameter(pt.Tensor(self.max_seq_len, self.num_embed))
+        else:
+            raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
+        # TODO consider weight initialization
+
+    def forward(self, data, steps):  # pylint: disable=arguments-differ
+        """
+        Applies positional embeddings to input data.
+
+        :param data: Input data. Shape: (batch, length or 1, num_embed)
+        :param steps: Optional steps input. If given, shape is (batch_size or 1, seq_len,)
+
+        :return: Data with positional embeddings added
+        """
+        # (length, num_embed)
+        if steps is None:
+            # (batch, length, num_embed)
+            # TODO: using size here, thats dynamic
+            pos_embedding = self.weight.unsqueeze(0)[:, :data.size()[1]]
+        else:
+            # (batch_size or 1, seq_len, num_embed)
+            pos_embedding = pt.nn.functional.embedding(steps, self.weight)
+
+        if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
+            pos_embedding = pos_embedding.detach()
+
+        if self.scale_up_input:
+            data = data * (self.num_embed ** 0.5)
+
+        return data + pos_embedding
+
+    def weights_from_mxnet_block(self, block_mx: PositionalEmbeddings):
+        if self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+            self.weight[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
 
 
 class PyTorchSSRU(pt.nn.Module, AutoregressiveLayer):

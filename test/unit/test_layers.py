@@ -128,6 +128,53 @@ def test_positional_embeddings():
     assert onp.allclose(out[0], expected_learned_embeddings)
 
 
+@pytest.mark.parametrize('data_len, num_embed, scale_up_input, scale_down_positions, steps',
+                         [(5, 32, False, False, None),
+                          (5, 32, False, False, [2, 3]),
+                          (10, 32, True, False, [1, 3]),
+                          (4, 32, False, True, [2, 3])])
+def test_mx_pt_eq_positional_embeddings(data_len, num_embed, scale_up_input, scale_down_positions, steps):
+    max_seq_len = 10
+    data_mx = np.random.uniform(0, 1, (2, data_len, num_embed))
+    data_pt = pt.as_tensor(data_mx.asnumpy())
+    if steps is None:
+        steps_mx, steps_pt = None, None
+    else:
+        steps_mx = np.array(steps).reshape((-1, 1))
+        steps_pt = pt.as_tensor(steps).unsqueeze(1)
+
+    b_mx = sockeye.layers.PositionalEmbeddings(weight_type='fixed',
+                                               num_embed=num_embed,
+                                               max_seq_len=max_seq_len,
+                                               scale_up_input=scale_up_input,
+                                               scale_down_positions=scale_down_positions,
+                                               weight_init=None)
+    b_mx.initialize()
+    r_mx = b_mx(data_mx, steps_mx).asnumpy()
+
+    b_pt = sockeye.layers_pt.PyTorchPositionalEmbeddings(weight_type='fixed',
+                                                         num_embed=num_embed,
+                                                         max_seq_len=max_seq_len,
+                                                         scale_up_input=scale_up_input,
+                                                         scale_down_positions=scale_down_positions,
+                                                         weight_init=None)
+    b_pt.weights_from_mxnet_block(b_mx)
+    r_pt = b_pt(data_pt, steps_pt).detach().numpy()
+
+
+    np.allclose(r_mx, r_pt)
+
+
+def test_mx_pt_eq_get_positional_embeddings():
+    data_len = 5
+    num_embed = 32
+
+    embed_mx = sockeye.layers.get_positional_embeddings(data_len, num_embed).asnumpy()
+    embed_pt = sockeye.layers_pt.pytorch_get_positional_embeddings(data_len, num_embed).detach().numpy()
+
+    assert np.allclose(embed_mx, embed_pt)
+
+
 def test_output_layer():
     num_hidden = 32
     vocab_size = 64
@@ -297,5 +344,3 @@ def test_mx_pt_eq_ssru(hidden, inference_only, seq_len, batch):
 
     assert np.allclose(r1_mx, r1_pt)
     assert np.allclose(r2_mx, r2_pt)
-
-
