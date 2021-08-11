@@ -11,13 +11,13 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import pytest
-
-from mxnet import np
 import numpy as onp
+import pytest
+from mxnet import np
 
-import sockeye.transformer
 import sockeye.constants as C
+import sockeye.transformer
+import sockeye.transformer_pt
 
 
 def test_auto_regressive_bias_dtype():
@@ -74,12 +74,12 @@ def test_pt_mx_eq_transformer_feed_forward(use_glu):
                                                       use_glu=use_glu)
     b_mx.initialize()
 
-    b_pt = sockeye.transformer.PyTorchTransformerFeedForward(num_hidden=4,
-                                                             num_model=2,
-                                                             act_type=C.RELU,
-                                                             dropout=0.0,
-                                                             dtype=C.DTYPE_FP32,
-                                                             use_glu=use_glu)
+    b_pt = sockeye.transformer_pt.PyTorchTransformerFeedForward(num_hidden=4,
+                                                                num_model=2,
+                                                                act_type=C.RELU,
+                                                                dropout=0.0,
+                                                                dtype=C.DTYPE_FP32,
+                                                                use_glu=use_glu)
     b_pt.weights_from_mxnet_block(b_mx)
 
     result_mx = b_mx(np.ones((2, 2, 2))).asnumpy()
@@ -95,7 +95,7 @@ def test_pt_mx_eq_autoregressive_bias(length):
 
     b_mx = sockeye.transformer.AutoRegressiveBias()
     b_mx.initialize()
-    b_pt = sockeye.transformer.PyTorchAutoRegressiveBias()
+    b_pt = sockeye.transformer_pt.PyTorchAutoRegressiveBias()
 
     result_mx = b_mx(x_mx).asnumpy()
     result_pt = b_pt(x_pt).detach().numpy()
@@ -113,7 +113,7 @@ def test_pt_mx_eq_transformer_process_block(sequence):
 
     b_mx = sockeye.transformer.TransformerProcessBlock(sequence, 0.0, num_hidden)
     b_mx.initialize()
-    b_pt = sockeye.transformer.PyTorchTransformerProcessBlock(sequence, 0.0, num_hidden)
+    b_pt = sockeye.transformer_pt.PyTorchTransformerProcessBlock(sequence, 0.0, num_hidden)
     b_pt.weights_from_mxnet_block(b_mx)
 
     result_mx = b_mx(x_mx, prev_mx).asnumpy()
@@ -158,7 +158,7 @@ def test_pt_mx_eq_transformer_encoder_block(batch_size, input_len, model_size, h
     b_mx.initialize()
     r_mx = b_mx(data_mx, None).asnumpy()
 
-    b_pt = sockeye.transformer.PyTorchTransformerEncoderBlock(config, dtype=C.DTYPE_FP32)
+    b_pt = sockeye.transformer_pt.PyTorchTransformerEncoderBlock(config, dtype=C.DTYPE_FP32)
     b_pt.weights_from_mxnet_block(b_mx)
     r_pt = b_pt(data_pt, None).detach().numpy()
 

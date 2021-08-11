@@ -20,6 +20,7 @@ import torch as pt
 from mxnet import np, npx
 
 import sockeye.layers
+import sockeye.layers_pt
 
 
 def test_lhuc():
@@ -45,7 +46,7 @@ def test_mx_pt_eq_lhuc():
     inp_pt = pt.as_tensor(inp_mx.asnumpy())
     b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init='zeros')
     b_mx.initialize()
-    b_pt = sockeye.layers.PyTorchLHUC(num_hidden=num_hidden, weight_init=pt.nn.init.zeros_)
+    b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden, weight_init=pt.nn.init.zeros_)
 
     out_mx = b_mx(inp_mx).asnumpy()
     out_pt = b_pt(inp_pt).detach().numpy()
@@ -54,7 +55,7 @@ def test_mx_pt_eq_lhuc():
 
     b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mx.init.Constant(value=20.0))
     b_mx.initialize()
-    b_pt = sockeye.layers.PyTorchLHUC(num_hidden=num_hidden, weight_init=partial(pt.nn.init.constant, val=20.0))
+    b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden, weight_init=partial(pt.nn.init.constant, val=20.0))
 
     out_mx = b_mx(inp_mx).asnumpy()
     out_pt = b_pt(inp_pt).detach().numpy()
@@ -78,7 +79,7 @@ def test_mx_pt_eq_weight_normalization():
     weight_pt = pt.as_tensor(weight_mx.asnumpy())
     b_mx = sockeye.layers.WeightNormalization(num_hidden=num_hidden)
     b_mx.initialize()
-    b_pt = sockeye.layers.PyTorchWeightNormalization(num_hidden=num_hidden)
+    b_pt = sockeye.layers_pt.PyTorchWeightNormalization(num_hidden=num_hidden)
 
     result_mx = b_mx(weight_mx).asnumpy()
     result_pt = b_pt(weight_pt).detach().numpy()
@@ -170,7 +171,7 @@ def test_mx_pt_eq_interleaved_matmul_encdec_qk(qlen, kvlen, batch_size):
     assert np.allclose(kv_pt.numpy(), kv_mx.asnumpy())
 
     r0 = npx.interleaved_matmul_encdec_qk(q_mx, kv_mx, heads=heads).asnumpy()
-    r1 = sockeye.layers.pytorch_interleaved_matmul_encdec_qk(q_pt, kv_pt, heads=heads).detach().numpy()
+    r1 = sockeye.layers_pt.pytorch_interleaved_matmul_encdec_qk(q_pt, kv_pt, heads=heads).detach().numpy()
     assert np.allclose(r0, r1)
 
 
@@ -184,7 +185,7 @@ def test_mx_pt_eq_interleaved_matmul_encdec_valatt(qlen, kvlen, batch_size):
     att = np.random.uniform(0, 1, (batch_size * heads, qlen, kvlen))
     attpt = pt.as_tensor(att.asnumpy())
     r0 = npx.interleaved_matmul_encdec_valatt(kv_mx, att, heads=heads).asnumpy()
-    r1 = sockeye.layers.pytorch_interleaved_matmul_encdec_valatt(kv_pt, attpt, heads=heads).numpy()
+    r1 = sockeye.layers_pt.pytorch_interleaved_matmul_encdec_valatt(kv_pt, attpt, heads=heads).numpy()
     assert np.allclose(r0, r1)
 
 
@@ -197,7 +198,7 @@ def test_mx_pt_eq_dot_attention_cell(qlen, kvlen, batch_size, hidden, heads):
     kv_pt = pt.as_tensor(kv_mx.asnumpy())
     b_mx = sockeye.layers.DotAttentionCell()
     b_mx.initialize()
-    b_pt = sockeye.layers.PyTorchDotAttentionCell()
+    b_pt = sockeye.layers_pt.PyTorchDotAttentionCell()
 
     # TODO test masked softmax once inmplemented (via bias and/or lengths)
     r_mx = b_mx(q_mx, kv_mx, heads, None, None).asnumpy()
@@ -216,7 +217,7 @@ def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, hea
 
     b_mx = sockeye.layers.MultiHeadAttentionBase(hidden, heads, hidden)
     b_mx.initialize()
-    b_pt = sockeye.layers.PyTorchMultiHeadAttentionBase(hidden, heads, hidden)
+    b_pt = sockeye.layers_pt.PyTorchMultiHeadAttentionBase(hidden, heads, hidden)
     # use mxnet parameter initializations for pytorch block
     b_pt.ff_out.weight[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
 
@@ -234,7 +235,7 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
 
     b_mx = sockeye.layers.MultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
     b_mx.initialize()
-    b_pt = sockeye.layers.PyTorchMultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
+    b_pt = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
     b_pt.weights_from_mxnet_block(b_mx)
 
     r_mx, states_mx = b_mx(inputs_mx, None, None, None)
@@ -259,12 +260,42 @@ def test_mx_pt_eq_multi_head_attention(qlen, kvlen, batch_size, hidden, heads):
 
     b_mx = sockeye.layers.MultiHeadAttention(hidden, heads, hidden, dropout=0.0)
     b_mx.initialize()
-    b_pt = sockeye.layers.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0)
-
     r_mx = b_mx(queries_mx, memory_mx, None, None, None)
+
+    b_pt = sockeye.layers_pt.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0)
     b_pt.weights_from_mxnet_block(b_mx)
+    r_pt = b_pt(queries_pt, memory_pt, None, None, None)
 
     r_mx = r_mx.asnumpy()
     r_pt = r_pt.detach().numpy()
 
     assert np.allclose(r_mx, r_pt, atol=1e-06)
+
+
+@pytest.mark.parametrize('hidden, inference_only, seq_len, batch',
+                         [(16, False, 10, 4),
+                          (10, False, 2, 1),
+                          (16, True, 1, 4),])
+def test_mx_pt_eq_ssru(hidden, inference_only, seq_len, batch):
+    b_mx = sockeye.layers.SSRU(hidden, inference_only)
+    b_mx.initialize()
+    b_pt = sockeye.layers_pt.PyTorchSSRU(hidden, inference_only)
+    b_pt.weights_from_mxnet_block(b_mx)
+
+    inputs_mx = np.random.uniform(0, 1, (seq_len, batch, hidden))
+    previous_states_mx = np.zeros((1, batch, hidden))
+    inputs_pt = pt.as_tensor(inputs_mx.asnumpy())
+    previous_states_pt = pt.as_tensor(previous_states_mx.asnumpy())
+
+    r1_mx, r2_mx = b_mx(inputs_mx, previous_states_mx)
+    r1_pt, r2_pt = b_pt(inputs_pt, previous_states_pt)
+
+    r1_mx = r1_mx.asnumpy()
+    r2_mx = r2_mx.asnumpy()
+    r1_pt = r1_pt.detach().numpy()
+    r2_pt = r2_pt.detach().numpy()
+
+    assert np.allclose(r1_mx, r1_pt)
+    assert np.allclose(r2_mx, r2_pt)
+
+
