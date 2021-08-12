@@ -750,3 +750,11 @@ def log_parameters(params: mx.gluon.ParameterDict):
                 total_fixed, total_fixed / total_parameters * 100)
     logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
     logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
+
+
+@contextmanager
+def no_context():
+    """
+    No-op context manager that can be used in "with" statements
+    """
+    yield None
