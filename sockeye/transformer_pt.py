@@ -12,11 +12,13 @@
 # permissions and limitations under the License.
 
 
+from typing import Optional, Tuple
+
 import torch as pt
 
 import sockeye.layers_pt
 from sockeye import constants as C
-from sockeye.transformer import TransformerConfig, TransformerEncoderBlock, TransformerProcessBlock
+from sockeye.transformer import TransformerConfig, TransformerEncoderBlock, TransformerDecoderBlock, TransformerProcessBlock
 
 
 class PyTorchTransformerEncoderBlock(pt.nn.Module):
@@ -83,6 +85,133 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
             self.lhuc.weights_from_mxnet_block(block_mx.lhuc)
 
 
+class PyTorchTransformerDecoderBlock(pt.nn.Module):
+    """
+    A transformer decoder block consists of an autoregressive attention block, encoder attention,
+    and a feed-forward layer with pre/post process blocks in between.
+    """
+
+    def __init__(self,
+                 config: TransformerConfig,
+                 inference_only: bool,
+                 dtype: str) -> None:
+        super().__init__()
+        self.decoder_type = config.decoder_type
+
+        if self.decoder_type == C.TRANSFORMER_TYPE:
+            self.autoregr_layer = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(depth_att=config.model_size,
+                                                                                  heads=config.attention_heads,
+                                                                                  depth_out=config.model_size,
+                                                                                  dropout=config.dropout_attention,
+                                                                                  dtype=dtype)
+        elif self.decoder_type == C.SSRU_TRANSFORMER:
+            self.autoregr_layer = sockeye.layers_pt.PyTorchSSRU(model_size=config.model_size,
+                                                                inference_only=inference_only,
+                                                                dtype=dtype)
+        else:
+            raise ValueError("Invalid decoder type.")
+
+        self.pre_autoregr_layer = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=config.model_size)
+
+        self.post_autoregr_layer = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                                  dropout=config.dropout_prepost,
+                                                                  num_hidden=config.model_size)
+
+        self.pre_enc_attention = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                dropout=config.dropout_prepost,
+                                                                num_hidden=config.model_size)
+        self.enc_attention = sockeye.layers_pt.PyTorchMultiHeadAttention(depth_att=config.model_size,
+                                                                         heads=config.attention_heads,
+                                                                         depth_out=config.model_size,
+                                                                         dropout=config.dropout_attention,
+                                                                         depth_key_value=config.depth_key_value,
+                                                                         dtype=dtype)
+        self.post_enc_attention = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=config.model_size)
+
+        self.pre_ff = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                     dropout=config.dropout_prepost,
+                                                     num_hidden=config.model_size)
+        self.ff = PyTorchTransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                                num_model=config.model_size,
+                                                act_type=config.act_type,
+                                                dropout=config.dropout_act,
+                                                dtype=dtype,
+                                                use_glu=config.use_glu)
+        self.post_ff = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                      dropout=config.dropout_prepost,
+                                                      num_hidden=config.model_size)
+
+        self.lhuc = None
+        if config.use_lhuc:
+            self.lhuc = sockeye.layers_pt.PyTorchLHUC(config.model_size)
+
+    @property
+    def num_state_tensors(self) -> int:
+        """ Number of state tensors returned by the layer """
+        return self.autoregr_layer.num_state_tensors
+
+    @property
+    def needs_mask(self):
+        """ Whether the block makes use of a mask tensor or not """
+        return self.autoregr_layer.needs_mask
+
+    def get_states_shape(self, batch_size: int) -> Tuple:
+        """
+        :param batch_size: current batch size
+        :return: dimensions of an output state (assuming all of them have the same shape)
+        """
+        return self.autoregr_layer.get_state_shape(batch_size)
+
+    def forward(self,
+                target: pt.Tensor,
+                target_bias: pt.Tensor,
+                source: pt.Tensor,
+                source_att_lengths: pt.Tensor,
+                autoregr_states: pt.Tensor,
+                enc_att_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
+        target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
+                                                                    autoregr_states,
+                                                                    None,
+                                                                    target_bias)
+
+        target = self.post_autoregr_layer(target_autoregr, target)
+
+        # encoder attention
+        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None),
+                                            source,
+                                            source_att_lengths,
+                                            None,
+                                            enc_att_kv)
+
+        target = self.post_enc_attention(target_enc_att, target)
+
+        # feed-forward
+        target_ff = self.ff(self.pre_ff(target, None))
+        target = self.post_ff(target_ff, target)
+
+        if self.lhuc:
+            target = self.lhuc(target)
+
+        return target, new_autoregr_states
+
+    def weights_from_mxnet_block(self, block_mx: TransformerDecoderBlock):
+        self.pre_autoregr_layer.weights_from_mxnet_block(block_mx.pre_autoregr_layer)
+        self.autoregr_layer.weights_from_mxnet_block(block_mx.autoregr_layer)
+        self.post_autoregr_layer.weights_from_mxnet_block(block_mx.post_autoregr_layer)
+        self.pre_enc_attention.weights_from_mxnet_block(block_mx.pre_enc_attention)
+        self.enc_attention.weights_from_mxnet_block(block_mx.enc_attention)
+        self.post_enc_attention.weights_from_mxnet_block(block_mx.post_enc_attention)
+        self.pre_ff.weights_from_mxnet_block(block_mx.pre_ff)
+        self.ff.weights_from_mxnet_block(block_mx.ff)
+        self.post_ff.weights_from_mxnet_block(block_mx.post_ff)
+        if self.lhuc is not None:
+            self.lhuc.weights_from_mxnet_block(block_mx.lhuc)
+
+
 class PyTorchTransformerProcessBlock(pt.nn.Module):
     """
     Block to perform pre/post processing on layer inputs.
@@ -101,6 +230,7 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
         self.layer_norm = None
         if 'n' in sequence:
             self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
+            # TODO: use apex FusedLayernorm for Cuda
         self.dropout = None  # type: Optional[pt.nn.Module]
         if dropout > 0.0:
             self.dropout = pt.nn.Dropout(p=dropout)

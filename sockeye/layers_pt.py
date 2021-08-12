@@ -158,11 +158,15 @@ class PyTorchDotAttentionCell(pt.nn.Module):
             logits = logits + bias
 
         if lengths is not None:
-            raise NotImplementedError()
-            # required shape for lengths if not broadcastable: (n*h, lq); required dtype: int32
-            # TODO: masked softmax
-        else:
-            probs = pt.nn.functional.softmax(logits, dim=-1)
+            # lengths shape: (n*h,) (different than for mxnet where we cant use broadcasting on the qlen dim.
+            # this is a temporary implementation that is likely slow. Once fully ported, we should prepare the mask below
+            # once for the encoder/decoder (like the bias). Similarly, the bias code path above should probably use masked_fill eventually.
+            klen = logits.size()[2]
+            mask = pt.arange(klen)[None, :] < lengths[:, None]
+            mask = mask.unsqueeze(1)  # (n*h, 1, klen)
+            logits = logits.masked_fill(~mask, -C.LARGE_VALUES[self._dtype])
+
+        probs = pt.nn.functional.softmax(logits, dim=-1)
 
         probs = self.dropout(probs) if self.dropout is not None else probs
 
@@ -172,7 +176,22 @@ class PyTorchDotAttentionCell(pt.nn.Module):
         return pytorch_interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
-# TODO: port prepare_source_valid_lengths
+def pytorch_prepare_source_valid_lengths(valid_length: pt.Tensor, query_data: pt.Tensor, num_heads: int) -> pt.Tensor:
+    """
+    Returns an int32 valid length tensor of shape (batch * num_heads, query_length) to be used in
+    the softmax operation in DotAttentionCell with the length argument.
+    Due to broadcast_like, dtypes of valid_length and query_data must be the same.
+
+    :param valid_length: Valid length information. Shape: (batch,).
+    :param query_data: Tensor from which the query_length dimension is derived.
+                       Expected shape: (X, query_length, ...).
+    :param num_heads: Number of attention heads.
+    :return: int32 tensor of shape (batch * num_heads, query_length).
+    """
+    batch, seq_len, _ = query_data.size()
+    # (batch * heads, seq_len)
+    return valid_length.repeat_interleave(num_heads, dim=0)#.unsqueeze(1).expand(batch * num_heads, seq_len)
+
 
 class PyTorchMultiHeadAttentionBase(pt.nn.Module):
     """
@@ -351,6 +370,7 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):
         self.ff_q.weight[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
+        self.ff_kv.weight[:] = pt.as_tensor(block_mx.ff_kv.weight.data().asnumpy())
         self.ff_out.weight[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
 
 

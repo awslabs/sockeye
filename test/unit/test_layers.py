@@ -204,6 +204,7 @@ def test_output_layer():
 
     assert onp.allclose(output_restricted, reduced_output)
 
+
 @pytest.mark.parametrize('qlen, kvlen, batch_size',
                          [(10, 9, 1), (1, 1, 1), (3, 32, 128)])
 def test_mx_pt_eq_interleaved_matmul_encdec_qk(qlen, kvlen, batch_size):
@@ -313,6 +314,9 @@ def test_mx_pt_eq_multi_head_attention(qlen, kvlen, batch_size, hidden, heads):
     b_pt.weights_from_mxnet_block(b_mx)
     r_pt = b_pt(queries_pt, memory_pt, None, None, None)
 
+    print(b_pt.ff_kv.weight[0])
+    print(b_mx.ff_kv.weight.data()[0])
+
     r_mx = r_mx.asnumpy()
     r_pt = r_pt.detach().numpy()
 
@@ -344,3 +348,19 @@ def test_mx_pt_eq_ssru(hidden, inference_only, seq_len, batch):
 
     assert np.allclose(r1_mx, r1_pt)
     assert np.allclose(r2_mx, r2_pt)
+
+
+@pytest.mark.parametrize('batch_size, num_heads, seq_len',
+                         [(5, 8, 10), (1, 1, 1), (1, 1, 5), (1, 8, 50)])
+def test_mx_pt_eq_prepare_source_valid_lengths(batch_size, num_heads, seq_len):
+    valid_lengths_mx = np.random.randint(0, seq_len, (batch_size,))
+    valid_lengths_pt = pt.as_tensor(valid_lengths_mx.asnumpy())
+    query_data_mx = np.random.uniform(0, 1, (batch_size, seq_len, 32))
+    query_data_pt = pt.as_tensor(query_data_mx.asnumpy())
+
+    r_mx = sockeye.layers.prepare_source_valid_lengths(valid_lengths_mx, query_data_mx, num_heads=num_heads).asnumpy()
+    r_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(valid_lengths_pt, query_data_pt,
+                                                                  num_heads=num_heads)
+    r_pt = r_pt.unsqueeze(1).expand(batch_size * num_heads, seq_len).detach().numpy()
+
+    assert np.allclose(r_mx, r_pt)
