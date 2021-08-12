@@ -13,9 +13,14 @@
 
 import pytest
 
+from mxnet import np
+import torch as pt
+
 import sockeye.constants as C
 import sockeye.encoder
+import sockeye.encoder_pt
 import sockeye.transformer
+import sockeye.transformer_pt
 
 
 @pytest.mark.parametrize('dropout, factor_configs', [
@@ -55,3 +60,42 @@ def test_get_transformer_encoder(lhuc):
     encoder.hybridize(static_alloc=True)
 
     assert type(encoder) == sockeye.encoder.TransformerEncoder
+
+
+def test_mx_pt_eq_transformer_encoder():
+    config = sockeye.transformer.TransformerConfig(model_size=128,
+                                                   attention_heads=8,
+                                                   feed_forward_num_hidden=256,
+                                                   act_type='relu',
+                                                   num_layers=12,
+                                                   dropout_attention=0,
+                                                   dropout_act=0,
+                                                   dropout_prepost=0,
+                                                   positional_embedding_type=C.LEARNED_POSITIONAL_EMBEDDING,
+                                                   preprocess_sequence='n',
+                                                   postprocess_sequence='r',
+                                                   max_seq_len_source=50,
+                                                   max_seq_len_target=60,
+                                                   use_lhuc=False)
+    encoder_mx = sockeye.encoder.get_transformer_encoder(config, dtype=C.DTYPE_FP32)
+    encoder_mx.initialize()
+    encoder_mx.hybridize(static_alloc=True)
+
+    encoder_pt = sockeye.encoder_pt.pytorch_get_transformer_encoder(config, dtype=C.DTYPE_FP32)
+    encoder_pt.weights_from_mxnet_block(encoder_mx)
+
+    batch = 12
+    seq_len = 45
+    data_mx = np.random.uniform(0, 1, (batch, seq_len, config.model_size))
+    data_pt = pt.as_tensor(data_mx.asnumpy())
+    lengths_mx = np.random.randint(0, seq_len, (batch,))
+    lengths_pt = pt.as_tensor(lengths_mx.asnumpy())
+
+    r1_mx, r2_mx = encoder_mx(data_mx, lengths_mx)
+    r1_pt, r2_pt = encoder_pt(data_pt, lengths_pt)
+
+    r1_mx, r2_mx = r1_mx.asnumpy(), r2_mx.asnumpy()
+    r1_pt, r2_pt = r1_pt.detach().numpy(), r2_pt.detach().numpy()
+
+    assert np.allclose(r1_mx, r1_pt, atol=1e-05)
+    assert np.allclose(r2_mx, r2_pt, atol=1e-05)

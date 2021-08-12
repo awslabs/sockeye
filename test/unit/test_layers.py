@@ -359,8 +359,7 @@ def test_mx_pt_eq_prepare_source_valid_lengths(batch_size, num_heads, seq_len):
     query_data_pt = pt.as_tensor(query_data_mx.asnumpy())
 
     r_mx = sockeye.layers.prepare_source_valid_lengths(valid_lengths_mx, query_data_mx, num_heads=num_heads).asnumpy()
-    r_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(valid_lengths_pt, query_data_pt,
-                                                                  num_heads=num_heads)
+    r_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(valid_lengths_pt, num_heads=num_heads)
     r_pt = r_pt.unsqueeze(1).expand(batch_size * num_heads, seq_len).detach().numpy()
 
     assert np.allclose(r_mx, r_pt)

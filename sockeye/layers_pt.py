@@ -176,21 +176,13 @@ class PyTorchDotAttentionCell(pt.nn.Module):
         return pytorch_interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
 
 
-def pytorch_prepare_source_valid_lengths(valid_length: pt.Tensor, query_data: pt.Tensor, num_heads: int) -> pt.Tensor:
+def pytorch_prepare_source_valid_lengths(valid_length: pt.Tensor, num_heads: int) -> pt.Tensor:
     """
-    Returns an int32 valid length tensor of shape (batch * num_heads, query_length) to be used in
-    the softmax operation in DotAttentionCell with the length argument.
-    Due to broadcast_like, dtypes of valid_length and query_data must be the same.
-
-    :param valid_length: Valid length information. Shape: (batch,).
-    :param query_data: Tensor from which the query_length dimension is derived.
-                       Expected shape: (X, query_length, ...).
-    :param num_heads: Number of attention heads.
-    :return: int32 tensor of shape (batch * num_heads, query_length).
+    TODO: update documentation and change it to create a mask once porting to PT is complete
+    Returns valid length tensor repeated by number of heads.
     """
-    batch, seq_len, _ = query_data.size()
     # (batch * heads, seq_len)
-    return valid_length.repeat_interleave(num_heads, dim=0)#.unsqueeze(1).expand(batch * num_heads, seq_len)
+    return valid_length.repeat_interleave(num_heads, dim=0)
 
 
 class PyTorchMultiHeadAttentionBase(pt.nn.Module):

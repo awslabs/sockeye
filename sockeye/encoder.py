@@ -15,7 +15,7 @@
 Encoders for sequence-to-sequence models.
 """
 import logging
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
@@ -31,13 +31,6 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-ImageEncoderConfig = None
-
-
-def get_encoder(config: 'EncoderConfig', dtype: str = C.DTYPE_FP32) -> 'Encoder':
-    return get_transformer_encoder(config, dtype)
-
-
 def get_transformer_encoder(config: transformer.TransformerConfig, dtype) -> 'Encoder':
     """
     Returns a Transformer encoder, consisting of an embedding layer with
@@ -49,19 +42,16 @@ def get_transformer_encoder(config: transformer.TransformerConfig, dtype) -> 'En
     return TransformerEncoder(config=config, dtype=dtype)
 
 
-class Encoder(ABC, mx.gluon.HybridBlock):
+get_encoder = get_transformer_encoder
+EncoderConfig = Union[transformer.TransformerConfig]
+
+
+class Encoder(mx.gluon.HybridBlock):
     """
     Generic encoder interface.
     """
 
-    @abstractmethod
-    def __init__(self, **kwargs):
-        mx.gluon.HybridBlock.__init__(self, **kwargs)
-
-    def forward(self, inputs, valid_length):  # pylint: disable=arguments-differ
-        return mx.gluon.HybridBlock.forward(self, inputs, valid_length)
-
-    def __call__(self, inputs, valid_length):  #pylint: disable=arguments-differ
+    def __call__(self, inputs, valid_length):  # pylint: disable=arguments-differ
         """
         Encodes inputs given valid lengths of individual examples.
 
@@ -89,6 +79,7 @@ class Encoder(ABC, mx.gluon.HybridBlock):
         :return: The maximum length supported by the encoder if such a restriction exists.
         """
         return None
+
 
 @dataclass
 class FactorConfig(config.Config):
@@ -202,6 +193,7 @@ class Embedding(Encoder):
         return self.config.num_embed
 
 
+# TODO DEPRECATE, NO LONGER USED
 class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
     """
     A sequence of encoders is itself an encoder.
@@ -307,6 +299,7 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         data = np.transpose(data, axes=(1, 0, 2))
         for block in self.layers:
             data = block(data, att_valid_length)
+
         data = self.final_process(data, None)
         data = np.transpose(data, axes=(1, 0, 2))
         return data, valid_length
@@ -316,6 +309,3 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
         Return the representation size of this encoder.
         """
         return self.config.model_size
-
-
-EncoderConfig = Union[transformer.TransformerConfig]

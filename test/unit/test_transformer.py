@@ -157,7 +157,7 @@ def test_mx_pt_eq_transformer_encoder_block(batch_size, input_len, model_size, h
     valid_lengths_pt = pt.as_tensor(valid_lengths_mx.asnumpy())
 
     att_valid_lengths_mx = sockeye.layers.prepare_source_valid_lengths(valid_lengths_mx, data_mx, num_heads=heads)
-    att_valid_lengths_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(valid_lengths_pt, data_pt, num_heads=heads)
+    att_valid_lengths_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(valid_lengths_pt, num_heads=heads)
 
     # time-major as done in the Transformer encoder
     data_mx = np.transpose(data_mx, axes=(1, 0, 2))
@@ -221,7 +221,7 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
     source_lengths_mx = np.random.randint(0, source_input_len, (batch_size,))
     source_lengths_pt = pt.as_tensor(source_lengths_mx.asnumpy())
     source_lengths_mx = sockeye.layers.prepare_source_valid_lengths(source_lengths_mx, target_mx, heads)
-    source_lengths_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(source_lengths_pt, target_pt, heads)
+    source_lengths_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(source_lengths_pt, heads)
 
     target_mx = np.transpose(target_mx, axes=(1, 0, 2))
     target_pt = target_pt.permute(1, 0, 2)
