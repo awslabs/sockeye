@@ -133,7 +133,7 @@ class Embedding(Encoder):
         if embed_weight is None:
             self.weight = mx.gluon.Parameter('weight',
                                              shape=(self.config.vocab_size, self.config.num_embed),
-                                             grad_stype='row_sparse',
+                                             #grad_stype='row_sparse',
                                              dtype=dtype)
             self._use_sparse_grad = self.config.allow_sparse_grad
         else:
@@ -144,7 +144,7 @@ class Embedding(Encoder):
         if self.config.factor_configs is not None:
             for i, fc in enumerate(self.config.factor_configs, 1):
                 factor_weight_name = self._factor_weight_format_string % i
-                factor_weight = embed_weight if fc.share_embedding else \
+                factor_weight = self.weight if fc.share_embedding else \
                     mx.gluon.Parameter(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
                 # We set the attribute of the class to register the parameter with the block
                 setattr(self, factor_weight_name, factor_weight)
