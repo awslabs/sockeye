@@ -99,3 +99,46 @@ def test_mx_pt_eq_transformer_encoder():
 
     assert np.allclose(r1_mx, r1_pt, atol=1e-05)
     assert np.allclose(r2_mx, r2_pt, atol=1e-05)
+
+"""
+class FactorConfig(config.Config):
+    vocab_size: int
+    num_embed: int
+    combine: str  # From C.FACTORS_COMBINE_CHOICES
+    share_embedding: bool
+
+"""
+@pytest.mark.parametrize('vocab_size, num_embed, factor_configs, sparse',
+                         [(300, 32, None, False),
+                          (300, 32, None, True),
+                          (300, 32, [sockeye.encoder.FactorConfig(300, 8, C.FACTORS_COMBINE_CONCAT, False),
+                                     sockeye.encoder.FactorConfig(300, 32, C.FACTORS_COMBINE_AVERAGE, False),
+                                     sockeye.encoder.FactorConfig(300, 32, C.FACTORS_COMBINE_AVERAGE, True),
+                                     sockeye.encoder.FactorConfig(300, 32, C.FACTORS_COMBINE_SUM, True)], True)])
+def test_mx_pt_eq_embedding(vocab_size, num_embed, factor_configs, sparse):
+    config = sockeye.encoder.EmbeddingConfig(vocab_size=vocab_size,
+                                             num_embed=num_embed,
+                                             dropout=0,
+                                             factor_configs=factor_configs,
+                                             allow_sparse_grad=sparse)
+
+    block_mx = sockeye.encoder.Embedding(config, None, C.DTYPE_FP32)
+    block_mx.initialize()
+    block_pt = sockeye.encoder_pt.PyTorchEmbedding(config, None, C.DTYPE_FP32)
+    block_pt.weights_from_mxnet_block(block_mx)
+
+    batch, seq_len, num_factors = 4, 10, len(factor_configs) + 1 if factor_configs is not None else 1
+    data_mx = np.random.randint(0, vocab_size, (batch, seq_len, num_factors))  # does not take into account different vocab sizes for factors
+    data_pt = pt.as_tensor(data_mx.asnumpy())
+    vl_mx = np.ones((1,))  # not used
+    vl_pt = pt.as_tensor(vl_mx.asnumpy())
+
+    r_mx, _ = block_mx(data_mx, vl_mx)
+    r_pt, _ = block_pt(data_pt, vl_pt)
+
+    r_mx = r_mx.asnumpy()
+    r_pt = r_pt.detach().numpy()
+
+    assert np.allclose(r_mx, r_pt)
+
+

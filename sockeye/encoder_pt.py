@@ -12,12 +12,12 @@
 # permissions and limitations under the License.
 
 from abc import abstractmethod
-from typing import Tuple, Optional
+from typing import List, Tuple, Optional
 
 import torch as pt
 
 import sockeye.constants as C
-from sockeye.encoder import TransformerEncoder
+from sockeye.encoder import TransformerEncoder, EmbeddingConfig, Embedding
 from . import layers_pt
 from . import transformer
 from . import transformer_pt
@@ -50,6 +50,93 @@ class PyTorchEncoder():
         :return: The maximum length supported by the encoder if such a restriction exists.
         """
         return None
+
+
+class PyTorchEmbedding(PyTorchEncoder, pt.nn.Module):
+    """
+    Thin wrapper around PyTorch's Embedding op.
+
+    :param config: Embedding config.
+    :param embedding: pre-existing embedding Module.
+    :param dtype: Data type. Default: 'float32'.
+    """
+
+    def __init__(self,
+                 config: EmbeddingConfig,
+                 embedding: Optional[pt.nn.Embedding] = None,
+                 dtype: str = C.DTYPE_FP32) -> None:
+        pt.nn.Module.__init__(self)
+        self.config = config
+        self._dtype = dtype
+
+        if embedding is not None:
+            self.embedding = embedding
+        else:
+            self.embedding = pt.nn.Embedding(self.config.vocab_size, self.config.num_embed,
+                                             sparse=self.config.allow_sparse_grad)
+
+        self.factor_embeds = pt.nn.ModuleList()
+        if self.config.factor_configs is not None:
+            for i, fc in enumerate(self.config.factor_configs, 1):
+                if fc.share_embedding:
+                    factor_embed = self.embedding
+                else:
+                    factor_embed = pt.nn.Embedding(fc.vocab_size, fc.num_embed,
+                                                   sparse=self.config.allow_sparse_grad)
+                self.factor_embeds.append(factor_embed)
+
+        self.dropout = pt.nn.Dropout(p=self.config.dropout) if self.config.dropout > 0.0 else None
+
+    def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor,
+                                                                         pt.Tensor]:  # pylint: disable=arguments-differ
+        # We will catch the optional factor weights in kwargs
+        average_factors_embeds = []  # type: List[pt.Tensor]
+        concat_factors_embeds = []  # type: List[pt.Tensor]
+        sum_factors_embeds = []  # type: List[pt.Tensor]
+
+        if self.config.num_factors > 1 and self.config.factor_configs is not None:
+            data, *factor_datas = (x.squeeze(2) for x in data.split(1, dim=2))
+            for i, (factor_data, factor_embedding, factor_config) in enumerate(zip(factor_datas,
+                                                                               self.factor_embeds,
+                                                                               self.config.factor_configs)):
+                factor_embedded = factor_embedding(factor_data)
+                if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
+                    concat_factors_embeds.append(factor_embedded)
+                elif factor_config.combine == C.FACTORS_COMBINE_SUM:
+                    sum_factors_embeds.append(factor_embedded)
+                elif factor_config.combine == C.FACTORS_COMBINE_AVERAGE:
+                    average_factors_embeds.append(factor_embedded)
+                else:
+                    raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
+        else:
+            data = data.squeeze(2)
+
+        embedded = self.embedding(data)
+
+        if self.config.num_factors > 1 and self.config.factor_configs is not None:
+            if average_factors_embeds:
+                embedded = pt.mean(pt.stack([embedded] + average_factors_embeds, dim=0), dim=0)
+            if sum_factors_embeds:
+                embedded = pt.sum(pt.stack([embedded] + sum_factors_embeds, dim=0), dim=0)
+            if concat_factors_embeds:
+                embedded = pt.cat([embedded] + concat_factors_embeds, dim=2)
+
+        if self.dropout is not None:
+            embedded = self.dropout(embedded)
+
+        return embedded, valid_length
+
+    def get_num_hidden(self) -> int:
+        """
+        Return the representation size of this encoder.
+        """
+        return self.config.num_embed
+
+    def weights_from_mxnet_block(self, block_mx: Embedding):
+        self.embedding.weight[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
+        if self.config.factor_configs is not None:
+            for embedding, mx_weight, fc in zip(self.factor_embeds, block_mx.factor_weights, self.config.factor_configs):
+                embedding.weight[:] = pt.as_tensor(mx_weight.data().asnumpy())
 
 
 class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
