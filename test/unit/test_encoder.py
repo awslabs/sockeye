@@ -11,10 +11,11 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import numpy as onp
 import pytest
-
-from mxnet import np
 import torch as pt
+from mxnet import np
+import mxnet as mx
 
 import sockeye.constants as C
 import sockeye.encoder
@@ -63,6 +64,8 @@ def test_get_transformer_encoder(lhuc):
 
 
 def test_mx_pt_eq_transformer_encoder():
+    pt.manual_seed(13)
+    mx.random.seed(13)
     config = sockeye.transformer.TransformerConfig(model_size=128,
                                                    attention_heads=8,
                                                    feed_forward_num_hidden=256,
@@ -79,7 +82,6 @@ def test_mx_pt_eq_transformer_encoder():
                                                    use_lhuc=False)
     encoder_mx = sockeye.encoder.get_transformer_encoder(config, dtype=C.DTYPE_FP32)
     encoder_mx.initialize()
-    encoder_mx.hybridize(static_alloc=True)
 
     encoder_pt = sockeye.encoder_pt.pytorch_get_transformer_encoder(config, dtype=C.DTYPE_FP32)
     encoder_pt.weights_from_mxnet_block(encoder_mx)
@@ -97,17 +99,11 @@ def test_mx_pt_eq_transformer_encoder():
     r1_mx, r2_mx = r1_mx.asnumpy(), r2_mx.asnumpy()
     r1_pt, r2_pt = r1_pt.detach().numpy(), r2_pt.detach().numpy()
 
+    print("Max deviation:", onp.abs(r1_mx - r1_pt).max())
     assert np.allclose(r1_mx, r1_pt, atol=1e-05)
     assert np.allclose(r2_mx, r2_pt, atol=1e-05)
 
-"""
-class FactorConfig(config.Config):
-    vocab_size: int
-    num_embed: int
-    combine: str  # From C.FACTORS_COMBINE_CHOICES
-    share_embedding: bool
 
-"""
 @pytest.mark.parametrize('vocab_size, num_embed, factor_configs, sparse',
                          [(300, 32, None, False),
                           (300, 32, None, True),
@@ -128,7 +124,8 @@ def test_mx_pt_eq_embedding(vocab_size, num_embed, factor_configs, sparse):
     block_pt.weights_from_mxnet_block(block_mx)
 
     batch, seq_len, num_factors = 4, 10, len(factor_configs) + 1 if factor_configs is not None else 1
-    data_mx = np.random.randint(0, vocab_size, (batch, seq_len, num_factors))  # does not take into account different vocab sizes for factors
+    # data_mx does not take into account different vocab sizes for factors
+    data_mx = np.random.randint(0, vocab_size, (batch, seq_len, num_factors))
     data_pt = pt.as_tensor(data_mx.asnumpy())
     vl_mx = np.ones((1,))  # not used
     vl_pt = pt.as_tensor(vl_mx.asnumpy())

@@ -11,13 +11,16 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import logging
 from functools import partial
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Optional, Tuple
 
 import torch as pt
 
 from sockeye import constants as C, utils
 from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings
+
+logger = logging.getLogger(__name__)
 
 
 def pytorch_get_activation(act_type: str) -> pt.nn.Module:

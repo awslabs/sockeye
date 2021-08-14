@@ -163,7 +163,7 @@ class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
                                                                    scale_up_input=True,
                                                                    scale_down_positions=False)
 
-        self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional
+        self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
             transformer_pt.PyTorchTransformerEncoderBlock(config, dtype) for _ in range(config.num_layers))
 
         self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
