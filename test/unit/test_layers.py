@@ -205,6 +205,41 @@ def test_output_layer():
     assert onp.allclose(output_restricted, reduced_output)
 
 
+def test_mx_pt_eq_output_layer():
+    num_hidden = 32
+    vocab_size = 64
+    data_mx = np.random.uniform(0, 1, (2, 10, num_hidden))
+    data_pt = pt.as_tensor(data_mx.asnumpy())
+    vocab_slice_ids_mx = np.array([4, 7, 23])
+    vocab_slice_ids_pt = pt.tensor([4, 7, 23])
+
+    b_mx = sockeye.layers.OutputLayer(num_hidden, vocab_size)
+    b_mx.initialize()
+
+    b_pt = sockeye.layers_pt.PyTorchOutputLayer(num_hidden, vocab_size)
+    b_pt.weights_from_mxnet_block(b_mx)
+    assert b_pt.weight.size() == (vocab_size, num_hidden)
+
+    out_mx = b_mx(data_mx, None)
+    assert out_mx.shape == (2, 10, vocab_size)
+
+    out_pt = b_pt(data_pt, None)
+    assert out_pt.shape == (2, 10, vocab_size)
+
+    assert np.allclose(out_mx.asnumpy(), out_pt.detach().numpy())
+
+    reduced_out_mx = out_mx.take(vocab_slice_ids_mx, axis=-1).asnumpy()
+    reduced_out_pt = pt.index_select(out_pt, 2, vocab_slice_ids_pt).detach().numpy()
+    assert np.allclose(reduced_out_mx, reduced_out_pt)
+
+    out_restricted_mx = b_mx(data_mx, vocab_slice_ids_mx).asnumpy()
+    out_restricted_pt = b_pt(data_pt, vocab_slice_ids_pt).detach().numpy()
+    assert out_restricted_mx.shape == (2, 10, len(vocab_slice_ids_mx))
+    assert out_restricted_pt.shape == (2, 10, len(vocab_slice_ids_pt))
+
+    assert onp.allclose(out_restricted_mx, out_restricted_pt)
+
+
 @pytest.mark.parametrize('qlen, kvlen, batch_size',
                          [(10, 9, 1), (1, 1, 1), (3, 32, 128)])
 def test_mx_pt_eq_interleaved_matmul_encdec_qk(qlen, kvlen, batch_size):

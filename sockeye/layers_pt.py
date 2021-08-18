@@ -12,13 +12,15 @@
 # permissions and limitations under the License.
 
 import logging
+import math
 from functools import partial
 from typing import Callable, Optional, Tuple
 
 import torch as pt
 
 from sockeye import constants as C, utils
-from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings
+from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings, OutputLayer
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,106 @@ class PyTorchWeightNormalization(pt.nn.Module):
 
     def forward(self, weight: pt.Tensor) -> pt.Tensor:
         return pt.nn.functional.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale
+
+
+class PyTorchOutputLayer(pt.nn.Module):
+    """
+    Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
+
+    :param hidden_size: Input hidden size.
+    :param vocab_size: Target vocabulary size.
+    :param weight: Optional shared weight Parameter.
+    :param weight_initializer: Initializer for weight.
+    :param bias_initializer: Initializer for bias.
+    :param dtype: Data type.
+    :params params: Optional parameter dict for shared parameters.
+    """
+
+    def __init__(self,
+                 hidden_size: int,
+                 vocab_size: int,
+                 weight: Optional[pt.Tensor] = None,
+                 weight_initializer: Optional[str] = None,
+                 bias_initializer: str = 'zeros',
+                 dtype: str = C.DTYPE_FP32) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.in_features = hidden_size
+        self.out_features = vocab_size
+
+        if dtype == C.DTYPE_INT8:
+            raise NotImplementedError("int8 not implemented yet")
+            # self.scaling = gluon.Parameter('scaling',
+            #                                shape=(1,), init=mx.initializer.Constant(-1.0),
+            #                                dtype=C.DTYPE_FP32, allow_deferred_init=False)
+            # # This is only for inference but MXNet tries to create an
+            # # initializer anyway, then fails because most random
+            # # generators don't support int8 output.
+            # weight_initializer = 'zeros'
+        if weight is None:
+            self.weight = pt.nn.Parameter(pt.Tensor(vocab_size, hidden_size))
+        else:
+            self.weight = pt.nn.Parameter(weight)
+
+        # Bias stays fp32 even with int8 weights.
+        self.bias = pt.nn.Parameter(pt.Tensor(vocab_size))
+
+        self._cache_key = None  # type: Optional[int]
+        self._weight_slice_cache = None  # type: Optional[np.ndarray]
+        self._bias_slice_cache = None  # type: Optional[np.ndarray]
+
+    def reset_parameters(self) -> None:
+        # TODO: match mxnet / implement global weight initialization
+        pt.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = pt.nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            pt.nn.init.uniform_(self.bias, -bound, bound)
+
+    def extra_repr(self) -> str:
+        return 'in_features={}, out_features={}, bias={} dtype={}'.format(
+            self.in_features, self.out_features, self.bias is not None, self.weight.dtype)
+
+    # def _is_new_vocab_slices(self, x: pt.Tensor) -> bool:
+    #     # MXNet ndarrays (like Numpy ndarrays) do not support hashing, using string representation.
+    #     x_hash = hash(str(x))
+    #     if x_hash != self._cache_key:
+    #         self._cache_key = x_hash
+    #         return True
+    #     return False
+
+    def _take_slice(self, vocab_slice_ids: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+        if self.weight.dtype == C.DTYPE_INT8:
+            raise NotImplementedError('int8 not implemented yet')
+            #weight = npx.intgemm_take_weight(self.weight.data(), vocab_slice_ids)
+        else:
+            weight = self.weight[vocab_slice_ids]  # Shape: (len(vocab_slice_ids), hidden)
+        bias = self.bias[vocab_slice_ids]
+        return weight, bias
+
+    def forward(self, data: pt.Tensor, vocab_slice_ids: Optional[pt.Tensor] = None) -> pt.Tensor:
+        if vocab_slice_ids is not None:
+            # imperative, reduced matrix multiplication for vocabulary selection
+            weight, bias = self._take_slice(vocab_slice_ids)
+            # TODO: implement caching if useful for PT
+            # if self._is_new_vocab_slices(vocab_slice_ids):
+            #     weight, bias = self._take_slice(vocab_slice_ids)
+            #     self._weight_slice_cache, self._bias_slice_cache = weight, bias
+            # else:
+            #     weight, bias = self._weight_slice_cache, self._bias_slice_cache
+        else:
+            weight, bias = self.weight, self.bias
+
+        if self.weight.dtype == C.DTYPE_INT8:
+            # needs scaling
+            raise NotImplementedError("int8 not implemented yet")
+        else:
+            return pt.nn.functional.linear(data, weight, bias)
+
+    def weights_from_mxnet_block(self, block_mx: OutputLayer):
+        self.weight[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
+        self.bias[:] = pt.as_tensor(block_mx.bias.data().asnumpy())
+
 
 # TODO: Port LengthRatio
 
