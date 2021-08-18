@@ -70,11 +70,11 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
     encoder_seq_len = 45
     decoder_seq_len = 39 if not inference_only else 1
     encoder_outputs_mx = np.random.uniform(0, 1, (batch, encoder_seq_len, config.model_size))
-    encoder_outputs_pt = pt.as_tensor(encoder_outputs_mx.asnumpy())
+    encoder_outputs_pt = pt.tensor(encoder_outputs_mx.asnumpy())
     encoder_valid_length_mx = np.random.randint(0, encoder_seq_len, (batch,))
-    encoder_valid_length_pt = pt.as_tensor(encoder_valid_length_mx.asnumpy())
+    encoder_valid_length_pt = pt.tensor(encoder_valid_length_mx.asnumpy())
     inputs_mx = np.random.uniform(0, 1, (batch, decoder_seq_len, config.model_size))
-    inputs_pt = pt.as_tensor(inputs_mx.asnumpy())
+    inputs_pt = pt.tensor(inputs_mx.asnumpy())
 
     # mx
     decoder_mx = sockeye.decoder.get_decoder(config, inference_only=inference_only, dtype=C.DTYPE_FP32)
@@ -91,6 +91,9 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
     output_pt, new_states_pt = decoder_pt(inputs_pt, init_states_pt)
     if inference_only:  # do a second decoder step
         output_pt, new_states_pt = decoder_pt(output_pt, new_states_pt)
+
+    assert decoder_mx.state_structure() == decoder_pt.state_structure()
+    assert decoder_mx.get_num_hidden() == decoder_pt.get_num_hidden()
 
     assert len(init_states_mx) == len(init_states_pt)
     for s_mx, s_pt in zip(init_states_mx, init_states_pt):

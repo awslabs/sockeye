@@ -398,3 +398,25 @@ def test_mx_pt_eq_prepare_source_valid_lengths(batch_size, num_heads, seq_len):
     r_pt = r_pt.unsqueeze(1).expand(batch_size * num_heads, seq_len).detach().numpy()
 
     assert np.allclose(r_mx, r_pt)
+
+
+def test_mx_pt_length_ratio():
+    hidden_size = 32
+    seq_len = 10
+    batch_size = 8
+    num_layers = 1  # more layers seems to be numerically unstable
+
+    source_encoded_mx = np.random.uniform(0, 1, (batch_size, seq_len, hidden_size))
+    source_encoded_pt = pt.as_tensor(source_encoded_mx.asnumpy())
+    source_lengths_mx = np.random.randint(1, seq_len, (batch_size,), dtype='int32')
+    source_lengths_pt = pt.as_tensor(source_lengths_mx.asnumpy())
+
+    b_mx = sockeye.layers.LengthRatio(hidden_size=hidden_size, num_layers=num_layers)
+    b_mx.initialize()
+    r_mx = b_mx(source_encoded_mx, source_lengths_mx).asnumpy()
+
+    b_pt = sockeye.layers_pt.PyTorchLengthRatio(hidden_size=hidden_size, num_layers=num_layers)
+    b_pt.weights_from_mxnet_block(b_mx)
+    r_pt = b_pt(source_encoded_pt, source_lengths_pt).detach().numpy()
+
+    assert np.allclose(r_mx, r_pt)

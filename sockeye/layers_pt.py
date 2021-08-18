@@ -19,7 +19,7 @@ from typing import Callable, Optional, Tuple
 import torch as pt
 
 from sockeye import constants as C, utils
-from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings, OutputLayer
+from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings, OutputLayer, LengthRatio
 
 
 logger = logging.getLogger(__name__)
@@ -183,7 +183,53 @@ class PyTorchOutputLayer(pt.nn.Module):
         self.bias[:] = pt.as_tensor(block_mx.bias.data().asnumpy())
 
 
-# TODO: Port LengthRatio
+class PyTorchLengthRatio(pt.nn.Module):
+    """
+    Defines the length-ratio prediction layer of Sockeye.
+
+    :param hidden_size: Encoder hidden size.
+    :param num_layers: Number of layers.
+    """
+
+    def __init__(self,
+                 hidden_size: int,
+                 num_layers: int,
+                 dtype: str = C.DTYPE_FP32) -> None:
+        utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
+        super().__init__()
+        self.num_layers = num_layers
+        self.hidden_size = hidden_size
+
+        modules = []
+        for l in range(num_layers - 1):
+            modules.append(pt.nn.Linear(in_features=hidden_size, out_features=hidden_size))  # TODO quantization?
+            modules.append(pt.nn.Tanh())
+        modules.append(pt.nn.Linear(in_features=hidden_size, out_features=1))
+        modules.append(pt.nn.Softplus())  # SoftReLU activation to ensure positiveness of the predicted length ratio
+        self.layers = pt.nn.Sequential(*modules)
+
+    def forward(self, source_encoded: pt.Tensor, source_encoded_length: pt.Tensor) -> pt.Tensor:
+        """
+        Transformation to the length ratio. Returns a vector.
+
+        :param source_encoded: Encoder representation for n elements. Shape: (n, source_encoded_length, hidden_size).
+        :param source_encoded_length: A vector of encoded sequence lengths. Shape: (n,).
+        :return: Predictions of the ratio length(hypothesis)/length(reference). Shape(n, 1).
+        """
+        # True when outside length. Shape: (n, source_encoded_length, 1)
+        mask = pt.arange(source_encoded.size()[1])[None, :, None] >= source_encoded_length[:, None, None]
+        source_masked = source_encoded.masked_fill(mask, 0.)
+
+        # data: (n, hidden_size)
+        data = source_masked.sum(dim=1, keepdim=False) / source_encoded_length.unsqueeze(1)
+        data = self.layers(data).squeeze(1)  # (n, 1)
+        return data
+
+    def weights_from_mxnet_block(self, block_mx: LengthRatio):
+        for l_pt, l_mx in zip(self.layers, block_mx.layers):
+            if isinstance(l_pt, pt.nn.Linear):
+                l_pt.weight[:] = pt.as_tensor(l_mx.weight.data().asnumpy())
+                l_pt.bias[:] = pt.as_tensor(l_mx.bias.data().asnumpy())
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op

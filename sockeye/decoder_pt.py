@@ -110,6 +110,10 @@ class PyTorchDecoder(pt.nn.Module):
     def get_num_hidden(self):
         raise NotImplementedError()
 
+    @abstractmethod
+    def weights_from_mxnet_block(self, block_mx):
+        raise NotImplementedError()
+
 
 @PyTorchDecoder.register(TransformerConfig)
 class PyTorchTransformerDecoder(PyTorchDecoder):

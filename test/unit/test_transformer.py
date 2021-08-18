@@ -11,6 +11,7 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+import mxnet as mx
 import numpy as onp
 import pytest
 import torch as pt
@@ -186,6 +187,8 @@ def test_mx_pt_eq_transformer_encoder_block(batch_size, input_len, model_size, h
 def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target_input_len, model_size, heads,
                                             ff_hidden, num_layers, use_lhuc, preprocess_sequence,
                                             postprocess_sequence, use_glu, inference_only, decoder_type):
+    pt.manual_seed(13)
+    mx.random.seed(13)
     config = sockeye.transformer.TransformerConfig(
         model_size=model_size,
         attention_heads=heads,
@@ -206,7 +209,7 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
         use_glu=use_glu)
 
     target_mx = np.random.uniform(0, 1, (batch_size, target_input_len, model_size))
-    target_pt = pt.as_tensor(target_mx.asnumpy())
+    target_pt = pt.tensor(target_mx.asnumpy())
 
     autoregr_bias_mx = sockeye.transformer.AutoRegressiveBias()
     autoregr_bias_mx.initialize()
@@ -216,10 +219,10 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
 
     source_mx = np.random.uniform(0, 1, (batch_size, source_input_len, model_size))
     source_mx = np.transpose(source_mx, axes=(1, 0, 2))
-    source_pt = pt.as_tensor(source_mx.asnumpy())
+    source_pt = pt.tensor(source_mx.asnumpy())
 
     source_lengths_mx = np.random.randint(0, source_input_len, (batch_size,))
-    source_lengths_pt = pt.as_tensor(source_lengths_mx.asnumpy())
+    source_lengths_pt = pt.tensor(source_lengths_mx.asnumpy())
     source_lengths_mx = sockeye.layers.prepare_source_valid_lengths(source_lengths_mx, target_mx, heads)
     source_lengths_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(source_lengths_pt, heads)
 
