@@ -133,10 +133,10 @@ class PyTorchEmbedding(PyTorchEncoder, pt.nn.Module):
         return self.config.num_embed
 
     def weights_from_mxnet_block(self, block_mx: Embedding):
-        self.embedding.weight[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
+        self.embedding.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
         if self.config.factor_configs is not None:
             for embedding, mx_weight, fc in zip(self.factor_embeds, block_mx.factor_weights, self.config.factor_configs):
-                embedding.weight[:] = pt.as_tensor(mx_weight.data().asnumpy())
+                embedding.weight.data[:] = pt.as_tensor(mx_weight.data().asnumpy())
 
 
 class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):

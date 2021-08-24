@@ -267,8 +267,8 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
     def weights_from_mxnet_block(self, block_mx: TransformerProcessBlock):
         if 'n' in self.sequence:
             assert 'n' in block_mx.sequence
-            self.layer_norm.bias[:] = pt.as_tensor(block_mx.layer_norm.beta.data().asnumpy())
-            self.layer_norm.weight[:] = pt.as_tensor(block_mx.layer_norm.gamma.data().asnumpy())
+            self.layer_norm.bias.data[:] = pt.as_tensor(block_mx.layer_norm.beta.data().asnumpy())
+            self.layer_norm.weight.data[:] = pt.as_tensor(block_mx.layer_norm.gamma.data().asnumpy())
 
 
 class PyTorchTransformerFeedForward(pt.nn.Module):
@@ -303,13 +303,13 @@ class PyTorchTransformerFeedForward(pt.nn.Module):
         return y
 
     def weights_from_mxnet_block(self, block_mx: 'TransformerFeedForward'):
-        self.ff1.weight[:] = pt.as_tensor(block_mx.ff1.weight.data().asnumpy())
-        self.ff2.weight[:] = pt.as_tensor(block_mx.ff2.weight.data().asnumpy())
-        self.ff1.bias[:] = pt.as_tensor(block_mx.ff1.bias.data().asnumpy())
-        self.ff2.bias[:] = pt.as_tensor(block_mx.ff2.bias.data().asnumpy())
+        self.ff1.weight.data[:] = pt.as_tensor(block_mx.ff1.weight.data().asnumpy())
+        self.ff2.weight.data[:] = pt.as_tensor(block_mx.ff2.weight.data().asnumpy())
+        self.ff1.bias.data[:] = pt.as_tensor(block_mx.ff1.bias.data().asnumpy())
+        self.ff2.bias.data[:] = pt.as_tensor(block_mx.ff2.bias.data().asnumpy())
         if self.use_glu:
-            self.linear.weight[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())
-            self.linear.bias[:] = pt.as_tensor(block_mx.linear.bias.data().asnumpy())
+            self.linear.weight.data[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())
+            self.linear.bias.data[:] = pt.as_tensor(block_mx.linear.bias.data().asnumpy())
 
 
 class PyTorchAutoRegressiveBias(pt.nn.Module):

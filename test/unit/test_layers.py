@@ -302,7 +302,7 @@ def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, hea
     b_mx.initialize()
     b_pt = sockeye.layers_pt.PyTorchMultiHeadAttentionBase(hidden, heads, hidden)
     # use mxnet parameter initializations for pytorch block
-    b_pt.ff_out.weight[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
+    b_pt.ff_out.weight.data[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
 
     r_mx = b_mx._attend(q_mx, kv_mx, None, None).asnumpy()
     r_pt = b_pt._attend(q_pt, kv_pt, lengths=None, bias=None).detach().numpy()

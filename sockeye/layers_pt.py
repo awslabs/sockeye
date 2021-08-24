@@ -62,7 +62,7 @@ class PyTorchLHUC(pt.nn.Module):
         return weight * data
 
     def weights_from_mxnet_block(self, block_mx: 'LHUC'):
-        self.weight[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
+        self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
 
 
 class PyTorchWeightNormalization(pt.nn.Module):
@@ -179,8 +179,8 @@ class PyTorchOutputLayer(pt.nn.Module):
             return pt.nn.functional.linear(data, weight, bias)
 
     def weights_from_mxnet_block(self, block_mx: OutputLayer):
-        self.weight[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
-        self.bias[:] = pt.as_tensor(block_mx.bias.data().asnumpy())
+        self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
+        self.bias.data[:] = pt.as_tensor(block_mx.bias.data().asnumpy())
 
 
 class PyTorchLengthRatio(pt.nn.Module):
@@ -228,8 +228,8 @@ class PyTorchLengthRatio(pt.nn.Module):
     def weights_from_mxnet_block(self, block_mx: LengthRatio):
         for l_pt, l_mx in zip(self.layers, block_mx.layers):
             if isinstance(l_pt, pt.nn.Linear):
-                l_pt.weight[:] = pt.as_tensor(l_mx.weight.data().asnumpy())
-                l_pt.bias[:] = pt.as_tensor(l_mx.bias.data().asnumpy())
+                l_pt.weight.data[:] = pt.as_tensor(l_mx.weight.data().asnumpy())
+                l_pt.bias.data[:] = pt.as_tensor(l_mx.bias.data().asnumpy())
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
@@ -250,7 +250,7 @@ def pytorch_interleaved_matmul_encdec_qk(q: pt.Tensor,
 
     # batch * heads, qlen, head_dim)
     q = q.contiguous().view(qlen, batch * heads, head_dim).transpose(0, 1)
-    q *= head_dim ** -0.5
+    q = q * head_dim ** -0.5
 
     kvlen, batch, hidden2 = kv.size()
     tmp = kv.reshape(kvlen, batch, heads, 2, head_dim)
@@ -458,8 +458,8 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         return self._attend(queries, states, lengths=input_lengths, bias=bias), states
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadSelfAttention'):
-        self.ff_in.weight[:] = pt.as_tensor(block_mx.ff_in.weight.data().asnumpy())
-        self.ff_out.weight[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
+        self.ff_in.weight.data[:] = pt.as_tensor(block_mx.ff_in.weight.data().asnumpy())
+        self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
 
 
 class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
@@ -512,9 +512,9 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
         return self._attend(queries, kv, bias=bias, lengths=memory_lengths)
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):
-        self.ff_q.weight[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
-        self.ff_kv.weight[:] = pt.as_tensor(block_mx.ff_kv.weight.data().asnumpy())
-        self.ff_out.weight[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
+        self.ff_q.weight.data[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
+        self.ff_kv.weight.data[:] = pt.as_tensor(block_mx.ff_kv.weight.data().asnumpy())
+        self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
 
 
 def pytorch_get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
@@ -601,7 +601,7 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
 
     def weights_from_mxnet_block(self, block_mx: PositionalEmbeddings):
         if self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-            self.weight[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
+            self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
 
 
 class PyTorchSSRU(pt.nn.Module, AutoregressiveLayer):
@@ -699,8 +699,8 @@ class PyTorchSSRU(pt.nn.Module, AutoregressiveLayer):
         return self.relu(cell_state), last_step_state
 
     def weights_from_mxnet_block(self, block_mx: SSRU):
-        self.forget_gate.weight[:] = pt.as_tensor(block_mx.forget_gate.weight.data().asnumpy())
-        self.forget_gate.bias[:] = pt.as_tensor(block_mx.forget_gate.bias.data().asnumpy())
-        self.linear.weight[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())
+        self.forget_gate.weight.data[:] = pt.as_tensor(block_mx.forget_gate.weight.data().asnumpy())
+        self.forget_gate.bias.data[:] = pt.as_tensor(block_mx.forget_gate.bias.data().asnumpy())
+        self.linear.weight.data[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())
 
 
