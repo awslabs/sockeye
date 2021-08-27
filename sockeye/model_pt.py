@@ -298,11 +298,12 @@ class PyTorchSockeyeModel(pt.nn.Module):
         """
         Saves model parameters to file.
         :param fname: Path to save parameters to.
+        See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
         """
         pt.save(self.state_dict(), fname)
         logging.info('Saved params/state_dict to "%s"', fname)
 
-    def load_parameters(self,  # TODO
+    def load_parameters(self,
                         filename: str,
                         ctx: Union[mx.Context, List[mx.Context]] = None,
                         allow_missing: bool = False,
@@ -310,6 +311,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
                         cast_dtype: bool = False,
                         dtype_source: str = 'current'):
         """Load parameters from file previously saved by `save_parameters`.
+        See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
 
         Parameters
         ----------
@@ -334,11 +336,18 @@ class PyTorchSockeyeModel(pt.nn.Module):
         `Saving and Loading Gluon Models \
         <https://mxnet.incubator.apache.org/tutorials/gluon/save_load_params.html>`_
         """
+        assert ctx is None, "not implemented yet"
+        assert cast_dtype is False, "not implemented yet"
+        assert dtype_source == 'current', "not implemented yet"
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                         "This is either not a model directory or the first training "
                                                         "checkpoint has not happened yet." % filename)
-        super().load_parameters(filename, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra,
-                                cast_dtype=cast_dtype, dtype_source=dtype_source)
+        state_dict = pt.load(filename)
+        missing, unexpected = self.load_state_dict(state_dict, strict=False)
+        if not allow_missing:
+            utils.check_condition(not missing, f"missing keys: {missing}")
+        if not ignore_extra:
+            utils.check_condition(not unexpected, f"extra keys: {unexpected}")
         logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
 
     def set_parameters(self,  # TODO

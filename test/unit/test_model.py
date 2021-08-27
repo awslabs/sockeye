@@ -16,6 +16,8 @@ import random
 import mxnet as mx
 import numpy as onp
 import pytest
+import os
+from tempfile import TemporaryDirectory
 import torch as pt
 from mxnet import np, npx
 import sockeye.constants as C
@@ -190,6 +192,17 @@ def test_mx_pt_eq_sockeye_model():
     for param_tensor in b_pt.state_dict():
         print(param_tensor, "\t", b_pt.state_dict()[param_tensor].size())
 
+    # save & load parameters
+    with TemporaryDirectory() as work_dir:
+        fname = os.path.join(work_dir, 'params.pt')
+        b_pt.save_parameters(fname)
+        b_pt.load_parameters(fname)
+
+    forward_dict_pt = b_pt(source_inputs_pt, source_input_lengths_pt, target_inputs_pt, target_input_lengths_pt)
+    assert forward_dict_mx.keys() == forward_dict_pt.keys()
+    logits_mx = forward_dict_mx[C.LOGITS_NAME].asnumpy()
+    logits_pt = forward_dict_pt[C.LOGITS_NAME].detach().numpy()
+    assert np.allclose(logits_mx, logits_pt, atol=1e-05)
 
 
     assert False
