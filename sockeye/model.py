@@ -84,12 +84,15 @@ class SockeyeModel(mx.gluon.Block):
 
     :param config: Model configuration.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param train_decoder_only: Training will only update the decoder. Disable
+           autograd for encoder and embeddings to save memory.
     :param prefix: Name prefix for all parameters of this model.
     """
 
     def __init__(self,
                  config: ModelConfig,
                  inference_only: bool = False,
+                 train_decoder_only: bool = False,
                  mc_dropout: bool = False,
                  forward_pass_cache_size: int = 0,
                  prefix: str = '',
@@ -98,6 +101,7 @@ class SockeyeModel(mx.gluon.Block):
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
         self.dtype = config.dtype
+        self.train_decoder_only = train_decoder_only
         self.mc_dropout = mc_dropout
         self._output_layer_factor_format_string = 'output_layer_factor%i'
         self.forward_pass_cache_size = forward_pass_cache_size
@@ -259,8 +263,12 @@ class SockeyeModel(mx.gluon.Block):
         return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
-        source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
-                                                                                            target, target_length)
+        # When updating only the decoder (specified directly or implied by
+        # caching the encoder and embedding forward passes), turn off autograd
+        # for the encoder and embeddings to save memory.
+        with mx.autograd.pause() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
+            source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
+                                                                                                target, target_length)
 
         target = self.decoder.decode_seq(target_embed, states=states)
 
@@ -516,6 +524,7 @@ def load_model(model_folder: str,
                checkpoint: Optional[int] = None,
                hybridize: bool = True,
                inference_only: bool = False,
+               train_decoder_only: bool = False,
                mc_dropout: bool = False,
                for_disk_saving: Optional[str] = None,
                allow_missing: bool = False,
@@ -530,6 +539,8 @@ def load_model(model_folder: str,
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param train_decoder_only: Training will only update the decoder. Disable
+           autograd for encoder and embeddings to save memory.
     :param mc_dropout: Turn on dropout during inference.
     :param for_disk_saving: For saving quantized models to disk.
            None: load as usual and the model will work.
@@ -578,8 +589,8 @@ def load_model(model_folder: str,
     if quantizing:
         model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
 
-    model = SockeyeModel(model_config, inference_only=inference_only, mc_dropout=mc_dropout,
-                         forward_pass_cache_size=forward_pass_cache_size)
+    model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
+                         mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
     model.initialize(ctx=context)
     if model_config.dtype != C.DTYPE_INT8:
         # If model_config.dtype is int8, then the above model construction
@@ -647,6 +658,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                 dtype: Optional[str] = C.DTYPE_FP32,
                 hybridize: bool = True,
                 inference_only: bool = False,
+                train_decoder_only: bool = False,
                 mc_dropout: bool = False,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
@@ -660,6 +672,8 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
     :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param train_decoder_only: Training will only update the decoder. Disable
+           autograd for encoder and embeddings to save memory.
     :param mc_dropout: Turn on dropout during inference.
     :param allow_missing: Allow missing parameters in the loaded models.
     :param set_grad_req_null: Set grad_req to null for model parameters.
@@ -684,6 +698,7 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
                                                checkpoint=checkpoint,
                                                hybridize=hybridize,
                                                inference_only=inference_only,
+                                               train_decoder_only=train_decoder_only,
                                                mc_dropout=mc_dropout,
                                                allow_missing=allow_missing,
                                                set_grad_req_null=set_grad_req_null,
