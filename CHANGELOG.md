@@ -13,7 +13,13 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ## [2.4.0]
 ### Changed
+
 - Updated to MXnet 2.0 with Gluon 2.0 and full numpy support.
+
+## [2.3.19]
+### Changed
+
+- When training only the decoder (`--fixed-param-strategy all_except_decoder`), disable autograd for the encoder and embeddings to save memory.
 
 ## [2.3.18]
 ### Changed

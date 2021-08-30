@@ -644,3 +644,11 @@ def log_parameters(params: C.ParameterDict):
     logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
     logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names))
     logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
+
+
+@contextmanager
+def no_context():
+    """
+    No-op context manager that can be used in "with" statements
+    """
+    yield None
