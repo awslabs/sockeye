@@ -15,6 +15,11 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 - Updated to MXnet 2.0 with Gluon 2.0 and full numpy support.
 
+## [2.3.18]
+### Changed
+
+- Updated Docker builds and documentation.  See [sockeye_contrib/docker](sockeye_contrib/docker).
+
 ## [2.3.17]
 ### Added
 - Added an alternative, faster implementation of greedy search. The '--greedy' flag to `sockeye.translate` will enable it. This implementation does not support hypothesis scores, batch decoding, or lexical constraints."

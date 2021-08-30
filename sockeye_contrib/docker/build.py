@@ -8,7 +8,7 @@ import sys
 SOCKEYE_DIR = os.path.dirname(os.path.dirname((os.path.dirname(os.path.abspath(__file__)))))
 DOCKERFILE_CPU = os.path.join(SOCKEYE_DIR, 'sockeye_contrib', 'docker', 'Dockerfile.cpu')
 DOCKERFILE_GPU = os.path.join(SOCKEYE_DIR, 'sockeye_contrib', 'docker', 'Dockerfile.gpu')
-REQS_BASE = os.path.join(SOCKEYE_DIR, 'requirements', 'requirements.txt')
+REQS = os.path.join(SOCKEYE_DIR, 'requirements', 'requirements.txt')
 REQS_HOROVOD = os.path.join(SOCKEYE_DIR, 'requirements', 'requirements.horovod.txt')
 
 GIT = 'git'
@@ -37,11 +37,12 @@ def run_command(cmd_args, get_output=False):
 def read_requirements(fname):
     with open(fname, 'rt') as reqs_in:
         # MXNet is installed separately in the Dockerfile
-        return ' '.join(line.strip() for line in reqs_in if not line.startswith('mxnet'))
+        return ' '.join(line.strip() for line in reqs_in if not (line.startswith('mxnet')
+                                                                 or line.startswith('horovod')))
 
 
 def main():
-    for fname in (DOCKERFILE_CPU, DOCKERFILE_GPU, REQS_BASE, REQS_HOROVOD):
+    for fname in (DOCKERFILE_CPU, DOCKERFILE_GPU, REQS):
         if not os.path.exists(fname):
             msg = 'Cannot find {}. Please make sure {} is a properly cloned repository.'.format(fname, SOCKEYE_DIR)
             raise FileNotFoundError(msg)
@@ -70,7 +71,7 @@ def main():
                  '-f', dockerfile,
                  '.',
                  '--build-arg', 'SOCKEYE_COMMIT={}'.format(sockeye_commit),
-                 '--build-arg', 'REQS_BASE={}'.format(read_requirements(REQS_BASE)),
+                 '--build-arg', 'REQS={}'.format(read_requirements(REQS)),
                  '--build-arg', 'REQS_HOROVOD={}'.format(read_requirements(REQS_HOROVOD))])
 
     run_command([DOCKER, 'tag', '{}:{}'.format(repository, tag), '{}:latest'.format(repository)])
