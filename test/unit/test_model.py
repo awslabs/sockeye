@@ -203,12 +203,3 @@ def test_mx_pt_eq_sockeye_model():
     logits_mx = forward_dict_mx[C.LOGITS_NAME].asnumpy()
     logits_pt = forward_dict_pt[C.LOGITS_NAME].detach().numpy()
     assert np.allclose(logits_mx, logits_pt, atol=1e-05)
-
-
-    assert False
-
-
-
-
-
-

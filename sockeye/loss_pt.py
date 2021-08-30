@@ -18,7 +18,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Tuple
 
 from mxnet import gluon, np, npx
-from sockeye.loss import LossMetric
+from sockeye.loss import LossMetric, PerplexityMetric
 
 from . import constants as C
 # TODO: consider inheriting from 'from torch.nn.modules.loss import _Loss' ?
@@ -109,47 +109,75 @@ class PyTorchCrossEntropyLoss(PyTorchLoss):
                  label_name: str = C.TARGET_LABEL_NAME,
                  ignore_label: int = C.PAD_ID,
                  num_labels: int = 0,
-                 metric_prefix: str = '') -> None:  # this is needed for label smoothing
+                 metric_prefix: str = '') -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name,
                          weight=weight, metric_prefix=metric_prefix)
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._dtype = dtype
-        self._num_labels = float(num_labels)
+        self._reduction = 'mean'  # TODO: consider sum reduction and normalization outside of loss for reporting
+        self._use_mx_style_smoothing = True
+
+    def _compute_smoothed_loss_as_in_mxnet(self, logits, labels):
+        """
+        Computes label-smoothed cross-entropy loss just like sockeye.loss.CrossEntropyLossWithoutSoftmaxOutput()
+        Notable details:
+        - smoothing with 1/vocab_size, not 1/(vocab_size-1) as in fairseq
+        - form taken from https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4
+        """
+        pred = pt.log_softmax(logits, dim=-1)
+        nll = -pred.gather(dim=-1, index=labels.unsqueeze(-1).long()).squeeze(-1)
+        all_scores = pred.sum(dim=-1)
+        # (batch, len,)
+        valid_mask = labels.not_equal(self.ignore_label)
+        pad_mask = ~valid_mask
+        nll.masked_fill_(pad_mask, 0.0)
+        all_scores.masked_fill_(pad_mask, 0.0)
+
+        nll = (1 - self._alpha) * nll - self._alpha / logits.size(-1) * all_scores
+        num_valid = valid_mask.sum()
+        ce = nll.sum() * self.weight / num_valid
+        return ce
+
+    def _compute_smoothed_loss_as_in_fairseq(self, logits, labels):
+        """
+        Computes smoothed NLL as in fairseq, see
+        # https://github.com/pytorch/fairseq/blob/db0175a882e8ae0f30d89b5a610373dbe032d528/fairseq/criterions/label_smoothed_cross_entropy.py#L33
+        """
+        pred = pt.log_softmax(logits, dim=-1)
+        if labels.dim() == logits.dim() - 1:
+            labels = labels.unsqueeze(-1)
+        nll = -pred.gather(dim=-1, index=labels.long())
+        smooth_loss = pred.sum(dim=-1, keepdim=True)
+
+        pad_mask = labels.eq(self.ignore_label)
+        nll.masked_fill_(pad_mask, 0.0)
+        smooth_loss.masked_fill_(pad_mask, 0.0)
+
+        nll = nll.sum()
+        smooth_loss = smooth_loss.sum()
+
+        alpha_i = self._alpha / (logits.size(-1) - 1)
+        nll = (1.0 - self._alpha - alpha_i) * nll - alpha_i * smooth_loss
+
+        num_valid = (~pad_mask).sum()
+        ce = nll.sum() * self.weight / num_valid
+        return ce
 
     def forward(self, logits: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         if self._alpha == 0.0:
-            #pt.nn.functional.cross_entropy(logits_pt, labels.long(), weight=None, ignore_index=0, reduction='mean')
-            pt.nn.functional.cross_entropy(input, target, weight=self.weight,
-                               ignore_index=self.ignore_index, reduction=self.reduction)
-        pred = npx.log_softmax(logits, axis=-1)
-        pt.nn.NLLLoss
-        pt.nn.CrossEntropyLoss
-
-        # (batch, len)
-        neg_log_likelihood = - npx.pick(pred,  # pylint: disable=invalid-unary-operand-type
-                                        labels, axis=-1, keepdims=False)
-
-        # label smoothing as in
-        # https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4
-        if self._alpha > 0:
-            all_scores = np.sum(pred, axis=-1)
-            neg_log_likelihood = (1 - self._alpha) * neg_log_likelihood - self._alpha / self._num_labels * all_scores
-
-        # (batch, len,)
-        valid_mask = labels != self.ignore_label
-
-        # (batch, len)
-        loss = neg_log_likelihood * valid_mask
-
-        # (1,)
-        num_valid = np.sum(valid_mask)
-
-        # (1,)
-        ce = np.sum(loss) * self.weight
-
-        # we need to divide by num_valid here to backpropagate a 'valid' normalized loss value like in SoftmaxOutput.
-        return ce / num_valid, np.ones((1,))
+            logits = logits.view(-1, logits.size(-1))
+            labels = labels.view(-1)
+            ce = pt.nn.functional.cross_entropy(logits, labels.long(),
+                                                weight=None, ignore_index=self.ignore_label, reduction=self._reduction)
+            ce *= self.weight
+            return ce, pt.ones(1, device=ce.device)  # TODO: check device or whether that can be simplified
+        else:
+            if self._use_mx_style_smoothing:
+                ce = self._compute_smoothed_loss_as_in_mxnet(logits, labels)
+            else:
+                ce = self._compute_smoothed_loss_as_in_fairseq(logits, labels)
+            return ce, pt.ones(1, device=ce.device)  # TODO: check device or whether that can be simplified
 
     def create_metric(self) -> 'LossMetric':
         """
