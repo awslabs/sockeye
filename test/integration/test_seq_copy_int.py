@@ -51,7 +51,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --weight-tying-type src_trg_softmax"
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
-     # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching 
+     # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching
      # max updates independent of the checkpoint interval
      " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 2 --nbest-size 2",
@@ -117,6 +117,18 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --length-task length --length-task-weight 1.0 --length-task-layers 2",
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
+     False, 0, 0),
+    # Basic transformer, training only the decoder
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg_softmax"
+     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --fixed-param-strategy " + C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
+     "--beam-size 2",
      False, 0, 0),
 ]
 

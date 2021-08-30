@@ -1024,7 +1024,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                            max_seq_len_target=max_seq_len_target,
                                            config_data=config_data)
 
-        training_model = model.SockeyeModel(model_config)
+        training_model = model.SockeyeModel(
+            model_config,
+            train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
 
         # Handle options that override training settings
         trainer_config = training.TrainerConfig(

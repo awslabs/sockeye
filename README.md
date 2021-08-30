@@ -56,12 +56,15 @@ For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
 ## Research with Sockeye
 
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
-If you know more, please let us know or submit a pull request (last updated: March 2021).
+If you know more, please let us know or submit a pull request (last updated: August 2021).
 
 ### 2021
 
 * Bergmanis, Toms, Mārcis Pinnis. "Facilitating Terminology Translation with Target Lemma Annotations". arXiv preprint arXiv:2101.10035 (2021)
+* Briakou, Eleftheria, Marine Carpuat. "Beyond Noise: Mitigating the Impact of Fine-grained Semantic Divergences on Neural Machine Translation". arXiv preprint arXiv:2105.15087 (2021)
+* Tang, Gongbo, Philipp Rönchen, Rico Sennrich, Joakim Nivre. "Revisiting Negation in Neural Machine Translation". Transactions of the Association for Computation Linguistics 9 (2021)
 * Vu, Thuy, Alessandro Moschitti. "Machine Translation Customization via Automatic Training Data Selection from the Web". arXiv preprint arXiv:2102.1024 (2021)
+* Xu, Weijia, Marine Carpuat. "EDITOR: An Edit-Based Transformer with Repositioning for Neural Machine Translation with Soft Lexical Constraints." Transactions of the Association for Computation Linguistics 9 (2021)
 
 ### 2020
 
