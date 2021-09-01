@@ -65,6 +65,7 @@ If you know more, please let us know or submit a pull request (last updated: Aug
 * Tang, Gongbo, Philipp Rönchen, Rico Sennrich, Joakim Nivre. "Revisiting Negation in Neural Machine Translation". Transactions of the Association for Computation Linguistics 9 (2021)
 * Vu, Thuy, Alessandro Moschitti. "Machine Translation Customization via Automatic Training Data Selection from the Web". arXiv preprint arXiv:2102.1024 (2021)
 * Xu, Weijia, Marine Carpuat. "EDITOR: An Edit-Based Transformer with Repositioning for Neural Machine Translation with Soft Lexical Constraints." Transactions of the Association for Computation Linguistics 9 (2021)
+* Müller, Mathias, Rico Sennrich. "Understanding the Properties of Minimum Bayes Risk Decoding in Neural Machine Translation". Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing (Volume 1: Long Papers) (2021)
 
 ### 2020
 
