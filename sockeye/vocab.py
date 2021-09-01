@@ -14,6 +14,7 @@
 import argparse
 import json
 import logging
+import multiprocessing
 import os
 from collections import Counter
 from contextlib import ExitStack
@@ -31,25 +32,37 @@ logger = logging.getLogger(__name__)
 Vocab = Dict[str, int]
 InverseVocab = Dict[int, str]
 
-
-def build_from_paths(paths: List[str], num_words: Optional[int] = None, min_count: int = 1,
-                     pad_to_multiple_of: Optional[int] = None) -> Vocab:
+def vocab_mapper(paths):
     """
-    Creates vocabulary from paths to a file in sentence-per-line format. A sentence is just a whitespace delimited
+    :param paths: List of paths to files with one sentence per line.
+    :return: token Counter.
+    """
+    with ExitStack() as stack:
+        logger.info("Building vocabulary from dataset(s): %s", paths)
+        files = (stack.enter_context(utils.smart_open(path, mode='rt')) for path in [paths])
+        return build_vocab(chain(*files))
+
+
+def build_from_paths(paths: List[Tuple[str]], num_words: Optional[int] = None, min_count: int = 1,
+                     pad_to_multiple_of: Optional[int] = None, pool: multiprocessing.pool.Pool = None) -> Vocab:
+    """
+    Creates vocabulary from shard paths to files in sentence-per-line format. A sentence is just a whitespace delimited
     list of tokens. Note that special symbols like the beginning of sentence (BOS) symbol will be added to the
     vocabulary.
 
-    :param paths: List of paths to files with one sentence per line.
+    :param paths: List of tuples containing shard paths to files with one sentence per line.
     :param num_words: Optional maximum number of words in the vocabulary.
     :param min_count: Minimum occurrences of words to be included in the vocabulary.
     :param pad_to_multiple_of: If not None, pads the vocabulary to a size that is the next multiple of this int.
     :return: Word-to-id mapping.
     """
-    with ExitStack() as stack:
-        logger.info("Building vocabulary from dataset(s): %s", paths)
-        files = (stack.enter_context(utils.smart_open(path)) for path in paths)
-        return build_vocab(chain(*files), num_words, min_count, pad_to_multiple_of)
-
+    vocab_counters = pool.map(vocab_mapper, paths)
+    # Combine shard Counters and create a single Vocab
+    raw_vocab = sum(vocab_counters, Counter())
+    return build_pruned_vocab(raw_vocab=raw_vocab,
+                                        num_words=num_words,
+                                        min_count=min_count,
+                                        pad_to_multiple_of=pad_to_multiple_of)
 
 def build_raw_vocab(data: Iterable[str]) -> Counter:
     """
@@ -107,8 +120,7 @@ def build_pruned_vocab(raw_vocab: Counter, num_words: Optional[int] = None, min_
     return word_to_id
 
 
-def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count: int = 1,
-                pad_to_multiple_of: Optional[int] = None) -> Vocab:
+def build_vocab(data: List[str]) -> Counter:
     """
     Creates a vocabulary mapping from words to ids. Increasing integer ids are assigned by word frequency,
     using lexical sorting as a tie breaker. The only exception to this are special symbols such as the padding symbol
@@ -118,13 +130,10 @@ def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count:
     :param num_words: Optional maximum number of words in the vocabulary.
     :param min_count: Minimum occurrences of words to be included in the vocabulary.
     :param pad_to_multiple_of: If not None, pads the vocabulary to a size that is the next multiple of this int.
-    :return: Word-to-id mapping.
+    :return: token Counter.
     """
     raw_vocab = build_raw_vocab(data) - Counter(set(C.VOCAB_SYMBOLS))
-    return build_pruned_vocab(raw_vocab=raw_vocab,
-                              num_words=num_words,
-                              min_count=min_count,
-                              pad_to_multiple_of=pad_to_multiple_of)
+    return raw_vocab
 
 
 def merge_raw_vocabs(*raw_vocabs: Counter) -> Counter:
@@ -253,21 +262,22 @@ def load_target_vocabs(folder: str) -> List[Vocab]:
     return [vocab_from_json(os.path.join(folder, fname)) for fname in _get_sorted_target_vocab_fnames(folder)]
 
 
-def load_or_create_vocab(data: str, vocab_path: Optional[str], num_words: int, word_min_count: int,
-                         pad_to_multiple_of: Optional[int] = None) -> Vocab:
+def load_or_create_vocab(data: Tuple[str], vocab_path: Optional[str], num_words: int, word_min_count: int,
+                         pad_to_multiple_of: Optional[int] = None, pool: multiprocessing.pool.Pool = None) -> Vocab:
     """
     If the vocabulary path is defined, the vocabulary is loaded from the path.
     Otherwise, it is built from the data file. No writing to disk occurs.
+
+    :param data: Tuple of file paths for each shard.
     """
     if vocab_path is None:
-        return build_from_paths(paths=[data], num_words=num_words, min_count=word_min_count,
-                                pad_to_multiple_of=pad_to_multiple_of)
+        return build_from_paths(paths=data, num_words=num_words, min_count=word_min_count,
+                                pad_to_multiple_of=pad_to_multiple_of, pool=pool)
     else:
         return vocab_from_json(vocab_path)
 
-
-def load_or_create_vocabs(source_paths: List[str],
-                          target_paths: List[str],
+def load_or_create_vocabs(shard_source_paths: Tuple[Tuple[str]],
+                          shard_target_paths: Tuple[Tuple[str]],
                           source_vocab_paths: List[Optional[str]],
                           source_factor_vocab_same_as_source: List[bool],
                           target_vocab_paths: List[Optional[str]],
@@ -275,14 +285,15 @@ def load_or_create_vocabs(source_paths: List[str],
                           shared_vocab: bool,
                           num_words_source: Optional[int], word_min_count_source: int,
                           num_words_target: Optional[int], word_min_count_target: int,
-                          pad_to_multiple_of: Optional[int] = None) -> Tuple[List[Vocab], List[Vocab]]:
+                          pad_to_multiple_of: Optional[int] = None,
+                          pool: multiprocessing.pool.Pool = None) -> Tuple[List[Vocab], List[Vocab]]:
     """
     Returns vocabularies for source files (including factors) and target files (including factors.
     If the respective vocabulary paths are not None, the vocabulary is read from the path and returned.
     Otherwise, it is built from the support and saved to the path.
 
-    :param source_paths: The path to the source text (and optional token-parallel factor files).
-    :param target_paths: The path to the target text (and optional token-parallel factor files).
+    :param shard_source_paths: The path to the source text (and optional token-parallel factor files) of all shards.
+    :param shard_target_paths: The path to the target text (and optional token-parallel factor files) of all shards.
     :param source_vocab_paths: The source vocabulary path (and optional factor vocabulary paths).
     :param source_factor_vocab_same_as_source: List of bools whether factor vocabulary is equal to primary factor.
     :param target_vocab_paths: The target vocabulary path (and optional factor vocabulary paths).
@@ -293,11 +304,12 @@ def load_or_create_vocabs(source_paths: List[str],
     :param num_words_target: Number of words in the target vocabulary.
     :param word_min_count_target: Minimum frequency of words in the target vocabulary.
     :param pad_to_multiple_of: If not None, pads the vocabularies to a size that is the next multiple of this int.
+    :param pool: Multiprocessing pool to create vocabularies per shard in parallel using max_processes processes.
     :return: List of source vocabularies (for source and factors), and target vocabulary.
     """
-    source_path, *source_factor_paths = source_paths
+    shard_source_path, *shard_source_factor_paths = [paths for paths in zip(*shard_source_paths)]
     source_vocab_path, *source_factor_vocab_paths = source_vocab_paths
-    target_path, *target_factor_paths = target_paths
+    shard_target_path, *shard_target_factor_paths = [paths for paths in zip(*shard_target_paths)]
     target_vocab_path, *target_factor_vocab_paths = target_vocab_paths
 
     logger.info("=============================")
@@ -320,10 +332,12 @@ def load_or_create_vocabs(source_paths: List[str],
             utils.check_condition(word_min_count_source == word_min_count_target,
                                   "A shared vocabulary requires the minimum word count for source and target "
                                   "to be the same.")
-            vocab_source = vocab_target = build_from_paths(paths=[source_path, target_path],
+            input_paths = [(src_path, tgt_path) for src_path, tgt_path in zip(shard_source_path, shard_target_path)]
+            vocab_source = vocab_target = build_from_paths(paths=input_paths,
                                                            num_words=num_words_source,
                                                            min_count=word_min_count_source,
-                                                           pad_to_multiple_of=pad_to_multiple_of)
+                                                           pad_to_multiple_of=pad_to_multiple_of,
+                                                           pool=pool)
 
         else:
             vocab_path = source_vocab_path if source_vocab_path is not None else target_vocab_path
@@ -331,54 +345,56 @@ def load_or_create_vocabs(source_paths: List[str],
             vocab_source = vocab_target = vocab_from_json(vocab_path)
 
     else:
-        vocab_source = load_or_create_vocab(source_path, source_vocab_path, num_words_source, word_min_count_source,
-                                            pad_to_multiple_of=pad_to_multiple_of)
-        vocab_target = load_or_create_vocab(target_path, target_vocab_path, num_words_target, word_min_count_target,
-                                            pad_to_multiple_of=pad_to_multiple_of)
+        vocab_source = load_or_create_vocab(shard_source_path, source_vocab_path, num_words_source, word_min_count_source,
+                                            pad_to_multiple_of=pad_to_multiple_of, pool=pool)
+        vocab_target = load_or_create_vocab(shard_target_path, target_vocab_path, num_words_target, word_min_count_target,
+                                            pad_to_multiple_of=pad_to_multiple_of, pool=pool)
 
     vocab_source_factors = []  # type: List[Vocab]
-    if source_factor_paths:
+    if shard_source_factor_paths:
         logger.info("(2) Additional source factor vocabularies")
         if len(source_factor_vocab_same_as_source) > 1:
-            utils.check_condition(len(source_factor_vocab_same_as_source) == len(source_factor_paths),
+            utils.check_condition(len(source_factor_vocab_same_as_source) == len(shard_source_factor_paths[0]),
                                   "The number of flags for sharing the vocabulary of "
                                   "source factors does not match the number of source "
                                   "factors.")
         elif len(source_factor_vocab_same_as_source) == 1:
-            source_factor_vocab_same_as_source = source_factor_vocab_same_as_source * len(source_factor_paths)
+            source_factor_vocab_same_as_source = source_factor_vocab_same_as_source * len(shard_source_factor_paths[0])
         else:
-            source_factor_vocab_same_as_source = [False] * len(source_factor_paths)
+            source_factor_vocab_same_as_source = [False] * len(shard_source_factor_paths[0])
 
-    for factor_path, factor_vocab_path, share_source_vocab in zip(source_factor_paths,
-                                                                  source_factor_vocab_paths,
-                                                                  source_factor_vocab_same_as_source):
+    for shard_factor_path, factor_vocab_path, share_source_vocab in zip(shard_source_factor_paths,
+                                                                        source_factor_vocab_paths,
+                                                                        source_factor_vocab_same_as_source):
         if not share_source_vocab:
-            vocab_source_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
+            vocab_source_factors.append(load_or_create_vocab(shard_factor_path, factor_vocab_path,
                                                              num_words_source, word_min_count_source,
-                                                             pad_to_multiple_of=pad_to_multiple_of))
+                                                             pad_to_multiple_of=pad_to_multiple_of,
+                                                             pool=pool))
         else:
             vocab_source_factors.append(vocab_source)
 
     vocab_target_factors = []  # type: List[Vocab]
-    if target_factor_paths:
+    if shard_target_factor_paths:
         logger.info("(3) Additional target factor vocabularies")
         if len(target_factor_vocab_same_as_target) > 1:
-            utils.check_condition(len(target_factor_vocab_same_as_target) == len(target_factor_paths),
+            utils.check_condition(len(target_factor_vocab_same_as_target) == len(shard_target_factor_paths[0]),
                                   "The number of flags for sharing the vocabulary of "
                                   "target factors does not match the number of target "
                                   "factors.")
         elif len(target_factor_vocab_same_as_target) == 1:
-            target_factor_vocab_same_as_target = target_factor_vocab_same_as_target * len(target_factor_paths)
+            target_factor_vocab_same_as_target = target_factor_vocab_same_as_target * len(shard_target_factor_paths[0])
         else:
-            target_factor_vocab_same_as_target = [False] * len(target_factor_paths)
+            target_factor_vocab_same_as_target = [False] * len(shard_target_factor_paths[0])
 
-    for factor_path, factor_vocab_path, share_target_vocab in zip(target_factor_paths,
-                                                                  target_factor_vocab_paths,
-                                                                  target_factor_vocab_same_as_target):
+    for shard_factor_path, factor_vocab_path, share_target_vocab in zip(shard_target_factor_paths,
+                                                                        target_factor_vocab_paths,
+                                                                        target_factor_vocab_same_as_target):
         if not share_target_vocab:
-            vocab_target_factors.append(load_or_create_vocab(factor_path, factor_vocab_path,
+            vocab_target_factors.append(load_or_create_vocab(shard_factor_path, factor_vocab_path,
                                                              num_words_target, word_min_count_target,
-                                                             pad_to_multiple_of=pad_to_multiple_of))
+                                                             pad_to_multiple_of=pad_to_multiple_of,
+                                                             pool=pool))
         else:
             vocab_target_factors.append(vocab_target)
 
@@ -435,7 +451,7 @@ def prepare_vocab(args: argparse.Namespace):
     vocab = build_from_paths(args.inputs,
                              num_words=num_words,
                              min_count=word_min_count,
-                             pad_to_multiple_of=args.pad_vocab_to_multiple_of)
+                             pad_to_multiple_of=args.pad_vocab_to_multiple_of) # TODO: add pool
     logger.info("Vocabulary size: %d ", len(vocab))
     vocab_to_json(vocab, args.output)
 

@@ -233,9 +233,15 @@ def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str
     if ftype in ('gzip', 'gz') \
             or (ftype == 'auto' and filename.endswith(".gz")) \
             or (ftype == 'auto' and 'r' in mode and is_gzip_file(filename)):
-        return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
+            if mode == "rb" or mode == "wb":
+                return gzip.open(filename, mode=mode)
+            else:
+                return gzip.open(filename, mode=mode, encoding='utf-8', errors=errors)
     else:
-        return open(filename, mode=mode, encoding='utf-8', errors=errors)
+        if mode == "rb" or mode == "wb":
+            return open(filename, mode=mode)
+        else:
+            return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
 def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
@@ -750,11 +756,3 @@ def log_parameters(params: mx.gluon.ParameterDict):
                 total_fixed, total_fixed / total_parameters * 100)
     logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
     logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
-
-
-@contextmanager
-def no_context():
-    """
-    No-op context manager that can be used in "with" statements
-    """
-    yield None

@@ -14,6 +14,7 @@
 import argparse
 import os
 import logging
+import multiprocessing
 
 from . import arguments
 from . import constants as C
@@ -30,7 +31,6 @@ def main():
     arguments.add_prepare_data_cli_args(params)
     args = params.parse_args()
     prepare_data(args)
-
 
 def prepare_data(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
@@ -69,11 +69,28 @@ def prepare_data(args: argparse.Namespace):
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
+    # 1. Split input into shards and randomly assign data to shards
+    num_sents = 0
+    with utils.smart_open(source_paths[0], mode='rb') as infile:
+        for _ in infile:
+            num_sents += 1
+    num_shards = data_io.get_num_shards(num_sents, samples_per_shard, minimum_num_shards)
+    logger.info("%d samples will be split into %d shard(s) (requested samples/shard=%d, min_num_shards=%d)."
+                % (num_sents, num_shards, samples_per_shard, minimum_num_shards))
+    shards = data_io.create_shards(source_fnames=source_paths,
+                                   target_fnames=target_paths,
+                                   num_shards=num_shards,
+                                   output_prefix=output_folder)
+    shard_source_paths, shard_target_paths = [paths for paths in zip(*shards)]
+
+    # Process shards in parallel using max_processes process    
+    pool = multiprocessing.pool.Pool(processes=args.max_processes)
+
     source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
-        source_paths=source_paths,
+        shard_source_paths=shard_source_paths,
         source_factor_vocab_same_as_source=args.source_factors_use_source_vocab,
         target_factor_vocab_same_as_target=args.target_factors_use_target_vocab,
-        target_paths=target_paths,
+        shard_target_paths=shard_target_paths,
         source_vocab_paths=source_vocab_paths,
         target_vocab_paths=target_vocab_paths,
         shared_vocab=args.shared_vocab,
@@ -81,7 +98,8 @@ def prepare_data(args: argparse.Namespace):
         word_min_count_source=word_min_count_source,
         num_words_target=num_words_target,
         word_min_count_target=word_min_count_target,
-        pad_to_multiple_of=args.pad_vocab_to_multiple_of)
+        pad_to_multiple_of=args.pad_vocab_to_multiple_of,
+        pool=pool)
 
     data_io.prepare_data(source_fnames=source_paths,
                          target_fnames=target_paths,
@@ -94,12 +112,15 @@ def prepare_data(args: argparse.Namespace):
                          max_seq_len_target=max_seq_len_target,
                          bucketing=bucketing,
                          bucket_width=bucket_width,
-                         samples_per_shard=samples_per_shard,
-                         min_num_shards=minimum_num_shards,
+                         num_shards=num_shards,
                          output_prefix=output_folder,
                          bucket_scaling=bucket_scaling,
-                         max_processes=args.max_processes)
+                         max_processes=args.max_processes,
+                         pool=pool,
+                         shards=shards)
 
+    pool.close()
+    pool.join()
 
 if __name__ == "__main__":
     main()
