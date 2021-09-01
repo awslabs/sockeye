@@ -487,10 +487,10 @@ class SortStates(mx.gluon.HybridBlock):
 
 
 def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
-                        source_words: mx.nd.NDArray,
-                        raw_constraint_list: List[Optional[constrained.RawConstraintList]],
-                        eos_id: int,
-                        beam_size: int) -> Tuple[mx.nd.NDArray, int]:
+                         source_words: mx.nd.NDArray,
+                         raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                         eos_id: int,
+                         beam_size: int) -> Tuple[mx.nd.NDArray, int, List[Optional[constrained.RawConstraintList]]]:
     vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32").asnumpy())
     ctx = source_words.context
     if any(raw_constraint_list):
@@ -500,7 +500,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
         raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                raw_constraint_list]
-    # Pad to a multiple of 8.
+    # pad to a multiple of 8.
     vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
                              mode='constant', constant_values=eos_id)
     vocab_slice_ids = mx.nd.array(vocab_slice_ids, ctx=ctx, dtype='int32')
@@ -514,7 +514,9 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         n = beam_size - vocab_slice_ids_shape + 1
         vocab_slice_ids = mx.nd.concat(vocab_slice_ids, mx.nd.full((n,), val=eos_id, ctx=ctx, dtype='int32'), dim=0)
 
-    return vocab_slice_ids, vocab_slice_ids_shape
+    logger.debug(f'decoder softmax size: {vocab_slice_ids_shape}')
+
+    return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list
 
 
 class GreedySearch(mx.gluon.Block):
@@ -590,8 +592,9 @@ class GreedySearch(mx.gluon.Block):
         # target vocab for this sentence.
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            vocab_slice_ids, _ = _get_vocab_slice_ids(restrict_lexicon, source_words,
-                                                      raw_constraint_list, self.eos_id, beam_size=1)
+            vocab_slice_ids, _, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon, source_words,
+                                                                           raw_constraint_list,
+                                                                           self.eos_id, beam_size=1)
 
         # (0) encode source sentence, returns a list
         model_states, _ = self._inference.encode_and_initialize(source, source_length)
@@ -776,8 +779,10 @@ class BeamSearch(mx.gluon.Block):
         vocab_slice_ids = None  # type: Optional[mx.nd.NDArray]
         if restrict_lexicon:
             source_words = utils.split(source, num_outputs=self.num_source_factors, axis=2, squeeze_axis=True)[0]
-            vocab_slice_ids, output_vocab_size = _get_vocab_slice_ids(restrict_lexicon, source_words,
-                                                                      raw_constraint_list, self.eos_id, beam_size=1)
+            vocab_slice_ids, output_vocab_size, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon,
+                                                                                           source_words,
+                                                                                           raw_constraint_list,
+                                                                                           self.eos_id, beam_size=1)
 
         pad_dist = mx.nd.full((batch_size * self.beam_size, output_vocab_size - 1),
                               val=np.inf, ctx=self.context, dtype=self.dtype)
