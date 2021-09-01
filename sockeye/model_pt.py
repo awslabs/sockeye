@@ -14,26 +14,23 @@
 import copy
 import logging
 import os
-from typing import cast, Dict, Optional, Tuple, Union, List
 from functools import lru_cache
+from typing import cast, Dict, Optional, Tuple, Union, List
 
-import torch as pt
 import mxnet as mx
-from mxnet import gluon, np, npx
-from sockeye import __version__
-from sockeye.config import Config
+import torch as pt
+from mxnet import gluon, npx
 
-from .model import ModelConfig, SockeyeModel
+from sockeye import __version__
 from . import constants as C
-from . import data_io
 from . import decoder_pt
 from . import encoder_pt
 from . import layers_pt
 from . import quantization
 from . import utils
 from . import vocab
-from dataclasses import dataclass
 from .encoder import FactorConfig
+from .model import ModelConfig, SockeyeModel
 
 logger = logging.getLogger(__name__)
 
@@ -475,3 +472,13 @@ class PyTorchSockeyeModel(pt.nn.Module):
             return class_func(*args)
 
         return cache_func
+
+
+def make_pytorch_model_from_mxnet_model(mx_model: SockeyeModel) -> PyTorchSockeyeModel:
+    model = PyTorchSockeyeModel(config=mx_model.config,
+                                inference_only=mx_model.decoder.inference_only,
+                                mc_dropout=mx_model.mc_dropout,
+                                forward_pass_cache_size=mx_model.forward_pass_cache_size)
+    assert not mx_model.train_decoder_only, 'not implemented yet'
+    model.weights_from_mxnet_block(mx_model)
+    return model

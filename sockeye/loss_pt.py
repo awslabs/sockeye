@@ -12,14 +12,12 @@
 # permissions and limitations under the License.
 
 import logging
-import torch as pt
-import math
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Any, Dict, Optional, Tuple
 
-from mxnet import gluon, np, npx
-from sockeye.loss import LossMetric, PerplexityMetric
+import torch as pt
 
+from sockeye.loss import LossMetric, PerplexityMetric
 from . import constants as C
 # TODO: consider inheriting from 'from torch.nn.modules.loss import _Loss' ?
 from . import utils

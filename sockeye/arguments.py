@@ -1178,6 +1178,8 @@ def add_score_cli_args(params):
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                         help="Data type. Default: %(default)s infers from saved model.")
 
+    params.add_argument('--use-pytorch', action="store_true", help='Use PyTorch to score')
+
     add_logging_args(params)
 
 

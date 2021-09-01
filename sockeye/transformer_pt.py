@@ -79,6 +79,7 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
         self.pre_self_attention.weights_from_mxnet_block(block_mx.pre_self_attention)
         self.self_attention.weights_from_mxnet_block(block_mx.self_attention)
         self.post_self_attention.weights_from_mxnet_block(block_mx.post_self_attention)
+        self.pre_ff.weights_from_mxnet_block(block_mx.pre_ff)
         self.ff.weights_from_mxnet_block(block_mx.ff)
         self.post_ff.weights_from_mxnet_block(block_mx.post_ff)
         if self.lhuc is not None:

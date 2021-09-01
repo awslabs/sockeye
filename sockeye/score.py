@@ -27,6 +27,7 @@ from . import utils
 from .beam_search import CandidateScorer
 from .log import setup_main_logger
 from .model import load_model
+
 from .output_handler import get_output_handler
 from .utils import check_condition
 
@@ -62,6 +63,15 @@ def score(args: argparse.Namespace):
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
         model, source_vocabs, target_vocabs = load_model(args.model, context=context, dtype=args.dtype)
+        if args.use_pytorch:
+            from .beam_search_pt import CandidateScorer
+            from .model_pt import make_pytorch_model_from_mxnet_model
+            from . import scoring_pt
+            logger.info("=============== USING PYTORCH MODEL ===============")
+            model = make_pytorch_model_from_mxnet_model(model)
+            model.eval()
+        else:
+            from .beam_search import CandidateScorer
 
         max_seq_len_source = model.max_supported_len_source
         max_seq_len_target = model.max_supported_len_target
@@ -97,20 +107,34 @@ def score(args: argparse.Namespace):
         else:
             constant_length_ratio = -1.0
 
-        batch_scorer = scoring.BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
-                                                                  length_penalty_beta=args.length_penalty_beta,
-                                                                  brevity_penalty_weight=args.brevity_penalty_weight),
-                                           score_type=args.score_type,
-                                           constant_length_ratio=constant_length_ratio,
-                                           softmax_temperature=args.softmax_temperature)
-        if hybridize:
-            batch_scorer.hybridize(static_alloc=True)
+        if args.use_pytorch:
+            batch_scorer = scoring_pt.BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
+                                                                         length_penalty_beta=args.length_penalty_beta,
+                                                                         brevity_penalty_weight=args.brevity_penalty_weight),
+                                                  score_type=args.score_type,
+                                                  constant_length_ratio=constant_length_ratio,
+                                                  softmax_temperature=args.softmax_temperature)
 
-        scorer = scoring.Scorer(model=model,
-                                batch_scorer=batch_scorer,
-                                source_vocabs=source_vocabs,
-                                target_vocabs=target_vocabs,
-                                context=context)
+            scorer = scoring_pt.Scorer(model=model,
+                                       batch_scorer=batch_scorer,
+                                       source_vocabs=source_vocabs,
+                                       target_vocabs=target_vocabs,
+                                       context=context)
+        else:
+            batch_scorer = scoring.BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
+                                                                      length_penalty_beta=args.length_penalty_beta,
+                                                                      brevity_penalty_weight=args.brevity_penalty_weight),
+                                               score_type=args.score_type,
+                                               constant_length_ratio=constant_length_ratio,
+                                               softmax_temperature=args.softmax_temperature)
+            if hybridize:
+                batch_scorer.hybridize(static_alloc=True)
+
+            scorer = scoring.Scorer(model=model,
+                                    batch_scorer=batch_scorer,
+                                    source_vocabs=source_vocabs,
+                                    target_vocabs=target_vocabs,
+                                    context=context)
 
         scorer.score(score_iter=score_iter,
                      output_handler=get_output_handler(output_type=args.output_type,

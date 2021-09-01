@@ -153,6 +153,8 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                            dropout=config.dropout_prepost,
                                                                            num_hidden=self.config.model_size)
+        if self.config.dropout_prepost > 0.0:
+            self.dropout = pt.nn.Dropout(p=self.config.dropout_prepost, inplace=True)
 
     def state_structure(self) -> str:
         """
@@ -254,7 +256,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         target = target.transpose(1, 0)
 
         if self.config.dropout_prepost > 0.0:
-            target = npx.dropout(data=target, p=self.config.dropout_prepost)
+            target = self.dropout(target)
 
         new_autoregr_states = []
         for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
