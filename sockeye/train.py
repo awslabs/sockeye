@@ -366,8 +366,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                          else None for i in range(len(args.target_factors))]
             target_vocab_paths = [args.target_vocab] + target_factor_vocab_paths
             source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
-                source_paths=[args.source] + args.source_factors,
-                target_paths=[args.target] + args.target_factors,
+                shard_source_paths=[[args.source] + args.source_factors],
+                shard_target_paths=[[args.target] + args.target_factors],
                 source_vocab_paths=source_vocab_paths,
                 source_factor_vocab_same_as_source=args.source_factors_share_embedding,
                 target_vocab_paths=target_vocab_paths,
@@ -1026,9 +1026,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                            max_seq_len_target=max_seq_len_target,
                                            config_data=config_data)
 
-        training_model = model.SockeyeModel(
-            model_config,
-            train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
+        training_model = model.SockeyeModel(model_config)
 
         # Handle options that override training settings
         trainer_config = training.TrainerConfig(

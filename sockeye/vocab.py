@@ -273,8 +273,8 @@ def load_or_create_vocab(data: Tuple[str], vocab_path: Optional[str], num_words:
     else:
         return vocab_from_json(vocab_path)
 
-def load_or_create_vocabs(shard_source_paths: Tuple[Tuple[str]],
-                          shard_target_paths: Tuple[Tuple[str]],
+def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
+                          shard_target_paths: Iterable[Iterable[str]],
                           source_vocab_paths: List[Optional[str]],
                           source_factor_vocab_same_as_source: List[bool],
                           target_vocab_paths: List[Optional[str]],
@@ -308,7 +308,6 @@ def load_or_create_vocabs(shard_source_paths: Tuple[Tuple[str]],
     source_vocab_path, *source_factor_vocab_paths = source_vocab_paths
     shard_target_path, *shard_target_factor_paths = [paths for paths in zip(*shard_target_paths)]
     target_vocab_path, *target_factor_vocab_paths = target_vocab_paths
-
     logger.info("=============================")
     logger.info("Loading/creating vocabularies")
     logger.info("=============================")
