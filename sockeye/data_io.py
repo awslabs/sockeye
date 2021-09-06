@@ -35,7 +35,7 @@ from . import config
 from . import constants as C
 from . import horovod_mpi
 from . import vocab
-from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance
+from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance, combine_means, combine_stds
 
 logger = logging.getLogger(__name__)
 
@@ -301,13 +301,17 @@ def are_none(sequences: Sequence[Sized]) -> bool:
     return all(s is None for s in sequences)
 
 
-def are_token_parallel(sequences: Sequence[Sized]) -> bool:
+def are_token_parallel(sequences: Sequence[Sized], binary: bool = False) -> bool:
     """
     Returns True if all sequences in the list have the same length.
     """
     if not sequences or len(sequences) == 1:
-        return True
-    return all(len(s) == len(sequences[0]) for s in sequences)
+            return True
+    else:
+        if not binary:
+            return all(len(s) == len(sequences[0]) for s in sequences)
+        else:
+            return all(len(s.split()) == len(sequences[0].split()) for s in sequences)
 
 
 class DataStatisticsAccumulator:
@@ -396,10 +400,12 @@ class DataStatisticsAccumulator:
                               average_len_target_per_bucket=self.mean_len_target_per_bucket,
                               length_ratio_stats_per_bucket=self.length_ratio_stats_per_bucket)
 
+
 def create_shards(source_fnames: List[str],
                   target_fnames: List[str],
                   num_shards: int,
-                  output_prefix: str):
+                  output_prefix: str
+                  ) -> List[Tuple[Tuple[str], Tuple[str]]]:
     """
     Assign source/target sentence pairs to shards at random.
 
@@ -407,8 +413,10 @@ def create_shards(source_fnames: List[str],
     :param target_fnames: The path to the target text (and optional token-parallel factor files).
     :param num_shards: The total number of shards.
     :param output_prefix: The prefix under which the shard files will be created.
-    :return: Tuple of source (and source factor) file names and target (and target factor) file names for each shard.
+    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each shard.
     """
+    if num_shards == 1:
+        return [(tuple(source_fnames), tuple(target_fnames))]
     os.makedirs(output_prefix, exist_ok=True)
     sources_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % i) + ".%d" % f for i in range(num_shards)]
                             for f in range(len(source_fnames))]
@@ -421,18 +429,18 @@ def create_shards(source_fnames: List[str],
         targets_shards = [[exit_stack.enter_context(smart_open(f, mode="wb")) for f in targets_shard_fnames[i]] for i in
                           range(len(target_fnames))]
 
-        source_readers, target_readers = create_sequence_readers(source_fnames, target_fnames, None, None)
+        source_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in source_fnames]
+        target_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in target_fnames]
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
-        for (sources, targets), random_shard_index in zip(parallel_iter(source_readers, target_readers), random_shard_iter):
+        for (sources, targets), random_shard_index in zip(parallel_iter(source_readers, target_readers, True, True), random_shard_iter):
             random_shard_index = cast(int, random_shard_index)
             for i, line in enumerate(sources):
                 file = sources_shards[i][random_shard_index]
-                file.write((ids2strids(line)+"\n").encode(encoding="utf-8"))
+                file.write(line)
             for i, line in enumerate(targets):
                 file = targets_shards[i][random_shard_index]
-                file.write((ids2strids(line)+"\n").encode(encoding="utf-8"))
-        
+                file.write(line)
     sources_shard_fnames_by_shards = zip(*sources_shard_fnames)
     targets_shard_fnames_by_shards = zip(*targets_shard_fnames)
 
@@ -559,6 +567,7 @@ def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int
     """
     return max(int(math.ceil(num_samples / samples_per_shard)), min_num_shards)
 
+
 def save_shard(shard_idx: int,
                data_loader: RawParallelDatasetLoader,
                shard_sources: List[str],
@@ -571,16 +580,22 @@ def save_shard(shard_idx: int,
                output_prefix: str,
                keep_tmp_shard_files: bool):
     """
-    Load shard source and target data files into NDArrays and save to disk.
+    Load raw shard source and target data files, map to integers using the corresponding vocabularies,  
+    convert data into NDArrays and save to disk.
     Optionally it can delete the source/target files.
 
     :param shard_idx: The index of the shard.
     :param data_loader: A loader for loading parallel data from sources and target.
     :param shard_sources: A list of source file names.
     :param shard_targets: A list of target file names.
-    :param shard_stats: The statistics for the sources/target data.
+    :param source_vocabs: Source vocabulary (and optional source factor vocabularies).
+    :param target_vocabs: Target vocabulary (and optional target factor vocabularies).
+    :param length_ratio_mean: Mean length ratio.
+    :param length_ratio_std: Standard deviation of length ratios.
+    :param buckets: Bucket list.
     :param output_prefix: The prefix of the output file name.
     :param keep_tmp_shard_files: Keep the sources/target files when it is True otherwise delete them.
+    :return: Shard statistics.
     """
 
     # Compute shard statistics and bucketing
@@ -614,8 +629,8 @@ def save_shard(shard_idx: int,
     return shard_stat_accumulator.statistics
 
 
-def prepare_data(source_fnames: Tuple[Tuple[str]], 
-                 target_fnames: Tuple[Tuple[str]],
+def prepare_data(source_fnames: List[str],
+                 target_fnames: List[str],
                  source_vocabs: List[vocab.Vocab],
                  target_vocabs: List[vocab.Vocab],
                  source_vocab_paths: List[Optional[str]],
@@ -629,21 +644,25 @@ def prepare_data(source_fnames: Tuple[Tuple[str]],
                  output_prefix: str,
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
-                 max_processes: int = 1,
                  pool: multiprocessing.pool.Pool = None, 
                  shards: List[Tuple[Tuple[str], Tuple[str]]] = None):
+    """
+    :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.
+    """
     logger.info("Preparing data.")
     # write vocabularies to data folder
     vocab.save_source_vocabs(source_vocabs, output_prefix)
     vocab.save_target_vocabs(target_vocabs, output_prefix)
 
-    # Pass 1: get target/source length ratios.
+    # Get target/source length ratios.
     stats_args = ((source_path, target_path, source_vocabs, target_vocabs, max_seq_len_source, max_seq_len_target) for source_path, target_path in shards)
     length_stats = pool.starmap(analyze_sequence_lengths, stats_args)
-    num_sents = sum([stat.num_sents for stat in length_stats])
-    length_ratio_mean = sum([stat.num_sents * stat.length_ratio_mean for stat in length_stats]) / num_sents
-    length_ratio_std = math.sqrt(sum([stat.num_sents * (stat.length_ratio_std**2 + (stat.length_ratio_mean-length_ratio_mean)**2) for stat in length_stats]) / num_sents)
-    length_statistics = LengthStatistics(num_sents, length_ratio_mean, length_ratio_std)
+    shards_num_sents = [stat.num_sents for stat in length_stats]
+    shards_mean = [stat.length_ratio_mean for stat in length_stats]
+    shards_std = [stat.length_ratio_std for stat in length_stats]
+    length_ratio_mean = combine_means(shards_mean, shards_num_sents)
+    length_ratio_std = combine_stds(shards_std, shards_mean, shards_num_sents)
+    length_statistics = LengthStatistics(sum(shards_num_sents), length_ratio_mean, length_ratio_std)
 
     check_condition(length_statistics.num_sents > 0,
                     "No training sequences found with length smaller or equal than the maximum sequence length."
@@ -655,40 +674,17 @@ def prepare_data(source_fnames: Tuple[Tuple[str]],
                                                                                                max_seq_len_target)]
     logger.info("Buckets: %s", buckets)
 
-    # 2. Map sentences to ids, assign to buckets, compute length statistics and convert each shard to serialized ndarrays
+    # Map sentences to ids, assign to buckets, compute shard statistics and convert each shard to serialized NDArrays
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
-    per_shard_statistics = [None for _ in range(num_shards)]
-    if max_processes == 1:
-        logger.info("Processing shards sequentially.")
-        # Process shards sequentially without using multiprocessing
-        for shard_idx, (shard_sources, shard_targets) in enumerate(shards):
-            per_shard_statistics[shard_idx] = save_shard(shard_idx=shard_idx,
-                                                        data_loader=data_loader,
-                                                        shard_sources=shard_sources,
-                                                        shard_targets=shard_targets,
-                                                        source_vocabs=source_vocabs,
-                                                        target_vocabs=target_vocabs,
-                                                        length_ratio_mean=length_statistics.length_ratio_mean,
-                                                        length_ratio_std=length_statistics.length_ratio_std,
-                                                        buckets=buckets,
-                                                        output_prefix=output_prefix,
-                                                        keep_tmp_shard_files=keep_tmp_shard_files)
-    else:
-        logger.info("Processing shards using %s processes.", max_processes)
-        # Process shards in parallel using max_processes process
-        per_shard_statistics = [None] * num_shards
-        for shard_idx, (shard_sources, shard_targets) in enumerate(shards):
-            args = (shard_idx, data_loader, shard_sources, shard_targets, source_vocabs,
-                    target_vocabs, length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
-                    buckets, output_prefix, keep_tmp_shard_files)
-            result = pool.apply_async(save_shard, args=args)
-            per_shard_statistics[shard_idx] = result
-        for shard_idx, result in enumerate(per_shard_statistics):
-            per_shard_statistics[shard_idx] = result.get()
-    
+
+    # Process shards in parallel using max_processes process
+    args = ((shard_idx, data_loader, shard_sources, shard_targets, source_vocabs,
+             target_vocabs, length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
+             buckets, output_prefix, keep_tmp_shard_files) for shard_idx, (shard_sources, shard_targets) in enumerate(shards))
+    per_shard_statistics = pool.starmap(save_shard, args)
 
     # Combine per shard statistics to obtain global statistics
     shard_average_len = [shard_stats.average_len_target_per_bucket for shard_stats in per_shard_statistics]
@@ -696,28 +692,29 @@ def prepare_data(source_fnames: Tuple[Tuple[str]],
     num_sents_per_bucket = [sum(n) for n in zip(*shard_num_sents)]
     average_len_target_per_bucket = []
     for num_sents_bucket, average_len_bucket in zip(zip(*shard_num_sents), zip(*shard_average_len)):
-        if None in average_len_bucket:
+        if all(avg is None for avg in average_len_bucket):
             average_len_target_per_bucket.append(None)
         else:
-            average_len_target_per_bucket.append(sum([num_sent*avg for num_sent, avg in zip(num_sents_bucket, average_len_bucket)])/sum(num_sents_bucket))
+            average_len_target_per_bucket.append(combine_means(average_len_bucket, shards_num_sents))
+
     shard_length_ratios = [shard_stats.length_ratio_stats_per_bucket for shard_stats in per_shard_statistics]
     length_ratio_stats_per_bucket = [] 
     for num_sents_bucket, len_ratios_bucket in zip(zip(*shard_num_sents), zip(*shard_length_ratios)):
-        if None in len_ratios_bucket[0]:
+        if all(all(x is None for x in ratio) for ratio in len_ratios_bucket):
             length_ratio_stats_per_bucket.append((None, None))
         else:
-            total_num_sents = sum(num_sents_bucket)
-            ratio_mean = sum([num_sent*len_ratio[0] for num_sent, len_ratio in zip(num_sents_bucket, len_ratios_bucket)])/total_num_sents
-            ratio_std = math.sqrt(sum([num_sent*(len_ratio[1]**2 + (len_ratio[0]-ratio_mean)**2) for num_sent, len_ratio in zip(num_sents_bucket, len_ratios_bucket)])/total_num_sents)
+            shards_mean = [ratio[0] for ratio in len_ratios_bucket]
+            ratio_mean = combine_means(shards_mean, num_sents_bucket)
+            ratio_std = combine_stds([ratio[1] for ratio in len_ratios_bucket], shards_mean, num_sents_bucket)
             length_ratio_stats_per_bucket.append((ratio_mean, ratio_std))
-    data_statistics = DataStatistics(num_sents=num_sents,
-                                     num_discarded=sum([shard_stats.num_discarded for shard_stats in per_shard_statistics]),
-                                     num_tokens_source=sum([shard_stats.num_tokens_source for shard_stats in per_shard_statistics]),
-                                     num_tokens_target=sum([shard_stats.num_tokens_target for shard_stats in per_shard_statistics]),
-                                     num_unks_source=sum([shard_stats.num_unks_source for shard_stats in per_shard_statistics]),
-                                     num_unks_target=sum([shard_stats.num_unks_target for shard_stats in per_shard_statistics]),
-                                     max_observed_len_source=max([shard_stats.max_observed_len_source for shard_stats in per_shard_statistics]),
-                                     max_observed_len_target=max([shard_stats.max_observed_len_target for shard_stats in per_shard_statistics]),
+    data_statistics = DataStatistics(num_sents=sum(shards_num_sents),
+                                     num_discarded=sum(shard_stats.num_discarded for shard_stats in per_shard_statistics),
+                                     num_tokens_source=sum(shard_stats.num_tokens_source for shard_stats in per_shard_statistics),
+                                     num_tokens_target=sum(shard_stats.num_tokens_target for shard_stats in per_shard_statistics),
+                                     num_unks_source=sum(shard_stats.num_unks_source for shard_stats in per_shard_statistics),
+                                     num_unks_target=sum(shard_stats.num_unks_target for shard_stats in per_shard_statistics),
+                                     max_observed_len_source=max(shard_stats.max_observed_len_source for shard_stats in per_shard_statistics),
+                                     max_observed_len_target=max(shard_stats.max_observed_len_target for shard_stats in per_shard_statistics),
                                      size_vocab_source=per_shard_statistics[0].size_vocab_source,
                                      size_vocab_target=per_shard_statistics[0].size_vocab_target,
                                      length_ratio_mean=length_ratio_mean,
@@ -1184,7 +1181,6 @@ def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
     :return: Iterator over lists of words.
     """
     with smart_open(path) as indata:
-    # with smart_open(path, mode="rb") as indata:
         for i, line in enumerate(indata):
             if limit is not None and i == limit:
                 break
@@ -1272,12 +1268,10 @@ class SequenceReader:
 
     def __iter__(self):
         for tokens in read_content(self.path, self.limit):
-            # TODO: if read_content in bytes, tokens will be in bytes. This might be a problem for tokens2ids
             if self.vocab is not None:
                 sequence = tokens2ids(tokens, self.vocab)
             else:
-                sequence = tokens # split input data into shards
-                # sequence = strids2ids(tokens)
+                sequence = strids2ids(tokens)
             if len(sequence) == 0:
                 yield None
                 continue
@@ -1300,20 +1294,21 @@ def create_sequence_readers(sources: List[str], targets: List[str],
     :param vocab_targets: The target vocabularies.
     :return: The source sequence readers and the target reader.
     """
-    if not vocab_sources or not vocab_targets:
-        source_sequence_readers = [SequenceReader(source, None, add_eos=False) for source in sources]
-        target_sequence_readers = [SequenceReader(target, None, add_bos=False) for target in targets]
-    else:
-        source_sequence_readers = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
-                                   zip(sources, vocab_sources)]
-        target_sequence_readers = [SequenceReader(target, vocab, add_bos=True) for target, vocab in
-                                   zip(targets, vocab_targets)]
+    # if not vocab_sources or not vocab_targets:
+    #     source_sequence_readers = [SequenceReader(source, None, add_eos=False) for source in sources]
+    #     target_sequence_readers = [SequenceReader(target, None, add_bos=False) for target in targets]
+    # else:
+    source_sequence_readers = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
+                                zip(sources, vocab_sources)]
+    target_sequence_readers = [SequenceReader(target, vocab, add_bos=True) for target, vocab in
+                                zip(targets, vocab_targets)]
     return source_sequence_readers, target_sequence_readers
 
 
 def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
                   target_iterables: Sequence[Iterable[Optional[Any]]],
-                  skip_blanks: bool = True):
+                  skip_blanks: bool = True,
+                  binary: bool = False):
     """
     Creates iterators over parallel iterables by calling iter() on the iterables
     and chaining to parallel_iterate(). The purpose of the separation is to allow
@@ -1322,16 +1317,18 @@ def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
     :param source_iterables: A list of source iterables.
     :param target_iterables: A target iterable.
     :param skip_blanks: Whether to skip empty target lines.
+    :param binary: Whether the sequence is in binary.
     :return: Iterators over sources and target.
     """
     source_iterators = [iter(s) for s in source_iterables]
     target_iterators = [iter(t) for t in target_iterables]
-    return parallel_iterate(source_iterators, target_iterators, skip_blanks)
+    return parallel_iterate(source_iterators, target_iterators, skip_blanks, binary)
 
 
 def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
                      target_iterators: Sequence[Iterator[Optional[Any]]],
-                     skip_blanks: bool = True):
+                     skip_blanks: bool = True,
+                     binary: bool = False):
     """
     Yields parallel source(s), target sequences from iterables.
     Checks for token parallelism in source sequences.
@@ -1342,6 +1339,7 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
     :param source_iterators: A list of source iterators.
     :param target_iterators: A list of source iterators.
     :param skip_blanks: Whether to skip empty target lines.
+    :param binary: Whether the sequence is in binary.
     :return: Iterators over sources and target.
     """
     num_skipped = 0
@@ -1354,9 +1352,9 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
         if skip_blanks and (any((s is None for s in sources)) or any((t is None for t in targets))):
             num_skipped += 1
             continue
-        check_condition(are_none(sources) or are_token_parallel(sources),
+        check_condition(are_none(sources) or are_token_parallel(sources, binary),
                         "Source sequences are not token-parallel: %s" % (str(sources)))
-        check_condition(are_none(targets) or are_token_parallel(targets),
+        check_condition(are_none(targets) or are_token_parallel(targets, binary),
                         "Target sequences are not token-parallel: %s" % (str(targets)))
         yield sources, targets
 

@@ -244,6 +244,38 @@ def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str
             return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
+def combine_means(means: List[float], num_sents: List[int]) -> float:
+    """
+    Takes a list of means and number of sentences of the same length and computes the combined mean.
+
+    :param means: A list of mean values.
+    :param num_sents: A list with the number of sentences used to compute each mean value.
+    :return: The combined mean of the list of means.
+    """
+    if not means or not num_sents:
+        raise ValueError("Invalid input list.")
+    check_condition(len(means) == len(num_sents), "List lengths do not match")
+    return sum(num_sent * mean for num_sent, mean in zip(num_sents, means) if mean is not None) / sum(num_sents)
+
+
+def combine_stds(stds: List[float], means: List[float], num_sents: List[int]) -> float:
+    """
+    Takes a list of standard deviations, means and number of sentences of the same length and computes 
+    the combined standard deviation.
+
+    :param stds: A list of standard deviations.
+    :param means: A list of mean values.
+    :param num_sents: A list with number of sentences used to compute each mean value.
+    :return: The combined standard deviation.
+    """
+    if not stds or not means or not num_sents:
+        raise ValueError("Invalid input list.")
+    check_condition(all(len(stds) == len(l) for l in [means, num_sents]), "List lengths do not match")
+    total_mean = combine_means(means, num_sents)
+    return math.sqrt(sum(num_sent * (std**2 + (mean-total_mean)**2) for num_sent, std, mean in zip(num_sents, stds, means)
+                         if std is not None and mean is not None) / sum(num_sents))
+
+
 def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
     """
     Take a list of arrays of the same shape and take the element wise average.

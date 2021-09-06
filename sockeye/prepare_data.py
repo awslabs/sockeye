@@ -69,11 +69,11 @@ def prepare_data(args: argparse.Namespace):
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-    # 1. Split input into shards and randomly assign data to shards
-    num_sents = 0
+    # Split input into shards and randomly assign data to shards
+    # NOTE: create_shards ensures the files are parallel, i.e. have the same number of lines and tokens for each factor file
+    # by calling parallel_iterate, which ensures files are parallel.
     with utils.smart_open(source_paths[0], mode='rb') as infile:
-        for _ in infile:
-            num_sents += 1
+        num_sents = sum(1 for _ in infile)
     num_shards = data_io.get_num_shards(num_sents, samples_per_shard, minimum_num_shards)
     logger.info("%d samples will be split into %d shard(s) (requested samples/shard=%d, min_num_shards=%d)."
                 % (num_sents, num_shards, samples_per_shard, minimum_num_shards))
@@ -99,7 +99,7 @@ def prepare_data(args: argparse.Namespace):
         num_words_target=num_words_target,
         word_min_count_target=word_min_count_target,
         pad_to_multiple_of=args.pad_vocab_to_multiple_of,
-        pool=pool)
+        mapper=pool.map)
 
     data_io.prepare_data(source_fnames=source_paths,
                          target_fnames=target_paths,
@@ -115,7 +115,6 @@ def prepare_data(args: argparse.Namespace):
                          num_shards=num_shards,
                          output_prefix=output_folder,
                          bucket_scaling=bucket_scaling,
-                         max_processes=args.max_processes,
                          pool=pool,
                          shards=shards)
 
