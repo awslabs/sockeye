@@ -38,7 +38,11 @@ def build_from_paths(paths: List[str]) -> Counter:
     :return: Token counter.
     """
     with ExitStack() as stack:
-        files = (stack.enter_context(utils.smart_open(path, mode='rt')) for path in [paths])
+        logger.info("Building vocabulary from dataset(s): %s", paths)
+        if isinstance(paths, List):
+            files = (stack.enter_context(utils.smart_open(path, mode='rt')) for path in paths)
+        else:
+            files = stack.enter_context(utils.smart_open(paths, mode='rt'))
         return count_tokens(chain(*files))
 
 
@@ -354,9 +358,9 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
                                   "source factors does not match the number of source "
                                   "factors.")
         elif len(source_factor_vocab_same_as_source) == 1:
-            source_factor_vocab_same_as_source = source_factor_vocab_same_as_source * len(shard_source_factor_paths[0])
+            source_factor_vocab_same_as_source = source_factor_vocab_same_as_source * len(shard_source_factor_paths)
         else:
-            source_factor_vocab_same_as_source = [False] * len(shard_source_factor_paths[0])
+            source_factor_vocab_same_as_source = [False] * len(shard_source_factor_paths)
 
     for shard_factor_path, factor_vocab_path, share_source_vocab in zip(shard_source_factor_paths,
                                                                         source_factor_vocab_paths,
@@ -378,9 +382,9 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
                                   "target factors does not match the number of target "
                                   "factors.")
         elif len(target_factor_vocab_same_as_target) == 1:
-            target_factor_vocab_same_as_target = target_factor_vocab_same_as_target * len(shard_target_factor_paths[0])
+            target_factor_vocab_same_as_target = target_factor_vocab_same_as_target * len(shard_target_factor_paths)
         else:
-            target_factor_vocab_same_as_target = [False] * len(shard_target_factor_paths[0])
+            target_factor_vocab_same_as_target = [False] * len(shard_target_factor_paths)
 
     for shard_factor_path, factor_vocab_path, share_target_vocab in zip(shard_target_factor_paths,
                                                                         target_factor_vocab_paths,
