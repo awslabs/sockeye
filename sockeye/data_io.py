@@ -404,8 +404,7 @@ class DataStatisticsAccumulator:
 def create_shards(source_fnames: List[str],
                   target_fnames: List[str],
                   num_shards: int,
-                  output_prefix: str
-                  ) -> List[Tuple[Tuple[str], Tuple[str]]]:
+                  output_prefix: str) -> List[Tuple[Tuple[str], Tuple[str]]]:
     """
     Assign source/target sentence pairs to shards at random.
 
@@ -413,10 +412,11 @@ def create_shards(source_fnames: List[str],
     :param target_fnames: The path to the target text (and optional token-parallel factor files).
     :param num_shards: The total number of shards.
     :param output_prefix: The prefix under which the shard files will be created.
-    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each shard.
+    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each shard
+             and a flag of whether the returned file names are temporary and can be deleted.
     """
     if num_shards == 1:
-        return [(tuple(source_fnames), tuple(target_fnames))]
+        return [(tuple(source_fnames), tuple(target_fnames))], True
     os.makedirs(output_prefix, exist_ok=True)
     sources_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % i) + ".%d" % f for i in range(num_shards)]
                             for f in range(len(source_fnames))]
@@ -444,7 +444,7 @@ def create_shards(source_fnames: List[str],
     sources_shard_fnames_by_shards = zip(*sources_shard_fnames)
     targets_shard_fnames_by_shards = zip(*targets_shard_fnames)
 
-    return list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards))
+    return list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards)), False
 
 
 class RawParallelDatasetLoader:
