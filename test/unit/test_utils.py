@@ -238,6 +238,35 @@ def test_get_tokens(line, expected_tokens):
     tokens = list(utils.get_tokens(line))
     assert tokens == expected_tokens
 
+def test_combine_means():
+    error_tolerance = 1e-05
+    n_lists = np.random.randint(1, 10)
+    num_sents = [np.random.randint(0, 20) for _ in range(n_lists)]
+    lists = [list(np.random.uniform(size=size)) for size in num_sents]
+
+    combined_list = sum(lists, [])
+    expected_mean = np.mean(combined_list)
+
+    means = [np.mean(l) if len(l) != 0 else None for l in lists]
+    combined_mean = utils.combine_means(means, num_sents)
+
+    assert abs(expected_mean - combined_mean) <= error_tolerance
+
+def test_combine_stds():
+    error_tolerance = 1e-05
+    n_lists = np.random.randint(1, 10)
+    num_sents = [np.random.randint(0, 20) for _ in range(n_lists)]
+    lists = [list(np.random.uniform(size=size)) for size in num_sents]
+
+    combined_list = sum(lists, [])
+    expected_std = np.std(combined_list)
+
+    means = [np.mean(l) if len(l) != 0 else None for l in lists]
+    stds = [np.std(l) if len(l) != 0 else None for l in lists]
+    combined_std = utils.combine_stds(stds, means, num_sents)
+
+    assert abs(expected_std - combined_std) <= error_tolerance
+
 
 def test_average_arrays():
     n = 4
