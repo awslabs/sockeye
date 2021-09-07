@@ -20,6 +20,7 @@ import gzip
 import itertools
 import logging
 import math
+import multiprocessing
 import os
 import pprint
 import random
@@ -28,6 +29,7 @@ import time
 from contextlib import contextmanager, ExitStack
 from functools import reduce
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
+from itertools import starmap
 
 import mxnet as mx
 import numpy as np
@@ -796,3 +798,25 @@ def no_context():
     No-op context manager that can be used in "with" statements
     """
     yield None
+
+
+class SingleProcessPool:
+
+    def map(self, func, iterable):
+        return list(map(func, iterable))
+
+    def starmap(self, func, iterable):
+        return list(starmap(func, iterable))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+def create_pool(max_processes):
+    if max_processes == 1:
+        return SingleProcessPool()
+    else:
+        return multiprocessing.pool.Pool(processes=max_processes)

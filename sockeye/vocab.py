@@ -38,7 +38,6 @@ def build_from_paths(paths: List[str]) -> Counter:
     :return: Token counter.
     """
     with ExitStack() as stack:
-        logger.info("Building vocabulary from dataset(s): %s", paths)
         files = (stack.enter_context(utils.smart_open(path, mode='rt')) for path in [paths])
         return count_tokens(chain(*files))
 
@@ -57,6 +56,7 @@ def build_from_shards(paths: List[Tuple[str]], num_words: Optional[int] = None, 
     :param mapper: Built-in map function for sequential execution or multiprocessing.pool.map function for parallel execution.
     :return: Word-to-id mapping.
     """
+    logger.info("Building vocabulary from dataset(s): %s", " ".join(paths))
     vocab_counters = mapper(build_from_paths, paths)
     # Combine shard Counters and create a single Vocab
     raw_vocab = sum(vocab_counters, Counter())
