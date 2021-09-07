@@ -293,8 +293,8 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     If the respective vocabulary paths are not None, the vocabulary is read from the path and returned.
     Otherwise, it is built from the support and saved to the path.
 
-    :param shard_source_paths: The path to the source text (and optional token-parallel factor files) of all shards.
-    :param shard_target_paths: The path to the target text (and optional token-parallel factor files) of all shards.
+    :param shard_source_paths: List of shards of list paths to the source text (and optional token-parallel factor files).
+    :param shard_target_paths: List of shards of list paths to the target text (and optional token-parallel factor files).
     :param source_vocab_paths: The source vocabulary path (and optional factor vocabulary paths).
     :param source_factor_vocab_same_as_source: List of bools whether factor vocabulary is equal to primary factor.
     :param target_vocab_paths: The target vocabulary path (and optional factor vocabulary paths).
@@ -353,7 +353,7 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     if shard_source_factor_paths:
         logger.info("(2) Additional source factor vocabularies")
         if len(source_factor_vocab_same_as_source) > 1:
-            utils.check_condition(len(source_factor_vocab_same_as_source) == len(shard_source_factor_paths[0]),
+            utils.check_condition(len(source_factor_vocab_same_as_source) == len(shard_source_factor_paths),
                                   "The number of flags for sharing the vocabulary of "
                                   "source factors does not match the number of source "
                                   "factors.")
@@ -377,7 +377,7 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     if shard_target_factor_paths:
         logger.info("(3) Additional target factor vocabularies")
         if len(target_factor_vocab_same_as_target) > 1:
-            utils.check_condition(len(target_factor_vocab_same_as_target) == len(shard_target_factor_paths[0]),
+            utils.check_condition(len(target_factor_vocab_same_as_target) == len(shard_target_factor_paths),
                                   "The number of flags for sharing the vocabulary of "
                                   "target factors does not match the number of target "
                                   "factors.")
