@@ -238,37 +238,38 @@ def test_get_tokens(line, expected_tokens):
     tokens = list(utils.get_tokens(line))
     assert tokens == expected_tokens
 
-def test_combine_means():
-    lists = [[1.23, 0.474, 9.516],
-             [10.219, 5.31, 9, 21.90, 98],
-             [],
-             [4.98],
-             [2.45, -5.21]]
-    combined_list = sum(lists, [])
-    expected_mean = np.mean(combined_list)
 
-    num_sents = [len(l) for l in lists]
-    means = [np.mean(l) if len(l) != 0 else None for l in lists]
-    combined_mean = utils.combine_means(means, num_sents)
-
+@pytest.mark.parametrize("samples, sample_means, expected_mean",
+                         [
+                             ([[1.23, 0.474, 9.516], [10.219, 5.31, 9, 21.90, 98]], [3.74, 28.8858], 19.456125),
+                             ([[-10, 10, 4.3, -4.3], [102], [0, 1]], [0.0, 102.0, 0.5], 14.714285714285714),
+                             ([[], [-1], [0, 1]], [None, -1.0, 0.5], 0.0),
+                             ([[], [1.99], [], [], [0]], [None, 1.99, None, None, 0.0], 0.995),
+                             ([[2.45, -5.21, -20, 81.92, 41, 1, 0.1123, 1.2], []], [12.8090375, None], 12.8090375)
+                         ])
+def test_combine_means(samples, sample_means, expected_mean):
+    num_sents = [len(l) for l in samples]
+    combined_mean = utils.combine_means(sample_means, num_sents)
     assert np.isclose(expected_mean, combined_mean)
 
-def test_combine_stds():
-    lists = [[-10, 10, 4.3, -4.3],
-             [10.219, 5.31, 9, 21.90, 98],
-             [],
-             [4.98],
-             [],
-             [0, 1],
-             [2.45, -5.21, -20, 81.92, 41, 1, 0.1123, 1.2]]
-    combined_list = sum(lists, [])
-    expected_std = np.std(combined_list)
 
-    num_sents = [len(l) for l in lists]
-    means = [np.mean(l) if len(l) != 0 else None for l in lists]
-    stds = [np.std(l) if len(l) != 0 else None for l in lists]
-    combined_std = utils.combine_stds(stds, means, num_sents)
-
+@pytest.mark.parametrize("samples, sample_means, sample_stds, expected_std",
+                         [
+                             ([[-10, 10, 4.3, -4.3], [10.219, 5.31, 9, 21.90, 98], [], [4.98], [], [0, 1]],
+                              [0.0, 28.8858, None, 4.98, None, 0.5], [7.697077367416805, 35.00081956983293, None, 0.0, None, 0.5],
+                              26.886761799748015),
+                             ([[1.23, 0.474, 9.516], [10.219, 5.31, 9, 21.90, 98]],
+                              [3.74, 28.8858], [4.095893553304333, 35.00081956983293], 30.33397330732285),
+                             ([[-10, 10, 4.3, -4.3], [102], [0, 1]],
+                              [0.0, 102.0, 0.5], [7.697077367416805, 0.0, 0.5], 36.10779213772596),
+                             ([[], [-1], [0, 1]], [None, -1.0, 0.5], [None, 0.0, 0.5], 0.816496580927726),
+                             ([[], [1.99], [], [], [0]], [None, 1.99, None, None, 0.0], [None, 0.0, None, None, 0.0], 0.995),
+                             ([[2.45, -5.21, -20, 81.92, 41, 1, 0.1123, 1.2], []], [12.8090375, None], [30.64904989938259, None],
+                              30.64904989938259)
+                         ])
+def test_combine_stds(samples, sample_means, sample_stds, expected_std):
+    num_sents = [len(l) for l in samples]
+    combined_std = utils.combine_stds(sample_stds, sample_means, num_sents)
     assert np.isclose(expected_std, combined_std)
 
 
