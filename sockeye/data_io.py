@@ -301,17 +301,18 @@ def are_none(sequences: Sequence[Sized]) -> bool:
     return all(s is None for s in sequences)
 
 
-def are_token_parallel(sequences: Sequence[Sized], binary: bool = False) -> bool:
+def are_token_parallel(sequences: Sequence[Sized]) -> bool:
     """
     Returns True if all sequences in the list have the same length.
     """
     if not sequences or len(sequences) == 1:
             return True
     else:
-        if not binary:
-            return all(len(s) == len(sequences[0]) for s in sequences)
-        else:
-            return all(len(s.split()) == len(sequences[0].split()) for s in sequences)
+        # if not binary:
+        return all(len(s) == len(sequences[0]) for s in sequences)
+        # else:
+        #     print('ARE TOKENS PARALLEL BINARY MODE')
+        #     return all(len(s.split()) == len(sequences[0].split()) for s in sequences)
 
 
 class DataStatisticsAccumulator:
@@ -433,7 +434,7 @@ def create_shards(source_fnames: List[str],
         target_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in target_fnames]
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
-        for (sources, targets), random_shard_index in zip(parallel_iter(source_readers, target_readers, True, True), random_shard_iter):
+        for (sources, targets), random_shard_index in zip(parallel_iter(source_readers, target_readers, True, False), random_shard_iter):
             random_shard_index = cast(int, random_shard_index)
             for i, line in enumerate(sources):
                 file = sources_shards[i][random_shard_index]
@@ -603,8 +604,7 @@ def save_shard(shard_idx: int,
                                                        length_ratio_mean, length_ratio_std)
 
     # Shards contain the raw sentences. Need to map to integers using the vocabs and add BOS/EOS
-    sources_sentences = [SequenceReader(source, vocab, add_eos=True) for source, vocab in zip(shard_sources, source_vocabs)]
-    targets_sentences = [SequenceReader(target, vocab, add_bos=True) for target, vocab in zip(shard_targets, target_vocabs)]
+    sources_sentences, targets_sentences = create_sequence_readers(shard_sources, shard_targets, source_vocabs, target_vocabs)
 
     for sources, targets in parallel_iter(sources_sentences, targets_sentences):
         source_len = len(sources[0])
@@ -680,7 +680,7 @@ def prepare_data(source_fnames: List[str],
                                            pad_id=C.PAD_ID)
 
 
-    # Process shards in parallel using max_processes process
+    # Process shards in parallel
     args = ((shard_idx, data_loader, shard_sources, shard_targets, source_vocabs,
              target_vocabs, length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
              buckets, output_prefix, keep_tmp_shard_files) for shard_idx, (shard_sources, shard_targets) in enumerate(shards))
@@ -1286,7 +1286,7 @@ def create_sequence_readers(sources: List[str], targets: List[str],
                             vocab_sources: List[vocab.Vocab],
                             vocab_targets: List[vocab.Vocab]) -> Tuple[List[SequenceReader], List[SequenceReader]]:
     """
-    Create source readers with EOS and target readers with BOS if vocabularies are passed.
+    Create source readers with EOS and target readers with BOS.
 
     :param sources: The file names of source data and factors.
     :param targets: The file name of the target data and factors.
@@ -1294,10 +1294,6 @@ def create_sequence_readers(sources: List[str], targets: List[str],
     :param vocab_targets: The target vocabularies.
     :return: The source sequence readers and the target reader.
     """
-    # if not vocab_sources or not vocab_targets:
-    #     source_sequence_readers = [SequenceReader(source, None, add_eos=False) for source in sources]
-    #     target_sequence_readers = [SequenceReader(target, None, add_bos=False) for target in targets]
-    # else:
     source_sequence_readers = [SequenceReader(source, vocab, add_eos=True) for source, vocab in
                                 zip(sources, vocab_sources)]
     target_sequence_readers = [SequenceReader(target, vocab, add_bos=True) for target, vocab in
@@ -1308,7 +1304,7 @@ def create_sequence_readers(sources: List[str], targets: List[str],
 def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
                   target_iterables: Sequence[Iterable[Optional[Any]]],
                   skip_blanks: bool = True,
-                  binary: bool = False):
+                  check_token_parallel: bool = True):
     """
     Creates iterators over parallel iterables by calling iter() on the iterables
     and chaining to parallel_iterate(). The purpose of the separation is to allow
@@ -1317,18 +1313,18 @@ def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
     :param source_iterables: A list of source iterables.
     :param target_iterables: A target iterable.
     :param skip_blanks: Whether to skip empty target lines.
-    :param binary: Whether the sequence is in binary.
+    :param check_token_parallel: Whether to check if the tokens are parallel or not.
     :return: Iterators over sources and target.
     """
     source_iterators = [iter(s) for s in source_iterables]
     target_iterators = [iter(t) for t in target_iterables]
-    return parallel_iterate(source_iterators, target_iterators, skip_blanks, binary)
+    return parallel_iterate(source_iterators, target_iterators, skip_blanks, check_token_parallel)
 
 
 def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
                      target_iterators: Sequence[Iterator[Optional[Any]]],
                      skip_blanks: bool = True,
-                     binary: bool = False):
+                     check_token_parallel: bool = True):
     """
     Yields parallel source(s), target sequences from iterables.
     Checks for token parallelism in source sequences.
@@ -1339,7 +1335,7 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
     :param source_iterators: A list of source iterators.
     :param target_iterators: A list of source iterators.
     :param skip_blanks: Whether to skip empty target lines.
-    :param binary: Whether the sequence is in binary.
+    :param check_token_parallel: Whether to check if the tokens are parallel or not.
     :return: Iterators over sources and target.
     """
     num_skipped = 0
@@ -1352,10 +1348,11 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
         if skip_blanks and (any((s is None for s in sources)) or any((t is None for t in targets))):
             num_skipped += 1
             continue
-        check_condition(are_none(sources) or are_token_parallel(sources, binary),
-                        "Source sequences are not token-parallel: %s" % (str(sources)))
-        check_condition(are_none(targets) or are_token_parallel(targets, binary),
-                        "Target sequences are not token-parallel: %s" % (str(targets)))
+        if check_token_parallel:
+            check_condition(are_none(sources) or are_token_parallel(sources),
+                            "Source sequences are not token-parallel: %s" % (str(sources)))
+            check_condition(are_none(targets) or are_token_parallel(targets),
+                            "Target sequences are not token-parallel: %s" % (str(targets)))
         yield sources, targets
 
     if num_skipped > 0:

@@ -246,7 +246,7 @@ def smart_open(filename: str, mode: str = "rt", ftype: str = "auto", errors: str
             return open(filename, mode=mode, encoding='utf-8', errors=errors)
 
 
-def combine_means(means: List[float], num_sents: List[int]) -> float:
+def combine_means(means: List[Optional[float]], num_sents: List[int]) -> float:
     """
     Takes a list of means and number of sentences of the same length and computes the combined mean.
 
@@ -260,7 +260,7 @@ def combine_means(means: List[float], num_sents: List[int]) -> float:
     return sum(num_sent * mean for num_sent, mean in zip(num_sents, means) if mean is not None) / sum(num_sents)
 
 
-def combine_stds(stds: List[float], means: List[float], num_sents: List[int]) -> float:
+def combine_stds(stds: List[Optional[float]], means: List[Optional[float]], num_sents: List[int]) -> float:
     """
     Takes a list of standard deviations, means and number of sentences of the same length and computes 
     the combined standard deviation.

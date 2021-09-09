@@ -19,7 +19,7 @@ from collections import Counter
 from contextlib import ExitStack
 from functools import reduce
 from itertools import chain, islice
-from typing import Dict, Iterable, List, Optional, Tuple, Callable
+from typing import Dict, Iterable, List, Optional, Tuple, Callable, Union
 
 from sockeye.log import setup_main_logger
 from . import constants as C
@@ -32,7 +32,7 @@ Vocab = Dict[str, int]
 InverseVocab = Dict[int, str]
 
 
-def build_from_paths(paths: List[str]) -> Counter:
+def build_from_paths(paths: Union[List[str], str]) -> Counter:
     """
     :param paths: List of paths to files with one sentence per line.
     :return: Token counter.
@@ -316,6 +316,9 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     logger.info("Loading/creating vocabularies")
     logger.info("=============================")
     logger.info("(1) Surface form vocabularies (source & target)")
+
+    print('shard source paths')
+    print(shard_source_paths)
 
     if shared_vocab:
         if source_vocab_path and target_vocab_path:

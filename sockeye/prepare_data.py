@@ -70,8 +70,6 @@ def prepare_data(args: argparse.Namespace):
                 max_seq_len_source, max_seq_len_target)
 
     # Split input into shards and randomly assign data to shards
-    # NOTE: create_shards ensures the files are parallel, i.e. have the same number of lines and tokens for each factor file
-    # by calling parallel_iterate, which ensures files are parallel.
     with utils.smart_open(source_paths[0], mode='rb') as infile:
         num_sents = sum(1 for _ in infile)
     num_shards = data_io.get_num_shards(num_sents, samples_per_shard, minimum_num_shards)
