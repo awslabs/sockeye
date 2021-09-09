@@ -404,7 +404,7 @@ class DataStatisticsAccumulator:
 def create_shards(source_fnames: List[str],
                   target_fnames: List[str],
                   num_shards: int,
-                  output_prefix: str) -> List[Tuple[Tuple[str], Tuple[str]]]:
+                  output_prefix: str) -> Tuple[List[Tuple[Tuple[str], Tuple[str]]], bool]:
     """
     Assign source/target sentence pairs to shards at random.
 
