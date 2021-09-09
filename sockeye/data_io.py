@@ -308,12 +308,7 @@ def are_token_parallel(sequences: Sequence[Sized]) -> bool:
     if not sequences or len(sequences) == 1:
             return True
     else:
-        # if not binary:
         return all(len(s) == len(sequences[0]) for s in sequences)
-        # else:
-        #     print('ARE TOKENS PARALLEL BINARY MODE')
-        #     return all(len(s.split()) == len(sequences[0].split()) for s in sequences)
-
 
 class DataStatisticsAccumulator:
 
