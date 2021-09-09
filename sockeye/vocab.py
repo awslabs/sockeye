@@ -63,7 +63,7 @@ def build_from_shards(paths: List[Tuple[str]], num_words: Optional[int] = None, 
     logger.info("Building vocabulary from dataset(s): %s", " ".join(paths))
     vocab_counters = mapper(build_from_paths, paths)
     # Combine shard Counters and create a single Vocab
-    raw_vocab = sum(vocab_counters, Counter())
+    raw_vocab = sum(vocab_counters, Counter()) # type: Counter
     return build_pruned_vocab(raw_vocab=raw_vocab,
                               num_words=num_words,
                               min_count=min_count,
@@ -126,7 +126,7 @@ def build_pruned_vocab(raw_vocab: Counter, num_words: Optional[int] = None, min_
     return word_to_id
 
 
-def count_tokens(data: List[str]) -> Counter:
+def count_tokens(data: Iterable[str]) -> Counter:
     """
     Creates raw vocabulary.
 
@@ -308,9 +308,9 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     :param mapper: Built-in map function or multiprocessing.pool.map with max_processes processes.
     :return: List of source vocabularies (for source and factors), and target vocabulary.
     """
-    shard_source_path, *shard_source_factor_paths = [paths for paths in zip(*shard_source_paths)]
-    source_vocab_path, *source_factor_vocab_paths = source_vocab_paths
-    shard_target_path, *shard_target_factor_paths = [paths for paths in zip(*shard_target_paths)]
+    shard_source_sentence_paths, *shard_source_factor_paths = [paths for paths in zip(*shard_source_paths)] # shard_source_sentence_paths[shard], shard_source_factor_paths[factor][shard]
+    source_vocab_path, *source_factor_vocab_paths = source_vocab_paths # source_vocab_path, source_factor_vocab_paths[factor]
+    shard_target_sentence_paths, *shard_target_factor_paths = [paths for paths in zip(*shard_target_paths)]
     target_vocab_path, *target_factor_vocab_paths = target_vocab_paths
     logger.info("=============================")
     logger.info("Loading/creating vocabularies")
@@ -332,7 +332,7 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
             utils.check_condition(word_min_count_source == word_min_count_target,
                                   "A shared vocabulary requires the minimum word count for source and target "
                                   "to be the same.")
-            vocab_source = vocab_target = build_from_shards(paths=shard_source_path + shard_target_path,
+            vocab_source = vocab_target = build_from_shards(paths=shard_source_sentence_paths + shard_target_sentence_paths,
                                                             num_words=num_words_source,
                                                             min_count=word_min_count_source,
                                                             pad_to_multiple_of=pad_to_multiple_of,
@@ -344,9 +344,9 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
             vocab_source = vocab_target = vocab_from_json(vocab_path)
 
     else:
-        vocab_source = load_or_create_vocab(shard_source_path, source_vocab_path, num_words_source, word_min_count_source,
+        vocab_source = load_or_create_vocab(shard_source_sentence_paths, source_vocab_path, num_words_source, word_min_count_source,
                                             pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)
-        vocab_target = load_or_create_vocab(shard_target_path, target_vocab_path, num_words_target, word_min_count_target,
+        vocab_target = load_or_create_vocab(shard_target_sentence_paths, target_vocab_path, num_words_target, word_min_count_target,
                                             pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)
 
     vocab_source_factors = []  # type: List[Vocab]
@@ -362,11 +362,11 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
         else:
             source_factor_vocab_same_as_source = [False] * len(shard_source_factor_paths)
 
-    for shard_factor_path, factor_vocab_path, share_source_vocab in zip(shard_source_factor_paths,
-                                                                        source_factor_vocab_paths,
-                                                                        source_factor_vocab_same_as_source):
+    for shard_factor_paths, factor_vocab_path, share_source_vocab in zip(shard_source_factor_paths,
+                                                                         source_factor_vocab_paths,
+                                                                         source_factor_vocab_same_as_source):
         if not share_source_vocab:
-            vocab_source_factors.append(load_or_create_vocab(shard_factor_path, factor_vocab_path,
+            vocab_source_factors.append(load_or_create_vocab(shard_factor_paths, factor_vocab_path,
                                                              num_words_source, word_min_count_source,
                                                              pad_to_multiple_of=pad_to_multiple_of,
                                                              mapper=mapper))
@@ -386,11 +386,11 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
         else:
             target_factor_vocab_same_as_target = [False] * len(shard_target_factor_paths)
 
-    for shard_factor_path, factor_vocab_path, share_target_vocab in zip(shard_target_factor_paths,
-                                                                        target_factor_vocab_paths,
-                                                                        target_factor_vocab_same_as_target):
+    for shard_factor_paths, factor_vocab_path, share_target_vocab in zip(shard_target_factor_paths,
+                                                                         target_factor_vocab_paths,
+                                                                         target_factor_vocab_same_as_target):
         if not share_target_vocab:
-            vocab_target_factors.append(load_or_create_vocab(shard_factor_path, factor_vocab_path,
+            vocab_target_factors.append(load_or_create_vocab(shard_factor_paths, factor_vocab_path,
                                                              num_words_target, word_min_count_target,
                                                              pad_to_multiple_of=pad_to_multiple_of,
                                                              mapper=mapper))
