@@ -317,9 +317,6 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     logger.info("=============================")
     logger.info("(1) Surface form vocabularies (source & target)")
 
-    print('shard source paths')
-    print(shard_source_paths)
-
     if shared_vocab:
         if source_vocab_path and target_vocab_path:
             vocab_source = vocab_from_json(source_vocab_path)
