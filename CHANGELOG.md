@@ -14,7 +14,7 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ## [2.3.21]
 ### Added
 
-- Added parallelization for prepare_data
+- Extended parallelization of data preparation to vocabulary and statistics creation while minimizing the overhead of sharding.
 
 ## [2.3.20]
 ### Added
