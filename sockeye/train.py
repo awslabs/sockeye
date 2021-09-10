@@ -14,6 +14,8 @@
 """
 Simple Training CLI.
 """
+import torch
+from sockeye import training_pt
 from . import pre_mxnet
 # Called before importing mxnet or any module that imports mxnet
 pre_mxnet.init()
@@ -1137,24 +1139,46 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 for lf in losses:
                     lf.hybridize(static_alloc=True)
 
-        trainer = training.GluonEarlyStoppingTrainer(
-            config=trainer_config,
-            optimizer_config=optimizer_config,
-            sockeye_model=training_model,
-            trainer=gluon_trainer,
-            loss_functions=losses,
-            context=context,
-            dtype=args.dtype,
-            using_amp=using_amp,
-            custom_metrics_logger=custom_metrics_logger,
-            checkpoint_callback=checkpoint_callback
-        )
+        if args.use_pytorch:
+            with torch.autograd.set_detect_anomaly(True):
+                from .model_pt import make_pytorch_model_from_mxnet_model
+                logger.info("=============== USING PYTORCH MODEL ===============")
+                pytorch_model = make_pytorch_model_from_mxnet_model(training_model)
 
-        cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
-                                               training_model, source_vocabs, target_vocabs, hybridize=hybridize)
+                trainer = training_pt.PyTorchEarlyStoppingTrainer(
+                    config=trainer_config,
+                    optimizer_config=optimizer_config,
+                    sockeye_model=pytorch_model,
+                    trainer=gluon_trainer,
+                    loss_functions=losses,
+                    context=context,
+                    dtype=args.dtype,
+                    using_amp=using_amp,
+                    custom_metrics_logger=custom_metrics_logger,
+                    checkpoint_callback=checkpoint_callback
+                )
 
-        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
-        return training_state
+                training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=None)
+                return training_state
+        else:
+            trainer = training.GluonEarlyStoppingTrainer(
+                config=trainer_config,
+                optimizer_config=optimizer_config,
+                sockeye_model=training_model,
+                trainer=gluon_trainer,
+                loss_functions=losses,
+                context=context,
+                dtype=args.dtype,
+                using_amp=using_amp,
+                custom_metrics_logger=custom_metrics_logger,
+                checkpoint_callback=checkpoint_callback
+            )
+
+            cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
+                                                training_model, source_vocabs, target_vocabs, hybridize=hybridize)
+
+            training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
+            return training_state
 
 
 if __name__ == "__main__":

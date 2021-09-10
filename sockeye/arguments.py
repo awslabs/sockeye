@@ -1124,6 +1124,8 @@ def add_training_args(params):
                               help="Do not perform any actual training, but print statistics about the model"
                               " and mode of operation.")
 
+    train_params.add_argument('--use-pytorch', action="store_true", help='Use PyTorch to score')
+
 
 def add_train_cli_args(params):
     add_training_io_args(params)

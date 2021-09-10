@@ -27,10 +27,10 @@ logger = logging.getLogger(__name__)
 
 def pytorch_get_activation(act_type: str) -> pt.nn.Module:
     if act_type == C.SWISH1:
-        return pt.nn.SiLU(inplace=True)
+        return pt.nn.SiLU()
     if act_type == C.GELU:
         return pt.nn.GELU()
-    return pt.nn.ReLU(inplace=True)
+    return pt.nn.ReLU()
 
 
 class PyTorchLHUC(pt.nn.Module):
