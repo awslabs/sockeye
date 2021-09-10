@@ -39,7 +39,7 @@ def build_from_paths(paths: Union[Sequence[str], str]) -> Counter:
     """
     with ExitStack() as stack:
         logger.info("Building vocabulary from dataset(s): %s", paths)
-        if isinstance(paths, Sequence):
+        if isinstance(paths, List):
             files = (stack.enter_context(utils.smart_open(path, mode='rt')) for path in paths)
         else:
             files = stack.enter_context(utils.smart_open(paths, mode='rt'))
