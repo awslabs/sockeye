@@ -41,8 +41,10 @@ def build_from_paths(paths: Union[Sequence[str], str]) -> Counter:
         logger.info("Building vocabulary from dataset(s): %s", paths)
         if isinstance(paths, List):
             files = (stack.enter_context(utils.smart_open(path, mode='rt')) for path in paths)
-        else:
+        elif isinstance(paths, str):
             files = stack.enter_context(utils.smart_open(paths, mode='rt'))
+        else:
+            raise ValueError("Expected str or List[str].")
         return count_tokens(chain(*files))
 
 def build_from_shards(paths: Iterable[Union[Sequence[str], str]], num_words: Optional[int] = None, min_count: int = 1,
