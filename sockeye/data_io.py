@@ -400,7 +400,7 @@ class DataStatisticsAccumulator:
 def create_shards(source_fnames: List[str],
                   target_fnames: List[str],
                   num_shards: int,
-                  output_prefix: str) -> Tuple[List[Tuple[Tuple[str], Tuple[str]]], bool]:
+                  output_prefix: str) -> Tuple[List[Tuple[Tuple[str, ...], Tuple[str, ...]]], bool]:
     """
     Assign source/target sentence pairs to shards at random.
 
@@ -640,7 +640,7 @@ def prepare_data(source_fnames: List[str],
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
                  pool: multiprocessing.pool.Pool = None, 
-                 shards: List[Tuple[Tuple[str], Tuple[str]]] = None):
+                 shards: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None):
     """
     :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.
     """
@@ -685,7 +685,7 @@ def prepare_data(source_fnames: List[str],
     shard_average_len = [shard_stats.average_len_target_per_bucket for shard_stats in per_shard_statistics]
     shard_num_sents = [shard_stats.num_sents_per_bucket for shard_stats in per_shard_statistics]
     num_sents_per_bucket = [sum(n) for n in zip(*shard_num_sents)]
-    average_len_target_per_bucket = []
+    average_len_target_per_bucket = [] # type: List[Optional[float]]
     for num_sents_bucket, average_len_bucket in zip(zip(*shard_num_sents), zip(*shard_average_len)):
         if all(avg is None for avg in average_len_bucket):
             average_len_target_per_bucket.append(None)
@@ -693,7 +693,7 @@ def prepare_data(source_fnames: List[str],
             average_len_target_per_bucket.append(combine_means(average_len_bucket, shards_num_sents))
 
     shard_length_ratios = [shard_stats.length_ratio_stats_per_bucket for shard_stats in per_shard_statistics]
-    length_ratio_stats_per_bucket = [] 
+    length_ratio_stats_per_bucket = [] # type: Optional[List[Tuple[Optional[float], Optional[float]]]]
     for num_sents_bucket, len_ratios_bucket in zip(zip(*shard_num_sents), zip(*shard_length_ratios)):
         if all(all(x is None for x in ratio) for ratio in len_ratios_bucket):
             length_ratio_stats_per_bucket.append((None, None))

@@ -45,8 +45,7 @@ def build_from_paths(paths: Union[List[str], str]) -> Counter:
             files = stack.enter_context(utils.smart_open(paths, mode='rt'))
         return count_tokens(chain(*files))
 
-
-def build_from_shards(paths: List[Tuple[str]], num_words: Optional[int] = None, min_count: int = 1,
+def build_from_shards(paths: Iterable[Union[Tuple[str], str]], num_words: Optional[int] = None, min_count: int = 1,
                       pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:
     """
     Creates a vocabulary mapping from words to ids from shard paths to files in sentence-per-line format.
@@ -60,7 +59,7 @@ def build_from_shards(paths: List[Tuple[str]], num_words: Optional[int] = None, 
     :param mapper: Built-in map function for sequential execution or multiprocessing.pool.map function for parallel execution.
     :return: Word-to-id mapping.
     """
-    logger.info("Building vocabulary from dataset(s): %s", " ".join(paths))
+    logger.info("Building vocabulary from dataset(s): %s", " ".join(paths)) # type: ignore
     vocab_counters = mapper(build_from_paths, paths)
     # Combine shard Counters and create a single Vocab
     raw_vocab = sum(vocab_counters, Counter()) # type: Counter
@@ -263,7 +262,7 @@ def load_target_vocabs(folder: str) -> List[Vocab]:
     return [vocab_from_json(os.path.join(folder, fname)) for fname in _get_sorted_target_vocab_fnames(folder)]
 
 
-def load_or_create_vocab(data: Tuple[str], vocab_path: Optional[str], num_words: int, word_min_count: int,
+def load_or_create_vocab(data: Iterable[str], vocab_path: Optional[str], num_words: int, word_min_count: int,
                          pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:
     """
     If the vocabulary path is defined, the vocabulary is loaded from the path.
@@ -308,9 +307,14 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     :param mapper: Built-in map function or multiprocessing.pool.map with max_processes processes.
     :return: List of source vocabularies (for source and factors), and target vocabulary.
     """
-    shard_source_sentence_paths, *shard_source_factor_paths = [paths for paths in zip(*shard_source_paths)] # shard_source_sentence_paths[shard], shard_source_factor_paths[factor][shard]
-    source_vocab_path, *source_factor_vocab_paths = source_vocab_paths # source_vocab_path, source_factor_vocab_paths[factor]
-    shard_target_sentence_paths, *shard_target_factor_paths = [paths for paths in zip(*shard_target_paths)]
+    shard_source_sentence_paths: Tuple[str, ...]
+    shard_source_factor_paths: List[Tuple[str, ...]]
+    shard_target_sentence_paths: Tuple[str, ...]
+    shard_target_factor_paths: List[Tuple[str, ...]]
+
+    shard_source_sentence_paths, *shard_source_factor_paths = [paths for paths in zip(*shard_source_paths)] # type: ignore
+    source_vocab_path, *source_factor_vocab_paths = source_vocab_paths
+    shard_target_sentence_paths, *shard_target_factor_paths = [paths for paths in zip(*shard_target_paths)] # type: ignore
     target_vocab_path, *target_factor_vocab_paths = target_vocab_paths
     logger.info("=============================")
     logger.info("Loading/creating vocabularies")

@@ -272,7 +272,7 @@ def combine_stds(stds: List[Optional[float]], means: List[Optional[float]], num_
     """
     if not stds or not means or not num_sents:
         raise ValueError("Invalid input list.")
-    check_condition(all(len(stds) == len(l) for l in [means, num_sents]), "List lengths do not match")
+    check_condition(all(len(stds) == len(l) for l in [means, num_sents]), "List lengths do not match") # type: ignore
     total_mean = combine_means(means, num_sents)
     return math.sqrt(sum(num_sent * (std**2 + (mean-total_mean)**2) for num_sent, std, mean in zip(num_sents, stds, means)
                          if std is not None and mean is not None) / sum(num_sents))
