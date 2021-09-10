@@ -366,8 +366,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                          else None for i in range(len(args.target_factors))]
             target_vocab_paths = [args.target_vocab] + target_factor_vocab_paths
             source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
-                source_paths=[args.source] + args.source_factors,
-                target_paths=[args.target] + args.target_factors,
+                shard_source_paths=[[args.source] + args.source_factors],
+                shard_target_paths=[[args.target] + args.target_factors],
                 source_vocab_paths=source_vocab_paths,
                 source_factor_vocab_same_as_source=args.source_factors_share_embedding,
                 target_vocab_paths=target_vocab_paths,
