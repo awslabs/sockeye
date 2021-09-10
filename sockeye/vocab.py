@@ -19,7 +19,7 @@ from collections import Counter
 from contextlib import ExitStack
 from functools import reduce
 from itertools import chain, islice
-from typing import Dict, Iterable, List, Optional, Tuple, Callable, Union
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Callable, Union
 
 from sockeye.log import setup_main_logger
 from . import constants as C
@@ -32,20 +32,20 @@ Vocab = Dict[str, int]
 InverseVocab = Dict[int, str]
 
 
-def build_from_paths(paths: Union[List[str], str]) -> Counter:
+def build_from_paths(paths: Union[Sequence[str], str]) -> Counter:
     """
     :param paths: List of paths to files with one sentence per line.
     :return: Token counter.
     """
     with ExitStack() as stack:
         logger.info("Building vocabulary from dataset(s): %s", paths)
-        if isinstance(paths, List):
+        if isinstance(paths, Sequence):
             files = (stack.enter_context(utils.smart_open(path, mode='rt')) for path in paths)
         else:
             files = stack.enter_context(utils.smart_open(paths, mode='rt'))
         return count_tokens(chain(*files))
 
-def build_from_shards(paths: Iterable[Union[Tuple[str], str]], num_words: Optional[int] = None, min_count: int = 1,
+def build_from_shards(paths: Iterable[Union[Sequence[str], str]], num_words: Optional[int] = None, min_count: int = 1,
                       pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:
     """
     Creates a vocabulary mapping from words to ids from shard paths to files in sentence-per-line format.
