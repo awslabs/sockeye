@@ -11,15 +11,80 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import logging
-from typing import Optional, Tuple, List
 import functools
-import sockeye.constants as C
+import logging
+
 import operator
+from abc import abstractmethod, ABC
+from typing import Optional, Tuple, List
 
 import torch as pt
+from . import vocab
+
+from .model_pt import PyTorchSockeyeModel
+import sockeye.constants as C
+from . import lexical_constraints as constrained
+from . import lexicon
 
 logger = logging.getLogger(__name__)
+
+
+class _Inference(ABC):
+
+    @abstractmethod
+    def state_structure(self):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def encode_and_initialize(self,
+                              inputs: pt.tensor,
+                              valid_length: Optional[pt.tensor] = None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def decode_step(self,
+                    step_input: pt.tensor,
+                    states: List,
+                    vocab_slice_ids: Optional[pt.tensor] = None):
+        raise NotImplementedError()
+
+
+class _SingleModelInference(_Inference):
+
+    def __init__(self,
+                 model: PyTorchSockeyeModel,
+                 skip_softmax: bool = False,
+                 constant_length_ratio: float = 0.0,
+                 softmax_temperature: Optional[float] = None) -> None:
+        self._model = model
+        self._skip_softmax = skip_softmax
+        self._const_lr = constant_length_ratio
+        self._softmax_temperature = softmax_temperature
+        assert softmax_temperature is None, "NOT IMPLEMENTED"
+
+    def state_structure(self) -> List:
+        return [self._model.state_structure()]
+
+    def encode_and_initialize(self, inputs: pt.tensor, valid_length: Optional[pt.tensor] = None):
+        states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
+        predicted_output_length = predicted_output_length.unsqueeze(1)
+        return states, predicted_output_length
+
+    def decode_step(self,
+                    step_input: pt.tensor,
+                    states: List,
+                    vocab_slice_ids: Optional[pt.tensor] = None):
+        logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
+        if not self._skip_softmax:
+            logits = pt.log_softmax(logits, dim=-1)
+        scores = -logits
+
+        target_factors = None  # type: Optional[pt.tensor]
+        if target_factor_outputs:
+            # target factors are greedily 'decoded'.
+            factor_predictions = [pt.argmax(tfo, dim=1).unsqueeze(1).int() for tfo in target_factor_outputs]
+            target_factors = factor_predictions[0] if len(factor_predictions) == 1 else pt.cat(factor_predictions, 1)
+        return scores, states, target_factors
 
 
 class UpdateScores(pt.nn.Module):
@@ -333,3 +398,231 @@ class SortStates(pt.nn.Module):
                 raise ValueError("Provided state format %s not recognized." % state_format)
             sorted_states.append(sorted_state)
         return sorted_states
+
+
+def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
+                         source_words: pt.tensor,
+                         raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                         eos_id: int,
+                         beam_size: int) -> Tuple[pt.tensor, int, List[Optional[constrained.RawConstraintList]]]:
+    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32", copy=False))
+    device = source_words.device
+    if any(raw_constraint_list):
+        # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
+        constraint_ids = pt.tensor(word_id for sent in raw_constraint_list for phr in sent for word_id in phr)
+        vocab_slice_ids = onp.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)  # type: ignore
+        full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
+        raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
+                               raw_constraint_list]
+    # Pad to a multiple of 8.
+    vocab_slice_ids = pt.nn.functional.pad(vocab_slice_ids, pad= (0, 7 - ((vocab_slice_ids.numel() - 1) % 8)),
+                                           mode='constant', value=eos_id)
+
+    vocab_slice_ids_shape = vocab_slice_ids.size()[0]
+    if vocab_slice_ids_shape < beam_size + 1:
+        # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
+        # smaller than the beam size.
+        logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
+                       vocab_slice_ids_shape, beam_size)
+        n = beam_size - vocab_slice_ids_shape + 1
+        vocab_slice_ids = pt.cat((vocab_slice_ids, pt.full((n,), fill_value=eos_id, device=device, dtype=pt.int32)),
+                                 dim=0)
+
+    return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list
+
+
+class GreedySearch(pt.nn.Module):
+    """
+    Implements greedy search, not supporting various features from the BeamSearch class
+    (scoring, sampling, ensembling, lexical constraints, batch decoding).
+    """
+
+    def __init__(self,
+                 dtype: str,
+                 bos_id: int,
+                 eos_id: int,
+                 device: pt.device,
+                 num_source_factors: int,
+                 num_target_factors: int,
+                 inference: _SingleModelInference):
+        super().__init__()
+        self.dtype = dtype
+        self.bos_id = bos_id
+        self.eos_id = eos_id
+        self.device = device
+        self._inference = inference
+        self.num_source_factors = num_source_factors
+        self.num_target_factors = num_target_factors
+        self.global_avoid_trie = None
+        assert inference._skip_softmax, "skipping softmax must be enabled for GreedySearch"
+
+        self.work_block = GreedyTop1()
+
+    def forward(self,
+                source: pt.tensor,
+                source_length: pt.tensor,
+                restrict_lexicon: Optional[lexicon.TopKLexicon],
+                raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                raw_avoid_list: List[Optional[constrained.RawConstraintList]],
+                max_output_lengths: pt.tensor) -> Tuple[pt.tensor, pt.tensor, pt.tensor, pt.tensor,
+                                                        List[Optional[pt.tensor]],
+                                                        List[Optional[constrained.ConstrainedHypothesis]]]:
+        """
+        Translates a single sentence (batch_size=1) using greedy search.
+
+        :param source: Source ids. Shape: (batch_size=1, bucket_key, num_factors).
+        :param source_length: Valid source lengths. Shape: (batch_size=1,).
+        :param restrict_lexicon: Lexicon to use for vocabulary restriction.
+        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
+                that must appear in each output.
+        :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
+                that must NOT appear in each output.
+        :param max_output_lengths: ndarray of maximum output lengths per input in source.
+                Shape: (batch_size=1,). Dtype: int32.
+        :return List of best hypotheses indices, list of best word indices,
+                array of accumulated length-normalized negative log-probs, hypotheses lengths,
+                predicted lengths of references (if any), constraints (if any).
+        """
+        batch_size = source.size()[0]
+        assert batch_size == 1, "Greedy Search does not support batch_size != 1"
+
+        # Maximum  search iterations (determined by longest input with eos)
+        max_iterations = max_output_lengths.max().item()
+        logger.debug("max greedy search iterations: %d", max_iterations)
+
+        # best word_indices (also act as input: (batch*beam, num_target_factors
+        best_word_index = pt.full((batch_size, self.num_target_factors),
+                                  fill_value=self.bos_id, device=self.device, dtype=pt.int32)
+        outputs = []  # type: List[pt.tensor]
+
+        vocab_slice_ids = None  # type: Optional[pt.tensor]
+        # If using a top-k lexicon, select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        if restrict_lexicon:
+            source_words = pt.split(source, self.num_source_factors, dim=2)[0].squeeze(2)
+            vocab_slice_ids, _, _ = _get_vocab_slice_ids(restrict_lexicon, source_words,
+                                                         raw_constraint_list, self.eos_id, beam_size=1)
+
+        # (0) encode source sentence, returns a list
+        model_states, _ = self._inference.encode_and_initialize(source, source_length)
+        # TODO: check for disabled predicted output length
+
+        t = 1
+        for t in range(1, max_iterations + 1):
+            scores, model_states, target_factors = self._inference.decode_step(best_word_index,
+                                                                               model_states,
+                                                                               vocab_slice_ids=vocab_slice_ids)
+            # shape: (batch*beam=1, 1)
+            best_word_index = self.work_block(scores, vocab_slice_ids, target_factors)
+            outputs.append(best_word_index)
+
+            if best_word_index == self.eos_id or best_word_index == C.PAD_ID:
+                break
+
+        logger.debug("Finished after %d out of %d steps.", t, max_iterations)
+
+        # shape: (1, num_factors, length)
+        stacked_outputs = pt.stack(outputs, dim=2)
+        length = pt.tensor([t], dtype=pt.int32)  # shape (1,)
+        hyp_indices = pt.zeros(1, t + 1, dtype=pt.int32)
+        score = pt.tensor([-1.])  # TODO: return unnormalized proper score
+
+        return hyp_indices, stacked_outputs, score, length, None, []  # type: ignore
+
+
+class GreedyTop1(pt.nn.Module):
+    """
+    Implements picking the highest scoring next word with support for vocabulary selection and target factors.
+    """
+
+    def forward(self,
+                scores: pt.tensor,
+                vocab_slice_ids: Optional[pt.tensor] = None,
+                target_factors: Optional[pt.tensor] = None) -> pt.tensor:
+        # shape: (batch*beam=1, 1)
+        # argmin has trouble with fp16 inputs on GPUs, using top1 instead
+        best_word_index = pt.argmin(scores, dim=-1, keepdim=True)
+        # Map from restricted to full vocab ids if needed
+        if vocab_slice_ids is not None:
+            best_word_index = vocab_slice_ids.gather(0, best_word_index)
+        if target_factors is not None:
+            best_word_index = pt.cat((best_word_index, target_factors), dim=1)
+        return best_word_index
+
+
+def get_search_algorithm(models: List[PyTorchSockeyeModel],
+                         beam_size: int,
+                         device: pt.device,
+                         vocab_target: vocab.Vocab,
+                         output_scores: bool,
+                         scorer: CandidateScorer,
+                         ensemble_mode: str = 'linear',
+                         beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
+                         constant_length_ratio: float = 0.0,
+                         avoid_list: Optional[str] = None,
+                         sample: Optional[int] = None,
+                         softmax_temperature: Optional[float] = None,
+                         prevent_unk: bool = False,
+                         greedy: bool = False) -> GreedySearch:
+    """
+    Returns an instance of BeamSearch or GreedySearch depending.
+
+    """
+    assert greedy, "beam not implemented yet"
+    # TODO: consider automatically selecting GreedySearch if flags to this method are compatible.
+    if greedy:
+        assert len(models) == 1, "Greedy search does not support ensemble decoding"
+        assert beam_size == 1, "Greedy search does not support beam_size > 1"
+        if output_scores:
+            logger.warning("Greedy Search does not return proper hypothesis scores")
+        assert constant_length_ratio == -1.0, "Greedy search does not support brevity penalty"
+        assert avoid_list is None, "Greedy Search does not support avoid constraints"
+        assert sample is None, "Greedy search does not support sampling"
+        assert not prevent_unk, "Greedy Search does not support prevention of unknown tokens"  # TODO: add support
+        search = GreedySearch(
+            dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
+            bos_id=C.BOS_ID,
+            eos_id=C.EOS_ID,
+            device=device,
+            num_source_factors=models[0].num_source_factors,
+            num_target_factors=models[0].num_target_factors,
+            inference=_SingleModelInference(model=models[0],
+                                            skip_softmax=True,
+                                            constant_length_ratio=0.0,
+                                            softmax_temperature=softmax_temperature))
+    else:
+        pass
+        # inference = None  # type: Optional[_Inference]
+        # if len(models) == 1:
+        #     skip_softmax = beam_size == 1 and not output_scores and sample is None
+        #     if skip_softmax:
+        #         logger.info("Enabled skipping softmax for a single model and greedy decoding.")
+        #     inference = _SingleModelInference(model=models[0],
+        #                                       skip_softmax=skip_softmax,
+        #                                       constant_length_ratio=constant_length_ratio,
+        #                                       softmax_temperature=softmax_temperature)
+        # else:
+        #     inference = _EnsembleInference(models=models,
+        #                                    ensemble_mode=ensemble_mode,
+        #                                    constant_length_ratio=constant_length_ratio,
+        #                                    softmax_temperature=softmax_temperature)
+        #
+        # global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
+        # search = BeamSearch(
+        #     beam_size=beam_size,
+        #     dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
+        #     bos_id=C.BOS_ID,
+        #     eos_id=C.EOS_ID,
+        #     context=context,
+        #     output_vocab_size=models[0].output_layer_vocab_size,
+        #     beam_search_stop=beam_search_stop,
+        #     scorer=scorer,
+        #     sample=sample,
+        #     num_source_factors=models[0].num_source_factors,
+        #     num_target_factors=models[0].num_target_factors,
+        #     global_avoid_trie=global_avoid_trie,
+        #     prevent_unk=prevent_unk,
+        #     inference=inference
+        # )
+
+    return search

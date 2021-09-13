@@ -1339,6 +1339,8 @@ def add_inference_args(params):
                                choices=C.OUTPUT_HANDLERS,
                                help='Output type. Default: %(default)s.')
 
+    decode_params.add_argument('--use-pytorch', action="store_true", help='Use PyTorch to score')
+
     # common params with score CLI
     add_length_penalty_args(decode_params)
     add_brevity_penalty_args(decode_params)

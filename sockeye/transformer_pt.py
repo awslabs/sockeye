@@ -258,8 +258,9 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
             elif step == "n":
                 data = self.layer_norm(data)
 
-            elif step == "d" and self.dropout is not None:
-                data = self.dropout(data)
+            elif step == "d":
+                if self.dropout is not None and self.dropout > 0.0:
+                    data = self.dropout(data)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 

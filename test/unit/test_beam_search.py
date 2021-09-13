@@ -301,6 +301,30 @@ def test_greedytop1(target_vocab_size):
     assert best_word_index_with_factors[0, 1] == target_factors.item()
 
 
+@pytest.mark.parametrize("target_vocab_size", [2, 10, 500, 1024])
+def test_pytorch_greedytop1(target_vocab_size):
+    batch_size = 1
+    beam_size = 1
+    target_vocab_size = 50
+    # Random model scores. Shape: (batch_size * beam_size, target_vocab_size)
+    scores = np.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
+    expected_hyp_index, expected_word_index, expected_value = numpy_topk(scores, k=beam_size, offset=None)
+    assert expected_hyp_index[0] == 0
+    assert expected_value.shape == (1, 1)
+
+    greedy_top1 = sockeye.beam_search_pt.GreedyTop1()
+
+    best_word_index = greedy_top1(pt.tensor(scores.asnumpy()), None, None).detach().numpy()
+    assert best_word_index.shape == (1, 1)
+    assert best_word_index[0, 0] == expected_word_index[0]
+
+    target_factors = pt.ones(1, 1, dtype=pt.int32)
+    best_word_index_with_factors = greedy_top1(pt.tensor(scores.asnumpy()), None, target_factors).detach().numpy()
+    assert best_word_index_with_factors.shape == (1, 2)
+    assert best_word_index_with_factors[0, 0] == expected_word_index[0]
+    assert best_word_index_with_factors[0, 1] == target_factors.item()
+
+
 @pytest.mark.parametrize("batch_size, beam_size, target_vocab_size, top_n",
                         [(1, 5, 200, 0),
                          (5, 5, 200, 0),
