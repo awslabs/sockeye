@@ -66,6 +66,10 @@ If you know more, please let us know or submit a pull request (last updated: Aug
 * Vu, Thuy, Alessandro Moschitti. "Machine Translation Customization via Automatic Training Data Selection from the Web". arXiv preprint arXiv:2102.1024 (2021)
 * Xu, Weijia, Marine Carpuat. "EDITOR: An Edit-Based Transformer with Repositioning for Neural Machine Translation with Soft Lexical Constraints." Transactions of the Association for Computation Linguistics 9 (2021)
 * Müller, Mathias, Rico Sennrich. "Understanding the Properties of Minimum Bayes Risk Decoding in Neural Machine Translation". Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing (Volume 1: Long Papers) (2021)
+* Popović, Maja, Alberto Poncelas. "On Machine Translation of User Reviews." Proceedings of RANLP (2021)
+* Popović, Maja. "On nature and causes of observed MT errors." Proceedings of the 18th MT Summit (Volume 1: Research Track) (2021)
+* Jain, Nishtha, Maja Popović, Declan Groves, Eva Vanmassenhove. "Generating Gender Augmented Data for NLP." Proceedings of the 3rd Workshop on Gender Bias in Natural Language Processing (2021)
+* Vilar, David, Marcello Federico. "A Statistical Extension of Byte-Pair Encoding." Proceedings of IWSLT (2021)
 
 ### 2020
 
@@ -87,6 +91,9 @@ Annotations." arXiv preprint arXiv:2010.06203 (2020)
 * Thazin Myint Oo, Ye Kyaw Thu, Khin Mar Soe and Thepchai Supnithi, "Neural Machine Translation between Myanmar (Burmese) and Dawei (Tavoyan)", In Proceedings of the 18th International Conference on Computer Applications (ICCA 2020), Feb 27-28, 2020, Yangon, Myanmar, pp. 219-227
 * Müller, Mathias, Annette Rios, Rico Sennrich. "Domain Robustness in Neural Machine Translation." Proceedings of AMTA (2020)
 * Rios, Annette, Mathias Müller, Rico Sennrich. "Subword Segmentation and a Single Bridge Language Affect Zero-Shot Neural Machine Translation." Proceedings of the 5th WMT: Research Papers (2020)
+* Popović, Maja, Alberto Poncelas. "Neural Machine Translation between similar South-Slavic languages." Proceedings of the 5th WMT: Research Papers (2020)
+* Popović, Maja, Alberto Poncelas. "Extracting correctly aligned segments from unclean parallel data using character n-gram matching." Proceedings of Conference on Language Technologies & Digital Humanities (JTDH 2020).
+* Popović, Maja, Alberto Poncelas, Marija Brkic, Andy Way. "Neural Machine Translation for translating into Croatian and Serbian." Proceedings of the 7th Workshop on NLP for Similar Languages, Varieties and Dialects (2020)
 
 ### 2019
 
