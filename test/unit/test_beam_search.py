@@ -17,8 +17,11 @@ from typing import Tuple
 import mxnet as mx
 import pytest
 from mxnet import np
+import torch as pt
+import numpy as onp
 
 import sockeye.beam_search
+import sockeye.beam_search_pt
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
@@ -34,9 +37,16 @@ def test_length_penalty_default():
     expected_lp = np.array([[1.0], [2.], [3.]])
 
     assert np.allclose(length_penalty(lengths), expected_lp)
-    assert np.allclose(length_penalty(lengths), expected_lp)
     length_penalty.hybridize()
     assert np.allclose(length_penalty(lengths), expected_lp)
+
+
+def test_pytorch_length_penalty_default():
+    lengths = pt.tensor([[1], [2], [3]])
+    length_penalty = sockeye.beam_search_pt.LengthPenalty(1.0, 0.0)
+    expected_lp = np.array([[1.0], [2.], [3.]])
+
+    assert np.allclose(length_penalty(lengths).detach().numpy(), expected_lp)
 
 
 def test_length_penalty():
@@ -45,14 +55,29 @@ def test_length_penalty():
     expected_lp = np.array([[6 ** 0.2 / 6 ** 0.2], [7 ** 0.2 / 6 ** 0.2], [8 ** 0.2 / 6 ** 0.2]])
 
     assert np.allclose(length_penalty(lengths), expected_lp)
-    assert np.allclose(length_penalty(lengths), expected_lp)
     length_penalty.hybridize()
     assert np.allclose(length_penalty(lengths), expected_lp)
+
+
+def test_pytorch_length_penalty():
+    lengths = pt.tensor([[1], [2], [3]])
+    length_penalty = sockeye.beam_search_pt.LengthPenalty(.2, 5.0)
+    expected_lp = np.array([[6 ** 0.2 / 6 ** 0.2], [7 ** 0.2 / 6 ** 0.2], [8 ** 0.2 / 6 ** 0.2]])
+
+    assert np.allclose(length_penalty(lengths).detach().numpy(), expected_lp)
 
 
 def test_length_penalty_int_input():
     length = 1
     length_penalty = sockeye.beam_search.LengthPenalty(.2, 5.0)
+    expected_lp = [6 ** 0.2 / 6 ** 0.2]
+
+    assert np.isclose(length_penalty(length), expected_lp)
+
+
+def test_pytorch_length_penalty_int_input():
+    length = 1
+    length_penalty = sockeye.beam_search_pt.LengthPenalty(.2, 5.0)
     expected_lp = [6 ** 0.2 / 6 ** 0.2]
 
     assert np.isclose(length_penalty(length), expected_lp)
@@ -71,6 +96,17 @@ def test_brevity_penalty_default():
     assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
 
 
+def test_pytorch_brevity_penalty_default():
+    hyp_lengths = pt.tensor([[1], [2], [3]])
+    ref_lengths = pt.tensor([[2], [3], [2]])
+    brevity_penalty = sockeye.beam_search_pt.BrevityPenalty(0.0)
+    expected_bp = np.array([[0.0], [0.0], [0.0]])
+    expected_bp_np = np.array([0.0, 0.0, 0.0])
+
+    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths).detach().numpy(), expected_bp)
+    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths).detach().numpy(), expected_bp_np)
+
+
 def test_brevity_penalty():
     hyp_lengths = np.array([[1], [2], [3]])
     ref_lengths = np.array([[7], [2], [91]])
@@ -82,10 +118,28 @@ def test_brevity_penalty():
     assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
 
 
+def test_pytorch_brevity_penalty():
+    hyp_lengths = pt.tensor([[1], [2], [3]])
+    ref_lengths = pt.tensor([[7], [2], [91]])
+    brevity_penalty = sockeye.beam_search_pt.BrevityPenalty(3.5)
+    expected_bp = np.array([[3.5 * (1 - 7 / 1)], [0.0], [3.5 * (1 - 91 / 3)]])
+
+    assert np.allclose(brevity_penalty(hyp_lengths, ref_lengths).detach().numpy(), expected_bp)
+
+
 def test_brevity_penalty_int_input():
     hyp_length = 3
     ref_length = 5
     brevity_penalty = sockeye.beam_search.BrevityPenalty(2.0)
+    expected_bp = [2.0 * (1 - 5 / 3)]
+
+    assert np.isclose(brevity_penalty(hyp_length, ref_length), expected_bp)
+
+
+def test_pytorch_brevity_penalty_int_input():
+    hyp_length = 3
+    ref_length = 5
+    brevity_penalty = sockeye.beam_search_pt.BrevityPenalty(2.0)
     expected_bp = [2.0 * (1 - 5 / 3)]
 
     assert np.isclose(brevity_penalty(hyp_length, ref_length), expected_bp)
@@ -98,7 +152,7 @@ def test_candidate_scorer():
     scorer.initialize()
     scorer.hybridize(static_alloc=True)
 
-    # NDArray input
+    # np.array input
     raw_scores = np.random.uniform(0, 1, (5,))
     lengths = np.array([1, 2, 3, 4, 5])
     reference_lengths = np.array([2, 3, 4, 5, 6])
@@ -106,6 +160,29 @@ def test_candidate_scorer():
     scores = scorer(raw_scores, lengths, reference_lengths)
     unnormalized_scores = scorer.unnormalize(scores, lengths, reference_lengths)
     assert np.allclose(unnormalized_scores, raw_scores)
+
+    # int/float input
+    raw_scores = 5.6
+    lengths = 3
+    reference_lengths = 4
+
+    scores = scorer(raw_scores, lengths, reference_lengths)
+    unnormalized_scores = scorer.unnormalize(scores, lengths, reference_lengths)
+    assert np.allclose(unnormalized_scores, raw_scores)
+
+
+def test_pytorch_candidate_scorer():
+    scorer = sockeye.beam_search_pt.CandidateScorer(length_penalty_alpha=1.0,
+                                                    length_penalty_beta=0.0,
+                                                    brevity_penalty_weight=0.1)
+
+    raw_scores = pt.rand(5)
+    lengths = pt.tensor([1, 2, 3, 4, 5])
+    reference_lengths = pt.tensor([2, 3, 4, 5, 6])
+
+    scores = scorer(raw_scores, lengths, reference_lengths)
+    unnormalized_scores = scorer.unnormalize(scores, lengths, reference_lengths)
+    assert np.allclose(unnormalized_scores.detach().numpy(), raw_scores.numpy())
 
     # int/float input
     raw_scores = 5.6
@@ -176,6 +253,27 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     assert np.allclose(mx_hyp, np_hyp)
     assert np.allclose(mx_word, np_word)
     assert np.allclose(mx_values, np_values)
+
+
+@pytest.mark.parametrize("batch_size, beam_size, target_vocab_size",
+                        [(1, 5, 200),
+                         (5, 5, 200),
+                         (1, 1, 200),
+                         (5, 1, 200),
+                         (10, 10, 100)])
+def test_pytorch_topk_func(batch_size, beam_size, target_vocab_size):
+    # Random model scores. Shape: (batch_size * beam_size, target_vocab_size)
+    scores = np.random.uniform(0, 1, (batch_size * beam_size, target_vocab_size))
+    # offset for batch sizes > 1
+    offset = np.repeat(np.arange(0, batch_size * beam_size, beam_size, dtype='int32'), beam_size)
+
+    np_hyp, np_word, np_values = numpy_topk(scores, k=beam_size, offset=offset)
+
+    topk = sockeye.beam_search_pt.TopK(k=beam_size)
+    pt_hyp, pt_word, pt_values = topk(pt.tensor(scores.asnumpy()), pt.tensor(offset.asnumpy()))
+    assert np.allclose(pt_hyp.detach().numpy(), np_hyp)
+    assert np.allclose(pt_word.detach().numpy(), np_word)
+    assert np.allclose(pt_values.detach().numpy(), np_values)
 
 
 @pytest.mark.parametrize("target_vocab_size", [2, 10, 500, 1024])
@@ -269,6 +367,47 @@ def test_update_scores():
     assert (scores[0] == (1. + target_dists[0] + eos_dist)).all()  # 1 reached max length, force eos
     assert (scores[1] == np.array([1.] + pad_dist[1].tolist())).all()  # 2 finished, force pad, keep score
     assert (scores[2] == (1. + target_dists[2])).all()  # 3 scores + previous scores
+
+
+@pytest.mark.parametrize("use_unk_dist", [False, True])
+def test_pytorch_update_scores(use_unk_dist):
+    vocab_size = 10
+    batch_beam_size = 3
+    us = sockeye.beam_search_pt.UpdateScores()
+    pad_dist = onp.full((batch_beam_size, vocab_size - 1), fill_value=np.inf, dtype='float32')
+    eos_dist = onp.full((batch_beam_size, vocab_size), fill_value=np.inf, dtype='float32')
+    eos_dist[:, C.EOS_ID] = 0
+    if use_unk_dist:
+        unk_dist = onp.zeros_like(eos_dist)
+        unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
+    else:
+        unk_dist = None
+
+    lengths = onp.array([[0], [1], [0]], dtype='int32')
+    max_lengths = onp.array([[1], [2], [3]], dtype='int32')  # first on reaches max length
+    scores_accumulated = onp.ones((3, 1), dtype='float32')
+    finished = onp.array([[0],  # not finished
+                         [1],  # finished
+                         [0]],  # not finished
+                         dtype='int32')
+    inactive = onp.zeros_like(finished)
+    target_dists = np.random.uniform(0, 1, (3, vocab_size), dtype='float32').asnumpy()
+
+    scores, lengths = us(pt.tensor(target_dists), pt.tensor(finished), pt.tensor(inactive),
+                         pt.tensor(scores_accumulated), pt.tensor(lengths), pt.tensor(max_lengths),
+                         pt.tensor(unk_dist) if unk_dist is not None else None, pt.tensor(pad_dist), pt.tensor(eos_dist))
+    scores = scores.detach().numpy()
+    lengths = lengths.detach().numpy()
+
+    lengths = lengths.reshape((-1,))
+    assert (lengths == np.array([[1], [1], [1]])).all()  # all lengths but finished updated + 1
+    assert (scores[0] == (1. + target_dists[0] + eos_dist)).all()  # 1 reached max length, force eos
+    assert (scores[1] == np.array([1.] + pad_dist[1].tolist())).all()  # 2 finished, force pad, keep score
+    if use_unk_dist:
+        assert scores[2, C.UNK_ID] == np.inf  # 3 scores of <unk> should be np.inf
+        assert (scores[2] == (1. + target_dists[2] + unk_dist[2])).all()  # 3 scores + previous scores
+    else:
+        assert (scores[2] == (1. + target_dists[2])).all()  # 3 scores + previous scores
 
 
 def test_prevent_unk_update_scores():
