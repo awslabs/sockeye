@@ -176,7 +176,7 @@ def test_pytorch_candidate_scorer():
                                                     length_penalty_beta=0.0,
                                                     brevity_penalty_weight=0.1)
 
-    raw_scores = pt.rand(5)
+    raw_scores = pt.rand(5).unsqueeze(1)
     lengths = pt.tensor([1, 2, 3, 4, 5])
     reference_lengths = pt.tensor([2, 3, 4, 5, 6])
 
@@ -407,24 +407,22 @@ def test_pytorch_update_scores(use_unk_dist):
     else:
         unk_dist = None
 
-    lengths = onp.array([[0], [1], [0]], dtype='int32')
-    max_lengths = onp.array([[1], [2], [3]], dtype='int32')  # first on reaches max length
+    lengths = onp.array([0, 1, 0], dtype='int32')
+    max_lengths = onp.array([1, 2, 3], dtype='int32')  # first on reaches max length
     scores_accumulated = onp.ones((3, 1), dtype='float32')
-    finished = onp.array([[0],  # not finished
-                         [1],  # finished
-                         [0]],  # not finished
-                         dtype='int32')
-    inactive = onp.zeros_like(finished)
+    finished = pt.tensor([False,  # not finished
+                          True,  # finished
+                          False],  # not finished
+                         dtype=pt.bool)
+    inactive = pt.zeros_like(finished)
     target_dists = np.random.uniform(0, 1, (3, vocab_size), dtype='float32').asnumpy()
 
-    scores, lengths = us(pt.tensor(target_dists), pt.tensor(finished), pt.tensor(inactive),
+    scores, lengths = us(pt.tensor(target_dists), finished, inactive,
                          pt.tensor(scores_accumulated), pt.tensor(lengths), pt.tensor(max_lengths),
                          pt.tensor(unk_dist) if unk_dist is not None else None, pt.tensor(pad_dist), pt.tensor(eos_dist))
     scores = scores.detach().numpy()
     lengths = lengths.detach().numpy()
-
-    lengths = lengths.reshape((-1,))
-    assert (lengths == np.array([[1], [1], [1]])).all()  # all lengths but finished updated + 1
+    assert np.allclose(lengths, np.array([1, 1, 1]))  # all lengths but finished updated + 1
     assert (scores[0] == (1. + target_dists[0] + eos_dist)).all()  # 1 reached max length, force eos
     assert (scores[1] == np.array([1.] + pad_dist[1].tolist())).all()  # 2 finished, force pad, keep score
     if use_unk_dist:

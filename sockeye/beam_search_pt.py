@@ -212,11 +212,17 @@ class CandidateScorer(pt.nn.Module):
             else:
                 # avoid warning for unused input
                 bp = pt.zeros_like(reference_lengths, dtype=scores.dtype) if reference_lengths is not None else 0.0
-        return scores / lp.unsqueeze(1) - bp.unsqueeze(1)
+        if isinstance(scores, (int, float)):
+            return scores / lp - bp
+        else:
+            return (scores.squeeze(1) / lp - bp).unsqueeze(1)
 
     def unnormalize(self, scores, lengths, reference_lengths):
         bp = 0.0 if self._bp is None else self._bp(lengths, reference_lengths)
-        return (scores + bp) * self._lp(lengths)
+        if isinstance(scores, (int, float)):
+            return (scores + bp) * self._lp(lengths)
+        else:
+            return ((scores.squeeze(1) + bp) * self._lp(lengths)).unsqueeze(1)
 
 
 class SortNormalizeAndUpdateFinished(pt.nn.Module):
