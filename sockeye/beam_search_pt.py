@@ -409,8 +409,8 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
                          raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                          eos_id: int,
                          beam_size: int) -> Tuple[pt.tensor, int, List[Optional[constrained.RawConstraintList]]]:
-    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32", copy=False))
     device = source_words.device
+    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.int().numpy()).asnumpy()
     if any(raw_constraint_list):
         # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
         constraint_ids = pt.tensor(word_id for sent in raw_constraint_list for phr in sent for word_id in phr)
@@ -419,7 +419,8 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                raw_constraint_list]
     # Pad to a multiple of 8.
-    vocab_slice_ids = pt.nn.functional.pad(vocab_slice_ids, pad= (0, 7 - ((vocab_slice_ids.numel() - 1) % 8)),
+    vocab_slice_ids = pt.nn.functional.pad(pt.tensor(vocab_slice_ids, device=source_words.device, dtype=pt.int64),
+                                           pad=(0, 7 - ((vocab_slice_ids.size - 1) % 8)),
                                            mode='constant', value=eos_id)
 
     vocab_slice_ids_shape = vocab_slice_ids.size()[0]
@@ -548,7 +549,7 @@ class GreedyTop1(pt.nn.Module):
         best_word_index = pt.argmin(scores, dim=-1, keepdim=True)
         # Map from restricted to full vocab ids if needed
         if vocab_slice_ids is not None:
-            best_word_index = vocab_slice_ids.gather(0, best_word_index)
+            best_word_index = vocab_slice_ids.index_select(0, best_word_index.squeeze(1)).unsqueeze(1)
         if target_factors is not None:
             best_word_index = pt.cat((best_word_index, target_factors), dim=1)
         return best_word_index
