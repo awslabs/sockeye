@@ -63,7 +63,7 @@ class BatchScorer(pt.nn.Module):
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
             token_scores = token_scores * -1
 
-        # Sum, then apply length penalty. The call to `np.where` masks out invalid values from scores.
+        # Sum, then apply length penalty. The call to `pt.where` masks out invalid values from scores.
         # zeros and sums: (batch_size,)
         scores = token_scores.where(labels.not_equal(0), pt.zeros_like(token_scores)).sum(dim=1)
 

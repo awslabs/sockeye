@@ -233,7 +233,6 @@ class PyTorchLengthRatio(pt.nn.Module):
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
-@pt.jit.script
 def pytorch_interleaved_matmul_encdec_qk(q: pt.Tensor,
                                          kv: pt.Tensor,
                                          heads: int) -> pt.Tensor:
@@ -262,7 +261,6 @@ def pytorch_interleaved_matmul_encdec_qk(q: pt.Tensor,
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
-@pt.jit.script
 def pytorch_interleaved_matmul_encdec_valatt(kv: pt.Tensor,
                                              att: pt.Tensor,
                                              heads: int) -> pt.Tensor:

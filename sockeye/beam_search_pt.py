@@ -19,11 +19,13 @@ from abc import abstractmethod, ABC
 from typing import Optional, Tuple, List
 
 import torch as pt
+import numpy as onp
 from . import vocab
 
 from .model_pt import PyTorchSockeyeModel
 import sockeye.constants as C
 from . import lexical_constraints as constrained
+from . import utils
 from . import lexicon
 
 logger = logging.getLogger(__name__)
@@ -67,7 +69,6 @@ class _SingleModelInference(_Inference):
 
     def encode_and_initialize(self, inputs: pt.tensor, valid_length: Optional[pt.tensor] = None):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
-        predicted_output_length = predicted_output_length.unsqueeze(1)
         return states, predicted_output_length
 
     def decode_step(self,
@@ -116,16 +117,15 @@ class UpdateScores(pt.nn.Module):
         # infinity otherwise.
         # pad_dist. Shape: (batch*beam, vocab_size)
         pad_dist = pt.cat((scores_accumulated, pad_dist), dim=1)
-        scores = pt.where(pt.logical_or(finished, inactive), pad_dist, scores)
+        scores = pt.where(pt.logical_or(finished, inactive).unsqueeze(1), pad_dist, scores)
 
         # Update lengths of all items, except those that were already finished. This updates
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
-        lengths = lengths + (1 - finished)
-
+        lengths = lengths + ~finished
         # Items that are at their maximum length and not finished now are forced to produce the <eos> symbol.
         # That is, we keep scores for hypotheses below max length or finished, and 'force-eos' the rest.
         below_max_length = lengths < max_lengths
-        scores = pt.where(pt.logical_or(below_max_length, finished), scores, eos_dist + scores)
+        scores = pt.where(pt.logical_or(below_max_length, finished).unsqueeze(1), scores, eos_dist + scores)
 
         return scores, lengths
 
@@ -185,7 +185,8 @@ class BrevityPenalty(pt.nn.Module):
             if isinstance(hyp_lengths, (int, float)):
                 log_bp = min(0.0, 1.0 - reference_lengths / hyp_lengths)
             else:
-                log_bp = pt.minimum(pt.zeros_like(hyp_lengths, dtype=pt.float), 1.0 - reference_lengths / hyp_lengths)
+                log_bp = pt.minimum(pt.zeros_like(hyp_lengths, dtype=pt.float),
+                                    1.0 - reference_lengths / hyp_lengths.float())
             return self.weight * log_bp
 
 
@@ -210,8 +211,8 @@ class CandidateScorer(pt.nn.Module):
                 bp = 0.0
             else:
                 # avoid warning for unused input
-                bp = pt.zeros_like(reference_lengths) if reference_lengths is not None else 0.0
-        return scores / lp - bp
+                bp = pt.zeros_like(reference_lengths, dtype=scores.dtype) if reference_lengths is not None else 0.0
+        return scores / lp.unsqueeze(1) - bp.unsqueeze(1)
 
     def unnormalize(self, scores, lengths, reference_lengths):
         bp = 0.0 if self._bp is None else self._bp(lengths, reference_lengths)
@@ -224,12 +225,10 @@ class SortNormalizeAndUpdateFinished(pt.nn.Module):
     """
 
     def __init__(self,
-                 dtype: str,
                  pad_id: int,
                  eos_id: int,
                  scorer: CandidateScorer) -> None:
         super().__init__()
-        self.dtype = dtype
         self.pad_id = pad_id
         self.eos_id = eos_id
         self._scorer = scorer
@@ -239,29 +238,28 @@ class SortNormalizeAndUpdateFinished(pt.nn.Module):
                 factors=None):
 
         # Reorder fixed-size beam data according to best_hyp_indices (ascending)
-        finished = finished.gather(0, best_hyp_indices)
-        lengths = lengths.take(0, best_hyp_indices)
-        reference_lengths = reference_lengths.gather(0, best_hyp_indices)
+        finished = finished.index_select(0, best_hyp_indices)
+        lengths = lengths.index_select(0, best_hyp_indices)
+        reference_lengths = reference_lengths.index_select(0, best_hyp_indices)
 
         # Normalize hypotheses that JUST finished
-        all_finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id).unsqueeze(1)
-        newly_finished = pt.logical_xor(all_finished, finished)
+        all_finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = pt.logical_xor(all_finished, finished).unsqueeze(1)
 
         scores_accumulated = pt.where(newly_finished,
                                       self._scorer(scores_accumulated,
-                                                   lengths,  # TODO cast int lengths to dtype required?
+                                                   lengths,
                                                    reference_lengths),
                                       scores_accumulated)
 
         # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
         finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
-        finished = finished.unsqueeze(1)  # TODO cast to int32 required?
 
         # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
         best_word_indices = best_word_indices.unsqueeze(1)
 
         if factors is not None:
-            secondary_factors = factors.gather(0, best_hyp_indices)
+            secondary_factors = factors.index_select(0, best_hyp_indices)
             best_word_indices = pt.cat((best_word_indices, secondary_factors), dim=1)
 
         return best_word_indices, finished, scores_accumulated, lengths, reference_lengths
@@ -272,7 +270,7 @@ def unravel_index(indices: pt.LongTensor, shape: Tuple[int, ...]) -> pt.LongTens
     coord = []
     for dim in reversed(shape):
         coord.append(indices % dim)
-        indices = indices // dim
+        indices = indices // dim  # triggers UserWarning: floor_divide is deprecated, and will be removed in a future version of pytorch.
     coord = pt.stack(coord[::-1], dim=0)
     return coord
 
@@ -361,17 +359,17 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
     repeated_states = []
     flat_structure = functools.reduce(operator.add, state_structure)
     assert len(states) == len(flat_structure), "Number of states do not match the defined state structure"
-    num_repeats = beam_size
     for state, state_format in zip(states, flat_structure):
         if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
             # Steps and source_bias have batch dimension on axis 0
-            repeats = [num_repeats] + [0] * (state.dim() - 1)
+            repeat_axis = 0
         elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
             # Decoder and encoder layer states have batch dimension on axis 1
-            repeats = [0, num_repeats] + [0] * (state.dim() - 2)
+            repeat_axis = 1
         else:
             raise ValueError("Provided state format %s not recognized." % state_format)
-        repeated_states.append(state.repeat(*repeats))
+        repeated_state = state.repeat_interleave(repeats=beam_size, dim=repeat_axis)
+        repeated_states.append(repeated_state)
     return repeated_states
 
 
@@ -387,10 +385,10 @@ class SortStates(pt.nn.Module):
         for state, state_format in zip(states, self.flat_structure):
             if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
                 # Steps and source_bias have batch dimension on axis 0
-                sorted_state = state.gather(0, best_hyp_indices)
+                sorted_state = state.index_select(0, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
                 # Decoder and encoder layer states have batch dimension on axis 1
-                sorted_state = state.gather(1, best_hyp_indices)
+                sorted_state = state.index_select(1, best_hyp_indices)
             elif state_format == C.ENCODER_STATE:
                 # No need for takes on encoder layer states
                 sorted_state = state
@@ -550,6 +548,282 @@ class GreedyTop1(pt.nn.Module):
         return best_word_index
 
 
+class BeamSearch(pt.nn.Module):
+    """
+    Features:
+    - beam search stop
+    - constraints (pos & neg)
+    - ensemble decoding
+    - vocabulary selection
+    - sampling
+
+    Not supported:
+    - beam pruning
+    - beam history
+    """
+
+    def __init__(self,
+                 beam_size: int,
+                 dtype: pt.dtype,
+                 bos_id: int,
+                 eos_id: int,
+                 device: pt.device,
+                 output_vocab_size: int,
+                 scorer: CandidateScorer,
+                 num_source_factors: int,
+                 num_target_factors: int,
+                 inference: _Inference,
+                 beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
+                 global_avoid_trie: Optional[constrained.AvoidTrie] = None,
+                 sample: Optional[int] = None,
+                 prevent_unk: bool = False) -> None:
+        super().__init__()
+        self.beam_size = beam_size
+        self.dtype = dtype
+        self.bos_id = bos_id
+        self.eos_id = eos_id
+        self.output_vocab_size = output_vocab_size
+        self.device = device
+        self._inference = inference
+        self.beam_search_stop = beam_search_stop
+        self.num_source_factors = num_source_factors
+        self.num_target_factors = num_target_factors
+        self.global_avoid_trie = global_avoid_trie
+        self.prevent_unk = prevent_unk
+
+        self._sort_states = SortStates(state_structure=self._inference.state_structure())
+        self._update_scores = UpdateScores()
+        self._scorer = scorer
+        self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
+            pad_id=C.PAD_ID,
+            eos_id=eos_id,
+            scorer=scorer)
+
+        self._sample = None  # type: Optional[pt.nn.Module]
+        self._top = None  # type: Optional[pt.nn.Module]
+        if sample is not None:
+            assert False, "not implemented yet"
+            #self._sample = SampleK(sample)
+        else:
+            self._top = TopK(self.beam_size)
+
+    def forward(self,
+                source: pt.tensor,
+                source_length: pt.tensor,
+                restrict_lexicon: Optional[lexicon.TopKLexicon],
+                raw_constraint_list: List[Optional[constrained.RawConstraintList]],
+                raw_avoid_list: List[Optional[constrained.RawConstraintList]],
+                max_output_lengths: pt.tensor) -> Tuple[pt.tensor, pt.tensor, pt.tensor, pt.tensor,
+                                                        List[Optional[pt.tensor]],
+                                                        List[Optional[constrained.ConstrainedHypothesis]]]:
+        """
+        Translates multiple sentences using beam search.
+
+        :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
+        :param source_length: Valid source lengths. Shape: (batch_size,).
+        :param restrict_lexicon: Lexicon to use for vocabulary restriction.
+        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
+               that must appear in each output.
+        :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
+               that must NOT appear in each output.
+        :param max_output_lengths: ndarray of maximum output lengths per input in source.
+                Shape: (batch_size,). Dtype: int32.
+        :return List of best hypotheses indices, list of best word indices,
+                array of accumulated length-normalized negative log-probs, hypotheses lengths,
+                predicted lengths of references (if any), constraints (if any).
+        """
+        batch_size = source.size()[0]
+        logger.debug("beam_search batch size: %d", batch_size)
+
+        # Maximum beam search iterations (determined by longest input with eos)
+        max_iterations = max_output_lengths.max().item()
+        logger.debug("max beam search iterations: %d", max_iterations)
+
+        sample_best_hyp_indices = None
+        if self._sample is not None:
+            utils.check_condition(restrict_lexicon is None,
+                                  "Sampling is not available when working with a restricted lexicon.")
+            sample_best_hyp_indices = pt.arange(0, batch_size * self.beam_size, dtype=pt.int32, device=self.device)
+
+        # General data structure: batch_size * beam_size blocks in total;
+        # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
+
+        # best word_indices (also act as input: (batch*beam, num_target_factors
+        best_word_indices = pt.full((batch_size * self.beam_size, self.num_target_factors),
+                                    fill_value=self.bos_id, device=self.device, dtype=pt.int32)
+
+        # offset for hypothesis indices in batch decoding
+        offset = pt.arange(0, batch_size * self.beam_size, self.beam_size,
+                           dtype=pt.int32, device=self.device).repeat_interleave(self.beam_size)
+
+        # locations of each batch item when first dimension is (batch * beam)
+        batch_indices = pt.arange(0, batch_size * self.beam_size, self.beam_size, dtype=pt.int64, device=self.device)
+        first_step_mask = pt.full((batch_size * self.beam_size, 1), fill_value=onp.inf, device=self.device, dtype=self.dtype)
+        first_step_mask[batch_indices] = 0.0
+
+        # Best word and hypotheses indices across beam search steps from topk operation.
+        best_hyp_indices_list = []  # type: List[pt.tensor]
+        best_word_indices_list = []  # type: List[pt.tensor]
+
+        lengths = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.int32)
+        finished = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.bool)
+
+        # Extending max_output_lengths to shape (batch_size * beam_size,)
+        max_output_lengths = max_output_lengths.repeat_interleave(self.beam_size, dim=0)
+
+        # scores_accumulated: chosen smallest scores in scores (ascending).
+        scores_accumulated = pt.zeros(batch_size * self.beam_size, 1, device=self.device, dtype=self.dtype)
+
+        output_vocab_size = self.output_vocab_size
+
+        # If using a top-k lexicon, select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        vocab_slice_ids = None  # type: Optional[pt.tensor]
+        if restrict_lexicon:
+            source_words = pt.split(source, self.num_source_factors, dim=2)[0].squeeze(2)
+            vocab_slice_ids, output_vocab_size, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon,
+                                                                                           source_words,
+                                                                                           raw_constraint_list,
+                                                                                           self.eos_id, beam_size=1)
+
+        pad_dist = pt.full((batch_size * self.beam_size, output_vocab_size - 1),
+                           fill_value=onp.inf, device=self.device, dtype=self.dtype)
+        eos_dist = pt.full((batch_size * self.beam_size, output_vocab_size),
+                           fill_value=onp.inf, device=self.device, dtype=self.dtype)
+        eos_dist[:, C.EOS_ID] = 0
+        unk_dist = None
+        if self.prevent_unk:
+            unk_dist = pt.zeros_like(eos_dist)
+            unk_dist[:, C.UNK_ID] = onp.inf  # pylint: disable=E1137
+
+        # Initialize the beam to track constraint sets, where target-side lexical constraints are present
+        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.bos_id, self.eos_id)
+
+        if self.global_avoid_trie or any(raw_avoid_list):
+            avoid_states = constrained.AvoidBatch(batch_size, self.beam_size,
+                                                  avoid_list=raw_avoid_list,
+                                                  global_avoid_trie=self.global_avoid_trie)
+            avoid_states.consume(best_word_indices[:, 0])  # constraints operate only on primary target factor
+
+        # (0) encode source sentence, returns a list
+        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
+        # repeat states to beam_size
+        model_states = _repeat_states(model_states, self.beam_size, self._inference.state_structure())
+        # repeat estimated_reference_lengths to shape (batch_size * beam_size)
+        estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
+
+        # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
+        # item on the beam for each sentence
+        inactive = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.int32)
+        t = 1
+        for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
+            # (1) obtain next predictions and advance models' state
+            # target_dists: (batch_size * beam_size, target_vocab_size)
+            target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
+                                                                                     model_states,
+                                                                                     vocab_slice_ids)
+
+            # (2) Produces the accumulated cost of target words in each row.
+            # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
+            # finished rows are inf everywhere except column zero, which holds the accumulated model score
+            scores, lengths = self._update_scores(target_dists,
+                                                  finished,
+                                                  inactive,
+                                                  scores_accumulated,
+                                                  lengths,
+                                                  max_output_lengths,
+                                                  unk_dist,
+                                                  pad_dist,
+                                                  eos_dist)
+
+            # Mark entries that should be blocked as having a score of np.inf
+            if self.global_avoid_trie or any(raw_avoid_list):
+                block_indices = avoid_states.avoid()
+                if len(block_indices) > 0:
+                    scores[block_indices] = onp.inf
+                    if self._sample is not None:
+                        target_dists[block_indices] = onp.inf
+
+            # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
+            # far as the active beam size for each sentence.
+            if self._sample is not None:
+                best_hyp_indices, best_word_indices, scores_accumulated = self._sample(scores,
+                                                                                       target_dists,
+                                                                                       finished,
+                                                                                       sample_best_hyp_indices)
+            else:
+                # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
+                # of the first row only by setting all other rows to inf
+                if t == 1:
+                    scores += first_step_mask
+
+                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
+
+            # Constraints for constrained decoding are processed sentence by sentence
+            if any(raw_constraint_list):
+                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = constrained.topk(
+                    t,
+                    batch_size,
+                    self.beam_size,
+                    inactive,
+                    scores,
+                    constraints,
+                    best_hyp_indices,
+                    best_word_indices,
+                    scores_accumulated)
+
+            # Map from restricted to full vocab ids if needed
+            if restrict_lexicon:
+                best_word_indices = vocab_slice_ids.index_select(0, best_word_indices)
+
+            # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
+            # next call to topk(), hypotheses may not be in sorted order.
+            _sort_inputs = [best_hyp_indices, best_word_indices, finished, scores_accumulated, lengths,
+                            estimated_reference_lengths]
+            if target_factors is not None:
+                _sort_inputs.append(target_factors)
+            best_word_indices, finished, scores_accumulated, lengths, estimated_reference_lengths = \
+                self._sort_norm_and_update_finished(*_sort_inputs)
+
+            # Collect best hypotheses, best word indices
+            best_word_indices_list.append(best_word_indices)
+            best_hyp_indices_list.append(best_hyp_indices)
+
+            if self._should_stop(finished, batch_size):
+                break
+
+            # (5) update models' state with winning hypotheses (ascending)
+            model_states = self._sort_states(best_hyp_indices, *model_states)
+
+        logger.debug("Finished after %d out of %d steps.", t, max_iterations)
+
+        # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
+        scores_accumulated_shape = scores_accumulated.size()
+        folded_accumulated_scores = scores_accumulated.reshape(batch_size, -1)
+        indices = folded_accumulated_scores.argsort(dim=1, descending=False).reshape(-1)
+        best_hyp_indices = unravel_index(indices, scores_accumulated_shape)[0].int() + offset
+        scores_accumulated = scores_accumulated.index_select(0, best_hyp_indices)
+        best_hyp_indices_list.append(best_hyp_indices)
+        lengths = lengths.index_select(0, best_hyp_indices)
+        all_best_hyp_indices = pt.stack(best_hyp_indices_list, dim=1)
+        all_best_word_indices = pt.stack(best_word_indices_list, dim=2)
+        constraints = [constraints[x] for x in best_hyp_indices.tolist()]
+
+        return all_best_hyp_indices, \
+               all_best_word_indices, \
+               scores_accumulated, \
+               lengths, \
+               estimated_reference_lengths, \
+               constraints
+
+    def _should_stop(self, finished: pt.tensor, batch_size: int) -> bool:
+        if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
+            at_least_one_finished = finished.reshape(batch_size, self.beam_size).sum(dim=1) > 0
+            return at_least_one_finished.sum().item() == batch_size
+        else:
+            return finished.sum().item() == batch_size * self.beam_size  # all finished
+
+
 def get_search_algorithm(models: List[PyTorchSockeyeModel],
                          beam_size: int,
                          device: pt.device,
@@ -568,7 +842,6 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
     Returns an instance of BeamSearch or GreedySearch depending.
 
     """
-    assert greedy, "beam not implemented yet"
     # TODO: consider automatically selecting GreedySearch if flags to this method are compatible.
     if greedy:
         assert len(models) == 1, "Greedy search does not support ensemble decoding"
@@ -591,38 +864,40 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
                                             constant_length_ratio=0.0,
                                             softmax_temperature=softmax_temperature))
     else:
-        pass
-        # inference = None  # type: Optional[_Inference]
-        # if len(models) == 1:
-        #     skip_softmax = beam_size == 1 and not output_scores and sample is None
-        #     if skip_softmax:
-        #         logger.info("Enabled skipping softmax for a single model and greedy decoding.")
-        #     inference = _SingleModelInference(model=models[0],
-        #                                       skip_softmax=skip_softmax,
-        #                                       constant_length_ratio=constant_length_ratio,
-        #                                       softmax_temperature=softmax_temperature)
-        # else:
-        #     inference = _EnsembleInference(models=models,
-        #                                    ensemble_mode=ensemble_mode,
-        #                                    constant_length_ratio=constant_length_ratio,
-        #                                    softmax_temperature=softmax_temperature)
-        #
-        # global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
-        # search = BeamSearch(
-        #     beam_size=beam_size,
-        #     dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
-        #     bos_id=C.BOS_ID,
-        #     eos_id=C.EOS_ID,
-        #     context=context,
-        #     output_vocab_size=models[0].output_layer_vocab_size,
-        #     beam_search_stop=beam_search_stop,
-        #     scorer=scorer,
-        #     sample=sample,
-        #     num_source_factors=models[0].num_source_factors,
-        #     num_target_factors=models[0].num_target_factors,
-        #     global_avoid_trie=global_avoid_trie,
-        #     prevent_unk=prevent_unk,
-        #     inference=inference
-        # )
+        inference = None  # type: Optional[_Inference]
+        if len(models) == 1:
+            skip_softmax = beam_size == 1 and not output_scores and sample is None
+            if skip_softmax:
+                logger.info("Enabled skipping softmax for a single model and greedy decoding.")
+            inference = _SingleModelInference(model=models[0],
+                                              skip_softmax=skip_softmax,
+                                              constant_length_ratio=constant_length_ratio,
+                                              softmax_temperature=softmax_temperature)
+        else:
+            assert False, "NOT IMPLEMENTED"
+            # inference = _EnsembleInference(models=models,
+            #                                ensemble_mode=ensemble_mode,
+            #                                constant_length_ratio=constant_length_ratio,
+            #                                softmax_temperature=softmax_temperature)
+
+        global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
+        search = BeamSearch(
+            beam_size=beam_size,
+            # dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
+            # TODO
+            dtype=pt.float32,
+            bos_id=C.BOS_ID,
+            eos_id=C.EOS_ID,
+            device=device,
+            output_vocab_size=models[0].output_layer_vocab_size,
+            beam_search_stop=beam_search_stop,
+            scorer=scorer,
+            sample=sample,
+            num_source_factors=models[0].num_source_factors,
+            num_target_factors=models[0].num_target_factors,
+            global_avoid_trie=global_avoid_trie,
+            prevent_unk=prevent_unk,
+            inference=inference
+        )
 
     return search
