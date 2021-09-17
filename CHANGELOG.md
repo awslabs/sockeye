@@ -16,6 +16,17 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 - Updated to MXnet 2.0 with Gluon 2.0 and full numpy support.
 
+## [2.3.21]
+### Added
+
+- Extended parallelization of data preparation to vocabulary and statistics creation while minimizing the overhead of sharding.
+
+## [2.3.20]
+### Added
+
+- Added debug logging for restrict_lexicon lookups
+>>>>>>> master
+
 ## [2.3.19]
 ### Changed
 

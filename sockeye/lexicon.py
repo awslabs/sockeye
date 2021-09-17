@@ -192,6 +192,7 @@ class TopKLexicon:
         """
         unique_src_ids = onp.lib.arraysetops.unique(src_ids)  # type: ignore
         trg_ids = onp.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))  # type: ignore
+        logger.debug(f"lookup: {trg_ids.shape[0]} unique targets for {unique_src_ids.shape[0]} unique sources")
         return trg_ids
 
 
