@@ -433,6 +433,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         vocab_slice_ids = pt.cat((vocab_slice_ids, pt.full((n,), fill_value=eos_id, device=device, dtype=pt.int32)),
                                  dim=0)
 
+    logger.debug(f'decoder softmax size: {vocab_slice_ids_shape}')
     return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list
 
 
@@ -505,8 +506,9 @@ class GreedySearch(pt.nn.Module):
         # target vocab for this sentence.
         if restrict_lexicon:
             source_words = pt.split(source, self.num_source_factors, dim=2)[0].squeeze(2)
-            vocab_slice_ids, _, _ = _get_vocab_slice_ids(restrict_lexicon, source_words,
-                                                         raw_constraint_list, self.eos_id, beam_size=1)
+            vocab_slice_ids, _, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon, source_words,
+                                                                           raw_constraint_list,
+                                                                           self.eos_id, beam_size=1)
 
         # (0) encode source sentence, returns a list
         model_states, _ = self._inference.encode_and_initialize(source, source_length)
