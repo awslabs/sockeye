@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [2.3.22]
+### Added
+
+- Use of the safe yaml loader for the model configuration files.
+
 ## [2.3.21]
 ### Added
 
