@@ -29,13 +29,24 @@ class TaggedYamlObjectMetaclass(yaml.YAMLObjectMetaclass):
         super().__init__(name, bases, new_kwds)
 
 
+class SafeLoaderWithTuple(yaml.SafeLoader):
+    def construct_python_tuple(self, node):
+        return tuple(self.construct_sequence(node))
+
+
+SafeLoaderWithTuple.add_constructor(
+    u'tag:yaml.org,2002:python/tuple',
+    SafeLoaderWithTuple.construct_python_tuple
+)
+
+
 @dataclass
 class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
     """
     Base configuration object YAML (de-)serialization.
     Actual Configuration should subclass this object.
     """
-    yaml_loader = yaml.UnsafeLoader  # type: ignore
+    yaml_loader = SafeLoaderWithTuple  # type: ignore
 
     def save(self, fname: str):
         """
@@ -56,7 +67,7 @@ class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
         :return: Configuration.
         """
         with open(fname) as inp:
-            obj = yaml.load(inp, Loader=yaml.UnsafeLoader)  # type: ignore
+            obj = yaml.load(inp, Loader=SafeLoaderWithTuple)  # type: ignore
             return obj
 
     def copy(self, **kwargs):
