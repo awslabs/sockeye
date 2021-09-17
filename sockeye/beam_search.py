@@ -498,7 +498,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
         raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                raw_constraint_list]
-    # Pad to a multiple of 8.
+    # pad to a multiple of 8.
     vocab_slice_ids = np.pad(vocab_slice_ids, (0, 7 - ((len(vocab_slice_ids) - 1) % 8)),
                              mode='constant', constant_values=eos_id)
 
@@ -512,6 +512,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         vocab_slice_ids = np.concatenate((vocab_slice_ids, np.full((n,), fill_value=eos_id, ctx=ctx, dtype='int32')),
                                          axis=0)
 
+    logger.debug(f'decoder softmax size: {vocab_slice_ids_shape}')
     return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list
 
 
@@ -587,8 +588,9 @@ class GreedySearch(gluon.Block):
         # target vocab for this sentence.
         if restrict_lexicon:
             source_words = np.squeeze(np.split(source, self.num_source_factors, axis=2)[0], axis=2)
-            vocab_slice_ids, _, _ = _get_vocab_slice_ids(restrict_lexicon, source_words,
-                                                         raw_constraint_list, self.eos_id, beam_size=1)
+            vocab_slice_ids, _, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon, source_words,
+                                                                           raw_constraint_list,
+                                                                           self.eos_id, beam_size=1)
 
         # (0) encode source sentence, returns a list
         model_states, _ = self._inference.encode_and_initialize(source, source_length)

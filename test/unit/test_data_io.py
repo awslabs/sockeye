@@ -123,7 +123,7 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
             for sequence in sequences:
                 print(sequence, file=f)
 
-        vocabulary = vocab.build_vocab(sequences) if use_vocab else None
+        vocabulary = vocab.build_pruned_vocab(vocab.count_tokens(sequences)) if use_vocab else None
 
         reader = data_io.SequenceReader(path, vocabulary=vocabulary, add_bos=add_bos, add_eos=add_eos)
 
@@ -514,7 +514,7 @@ def test_get_training_data_iters():
                             test_line_count, test_line_count_empty,
                             test_max_length - C.SPACE_FOR_XOS) as data:
         # tmp common vocab
-        vcb = vocab.build_from_paths([data['train_source'], data['train_target']])
+        vcb = vocab.build_pruned_vocab(vocab.build_from_paths([data['train_source'], data['train_target']])) 
 
         train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=[data['train_source']],

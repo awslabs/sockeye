@@ -16,7 +16,8 @@ from unittest import mock
 from collections import Counter
 
 import sockeye.constants as C
-from sockeye.vocab import (build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab, \
+
+from sockeye.vocab import (count_tokens, build_pruned_vocab, get_ordered_tokens_from_vocab, is_valid_vocab, \
     _get_sorted_source_vocab_fnames, build_raw_vocab, merge_raw_vocabs)
 
 
@@ -57,7 +58,8 @@ test_vocab = [
 
 @pytest.mark.parametrize("data,size,min_count,expected", test_vocab)
 def test_build_vocab(data, size, min_count, expected):
-    vocab = build_vocab(data=data, num_words=size, min_count=min_count)
+    raw_vocab = count_tokens(data)
+    vocab = build_pruned_vocab(raw_vocab=raw_vocab, num_words=size, min_count=min_count)
     assert vocab == expected
 
 
@@ -67,7 +69,8 @@ def test_padded_build_vocab(num_types, pad_to_multiple_of, expected_vocab_size):
     data = [" ".join('word%d' % i for i in range(num_types))]
     size = None
     min_count = 1
-    vocab = build_vocab(data, size, min_count, pad_to_multiple_of=pad_to_multiple_of)
+    raw_vocab = count_tokens(data)
+    vocab = build_pruned_vocab(raw_vocab=raw_vocab, num_words=size, min_count=min_count, pad_to_multiple_of=pad_to_multiple_of)
     assert len(vocab) == expected_vocab_size
 
 
@@ -86,7 +89,8 @@ test_constants = [
 
 @pytest.mark.parametrize("data,size,min_count,constants", test_constants)
 def test_constants_in_vocab(data, size, min_count, constants):
-    vocab = build_vocab(data, size, min_count)
+    raw_vocab = count_tokens(data)
+    vocab = build_pruned_vocab(raw_vocab=raw_vocab, num_words=size, min_count=min_count)
     for const in constants:
         assert const in vocab
 
