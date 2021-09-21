@@ -25,7 +25,6 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Added
 
 - Added debug logging for restrict_lexicon lookups
->>>>>>> master
 
 ## [2.3.19]
 ### Changed
