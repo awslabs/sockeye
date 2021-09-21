@@ -19,7 +19,7 @@ from collections import Counter
 from contextlib import ExitStack
 from functools import reduce
 from itertools import chain, islice
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Callable, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Callable
 
 from sockeye.log import setup_main_logger
 from . import constants as C
@@ -32,23 +32,18 @@ Vocab = Dict[str, int]
 InverseVocab = Dict[int, str]
 
 
-def build_from_paths(paths: Union[Sequence[str], str]) -> Counter:
+def count_tokens_for_path(path: str) -> Counter:
     """
-    :param paths: List of paths to files with one sentence per line.
+    :param path: Path to file with one sentence per line.
     :return: Token counter.
     """
     with ExitStack() as stack:
-        logger.info("Building vocabulary from dataset(s): %s", paths)
-        if isinstance(paths, List):
-            files = (stack.enter_context(utils.smart_open(path, mode='rt')) for path in paths)
-        elif isinstance(paths, str):
-            files = stack.enter_context(utils.smart_open(paths, mode='rt'))
-        else:
-            raise ValueError("Expected str or List[str].")
-        return count_tokens(chain(*files))
+        lines = stack.enter_context(utils.smart_open(path, mode='rt'))
+        return count_tokens(lines)
 
-def build_from_shards(paths: Iterable[Union[Sequence[str], str]], num_words: Optional[int] = None, min_count: int = 1,
-                      pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:
+
+def build_from_paths(paths: Iterable[str], num_words: Optional[int] = None, min_count: int = 1,
+                     pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:
     """
     Creates a vocabulary mapping from words to ids from shard paths to files in sentence-per-line format.
     A sentence is just a whitespace delimited list of tokens. Note that special symbols like the beginning of sentence (BOS)
@@ -62,7 +57,7 @@ def build_from_shards(paths: Iterable[Union[Sequence[str], str]], num_words: Opt
     :return: Word-to-id mapping.
     """
     logger.info("Building vocabulary from dataset(s): %s", " ".join(paths)) # type: ignore
-    vocab_counters = mapper(build_from_paths, paths)
+    vocab_counters = mapper(count_tokens_for_path, paths)
     # Combine shard Counters and create a single Vocab
     raw_vocab = sum(vocab_counters, Counter()) # type: Counter
     return build_pruned_vocab(raw_vocab=raw_vocab,
@@ -71,13 +66,24 @@ def build_from_shards(paths: Iterable[Union[Sequence[str], str]], num_words: Opt
                               pad_to_multiple_of=pad_to_multiple_of)
 
 
-def build_raw_vocab(data: Iterable[str]) -> Counter:
+def build_vocab(data: Iterable[str], num_words: Optional[int] = None, min_count: int = 1,
+                pad_to_multiple_of: Optional[int] = None) -> Vocab:
     """
-    Returns a token counts in data.
+    Creates a vocabulary mapping from words to ids. Increasing integer ids are assigned by word frequency,
+    using lexical sorting as a tie breaker. The only exception to this are special symbols such as the padding symbol
+    (PAD).
 
     :param data: Sequence of sentences containing whitespace-delimited tokens.
+    :param num_words: Optional maximum number of words in the vocabulary.
+    :param min_count: Minimum occurrences of words to be included in the vocabulary.
+    :param pad_to_multiple_of: If not None, pads the vocabulary to a size that is the next multiple of this int.
+    :return: Word-to-id mapping.
     """
-    return Counter(token for line in data for token in utils.get_tokens(line))
+    raw_vocab = count_tokens(data)
+    return build_pruned_vocab(raw_vocab=raw_vocab,
+                              num_words=num_words,
+                              min_count=min_count,
+                              pad_to_multiple_of=pad_to_multiple_of)
 
 
 def build_pruned_vocab(raw_vocab: Counter, num_words: Optional[int] = None, min_count: int = 1,
@@ -95,7 +101,8 @@ def build_pruned_vocab(raw_vocab: Counter, num_words: Optional[int] = None, min_
     """
     # For words with the same count, they will be ordered reverse alphabetically.
     # Not an issue since we only care for consistency
-    pruned_vocab = [w for c, w in sorted(((c, w) for w, c in raw_vocab.items() if c >= min_count), reverse=True)]
+    pruned_vocab = [w for _, w in sorted(
+        ((c, w) for w, c in raw_vocab.items() if c >= min_count and w not in C.VOCAB_SYMBOLS), reverse=True)]
 
     if num_words is not None:
         vocab = list(islice(pruned_vocab, num_words))
@@ -129,24 +136,12 @@ def build_pruned_vocab(raw_vocab: Counter, num_words: Optional[int] = None, min_
 
 def count_tokens(data: Iterable[str]) -> Counter:
     """
-    Creates raw vocabulary.
+    Count whitespace delimited tokens.
 
     :param data: Sequence of sentences containing whitespace-delimited tokens.
     :return: Token counter.
     """
-    raw_vocab = build_raw_vocab(data) - Counter(set(C.VOCAB_SYMBOLS))
-    return raw_vocab
-
-
-def merge_raw_vocabs(*raw_vocabs: Counter) -> Counter:
-    """
-    Merges multiple raw vocabularies into a single one.
-
-    :param raw_vocabs: Raw vocabularies.
-    :return: Merged raw vocabulary.
-    """
-    raw_vocab = reduce(lambda c1, c2: c1 + c2, raw_vocabs)
-    return raw_vocab
+    return Counter(token for line in data for token in utils.get_tokens(line))
 
 
 def vocab_to_json(vocab: Vocab, path: str):
@@ -273,8 +268,8 @@ def load_or_create_vocab(data: Iterable[str], vocab_path: Optional[str], num_wor
     :param data: Tuple of file paths for each shard.
     """
     if vocab_path is None:
-        return build_from_shards(paths=data, num_words=num_words, min_count=word_min_count,
-                                 pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)
+        return build_from_paths(paths=data, num_words=num_words, min_count=word_min_count,
+                                pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)
     else:
         return vocab_from_json(vocab_path)
 
@@ -338,11 +333,11 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
             utils.check_condition(word_min_count_source == word_min_count_target,
                                   "A shared vocabulary requires the minimum word count for source and target "
                                   "to be the same.")
-            vocab_source = vocab_target = build_from_shards(paths=shard_source_sentence_paths + shard_target_sentence_paths,
-                                                            num_words=num_words_source,
-                                                            min_count=word_min_count_source,
-                                                            pad_to_multiple_of=pad_to_multiple_of,
-                                                            mapper=mapper)
+            vocab_source = vocab_target = build_from_paths(paths=shard_source_sentence_paths + shard_target_sentence_paths,
+                                                           num_words=num_words_source,
+                                                           min_count=word_min_count_source,
+                                                           pad_to_multiple_of=pad_to_multiple_of,
+                                                           mapper=mapper)
 
         else:
             vocab_path = source_vocab_path if source_vocab_path is not None else target_vocab_path
@@ -453,13 +448,15 @@ def prepare_vocab(args: argparse.Namespace):
     setup_main_logger(file_logging=not args.no_logfile, console=not args.quiet,
                       path="%s.%s" % (args.output, C.LOG_NAME))
 
-    vocab = build_from_shards(args.inputs,
-                              num_words=num_words,
-                              min_count=word_min_count,
-                              pad_to_multiple_of=args.pad_vocab_to_multiple_of,
-                              mapper=map)
-    logger.info("Vocabulary size: %d ", len(vocab))
-    vocab_to_json(vocab, args.output)
+
+    with utils.create_pool(args.max_processes) as pool:
+        vocab = build_from_paths(args.inputs,
+                                num_words=num_words,
+                                min_count=word_min_count,
+                                pad_to_multiple_of=args.pad_vocab_to_multiple_of,
+                                mapper=pool.map)
+        logger.info("Vocabulary size: %d ", len(vocab))
+        vocab_to_json(vocab, args.output)
 
 
 if __name__ == "__main__":

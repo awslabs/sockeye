@@ -530,6 +530,13 @@ def add_bucketing_args(params):
                              'length is X+1). Use "x:x" to specify separate values for src&tgt. Default: %(default)s.')
 
 
+def add_process_pool_args(params):
+    params.add_argument('--max-processes',
+                        type=int_greater_or_equal(1),
+                        default=1,
+                        help='Process the shards in parallel using max-processes processes.')
+
+
 def add_prepare_data_cli_args(params):
     add_training_data_args(params, required=True)
     add_vocab_args(params)
@@ -554,12 +561,9 @@ def add_prepare_data_cli_args(params):
     params.add_argument('--output', '-o',
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
-    params.add_argument('--max-processes',
-                        type=int_greater_or_equal(1),
-                        default=1,
-                        help='Process the shards in parallel using max-processes processes.')
 
     add_logging_args(params)
+    add_process_pool_args(params)
 
 
 def add_device_args(params):
@@ -1412,6 +1416,7 @@ def add_build_vocab_args(params):
     params.add_argument('-i', '--inputs', required=True, nargs='+', help='List of text files to build vocabulary from.')
     params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
     add_vocab_args(params)
+    add_process_pool_args(params)
 
 
 def add_init_embedding_args(params):
