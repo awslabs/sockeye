@@ -448,10 +448,10 @@ def prepare_vocab(args: argparse.Namespace):
 
     with utils.create_pool(args.max_processes) as pool:
         vocab = build_from_paths(args.inputs,
-                                num_words=num_words,
-                                min_count=word_min_count,
-                                pad_to_multiple_of=args.pad_vocab_to_multiple_of,
-                                mapper=pool.map)
+                                 num_words=num_words,
+                                 min_count=word_min_count,
+                                 pad_to_multiple_of=args.pad_vocab_to_multiple_of,
+                                 mapper=pool.map)
         logger.info("Vocabulary size: %d ", len(vocab))
         vocab_to_json(vocab, args.output)
 
