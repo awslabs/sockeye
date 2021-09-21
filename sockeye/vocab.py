@@ -16,8 +16,6 @@ import json
 import logging
 import os
 from collections import Counter
-from contextlib import ExitStack
-from functools import reduce
 from itertools import chain, islice
 from typing import Dict, Iterable, List, Optional, Tuple, Callable
 
@@ -37,8 +35,7 @@ def count_tokens_for_path(path: str) -> Counter:
     :param path: Path to file with one sentence per line.
     :return: Token counter.
     """
-    with ExitStack() as stack:
-        lines = stack.enter_context(utils.smart_open(path, mode='rt'))
+    with utils.smart_open(path, mode='rt') as lines:
         return count_tokens(lines)
 
 
