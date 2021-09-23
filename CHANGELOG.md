@@ -11,7 +11,7 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [2.4.0]
+## [2.3.99]
 ### Changed
 
 - Updated to MXnet 2.0 with Gluon 2.0 and full numpy support.
