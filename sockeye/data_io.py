@@ -493,9 +493,9 @@ class RawParallelDatasetLoader:
         num_source_factors = len(source_iterables)
         num_target_factors = len(target_iterables)
 
-        data_source = [np.full((num_samples, source_len, num_source_factors), self.pad_id, dtype=self.dtype)
+        data_source = [onp.full((num_samples, source_len, num_source_factors), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-        data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
+        data_target = [onp.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
 
         bucket_sample_index = [0 for _ in self.buckets]
@@ -540,6 +540,10 @@ class RawParallelDatasetLoader:
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
 
             bucket_sample_index[buck_index] += 1
+
+        for i in range(len(data_source)):
+            data_source[i] = npx.from_numpy(data_source[i], zero_copy=True)
+            data_target[i] = npx.from_numpy(data_target[i], zero_copy=True)
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
