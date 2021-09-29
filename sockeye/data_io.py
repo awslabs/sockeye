@@ -136,17 +136,11 @@ def get_bucket(seq_len: int, buckets: List[int]) -> Optional[int]:
     return buckets[bucket_idx]
 
 
+@dataclass
 class BucketBatchSize:
-    """
-    :param bucket: The corresponding bucket.
-    :param batch_size: Number of sequences in each batch.
-    :param average_target_words_per_batch: Approximate number of target non-padding tokens in each batch.
-    """
-
-    def __init__(self, bucket: Tuple[int, int], batch_size: int, average_target_words_per_batch: float) -> None:
-        self.bucket = bucket
-        self.batch_size = batch_size
-        self.average_target_words_per_batch = average_target_words_per_batch
+    bucket: Tuple[int, int]  # The corresponding bucket.
+    batch_size: int  # Number of sequences in each batch.
+    average_target_words_per_batch: float  # Approximate number of target non-padding tokens in each batch.
 
 
 def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],

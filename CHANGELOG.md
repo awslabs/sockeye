@@ -11,10 +11,17 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+
 ## [2.3.99]
 ### Changed
 
 - Updated to MXnet 2.0 with Gluon 2.0 and full numpy support.
+
+## [2.3.22]
+### Fixed
+
+- The previous commit introduced a regression for vocab creation. The results was that the vocabulary was created on the input characters rather than on tokens.
+
 
 ## [2.3.21]
 ### Added
