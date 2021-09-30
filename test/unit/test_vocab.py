@@ -16,22 +16,14 @@ from unittest import mock
 from collections import Counter
 
 import sockeye.constants as C
+from sockeye.vocab import (build_vocab, get_ordered_tokens_from_vocab, is_valid_vocab, \
+    _get_sorted_source_vocab_fnames, count_tokens)
 
-from sockeye.vocab import (count_tokens, build_pruned_vocab, get_ordered_tokens_from_vocab, is_valid_vocab, \
-    _get_sorted_source_vocab_fnames, build_raw_vocab, merge_raw_vocabs)
 
-
-def test_build_raw_vocab():
+def test_count_tokens():
     data = ["a b c", "c d e"]
-    raw_vocab = build_raw_vocab(data)
+    raw_vocab = count_tokens(data)
     assert raw_vocab == Counter({"a": 1, "b": 1, "c": 2, "d": 1, "e": 1})
-
-
-def test_merge_raw_vocabs():
-    v1 = build_raw_vocab(["a b c", "c d e"])
-    v2 = build_raw_vocab(["a b c", "c d g"])
-    raw_vocab = merge_raw_vocabs(v1, v2)
-    assert raw_vocab == Counter({"a": 2, "b": 2, "c": 4, "d": 2, "e": 1, "g": 1})
 
 
 test_vocab = [
@@ -53,13 +45,15 @@ test_vocab = [
          {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4}),
         (["one one two three ", "one two three"], 2, 1,
          {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "one": 4, "two": 5}),
+         # Example 3 (including special symbols)
+        (["one two three <s> <s>", "one two three <s> <s>"], None, 1,
+         {"<pad>": 0, "<unk>": 1, "<s>": 2, "</s>": 3, "two": 4, "three": 5, "one": 6}),
         ]
 
 
 @pytest.mark.parametrize("data,size,min_count,expected", test_vocab)
 def test_build_vocab(data, size, min_count, expected):
-    raw_vocab = count_tokens(data)
-    vocab = build_pruned_vocab(raw_vocab=raw_vocab, num_words=size, min_count=min_count)
+    vocab = build_vocab(data=data, num_words=size, min_count=min_count)
     assert vocab == expected
 
 
@@ -69,8 +63,7 @@ def test_padded_build_vocab(num_types, pad_to_multiple_of, expected_vocab_size):
     data = [" ".join('word%d' % i for i in range(num_types))]
     size = None
     min_count = 1
-    raw_vocab = count_tokens(data)
-    vocab = build_pruned_vocab(raw_vocab=raw_vocab, num_words=size, min_count=min_count, pad_to_multiple_of=pad_to_multiple_of)
+    vocab = build_vocab(data, size, min_count, pad_to_multiple_of=pad_to_multiple_of)
     assert len(vocab) == expected_vocab_size
 
 
@@ -89,8 +82,7 @@ test_constants = [
 
 @pytest.mark.parametrize("data,size,min_count,constants", test_constants)
 def test_constants_in_vocab(data, size, min_count, constants):
-    raw_vocab = count_tokens(data)
-    vocab = build_pruned_vocab(raw_vocab=raw_vocab, num_words=size, min_count=min_count)
+    vocab = build_vocab(data, size, min_count)
     for const in constants:
         assert const in vocab
 
