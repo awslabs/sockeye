@@ -1984,18 +1984,15 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.data = self.data.permute(self.data_permutations)
 
 
+@dataclass
 class Batch:
-
-    __slots__ = ['source', 'source_length', 'target', 'target_length', 'labels', 'samples', 'tokens']
-
-    def __init__(self, source, source_length, target, target_length, labels, samples, tokens):
-        self.source = source
-        self.source_length = source_length
-        self.target = target
-        self.target_length = target_length
-        self.labels = labels
-        self.samples = samples
-        self.tokens = tokens
+    source: mx.nd.NDArray
+    source_length: mx.nd.NDArray
+    target: mx.nd.NDArray
+    target_length: mx.nd.NDArray
+    labels: Dict[str, mx.nd.NDArray]
+    samples: int
+    tokens: int
 
     def split_and_load(self, ctx: List[mx.context.Context]) -> 'Batch':
         source = mx.gluon.utils.split_and_load(self.source, ctx, batch_axis=0)
