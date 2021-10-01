@@ -587,6 +587,8 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
             pos_embedding = self.weight.unsqueeze(0)[:, :data.size()[1]]
         else:
             # (batch_size or 1, seq_len, num_embed)
+            # NOTE: temporary fix until we decide how to handle output steps > max_supported_seq_len_target
+            steps = pt.clip(steps, max=self.max_seq_len - 1)
             pos_embedding = pt.nn.functional.embedding(steps, self.weight)
 
         if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
