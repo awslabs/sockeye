@@ -217,7 +217,7 @@ class PyTorchLengthRatio(pt.nn.Module):
         :return: Predictions of the ratio length(hypothesis)/length(reference). Shape(n, 1).
         """
         # True when outside length. Shape: (n, source_encoded_length, 1)
-        mask = pt.arange(source_encoded.size()[1])[None, :, None] >= source_encoded_length[:, None, None]
+        mask = pt.arange(source_encoded.size()[1], device=source_encoded_length.device)[None, :, None] >= source_encoded_length[:, None, None]
         source_masked = source_encoded.masked_fill(mask, 0.)
 
         # data: (n, hidden_size)
@@ -311,9 +311,9 @@ class PyTorchDotAttentionCell(pt.nn.Module):
             # this is a temporary implementation that is likely slow. Once fully ported, we should prepare the mask below
             # once for the encoder/decoder (like the bias). Similarly, the bias code path above should probably use masked_fill eventually.
             klen = logits.size()[2]
-            mask = pt.arange(klen)[None, :] < lengths[:, None]
+            mask = pt.arange(klen, device=lengths.device)[None, :] < lengths[:, None]
             mask = mask.unsqueeze(1)  # (n*h, 1, klen)
-            logits = logits.masked_fill(~mask, -C.LARGE_VALUES[self._dtype])
+            logits = logits.masked_fill(~mask, -C.LARGE_VALUES[logits.dtype])
 
         probs = pt.nn.functional.softmax(logits, dim=-1)
 
@@ -562,9 +562,10 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
         self.scale_down_positions = scale_down_positions
 
         if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
-            self.weight = pytorch_get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
+            weight = pytorch_get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
             if self.scale_down_positions:
-                self.weight *= self.num_embed ** -0.5
+                weight *= self.num_embed ** -0.5
+            self.weight = pt.nn.Parameter(weight, requires_grad=False)
         elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
             self.weight = pt.nn.Parameter(pt.Tensor(self.max_seq_len, self.num_embed))
         else:

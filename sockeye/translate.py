@@ -27,7 +27,7 @@ from contextlib import ExitStack
 from typing import Dict, Generator, List, Optional, Union
 
 from sockeye.lexicon import TopKLexicon
-from sockeye.log import setup_main_logger
+from sockeye.log import setup_main_logger, log_torch_version
 from sockeye.output_handler import get_output_handler, OutputHandler
 from sockeye.utils import determine_context, log_basic_info, check_condition, grouper
 from . import arguments
@@ -35,7 +35,6 @@ from . import constants as C
 from . import data_io
 
 from . import utils
-from .model import load_models
 
 logger = logging.getLogger(__name__)
 
@@ -79,14 +78,27 @@ def run_translate(args: argparse.Namespace):
                                     lock_dir=args.lock_dir,
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
-
-        models, source_vocabs, target_vocabs = load_models(context=context,
-                                                           model_folders=args.models,
-                                                           checkpoints=args.checkpoints,
-                                                           dtype=args.dtype,
-                                                           hybridize=hybridize,
-                                                           inference_only=True,
-                                                           mc_dropout=args.mc_dropout)
+        if args.use_pytorch:
+            log_torch_version(logger)
+            import torch as pt
+            from sockeye.model_pt import load_models
+            # TODO: placeholder
+            device = pt.device('cpu' if args.use_cpu else f'cuda:0')
+            models, source_vocabs, target_vocabs = load_models(device=device,
+                                                               model_folders=args.models,
+                                                               checkpoints=args.checkpoints,
+                                                               dtype=args.dtype,
+                                                               inference_only=True,
+                                                               mc_dropout=args.mc_dropout)
+        else:
+            from sockeye.model import load_models
+            models, source_vocabs, target_vocabs = load_models(context=context,
+                                                               model_folders=args.models,
+                                                               checkpoints=args.checkpoints,
+                                                               dtype=args.dtype,
+                                                               hybridize=hybridize,
+                                                               inference_only=True,
+                                                               mc_dropout=args.mc_dropout)
 
         restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
         if args.restrict_lexicon is not None:
@@ -123,11 +135,7 @@ def run_translate(args: argparse.Namespace):
             raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
         if args.use_pytorch:
-            import torch as pt
             from . import inference_pt
-            from .model_pt import make_pytorch_model_from_mxnet_model
-            logger.info("=============== USING PYTORCH MODEL ===============")
-            models = [make_pytorch_model_from_mxnet_model(model) for model in models]
             for model in models:
                 model.eval()
 
@@ -136,7 +144,7 @@ def run_translate(args: argparse.Namespace):
                 length_penalty_beta=args.length_penalty_beta,
                 brevity_penalty_weight=brevity_penalty_weight)
 
-            translator = inference_pt.Translator(device=pt.device('cpu'),
+            translator = inference_pt.Translator(device=device,
                                                  ensemble_mode=args.ensemble_mode,
                                                  scorer=scorer,
                                                  batch_size=args.batch_size,

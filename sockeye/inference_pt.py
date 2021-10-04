@@ -169,8 +169,7 @@ class Translator:
                  prevent_unk: bool = False,
                  greedy: bool = False) -> None:
         self.device = device
-        #self.dtype = C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
-        self.dtype = pt.float32  # TODO
+        self.dtype = pt.float32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
         self._scorer = scorer
         self.batch_size = batch_size
         self.beam_size = beam_size
@@ -565,11 +564,11 @@ class Translator:
         :param beam_histories: The beam histories for each sentence in the batch.
         :return: List of Translation objects containing all relevant information.
         """
-        best_hyp_indices = best_hyp_indices.numpy()
-        best_word_indices = best_word_indices.numpy()
-        seq_scores = seq_scores.numpy()
-        lengths = lengths.numpy()
-        estimated_reference_lengths = estimated_reference_lengths.numpy() if estimated_reference_lengths is not None else None
+        best_hyp_indices = best_hyp_indices.cpu().numpy()
+        best_word_indices = best_word_indices.cpu().numpy()
+        seq_scores = seq_scores.cpu().numpy()
+        lengths = lengths.cpu().numpy()
+        estimated_reference_lengths = estimated_reference_lengths.cpu().numpy() if estimated_reference_lengths is not None else None
         batch_size = best_hyp_indices.shape[0] // self.beam_size
         nbest_translations = []  # type: List[List[Translation]]
         histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List

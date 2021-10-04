@@ -14,19 +14,19 @@
 import copy
 import logging
 import os
+import time
 from functools import lru_cache
-from typing import cast, Dict, Optional, Tuple, Union, List
+from typing import cast, Dict, Optional, Tuple, List
 
 import mxnet as mx
 import torch as pt
-from mxnet import gluon, npx
+from mxnet import gluon
 
 from sockeye import __version__
 from . import constants as C
 from . import decoder_pt
 from . import encoder_pt
 from . import layers_pt
-from . import quantization
 from . import utils
 from . import vocab
 from .encoder import FactorConfig
@@ -60,7 +60,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         super().__init__()
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
-        self.dtype = config.dtype
+        self.dtype = pt.float32  # config.dtype == C.DTYPE_FP32
         self.mc_dropout = mc_dropout
         self._output_layer_factor_format_string = 'output_layer_factor%i'
         self.forward_pass_cache_size = forward_pass_cache_size
@@ -113,8 +113,11 @@ class PyTorchSockeyeModel(pt.nn.Module):
             self.length_ratio.weights_from_mxnet_block(block_mx.length_ratio)
 
     def cast(self, dtype):
-        self.dtype = dtype
-        super().cast(dtype)
+        if dtype == C.DTYPE_FP16:
+            self.half()
+            self.dtype = pt.float16
+        else:
+            self.dtype = pt.float32
 
     def state_structure(self):
         return self.decoder.state_structure()
@@ -302,7 +305,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
 
     def load_parameters(self,
                         filename: str,
-                        ctx: Union[mx.Context, List[mx.Context]] = None,
+                        device: Optional[pt.device] = None,
                         allow_missing: bool = False,
                         ignore_extra: bool = False,
                         cast_dtype: bool = False,
@@ -314,8 +317,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         ----------
         filename : str
             Path to parameter file.
-        ctx : Context or list of Context, default cpu()
-            Context(s) to initialize loaded parameters on.
+        device : Device
+            Device(s) to initialize loaded parameters on.
         allow_missing : bool, default False
             Whether to silently skip loading parameters not represents in the file.
         ignore_extra : bool, default False
@@ -333,19 +336,16 @@ class PyTorchSockeyeModel(pt.nn.Module):
         `Saving and Loading Gluon Models \
         <https://mxnet.incubator.apache.org/tutorials/gluon/save_load_params.html>`_
         """
-        assert ctx is None, "not implemented yet"
-        assert cast_dtype is False, "not implemented yet"
-        assert dtype_source == 'current', "not implemented yet"
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                         "This is either not a model directory or the first training "
                                                         "checkpoint has not happened yet." % filename)
-        state_dict = pt.load(filename)
+        state_dict = pt.load(filename, map_location=device)
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         if not allow_missing:
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:
             utils.check_condition(not unexpected, f"extra keys: {unexpected}")
-        logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
+        logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
     def set_parameters(self,  # TODO
                        new_params: Dict[str, gluon.Parameter],
@@ -475,6 +475,9 @@ class PyTorchSockeyeModel(pt.nn.Module):
 
 
 def make_pytorch_model_from_mxnet_model(mx_model: SockeyeModel) -> PyTorchSockeyeModel:
+    """
+    Constructs a PyTorchSockeyeModel from a given SockeyeModel and copies its parameters in-memory.
+    """
     model = PyTorchSockeyeModel(config=mx_model.config,
                                 inference_only=mx_model.decoder.inference_only,
                                 mc_dropout=mx_model.mc_dropout,
@@ -482,3 +485,205 @@ def make_pytorch_model_from_mxnet_model(mx_model: SockeyeModel) -> PyTorchSockey
     assert not mx_model.train_decoder_only, 'not implemented yet'
     model.weights_from_mxnet_block(mx_model)
     return model
+
+
+def load_model(model_folder: str,
+               device: pt.device,
+               dtype: Optional[str] = None,
+               checkpoint: Optional[int] = None,
+               inference_only: bool = False,
+               train_decoder_only: bool = False,
+               mc_dropout: bool = False,
+               for_disk_saving: Optional[str] = None,
+               allow_missing: bool = False,
+               set_grad_req_null: bool = True,
+               forward_pass_cache_size: int = 0) -> Tuple[PyTorchSockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
+    """
+    Load a model from model_folder.
+
+    :param model_folder: Model folder.
+    :param device: Torch device to load model to.
+    :param checkpoint: Checkpoint to use. If none, uses best checkpoint.
+    :param dtype: Optional data type to use. If None, will be inferred from stored model.
+    :param inference_only: Use the model only for inference, enabling optimizations.
+    :param train_decoder_only: Training will only update the decoder. Disable
+           autograd for encoder and embeddings to save memory.
+    :param mc_dropout: Turn on dropout during inference.
+    :param for_disk_saving: For saving quantized models to disk.
+           None: load as usual and the model will work.
+           int8: The model loaded into RAM will not work, but is suitable for
+               writing to disk in quantized format (including scaling factors).
+           float32: The model loaded into RAM will not work, but is suitable
+               for writing to disk as float32 with precomputed scaling factors.
+    :param allow_missing: Allow missing parameters in the loaded model.
+    :param set_grad_req_null: Set grad_req to null for model parameters.
+    :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
+    :return: List of models, source vocabularies, target vocabularies.
+    """
+    assert not train_decoder_only, 'not implemented yet'
+    assert not forward_pass_cache_size, 'not implemented yet'
+    assert not for_disk_saving, 'not implemented yet'
+    assert dtype in (None, C.DTYPE_FP32, C.DTYPE_FP16), 'not implemented yet'
+
+    source_vocabs = vocab.load_source_vocabs(model_folder)
+    target_vocabs = vocab.load_target_vocabs(model_folder)
+    model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
+    logger.info("Model version: %s", model_version)
+    utils.check_version(model_version)
+    model_config = PyTorchSockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+
+    if inference_only and not mc_dropout:
+        logger.info("Disabling dropout layers for performance reasons")
+        model_config.disable_dropout()
+
+    if mc_dropout:
+        logger.info("Monte Carlo dropout enabled, inference output will be non-deterministic.")
+
+    if checkpoint is None:
+        params_fname = os.path.join(model_folder, f'{C.PARAMS_BEST_NAME}.{C.TORCH_SUFFIX}')
+    else:
+        params_fname = os.path.join(model_folder, f'{C.PARAMS_NAME % checkpoint}.{C.TORCH_SUFFIX}')
+    assert os.path.exists(params_fname), "Torch parameters not found. Run sockeye.mx_to_pt first."
+
+    # if (dtype == C.DTYPE_INT8 or
+    #     model_config.dtype == C.DTYPE_INT8 or
+    #     for_disk_saving is not None) and "intgemm_fully_connected" not in dir(npx):
+    #     # We're going to use int8 but it's not compiled into mxnet.
+    #     path = os.path.abspath(model_config.intgemm_custom_lib)
+    #     try:
+    #         mx.library.load(path)
+    #     except mx.base.MXNetError:
+    #         raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a "
+    #                                   "custom operator library was not found in `%s`.  Compile the custom "
+    #                                   "operator then set the path using intgemm_custom_lib in the config file." % path)
+
+    # Are we converting the model to 8-bit?
+    quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
+    if quantizing:
+        model_config.dtype = C.DTYPE_INT8  # Ensure the scaling factor parameters are created.
+
+    model = PyTorchSockeyeModel(model_config, inference_only=inference_only,
+                                mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
+
+    # if model_config.dtype != C.DTYPE_INT8:
+    #     # If model_config.dtype is int8, then the above model construction
+    #     # (which also used model_config) already set everything to the correct
+    #     # mix of float32 and int8.  Cast would try to make everything int8.
+    #     model.cast(model_config.dtype)
+
+    if quantizing:
+        logger.info("Model dtype: quantizing from float32 to int8")
+        allow_missing = True  # The scaling factors are missing
+        cast_dtype = True
+        dtype_source = 'saved'
+    elif dtype is None or dtype == model_config.dtype:
+        logger.info("Model dtype: %s" % model_config.dtype)
+        allow_missing = allow_missing
+        cast_dtype = False
+        dtype_source = 'saved'
+    else:
+        logger.info("Model dtype: overridden to %s" % dtype)
+        model.cast(dtype)
+        allow_missing = allow_missing
+        cast_dtype = True
+        dtype_source = 'current'
+
+    model.load_parameters(filename=params_fname,
+                          device=device,
+                          allow_missing=allow_missing,
+                          ignore_extra=True,  # Scaling factors may be present in float32 models.
+                          cast_dtype=cast_dtype,
+                          dtype_source=dtype_source)
+
+    model.to(device)
+
+    if set_grad_req_null:
+        model.eval()
+
+    # if for_disk_saving is not None:
+    #     # Saving scaling factors and possibly int8 values to disk.
+    #     if not quantizing:
+    #         raise RuntimeError("Model is already quantized and for_disk_saving is set.")
+    #     quantization.convert_weights_disk_format(params, for_disk_saving)
+    #     model.config.dtype = for_disk_saving
+    #     # TODO: check for missing parameters somehow (we allowed scaling to be missing)
+    # if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
+    #     # Disk format to CPU-dependent format.
+    #     quantization.convert_weights_cpu_dependent(params)
+
+    utils.check_condition(model.num_source_factors == len(source_vocabs),
+                          "Number of loaded source vocabularies (%d) does not match "
+                          "number of source factors for model '%s' (%d)" % (len(source_vocabs), model_folder,
+                                                                            model.num_source_factors))
+    utils.check_condition(model.num_target_factors == len(target_vocabs),
+                          "Number of loaded target vocabularies (%d) does not match "
+                          "number of target factors for model '%s' (%d)" % (len(target_vocabs), model_folder,
+                                                                            model.num_target_factors))
+    return model, source_vocabs, target_vocabs
+
+
+def load_models(device: pt.device,
+                model_folders: List[str],
+                checkpoints: Optional[List[int]] = None,
+                dtype: Optional[str] = C.DTYPE_FP32,
+                inference_only: bool = False,
+                train_decoder_only: bool = False,
+                mc_dropout: bool = False,
+                allow_missing: bool = False,
+                set_grad_req_null: bool = True,
+                forward_pass_cache_size: int = 0) -> Tuple[List[PyTorchSockeyeModel],
+                                                           List[vocab.Vocab], List[vocab.Vocab]]:
+    """
+    Loads a list of models for inference.
+
+    :param device: PyTorch device.
+    :param model_folders: List of model folders to load models from.
+    :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
+    :param dtype: Optional data type to use. If None, will be inferred from stored model.
+    :param inference_only: Use the model only for inference, enabling optimizations.
+    :param train_decoder_only: Training will only update the decoder. Disable
+           autograd for encoder and embeddings to save memory.
+    :param mc_dropout: Turn on dropout during inference.
+    :param allow_missing: Allow missing parameters in the loaded models.
+    :param set_grad_req_null: Set grad_req to null for model parameters.
+    :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
+    :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
+    """
+    logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
+    load_time_start = time.time()
+    models = []  # type: List[PyTorchSockeyeModel]
+    source_vocabs = []  # type: List[List[vocab.Vocab]]
+    target_vocabs = []  # type: List[List[vocab.Vocab]]
+
+    if checkpoints is None:
+        checkpoints = [None] * len(model_folders)
+    else:
+        utils.check_condition(len(checkpoints) == len(model_folders), "Must provide checkpoints for each model")
+
+    for model_folder, checkpoint in zip(model_folders, checkpoints):
+        model, src_vcbs, trg_vcbs = load_model(model_folder,
+                                               device=device,
+                                               dtype=dtype,
+                                               checkpoint=checkpoint,
+                                               inference_only=inference_only,
+                                               train_decoder_only=train_decoder_only,
+                                               mc_dropout=mc_dropout,
+                                               allow_missing=allow_missing,
+                                               set_grad_req_null=set_grad_req_null,
+                                               forward_pass_cache_size=forward_pass_cache_size)
+        models.append(model)
+        source_vocabs.append(src_vcbs)
+        target_vocabs.append(trg_vcbs)
+
+    first_model_vocabs = source_vocabs[0]
+    for fi in range(len(first_model_vocabs)):
+        utils.check_condition(vocab.are_identical(*[source_vocabs[i][fi] for i in range(len(source_vocabs))]),
+                              "Source vocabulary ids do not match. Factor %d" % fi)
+    first_model_vocabs = target_vocabs[0]
+    for fi in range(len(first_model_vocabs)):
+        utils.check_condition(vocab.are_identical(*[target_vocabs[i][fi] for i in range(len(target_vocabs))]),
+                              "Target vocabulary ids do not match. Factor %d" % fi)
+
+    load_time = time.time() - load_time_start
+    logger.info("%d model(s) loaded in %.4fs", len(models), load_time)
+    return models, source_vocabs[0], target_vocabs[0]

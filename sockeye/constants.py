@@ -16,6 +16,7 @@ Defines various constants used throughout the project
 """
 import sys
 from typing import Dict
+import torch as pt
 
 from mxnet import gluon, np
 
@@ -196,6 +197,7 @@ PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
 PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
+TORCH_SUFFIX = "pt"
 DECODE_OUT_NAME = "decode.output.{{factor}}.{checkpoint:05d}"
 DECODE_IN_NAME = "decode.source.{factor}"
 DECODE_REF_NAME = "decode.target.{factor}"
@@ -358,11 +360,13 @@ LARGE_VALUES = {
     # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP16: 49152.0,
     np.float16: 49152.0,
+    pt.float16: 49152.0,
 
     # Will be rounded to 1.0e8.
     # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
     DTYPE_FP32: LARGE_POSITIVE_VALUE,
-    np.float32: LARGE_POSITIVE_VALUE
+    np.float32: LARGE_POSITIVE_VALUE,
+    pt.float32: LARGE_POSITIVE_VALUE
 }
 LARGEST_INT = sys.maxsize
 
