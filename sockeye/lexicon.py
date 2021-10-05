@@ -21,7 +21,7 @@ from operator import itemgetter
 from typing import Dict, Generator, Tuple, Optional
 
 import mxnet as mx
-from mxnet import np, npx
+#from mxnet import np, npx
 import numpy as onp
 
 from . import arguments
@@ -51,13 +51,13 @@ def lexicon_iterator(path: str,
     with smart_open(path) as fin:
         for line in fin:
             src, trg, logprob = line.rstrip("\n").split("\t")
-            prob = np.exp(float(logprob))
+            prob = onp.exp(float(logprob))
             src_id = vocab_source.get(src, src_unk_id)
             trg_id = vocab_target.get(trg, trg_unk_id)
             yield src_id, trg_id, prob
 
 
-def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str, int]) -> np.ndarray:
+def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str, int]) -> onp.ndarray:
     """
     Loads lexical translation probabilities from a translation table of format: src, trg, logprob.
     Source words unknown to vocab_source are discarded.
@@ -72,7 +72,7 @@ def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str
     """
     src_unk_id = vocab_source[C.UNK_SYMBOL]
     trg_unk_id = vocab_target[C.UNK_SYMBOL]
-    lexicon = np.zeros((len(vocab_source), len(vocab_target)))
+    lexicon = onp.zeros((len(vocab_source), len(vocab_target)))
     n = 0
     for src_id, trg_id, prob in lexicon_iterator(path, vocab_source, vocab_target):
         if src_id == src_unk_id:
@@ -93,7 +93,7 @@ class LexiconInitializer(mx.initializer.Initializer):
     :param lexicon: Lexicon array.
     """
 
-    def __init__(self, lexicon: np.ndarray) -> None:
+    def __init__(self, lexicon: onp.ndarray) -> None:
         super().__init__()
         self.lexicon = lexicon
 
@@ -119,9 +119,9 @@ class TopKLexicon:
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         # Shape: (vocab_source_size, k), k determined at create() or load()
-        self.lex = None  # type: Optional[np.ndarray]
+        self.lex = None  # type: Optional[onp.ndarray]
         # Always allow special vocab symbols in target vocab
-        self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32')
+        self.always_allow = onp.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32')
 
     def create(self, path: str, k: int = 20):
         """
@@ -130,7 +130,7 @@ class TopKLexicon:
         :param path: Path to lexicon file.
         :param k: Number of target entries per source to keep.
         """
-        self.lex = np.zeros((len(self.vocab_source), k), dtype='int32')
+        self.lex = onp.zeros((len(self.vocab_source), k), dtype='int32')
         src_unk_id = self.vocab_source[C.UNK_SYMBOL]
         trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
         num_insufficient = 0  # number of source tokens with insufficient number of translations given k
@@ -157,7 +157,7 @@ class TopKLexicon:
 
         :param path: Path to Numpy array output file.
         """
-        npx.save(path, self.lex)
+        onp.save(path, self.lex)
         logger.info("Saved top-k lexicon to \"%s\"", path)
 
     def load(self, path: str, k: Optional[int] = None):
@@ -168,7 +168,7 @@ class TopKLexicon:
         :param k: Optionally load less items than stored in path.
         """
         load_time_start = time.time()
-        _lex = npx.load(path)
+        _lex = onp.load(path)
         loaded_k = _lex.shape[1]
         if k is not None:
             top_k = min(k, loaded_k)
@@ -177,13 +177,13 @@ class TopKLexicon:
                                "contains at most %d entries per source.", k, loaded_k)
         else:
             top_k = loaded_k
-        self.lex = np.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
+        self.lex = onp.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
         for src_id, trg_ids in enumerate(_lex):
-            self.lex[src_id, :] = np.sort(trg_ids[:top_k])
+            self.lex[src_id, :] = onp.sort(trg_ids[:top_k])
         load_time = time.time() - load_time_start
         logger.info("Loaded top-%d lexicon from \"%s\" in %.4fs.", top_k, path, load_time)
 
-    def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
+    def get_trg_ids(self, src_ids: onp.ndarray) -> onp.ndarray:
         """
         Lookup possible target ids for input sequence of source ids.
 
@@ -229,7 +229,7 @@ def inspect(args):
             continue
         ids = tokens2ids(tokens, vocab_source)
         print("Input:  n=%d" % len(tokens), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens, ids)))
-        trg_ids = lexicon.get_trg_ids(np.array(ids))
+        trg_ids = lexicon.get_trg_ids(onp.array(ids))
         tokens_trg = [vocab_target_inv.get(trg_id, C.UNK_SYMBOL) for trg_id in trg_ids]
         print("Output: n=%d" % len(tokens_trg), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens_trg, trg_ids)))
         print()

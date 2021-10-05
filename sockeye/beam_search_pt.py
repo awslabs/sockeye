@@ -410,7 +410,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
                          eos_id: int,
                          beam_size: int) -> Tuple[pt.tensor, int, List[Optional[constrained.RawConstraintList]]]:
     device = source_words.device
-    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.int().numpy()).asnumpy()
+    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.int().numpy())
     if any(raw_constraint_list):
         # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
         constraint_ids = pt.tensor(word_id for sent in raw_constraint_list for phr in sent for word_id in phr)
