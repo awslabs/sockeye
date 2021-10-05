@@ -33,6 +33,7 @@ import sockeye.score
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
+import sockeye.mx_to_pt
 
 logger = logging.getLogger(__name__)
 
@@ -342,6 +343,28 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str) -> Dict[
     # Collect test translate outputs and scores
     data['test_outputs_restricted'] = collect_translate_output_and_scores(out_path)
     assert len(data['test_outputs_restricted']) == len(data['test_outputs'])
+    return data
+
+
+def check_pytorch_translate(data: Dict[str, Any], translate_params: str) -> Dict[str, Any]:
+    # convert model to pytorch
+    convert_params = f"{sockeye.mx_to_pt.__file__} -m {data['model']}"
+    with patch.object(sys, "argv", convert_params.split()):
+        sockeye.mx_to_pt.main()
+
+    out_path = os.path.join(data['work_dir'], "out-torch.txt")
+    params = "{} {} {}".format(sockeye.translate.__file__,
+                               TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                              input=data['test_source'],
+                                                              output=out_path),
+                               translate_params)
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
+
+    # Collect test translate outputs and scores
+    data['test_outputs_torch'] = collect_translate_output_and_scores(out_path)
+    assert len(data['test_outputs_torch']) == len(data['test_outputs'])
+    assert data['test_outputs_torch'] == data['test_outputs']
     return data
 
 

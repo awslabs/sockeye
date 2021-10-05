@@ -22,9 +22,10 @@ import numpy as np
 import sockeye.score
 import sockeye.translate
 from sockeye import constants as C
-from sockeye.test_utils import run_train_translate, run_translate_restrict, TRANSLATE_PARAMS_COMMON, \
-    TRANSLATE_WITH_FACTORS_COMMON, collect_translate_output_and_scores, create_reference_constraints, \
-    SCORE_PARAMS_COMMON, SCORE_WITH_SOURCE_FACTORS_COMMON, SCORE_WITH_TARGET_FACTORS_COMMON
+from sockeye.test_utils import run_train_translate, run_translate_restrict, check_pytorch_translate, \
+    TRANSLATE_PARAMS_COMMON, TRANSLATE_WITH_FACTORS_COMMON, collect_translate_output_and_scores, \
+    create_reference_constraints, SCORE_PARAMS_COMMON, SCORE_WITH_SOURCE_FACTORS_COMMON, \
+    SCORE_WITH_TARGET_FACTORS_COMMON
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ def check_train_translate(train_params: str,
 
     # Run translate with restrict-lexicon
     data = run_translate_restrict(data, translate_params)
+
+    check_pytorch_translate(data, translate_params)
 
     # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
     # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate

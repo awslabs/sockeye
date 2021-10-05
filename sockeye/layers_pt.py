@@ -483,7 +483,8 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
 
         self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False)
         # TODO: pytorch does not allow underspecified dimensions, so we use depth_out for in_features
-        # TODO: here. This should be fine for standard transformer models.
+        # TODO: here. This should be fine for standard transformer models without model_size adjusted for concatenated
+        # TODO: factor embeddings.
         self.ff_kv = pt.nn.Linear(in_features=depth_out, out_features=depth_att * 2, bias=False)
 
     def forward(self, queries: pt.Tensor,
