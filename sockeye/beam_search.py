@@ -489,7 +489,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
                          raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                          eos_id: int,
                          beam_size: int) -> Tuple[np.ndarray, int, List[Optional[constrained.RawConstraintList]]]:
-    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.astype("int32", copy=False))
+    vocab_slice_ids = np.array(restrict_lexicon.get_trg_ids(source_words.astype("int32", copy=False).asnumpy()), dtype='int32')
     ctx = source_words.ctx
     if any(raw_constraint_list):
         # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space

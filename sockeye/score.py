@@ -25,8 +25,7 @@ from . import data_io
 from . import scoring
 from . import utils
 from .beam_search import CandidateScorer
-from .log import setup_main_logger
-from .model import load_model
+from .log import setup_main_logger, log_torch_version
 
 from .output_handler import get_output_handler
 from .utils import check_condition
@@ -62,24 +61,26 @@ def score(args: argparse.Namespace):
                                                                  "size that is a multiple of %d." % len(context))
         logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
 
-        model, source_vocabs, target_vocabs = load_model(args.model, context=context, dtype=args.dtype)
         if args.use_pytorch:
+            log_torch_version(logger)
+            import torch as pt
+            from sockeye.model_pt import load_model
             from .beam_search_pt import CandidateScorer
-            from .model_pt import make_pytorch_model_from_mxnet_model
-            from . import scoring_pt
-            logger.info("=============== USING PYTORCH MODEL ===============")
-            model = make_pytorch_model_from_mxnet_model(model)
-            model.eval()
+            from .scoring_pt import BatchScorer, Scorer
+            # TODO: placeholder
+            device = pt.device('cpu' if args.use_cpu else f'cuda:0')
+            model, source_vocabs, target_vocabs = load_model(args.model, device=device, dtype=args.dtype)
         else:
+            from sockeye.model import load_model
             from .beam_search import CandidateScorer
+            from .scoring import BatchScorer, Scorer
+            model, source_vocabs, target_vocabs = load_model(args.model, context=context, dtype=args.dtype)
 
         max_seq_len_source = model.max_supported_len_source
         max_seq_len_target = model.max_supported_len_target
         if args.max_seq_len is not None:
             max_seq_len_source = min(args.max_seq_len[0] + C.SPACE_FOR_XOS, max_seq_len_source)
             max_seq_len_target = min(args.max_seq_len[1] + C.SPACE_FOR_XOS, max_seq_len_target)
-
-        hybridize = not args.no_hybridization
 
         sources = [args.source] + args.source_factors
         sources = [str(os.path.abspath(source)) for source in sources]
@@ -107,34 +108,20 @@ def score(args: argparse.Namespace):
         else:
             constant_length_ratio = -1.0
 
-        if args.use_pytorch:
-            batch_scorer = scoring_pt.BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
-                                                                         length_penalty_beta=args.length_penalty_beta,
-                                                                         brevity_penalty_weight=args.brevity_penalty_weight),
-                                                  score_type=args.score_type,
-                                                  constant_length_ratio=constant_length_ratio,
-                                                  softmax_temperature=args.softmax_temperature)
+        batch_scorer = BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
+                                                          length_penalty_beta=args.length_penalty_beta,
+                                                          brevity_penalty_weight=args.brevity_penalty_weight),
+                                   score_type=args.score_type,
+                                   constant_length_ratio=constant_length_ratio,
+                                   softmax_temperature=args.softmax_temperature)
+        if args.use_pytorch and not args.no_hybridization:
+            batch_scorer.hybridize(static_alloc=True)
 
-            scorer = scoring_pt.Scorer(model=model,
-                                       batch_scorer=batch_scorer,
-                                       source_vocabs=source_vocabs,
-                                       target_vocabs=target_vocabs,
-                                       context=context)
-        else:
-            batch_scorer = scoring.BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
-                                                                      length_penalty_beta=args.length_penalty_beta,
-                                                                      brevity_penalty_weight=args.brevity_penalty_weight),
-                                               score_type=args.score_type,
-                                               constant_length_ratio=constant_length_ratio,
-                                               softmax_temperature=args.softmax_temperature)
-            if hybridize:
-                batch_scorer.hybridize(static_alloc=True)
-
-            scorer = scoring.Scorer(model=model,
-                                    batch_scorer=batch_scorer,
-                                    source_vocabs=source_vocabs,
-                                    target_vocabs=target_vocabs,
-                                    context=context)
+        scorer = Scorer(model=model,
+                        batch_scorer=batch_scorer,
+                        source_vocabs=source_vocabs,
+                        target_vocabs=target_vocabs,
+                        context=context)
 
         scorer.score(score_iter=score_iter,
                      output_handler=get_output_handler(output_type=args.output_type,

@@ -20,9 +20,7 @@ from itertools import groupby
 from operator import itemgetter
 from typing import Dict, Generator, Tuple, Optional
 
-import mxnet as mx
-#from mxnet import np, npx
-import numpy as onp
+import numpy as np
 
 from . import arguments
 from . import constants as C
@@ -51,13 +49,13 @@ def lexicon_iterator(path: str,
     with smart_open(path) as fin:
         for line in fin:
             src, trg, logprob = line.rstrip("\n").split("\t")
-            prob = onp.exp(float(logprob))
+            prob = np.exp(float(logprob))
             src_id = vocab_source.get(src, src_unk_id)
             trg_id = vocab_target.get(trg, trg_unk_id)
             yield src_id, trg_id, prob
 
 
-def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str, int]) -> onp.ndarray:
+def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str, int]) -> np.ndarray:
     """
     Loads lexical translation probabilities from a translation table of format: src, trg, logprob.
     Source words unknown to vocab_source are discarded.
@@ -72,7 +70,7 @@ def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str
     """
     src_unk_id = vocab_source[C.UNK_SYMBOL]
     trg_unk_id = vocab_target[C.UNK_SYMBOL]
-    lexicon = onp.zeros((len(vocab_source), len(vocab_target)))
+    lexicon = np.zeros((len(vocab_source), len(vocab_target)))
     n = 0
     for src_id, trg_id, prob in lexicon_iterator(path, vocab_source, vocab_target):
         if src_id == src_unk_id:
@@ -84,24 +82,6 @@ def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str
         n += 1
     logger.info("Loaded lexicon from '%s' with %d entries", path, n)
     return lexicon
-
-
-class LexiconInitializer(mx.initializer.Initializer):
-    """
-    Given a lexicon ndarray, initialize the variable named C.LEXICON_NAME with it.
-
-    :param lexicon: Lexicon array.
-    """
-
-    def __init__(self, lexicon: onp.ndarray) -> None:
-        super().__init__()
-        self.lexicon = lexicon
-
-    def _init_default(self, sym_name, arr):
-        assert sym_name == C.LEXICON_NAME, "This initializer should only be used for a lexicon parameter variable"
-        logger.info("Initializing '%s' with lexicon.", sym_name)
-        assert len(arr.shape) == 2, "Only 2d weight matrices supported."
-        self.lexicon.copyto(arr)
 
 
 class TopKLexicon:
@@ -119,9 +99,9 @@ class TopKLexicon:
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         # Shape: (vocab_source_size, k), k determined at create() or load()
-        self.lex = None  # type: Optional[onp.ndarray]
+        self.lex = None  # type: Optional[np.ndarray]
         # Always allow special vocab symbols in target vocab
-        self.always_allow = onp.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32')
+        self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32')
 
     def create(self, path: str, k: int = 20):
         """
@@ -130,7 +110,7 @@ class TopKLexicon:
         :param path: Path to lexicon file.
         :param k: Number of target entries per source to keep.
         """
-        self.lex = onp.zeros((len(self.vocab_source), k), dtype='int32')
+        self.lex = np.zeros((len(self.vocab_source), k), dtype='int32')
         src_unk_id = self.vocab_source[C.UNK_SYMBOL]
         trg_unk_id = self.vocab_target[C.UNK_SYMBOL]
         num_insufficient = 0  # number of source tokens with insufficient number of translations given k
@@ -157,7 +137,8 @@ class TopKLexicon:
 
         :param path: Path to Numpy array output file.
         """
-        onp.save(path, self.lex)
+        with open(path, 'wb') as out:
+            np.save(out, self.lex)
         logger.info("Saved top-k lexicon to \"%s\"", path)
 
     def load(self, path: str, k: Optional[int] = None):
@@ -168,7 +149,8 @@ class TopKLexicon:
         :param k: Optionally load less items than stored in path.
         """
         load_time_start = time.time()
-        _lex = onp.load(path)
+        with open(path, 'rb') as inp:
+            _lex = np.load(inp)
         loaded_k = _lex.shape[1]
         if k is not None:
             top_k = min(k, loaded_k)
@@ -177,21 +159,21 @@ class TopKLexicon:
                                "contains at most %d entries per source.", k, loaded_k)
         else:
             top_k = loaded_k
-        self.lex = onp.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
+        self.lex = np.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
         for src_id, trg_ids in enumerate(_lex):
-            self.lex[src_id, :] = onp.sort(trg_ids[:top_k])
+            self.lex[src_id, :] = np.sort(trg_ids[:top_k])
         load_time = time.time() - load_time_start
         logger.info("Loaded top-%d lexicon from \"%s\" in %.4fs.", top_k, path, load_time)
 
-    def get_trg_ids(self, src_ids: onp.ndarray) -> onp.ndarray:
+    def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
         """
         Lookup possible target ids for input sequence of source ids.
 
         :param src_ids: Sequence(s) of source ids (any shape).
         :return: Possible target ids for source (unique sorted, always includes special symbols).
         """
-        unique_src_ids = onp.lib.arraysetops.unique(src_ids)  # type: ignore
-        trg_ids = onp.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))  # type: ignore
+        unique_src_ids = np.lib.arraysetops.unique(src_ids)  # type: ignore
+        trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))  # type: ignore
         logger.debug(f"lookup: {trg_ids.shape[0]} unique targets for {unique_src_ids.shape[0]} unique sources")
         return trg_ids
 
@@ -229,7 +211,7 @@ def inspect(args):
             continue
         ids = tokens2ids(tokens, vocab_source)
         print("Input:  n=%d" % len(tokens), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens, ids)))
-        trg_ids = lexicon.get_trg_ids(onp.array(ids))
+        trg_ids = lexicon.get_trg_ids(np.array(ids))
         tokens_trg = [vocab_target_inv.get(trg_id, C.UNK_SYMBOL) for trg_id in trg_ids]
         print("Output: n=%d" % len(tokens_trg), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens_trg, trg_ids)))
         print()
