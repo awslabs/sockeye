@@ -142,13 +142,11 @@ class PyTorchOutputLayer(pt.nn.Module):
         return 'in_features={}, out_features={}, bias={} dtype={}'.format(
             self.in_features, self.out_features, self.bias is not None, self.weight.dtype)
 
-    # def _is_new_vocab_slices(self, x: pt.Tensor) -> bool:
-    #     # MXNet ndarrays (like Numpy ndarrays) do not support hashing, using string representation.
-    #     x_hash = hash(str(x))
-    #     if x_hash != self._cache_key:
-    #         self._cache_key = x_hash
-    #         return True
-    #     return False
+    def _is_new_vocab_slices(self, x: pt.Tensor) -> bool:
+        if self._cache_key is None or x.size() != self._cache_key.size() or pt.all(x != self._cache_key):
+            self._cache_key = x
+            return True
+        return False
 
     def _take_slice(self, vocab_slice_ids: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         if self.weight.dtype == C.DTYPE_INT8:
@@ -162,13 +160,11 @@ class PyTorchOutputLayer(pt.nn.Module):
     def forward(self, data: pt.Tensor, vocab_slice_ids: Optional[pt.Tensor] = None) -> pt.Tensor:
         if vocab_slice_ids is not None:
             # imperative, reduced matrix multiplication for vocabulary selection
-            weight, bias = self._take_slice(vocab_slice_ids)
-            # TODO: implement caching if useful for PT
-            # if self._is_new_vocab_slices(vocab_slice_ids):
-            #     weight, bias = self._take_slice(vocab_slice_ids)
-            #     self._weight_slice_cache, self._bias_slice_cache = weight, bias
-            # else:
-            #     weight, bias = self._weight_slice_cache, self._bias_slice_cache
+            if self._is_new_vocab_slices(vocab_slice_ids):
+                weight, bias = self._take_slice(vocab_slice_ids)
+                self._weight_slice_cache, self._bias_slice_cache = weight, bias
+            else:
+                weight, bias = self._weight_slice_cache, self._bias_slice_cache
         else:
             weight, bias = self.weight, self.bias
 
