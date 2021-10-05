@@ -126,9 +126,9 @@ class PyTorchOutputLayer(pt.nn.Module):
         # Bias stays fp32 even with int8 weights.
         self.bias = pt.nn.Parameter(pt.Tensor(vocab_size))
 
-        self._cache_key = None  # type: Optional[int]
-        self._weight_slice_cache = None  # type: Optional[np.ndarray]
-        self._bias_slice_cache = None  # type: Optional[np.ndarray]
+        self._cache_key = None  # type: Optional[pt.tensor]
+        self._weight_slice_cache = None  # type: Optional[pt.tensor]
+        self._bias_slice_cache = None  # type: Optional[pt.tensor]
 
     def reset_parameters(self) -> None:
         # TODO: match mxnet / implement global weight initialization
