@@ -471,6 +471,7 @@ def create_encoder_config(args: argparse.Namespace,
         postprocess_sequence=encoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
+        depth_key_value=encoder_transformer_model_size,
         use_lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         decoder_type=args.decoder,
         use_glu=args.transformer_feed_forward_use_glu)

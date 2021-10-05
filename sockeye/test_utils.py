@@ -21,6 +21,8 @@ from tempfile import TemporaryDirectory
 from typing import Any, Dict, List
 from unittest.mock import patch
 
+import numpy as np
+
 import sockeye.average
 import sockeye.checkpoint_decoder
 import sockeye.constants as C
@@ -28,12 +30,12 @@ import sockeye.evaluate
 import sockeye.extract_parameters
 import sockeye.lexicon
 import sockeye.model
+import sockeye.mx_to_pt
 import sockeye.prepare_data
 import sockeye.score
 import sockeye.train
 import sockeye.translate
 import sockeye.utils
-import sockeye.mx_to_pt
 
 logger = logging.getLogger(__name__)
 
@@ -353,18 +355,23 @@ def check_pytorch_translate(data: Dict[str, Any], translate_params: str) -> Dict
         sockeye.mx_to_pt.main()
 
     out_path = os.path.join(data['work_dir'], "out-torch.txt")
-    params = "{} {} {}".format(sockeye.translate.__file__,
+    params = "{} {} {} --use-pytorch".format(sockeye.translate.__file__,
                                TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                               input=data['test_source'],
                                                               output=out_path),
                                translate_params)
+    if 'test_source_factors' in data:
+        params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()
 
     # Collect test translate outputs and scores
     data['test_outputs_torch'] = collect_translate_output_and_scores(out_path)
     assert len(data['test_outputs_torch']) == len(data['test_outputs'])
-    assert data['test_outputs_torch'] == data['test_outputs']
+    for json_output, json_output_equiv in zip(data['test_outputs_torch'], data['test_outputs']):
+        assert json_output['translation'] == json_output_equiv['translation']
+        assert abs(json_output['score'] - json_output_equiv['score']) < 0.01 or \
+               np.isnan(json_output['score'] - json_output_equiv['score'])
     return data
 
 

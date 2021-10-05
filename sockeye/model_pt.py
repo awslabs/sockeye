@@ -108,7 +108,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         self.decoder.weights_from_mxnet_block(block_mx.decoder)
         self.output_layer.weights_from_mxnet_block(block_mx.output_layer)
         for i, factor_output_layer in enumerate(self.factor_output_layers):
-            factor_output_layer.weights_from_mnxet_block(block_mx.factor_output_layers[0])
+            factor_output_layer.weights_from_mxnet_block(block_mx.factor_output_layers[0])
         if self.config.config_length_task is not None:
             self.length_ratio.weights_from_mxnet_block(block_mx.length_ratio)
 

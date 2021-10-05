@@ -65,6 +65,7 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
                                                    postprocess_sequence='r',
                                                    max_seq_len_source=50,
                                                    max_seq_len_target=60,
+                                                   depth_key_value=128,
                                                    use_lhuc=False)
     batch = 12
     encoder_seq_len = 45

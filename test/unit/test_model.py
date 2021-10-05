@@ -66,6 +66,7 @@ config_decoder = sockeye.transformer.TransformerConfig(model_size=model_size,
                                                        postprocess_sequence='r',
                                                        max_seq_len_source=max_seq_len_source,
                                                        max_seq_len_target=max_seq_len_target,
+                                                       depth_key_value=model_size,
                                                        use_lhuc=False)
 config_embed_source = sockeye.encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                       num_embed=num_embed_source,
