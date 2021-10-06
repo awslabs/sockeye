@@ -24,6 +24,33 @@ from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings, Outp
 
 logger = logging.getLogger(__name__)
 
+try:
+    from apex.normalization import FusedLayerNorm as _FusedLayerNorm
+
+    has_fused_layernorm = True
+
+    class FusedLayerNorm(_FusedLayerNorm):
+        @pt.jit.unused
+        def forward(self, x):
+            if not x.is_cuda:
+                return super().forward(x)
+            else:
+                with pt.cuda.device(x.device):
+                    return super().forward(x)
+
+
+except ImportError:
+    has_fused_layernorm = False
+
+
+def LayerNorm(normalized_shape, eps=1e-5, elementwise_affine=True, export=False):
+    if pt.jit.is_scripting():
+        export = True
+    if not export and pt.cuda.is_available() and has_fused_layernorm:
+        logger.info("Using FusedLayerNorm from NVidia apex")
+        return FusedLayerNorm(normalized_shape, eps, elementwise_affine)
+    return pt.nn.LayerNorm(normalized_shape, eps, elementwise_affine)
+
 
 def pytorch_get_activation(act_type: str) -> pt.nn.Module:
     if act_type == C.SWISH1:

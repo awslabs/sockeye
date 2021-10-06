@@ -271,7 +271,6 @@ class SortNormalizeAndUpdateFinished(pt.nn.Module):
         return best_word_indices, finished, scores_accumulated, lengths, reference_lengths
 
 
-# TODO: make this a proper (jitted) op
 def unravel_index(indices: pt.LongTensor, shape: Tuple[int, ...]) -> pt.LongTensor:
     coord = []
     for dim in reversed(shape):
@@ -313,7 +312,9 @@ class TopK(pt.nn.Module):
         # Project indices back into original shape (which is different for t==1 and t>1)
         values, indices = values.view(-1, 1), indices.view(-1)
 
-        best_hyp_indices, best_word_indices = unravel_index(indices, (batch_size * self.k, vocab_size))
+        #best_hyp_indices, best_word_indices = unravel_index(indices, (batch_size * self.k, vocab_size))
+        best_hyp_indices, best_word_indices = indices.div(vocab_size, rounding_mode='floor'), indices.fmod(vocab_size)
+
         if batch_size > 1:
             # Offsetting the indices to match the shape of the scores matrix
             best_hyp_indices = best_hyp_indices + offset
