@@ -808,10 +808,10 @@ class BeamSearch(pt.nn.Module):
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
         # (9) Sort the hypotheses within each sentence (normalization for finished hyps may have unsorted them).
-        scores_accumulated_shape = scores_accumulated.size()
-        folded_accumulated_scores = scores_accumulated.reshape(batch_size, -1)
+        folded_accumulated_scores = scores_accumulated.reshape(batch_size, self.beam_size)
         indices = folded_accumulated_scores.argsort(dim=1, descending=False).reshape(-1)
-        best_hyp_indices = unravel_index(indices, scores_accumulated_shape)[0].int() + offset
+        # 1 = scores_accumulated.size()[1]
+        best_hyp_indices = indices.div(1, rounding_mode='floor').int() + offset
         scores_accumulated = scores_accumulated.index_select(0, best_hyp_indices)
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.index_select(0, best_hyp_indices)
