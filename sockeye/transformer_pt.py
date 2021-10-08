@@ -230,8 +230,9 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
         self.sequence = sequence
         self.layer_norm = None
         if 'n' in sequence:
-            self.layer_norm = sockeye.layers_pt.LayerNorm(num_hidden, eps=1e-06)
-            # TODO: use apex FusedLayernorm for Cuda
+            # do not use Apex' FusedLayerNorm because of
+            # https://github.com/huggingface/transformers/issues/9377
+            self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
         self.dropout = None  # type: Optional[pt.nn.Module]
         if dropout > 0.0:
             self.dropout = pt.nn.Dropout(p=dropout)
