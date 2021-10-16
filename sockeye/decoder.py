@@ -155,9 +155,9 @@ class TransformerDecoder(Decoder, gluon.HybridBlock):
         """
         structure = ''
         if self.inference_only:
-            structure += C.STEP_STATE + C.BIAS_STATE + C.ENCODER_STATE * self.config.num_layers
+            structure += C.STEP_STATE + C.MASK_STATE + C.ENCODER_STATE * self.config.num_layers
         else:
-            structure += C.STEP_STATE + C.ENCODER_STATE + C.BIAS_STATE
+            structure += C.STEP_STATE + C.ENCODER_STATE + C.MASK_STATE
 
         total_num_states = sum(layer.num_state_tensors for layer in self.layers)
         structure += C.DECODER_STATE * total_num_states

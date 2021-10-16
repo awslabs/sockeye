@@ -97,8 +97,9 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
     assert decoder_mx.get_num_hidden() == decoder_pt.get_num_hidden()
 
     assert len(init_states_mx) == len(init_states_pt)
-    for s_mx, s_pt in zip(init_states_mx, init_states_pt):
-        assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
+    for s_mx, s_pt, structure in zip(init_states_mx, init_states_pt, decoder_mx.state_structure()):
+        if structure != C.MASK_STATE:  # MASK state is new in Pytorch and not equivalent
+            assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
 
     output_mx, output_mx.asnumpy()
     output_pt = output_pt.detach().numpy()
@@ -107,6 +108,7 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
     assert np.allclose(output_mx, output_pt, atol=1e-05)
 
     assert len(new_states_mx) == len(new_states_pt)
-    for i, (s_mx, s_pt) in enumerate(zip(new_states_mx, new_states_pt)):
-        assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
+    for i, (s_mx, s_pt, structure) in enumerate(zip(new_states_mx, new_states_pt, decoder_mx.state_structure())):
+        if structure != C.MASK_STATE:  # MASK state is new in Pytorch and not equivalent
+            assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
 

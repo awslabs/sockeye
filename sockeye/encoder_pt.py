@@ -177,12 +177,12 @@ class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
         if self.dropout is not None:
             data = self.dropout(data)
 
-        # (batch_size * heads, seq_len)
-        att_valid_length = layers_pt.pytorch_prepare_source_valid_lengths(valid_length, self.config.attention_heads)
+        # inverted length_mask for attention masking, (batch_size * heads, 1, max_len)
+        length_mask = layers_pt.prepare_source_length_mask(valid_length, self.config.attention_heads, data.size()[1])
 
         data = data.transpose(1, 0)  # batch to time major
         for layer in self.layers:
-            data = layer(data, att_valid_length)
+            data = layer(data, length_mask=length_mask)
 
         data = self.final_process(data, None)
         data = data.transpose(1, 0)  # time to batch major

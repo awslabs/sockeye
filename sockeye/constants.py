@@ -168,7 +168,7 @@ BEAM_SEARCH_STOP_ALL = 'all'
 
 # State structure constants
 STEP_STATE = 's'
-BIAS_STATE = 'b'
+MASK_STATE = 'm'
 ENCODER_STATE = 'e'
 DECODER_STATE = 'd'
 

@@ -60,9 +60,17 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
         if config.use_lhuc:
             self.lhuc = sockeye.layers_pt.PyTorchLHUC(config.model_size)
 
-    def forward(self, data: pt.Tensor, lengths: pt.Tensor) -> pt.Tensor:
+    def forward(self, data: pt.Tensor, length_mask: pt.Tensor = None) -> pt.Tensor:
+        """
+        :param data: Input tensor of shape (length, batch_size, hidden)
+        :param length_mask: Optional data length mask of shape (batch_size * self.heads, 1, length)
+                            to mask self-attention scores. True for padding positions.
+        """
         # self-attention
-        data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, lengths, None)
+        data_self_att, _ = self.self_attention(inputs=self.pre_self_attention(data, None),
+                                               previous_states=None,
+                                               inputs_length_mask=length_mask,
+                                               bias=None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
@@ -169,24 +177,24 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
 
     def forward(self,
                 target: pt.Tensor,
-                target_bias: pt.Tensor,
+                target_bias: Optional[pt.Tensor],
                 source: pt.Tensor,
-                source_att_lengths: pt.Tensor,
-                autoregr_states: pt.Tensor,
+                source_length_mask: Optional[pt.Tensor],
+                autoregr_states: Optional[pt.Tensor],
                 enc_att_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
-        target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
-                                                                    autoregr_states,
-                                                                    None,
-                                                                    target_bias)
+        target_autoregr, *new_autoregr_states = self.autoregr_layer(inputs=self.pre_autoregr_layer(target, None),
+                                                                    previous_states=autoregr_states,
+                                                                    inputs_length_mask=None,
+                                                                    bias=target_bias)
 
         target = self.post_autoregr_layer(target_autoregr, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None),
-                                            source,
-                                            source_att_lengths,
-                                            None,
-                                            enc_att_kv)
+        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
+                                            key_values=source,
+                                            key_values_length_mask=source_length_mask,
+                                            bias=None,
+                                            projected_memory_kv=enc_att_kv)
 
         target = self.post_enc_attention(target_enc_att, target)
 

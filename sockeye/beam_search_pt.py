@@ -367,7 +367,7 @@ def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
     flat_structure = functools.reduce(operator.add, state_structure)
     assert len(states) == len(flat_structure), "Number of states do not match the defined state structure"
     for state, state_format in zip(states, flat_structure):
-        if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+        if state_format == C.STEP_STATE or state_format == C.MASK_STATE:
             # Steps and source_bias have batch dimension on axis 0
             repeat_axis = 0
         elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
@@ -390,13 +390,13 @@ class SortStates(pt.nn.Module):
         sorted_states = []
         assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
         for state, state_format in zip(states, self.flat_structure):
-            if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
+            if state_format == C.STEP_STATE:
                 # Steps and source_bias have batch dimension on axis 0
                 sorted_state = state.index_select(0, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
                 # Decoder and encoder layer states have batch dimension on axis 1
                 sorted_state = state.index_select(1, best_hyp_indices)
-            elif state_format == C.ENCODER_STATE:
+            elif state_format == C.ENCODER_STATE or state_format == C.MASK_STATE:
                 # No need for takes on encoder layer states
                 sorted_state = state
             else:

@@ -169,8 +169,10 @@ def test_mx_pt_eq_sockeye_model():
         assert pred_out_length_mx.asnumpy() == pred_out_length_pt.detach().numpy()
 
     assert len(init_states_mx) == len(init_states_pt)
-    for s_mx, s_pt in zip(init_states_mx, init_states_pt):
-        assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
+    state_structure = b_pt.decoder.state_structure()
+    for s_mx, s_pt, structure in zip(init_states_mx, init_states_pt, state_structure):
+        if structure != C.MASK_STATE:  # MASK state is new in Pytorch and not equivalent
+            assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
 
     # test decode_step()
     states_mx = init_states_mx
@@ -185,8 +187,9 @@ def test_mx_pt_eq_sockeye_model():
     assert len(factor_outputs_mx) == len(factor_outputs_pt)
     # TODO assert factor outputs equality
     assert len(states_mx) == len(states_pt)
-    for s_mx, s_pt in zip(states_mx, states_pt):
-        assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
+    for s_mx, s_pt, structure in zip(states_mx, states_pt, state_structure):
+        if structure != C.MASK_STATE:  # MASK state is new in Pytorch and not equivalent
+            assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
 
     from pprint import pprint
     pprint(b_mx.collect_params())

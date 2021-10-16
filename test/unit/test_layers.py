@@ -281,11 +281,11 @@ def test_mx_pt_eq_dot_attention_cell(qlen, kvlen, batch_size, hidden, heads):
     kv_pt = pt.as_tensor(kv_mx.asnumpy())
     b_mx = sockeye.layers.DotAttentionCell()
     b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchDotAttentionCell()
+    b_pt = sockeye.layers_pt.PyTorchDotAttentionCell(dropout=0.0, heads=heads)
 
     # TODO test masked softmax once inmplemented (via bias and/or lengths)
     r_mx = b_mx(q_mx, kv_mx, heads, None, None).asnumpy()
-    r_pt = b_pt(q_pt, kv_pt, heads=heads, lengths=None, bias=None).detach().numpy()
+    r_pt = b_pt(q_pt, kv_pt, length_mask=None, bias=None).detach().numpy()
 
     assert np.allclose(r_mx, r_pt)
 
@@ -305,7 +305,7 @@ def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, hea
     b_pt.ff_out.weight.data[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
 
     r_mx = b_mx._attend(q_mx, kv_mx, None, None).asnumpy()
-    r_pt = b_pt._attend(q_pt, kv_pt, lengths=None, bias=None).detach().numpy()
+    r_pt = b_pt._attend(q_pt, kv_pt, key_values_length_mask=None, bias=None).detach().numpy()
 
     assert np.allclose(r_mx, r_pt, atol=1e-06)
 
@@ -322,7 +322,7 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
     b_pt.weights_from_mxnet_block(b_mx)
 
     r_mx, states_mx = b_mx(inputs_mx, None, None, None)
-    r_pt, states_pt = b_pt(inputs_pt, previous_states=None, input_lengths=None, bias=None)
+    r_pt, states_pt = b_pt(inputs_pt, previous_states=None, inputs_length_mask=None, bias=None)
 
     r_mx = r_mx.asnumpy()
     states_mx = states_mx.asnumpy()
@@ -347,7 +347,7 @@ def test_mx_pt_eq_multi_head_attention(qlen, kvlen, batch_size, hidden, heads):
 
     b_pt = sockeye.layers_pt.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden)
     b_pt.weights_from_mxnet_block(b_mx)
-    r_pt = b_pt(queries_pt, memory_pt, None, None, None)
+    r_pt = b_pt(queries_pt, memory_pt, key_values_length_mask=None, bias=None, projected_memory_kv=None)
 
     print(b_pt.ff_kv.weight[0])
     print(b_mx.ff_kv.weight.data()[0])
@@ -383,21 +383,6 @@ def test_mx_pt_eq_ssru(hidden, inference_only, seq_len, batch):
 
     assert np.allclose(r1_mx, r1_pt)
     assert np.allclose(r2_mx, r2_pt)
-
-
-@pytest.mark.parametrize('batch_size, num_heads, seq_len',
-                         [(5, 8, 10), (1, 1, 1), (1, 1, 5), (1, 8, 50)])
-def test_mx_pt_eq_prepare_source_valid_lengths(batch_size, num_heads, seq_len):
-    valid_lengths_mx = np.random.randint(0, seq_len, (batch_size,))
-    valid_lengths_pt = pt.as_tensor(valid_lengths_mx.asnumpy())
-    query_data_mx = np.random.uniform(0, 1, (batch_size, seq_len, 32))
-    query_data_pt = pt.as_tensor(query_data_mx.asnumpy())
-
-    r_mx = sockeye.layers.prepare_source_valid_lengths(valid_lengths_mx, query_data_mx, num_heads=num_heads).asnumpy()
-    r_pt = sockeye.layers_pt.pytorch_prepare_source_valid_lengths(valid_lengths_pt, num_heads=num_heads)
-    r_pt = r_pt.unsqueeze(1).expand(batch_size * num_heads, seq_len).detach().numpy()
-
-    assert np.allclose(r_mx, r_pt)
 
 
 def test_mx_pt_length_ratio():
