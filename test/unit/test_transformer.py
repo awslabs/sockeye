@@ -224,7 +224,8 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
     source_lengths_mx = np.random.randint(0, source_input_len, (batch_size,))
     source_lengths_pt = pt.tensor(source_lengths_mx.asnumpy())
     source_lengths_mx = prepare_source_valid_lengths(source_lengths_mx, target_mx, heads)
-    source_length_mask_pt = prepare_source_length_mask(source_lengths_pt, heads, source_pt.size()[1])
+    source_max_len = source_pt.size()[0]
+    source_length_mask_pt = prepare_source_length_mask(source_lengths_pt, heads, source_max_len)
 
     target_mx = np.transpose(target_mx, axes=(1, 0, 2))
     target_pt = target_pt.permute(1, 0, 2)
@@ -244,5 +245,5 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
     new_states_pt = [s.detach().numpy() for s in new_states_pt]
 
     assert len(new_states_mx) == len(new_states_pt)
-    #assert np.allclose(new_target_mx, new_target_pt, atol=1e-05)
+    assert np.allclose(new_target_mx, new_target_pt, atol=1e-05)
     assert np.allclose(new_states_mx, new_states_pt, atol=1e-05)
