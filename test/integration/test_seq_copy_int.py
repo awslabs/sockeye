@@ -114,7 +114,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
-     " --length-task length --length-task-weight 1.0 --length-task-layers 2",
+     " --length-task length --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
      False, 0, 0),
