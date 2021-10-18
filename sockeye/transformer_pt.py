@@ -38,8 +38,7 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
         self.self_attention = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(depth_att=config.model_size,
                                                                               heads=config.attention_heads,
                                                                               depth_out=config.model_size,
-                                                                              dropout=config.dropout_attention,
-                                                                              dtype=dtype)
+                                                                              dropout=config.dropout_attention)
         self.post_self_attention = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
                                                                   dropout=config.dropout_prepost,
                                                                   num_hidden=config.model_size)
@@ -51,7 +50,6 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
                                                 num_model=config.model_size,
                                                 act_type=config.act_type,
                                                 dropout=config.dropout_act,
-                                                dtype=dtype,
                                                 use_glu=config.use_glu)
         self.post_ff = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
                                                       dropout=config.dropout_prepost,
@@ -111,12 +109,10 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
             self.autoregr_layer = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(depth_att=config.model_size,
                                                                                   heads=config.attention_heads,
                                                                                   depth_out=config.model_size,
-                                                                                  dropout=config.dropout_attention,
-                                                                                  dtype=dtype)
+                                                                                  dropout=config.dropout_attention)
         elif self.decoder_type == C.SSRU_TRANSFORMER:
             self.autoregr_layer = sockeye.layers_pt.PyTorchSSRU(model_size=config.model_size,
-                                                                inference_only=inference_only,
-                                                                dtype=dtype)
+                                                                inference_only=inference_only)
         else:
             raise ValueError("Invalid decoder type.")
 
@@ -135,8 +131,7 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
                                                                          heads=config.attention_heads,
                                                                          depth_out=config.model_size,
                                                                          dropout=config.dropout_attention,
-                                                                         depth_key_value=config.depth_key_value,
-                                                                         dtype=dtype)
+                                                                         depth_key_value=config.depth_key_value)
         self.post_enc_attention = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  num_hidden=config.model_size)
@@ -148,7 +143,6 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
                                                 num_model=config.model_size,
                                                 act_type=config.act_type,
                                                 dropout=config.dropout_act,
-                                                dtype=dtype,
                                                 use_glu=config.use_glu)
         self.post_ff = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
                                                       dropout=config.dropout_prepost,
@@ -287,10 +281,8 @@ class PyTorchTransformerFeedForward(pt.nn.Module):
                  num_model: int,
                  act_type: str,
                  dropout: float,
-                 dtype: str,
                  use_glu: bool = False) -> None:
         super().__init__()
-        assert dtype == C.DTYPE_FP32
         self.dropout = dropout
         self.use_glu = use_glu
         self.ff1 = pt.nn.Linear(in_features=num_model, out_features=num_hidden)

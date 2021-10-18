@@ -69,8 +69,8 @@ def test_transformer_feed_forward(use_glu):
 @pytest.mark.parametrize('use_glu', [(False), (True)])
 def test_mx_pt_eq_transformer_feed_forward(use_glu):
     b_mx = sockeye.transformer.TransformerFeedForward(num_hidden=4,
-                                                       num_model=2,
-                                                       act_type=C.RELU,
+                                                      num_model=2,
+                                                      act_type=C.RELU,
                                                       dropout=0.0,
                                                       dtype=C.DTYPE_FP32,
                                                       use_glu=use_glu)
@@ -80,7 +80,6 @@ def test_mx_pt_eq_transformer_feed_forward(use_glu):
                                                                 num_model=2,
                                                                 act_type=C.RELU,
                                                                 dropout=0.0,
-                                                                dtype=C.DTYPE_FP32,
                                                                 use_glu=use_glu)
     b_pt.weights_from_mxnet_block(b_mx)
 

@@ -189,8 +189,7 @@ class PyTorchLengthRatio(pt.nn.Module):
 
     def __init__(self,
                  hidden_size: int,
-                 num_layers: int,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 num_layers: int) -> None:
         utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
         super().__init__()
         self.num_layers = num_layers
@@ -337,14 +336,12 @@ class PyTorchMultiHeadAttentionBase(pt.nn.Module):
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
-    :param dtype: Data type for weights
     """
     def __init__(self,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 dropout: float = 0.0) -> None:
         super().__init__()
         utils.check_condition(depth_att % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
@@ -388,17 +385,14 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores
-    :param dtype: Data type for weights
     """
 
     def __init__(self,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0,
-                 dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(depth_att, heads, depth_out, dropout, dtype)
-        assert dtype == C.DTYPE_FP32, "only supports float32 for now"  # TODO: is this relevant?
+                 dropout: float = 0.0) -> None:
+        super().__init__(depth_att, heads, depth_out, dropout)
 
         self.depth_att = depth_att
         self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False)
@@ -461,7 +455,6 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
     :param depth_out: Output depth / number of output units.
     :param depth_key_value: Dimension of input key and value vectors.
     :param dropout: Dropout probability on attention scores
-    :param dtype: Data type for weights
     """
 
     def __init__(self,
@@ -469,9 +462,8 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: str = C.DTYPE_FP32,
                  depth_key_value: int = 512) -> None:
-        super().__init__(depth_att, heads, depth_out, dropout, dtype)
+        super().__init__(depth_att, heads, depth_out, dropout)
 
         self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False)
         self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False)
@@ -617,14 +609,9 @@ class PyTorchSSRU(pt.nn.Module, AutoregressiveLayer):
 
     :param model_size: number of hidden units
     :param inference_only: flag used to indicate execution at inference time
-    :param dtype: data type
     """
-    def __init__(self,
-                 model_size: int,
-                 inference_only: bool,
-                 dtype: str = C.DTYPE_FP32) -> None:
+    def __init__(self, model_size: int, inference_only: bool) -> None:
         super().__init__()
-        assert dtype == C.DTYPE_FP32, "other dtpyes not yet supported"
         self.model_size = model_size
         self.inference_only = inference_only
 
