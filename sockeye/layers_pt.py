@@ -293,26 +293,25 @@ class PyTorchDotAttentionCell(pt.nn.Module):
         super().__init__()
         self.dropout = pt.nn.Dropout(p=dropout) if dropout > 0.0 else None
         self.heads = heads
-        self._dtype = C.DTYPE_FP32  # TODO
 
     def forward(self,
                 queries: pt.Tensor,
                 key_values: pt.Tensor,
-                length_mask: Optional[pt.Tensor] = None, bias: Optional[pt.Tensor] = None):
+                mask: Optional[pt.Tensor] = None):
         """
         :param queries: Query tensor of shape (query_length, batch_size, hidden)
         :param key_values: Interleaved Key & value tensor of shape (key/value_length, batch_size, hidden * 2)
-        :param length_mask: Optional boolean mask of shape (batch_size * self.heads, 1, key/value_length).
-                            False for valid key/value positions, True for padding positoins.
+        :param mask: Optional boolean tensor for attention masking of shape (batch * heads, <qlen>, <kvlen>).
+                     If this is cross-attention, <qlen> dimension can be 1 for broadcasting,
+                     i.e. (batch * heads, 1, kvlen). For self-attention an autoregressive mask should be provided of
+                     shape (1, len, len). Value of this mask is True for positions that should be masked out
+                     (padding positions), False for valid positions.
         """
         # (batch * heads, qlen, klen)
         logits = pytorch_interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
 
-        if bias is not None:
-            logits = logits + bias
-
-        if length_mask is not None:
-            logits = logits.masked_fill(length_mask, -C.LARGE_VALUES[logits.dtype])
+        if mask is not None:
+            logits = logits.masked_fill(mask, -C.LARGE_VALUES[logits.dtype])
 
         probs = pt.nn.functional.softmax(logits, dim=-1)
 
@@ -360,21 +359,19 @@ class PyTorchMultiHeadAttentionBase(pt.nn.Module):
     def _attend(self,
                 queries: pt.Tensor,
                 key_values: pt.Tensor,
-                key_values_length_mask: Optional[pt.Tensor] = None,
-                bias: Optional[pt.Tensor] = None) -> pt.Tensor:
+                mask: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
         Returns context vectors of multi-head dot attention.
 
         :param queries: Query tensor. Shape: (queries_length, batch_size, depth).
         :param key_values: Keys/Values. Shape: (keys_values_length, batch_size, depth * 2).
-        :param key_values_length_mask: Optional length mask of shape (batch_size * self.heads, 1, key_values_length)
-                                       to mask attention scores.
+        :param mask: Optional boolean attention mask. See DotAttentionCell for shape requirements.
         :param bias: Optional 3d bias.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
 
         # (query_max_length, batch, depth)
-        contexts = self.dot_att(queries=queries, key_values=key_values, length_mask=key_values_length_mask, bias=bias)
+        contexts = self.dot_att(queries=queries, key_values=key_values, mask=mask)
 
         # (query_max_length, batch, output_depth)
         contexts = self.ff_out(contexts)
@@ -401,7 +398,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
                  dropout: float = 0.0,
                  dtype: str = C.DTYPE_FP32) -> None:
         super().__init__(depth_att, heads, depth_out, dropout, dtype)
-        assert dtype == C.DTYPE_FP32, "only supports float32 for now" # TODO: is this relevant?
+        assert dtype == C.DTYPE_FP32, "only supports float32 for now"  # TODO: is this relevant?
 
         self.depth_att = depth_att
         self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False)
@@ -427,8 +424,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
     def forward(self,
                 inputs: pt.Tensor,
                 previous_states: Optional[pt.Tensor] = None,
-                inputs_length_mask: Optional[pt.Tensor] = None,
-                bias: Optional[pt.Tensor] = None,
+                mask: Optional[pt.Tensor] = None,
                 **args) -> Tuple[pt.Tensor, pt.Tensor]:  # mypy: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
@@ -438,11 +434,9 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         Returns a tensor of shape (max_length, batch, output_depth).
 
         :param inputs: Input Data. Shape: (length, batch, input_depth).
-        :param inputs_length_mask: Optional length mask of shape (batch_size * self.heads, 1, length) to mask
-                                   attention scores.
-        :param bias: Optional 3d bias tensor to mask attention scores.
         :param previous_states: Optional list with two tensors - previous input's keys and values.
                                 Shape: 2 * (batch, max_length+1, depth_att).
+        :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :return: tensor of shape (max_length, batch, output_depth).
         """
         proj = self.ff_in(inputs)
@@ -451,10 +445,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         if previous_states is not None:
             states = pt.cat((previous_states, states), dim=0)
 
-        return self._attend(queries=queries,
-                            key_values=states,
-                            key_values_length_mask=inputs_length_mask,
-                            bias=bias), states
+        return self._attend(queries=queries, key_values=states, mask=mask), states
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadSelfAttention'):
         self.ff_in.weight.data[:] = pt.as_tensor(block_mx.ff_in.weight.data().asnumpy())
@@ -488,8 +479,7 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
     def forward(self,
                 queries: pt.Tensor,
                 key_values: pt.Tensor,
-                key_values_length_mask: Optional[pt.Tensor] = None,
-                bias: Optional[pt.Tensor] = None,
+                mask: Optional[pt.Tensor] = None,
                 projected_memory_kv: Optional[pt.Tensor] = None) -> pt.Tensor:  # mypy: ignore
         """
         Computes multi-head attention for queries given a memory tensor.
@@ -499,8 +489,7 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
 
         :param queries: Query tensor. Shape: (queries_length, batch, input_depth).
         :param key_values: Memory data to attend to. Shape: (key_values_length, batch, input_depth).
-        :param key_values_length_mask: Optional length mask of shape (batch_size * self.heads, 1, key_value_length)
-                                       to mask attention scores.
+        :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :param bias: Optional 3d bias tensor to mask attention scores.
         :param projected_memory_kv: Optional previously projected memory keys and values.
         :return: tensor of shape (query_seq_len, batch, output_depth).
@@ -508,10 +497,7 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
 
         queries = self.ff_q(queries)
         key_values = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(key_values)
-        return self._attend(queries=queries,
-                            key_values=key_values,
-                            bias=bias,
-                            key_values_length_mask=key_values_length_mask)
+        return self._attend(queries=queries, key_values=key_values, mask=mask)
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):
         self.ff_q.weight.data[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
@@ -576,7 +562,7 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
             raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
         # TODO consider weight initialization
 
-    def forward(self, data, steps):  # pylint: disable=arguments-differ
+    def forward(self, data: pt.Tensor, steps: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
         Applies positional embeddings to input data.
 

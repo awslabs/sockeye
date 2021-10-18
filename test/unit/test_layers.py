@@ -273,21 +273,43 @@ def test_mx_pt_eq_interleaved_matmul_encdec_valatt(qlen, kvlen, batch_size):
 
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
-                         [(10, 9, 1, 32, 8), (1, 1, 1, 4, 1), (3, 32, 128, 256, 2)])
+                         [
+                             (10, 9, 1, 32, 8),
+                             (1, 1, 1, 4, 1),
+                             (13, 13, 20, 8, 2),
+                             (3, 32, 64, 128, 2)
+                         ])
 def test_mx_pt_eq_dot_attention_cell(qlen, kvlen, batch_size, hidden, heads):
     q_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
     kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
     q_pt = pt.as_tensor(q_mx.asnumpy())
     kv_pt = pt.as_tensor(kv_mx.asnumpy())
-    b_mx = sockeye.layers.DotAttentionCell()
+
+    if qlen == kvlen:  # self-attention case
+        bias_mx = sockeye.transformer.AutoRegressiveBias()
+        bias_mx.initialize()
+        autoregr_mx = bias_mx(q_mx.transpose(1, 0, 2))
+        mx_args = (None, autoregr_mx)  # no source mask, autoregr mask
+
+        mask_pt = sockeye.transformer_pt.AutoRegressiveMask()
+        att_mask_pt = mask_pt(q_pt.permute(1, 0, 2))
+
+    else:  # cross-attention
+        lengths_mx = np.random.randint(1, kvlen, (batch_size,),)
+        valid_lengths_mx = sockeye.layers.prepare_source_valid_lengths(lengths_mx, q_mx.transpose(1, 0, 2), heads)
+        mx_args = (valid_lengths_mx, None)  # source mask, no autoregr mask
+
+        lengths_pt = pt.tensor(lengths_mx.asnumpy())
+        att_mask_pt = sockeye.layers_pt.prepare_source_length_mask(lengths_pt, heads, kvlen)
+
+    b_mx = sockeye.layers.DotAttentionCell(dropout=0.0)
     b_mx.initialize()
     b_pt = sockeye.layers_pt.PyTorchDotAttentionCell(dropout=0.0, heads=heads)
 
-    # TODO test masked softmax once inmplemented (via bias and/or lengths)
-    r_mx = b_mx(q_mx, kv_mx, heads, None, None).asnumpy()
-    r_pt = b_pt(q_pt, kv_pt, length_mask=None, bias=None).detach().numpy()
+    r_mx = b_mx(q_mx, kv_mx, heads, *mx_args).asnumpy()
+    r_pt = b_pt(q_pt, kv_pt, mask=att_mask_pt).detach().numpy()
 
-    assert np.allclose(r_mx, r_pt)
+    assert np.allclose(r_mx, r_pt, atol=1e-06)
 
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
@@ -305,7 +327,7 @@ def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, hea
     b_pt.ff_out.weight.data[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
 
     r_mx = b_mx._attend(q_mx, kv_mx, None, None).asnumpy()
-    r_pt = b_pt._attend(q_pt, kv_pt, key_values_length_mask=None, bias=None).detach().numpy()
+    r_pt = b_pt._attend(q_pt, kv_pt, mask=None).detach().numpy()
 
     assert np.allclose(r_mx, r_pt, atol=1e-06)
 
@@ -347,7 +369,7 @@ def test_mx_pt_eq_multi_head_attention(qlen, kvlen, batch_size, hidden, heads):
 
     b_pt = sockeye.layers_pt.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden)
     b_pt.weights_from_mxnet_block(b_mx)
-    r_pt = b_pt(queries_pt, memory_pt, key_values_length_mask=None, bias=None, projected_memory_kv=None)
+    r_pt = b_pt(queries_pt, memory_pt, mask=None, projected_memory_kv=None)
 
     print(b_pt.ff_kv.weight[0])
     print(b_mx.ff_kv.weight.data()[0])

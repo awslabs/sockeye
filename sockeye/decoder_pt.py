@@ -143,7 +143,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
                                                                    max_seq_len=self.config.max_seq_len_target,
                                                                    scale_up_input=True,
                                                                    scale_down_positions=False)
-        self.autoregressive_bias = transformer_pt.PyTorchAutoRegressiveBias()
+        self.autoregressive_mask = transformer_pt.AutoRegressiveMask()
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
             transformer_pt.PyTorchTransformerDecoderBlock(config,
@@ -236,7 +236,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         return outputs
 
     def forward(self, step_input: pt.Tensor, states: List[pt.Tensor]) -> Tuple[pt.Tensor, List[pt.Tensor]]:
-        mask = None
+        target_mask = None
         if self.inference_only:
             steps, source_mask, *other = states
             source_encoded = None  # use constant pre-computed key value projections from the states
@@ -244,7 +244,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             autoregr_states = other[self.config.num_layers:]
         else:
             if any(layer.needs_mask for layer in self.layers):
-                mask = self.autoregressive_bias(step_input)  # mask: (1, length, length)
+                target_mask = self.autoregressive_mask(step_input)  # mask: (1, length, length)
             steps, source_encoded, source_mask, *autoregr_states = states
             enc_att_kv = [None for _ in range(self.config.num_layers)]
 
@@ -254,7 +254,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
 
         batch, heads, source_max_len = source_mask.size()
-        source_length_mask = source_mask.view(batch * heads, 1, source_max_len)
+        source_mask_view = source_mask.view(batch * heads, 1, source_max_len)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
@@ -267,15 +267,15 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         new_autoregr_states = []  # type: List[pt.Tensor]
         for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
             target, new_layer_autoregr_state = layer(target=target,
-                                                     target_bias=mask,
+                                                     target_mask=target_mask,
                                                      source=source_encoded,
-                                                     source_length_mask=source_length_mask,
+                                                     source_mask=source_mask_view,
                                                      autoregr_states=layer_autoregr_state,
                                                      enc_att_kv=layer_enc_att_kv)
 
             new_autoregr_states += [*new_layer_autoregr_state]
 
-        target = self.final_process(target, None)
+        target = self.final_process(target)
         target = target.transpose(1, 0)
 
         # Inference: increment steps by 1 (discarded in training)

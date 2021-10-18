@@ -60,21 +60,21 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
         if config.use_lhuc:
             self.lhuc = sockeye.layers_pt.PyTorchLHUC(config.model_size)
 
-    def forward(self, data: pt.Tensor, length_mask: pt.Tensor = None) -> pt.Tensor:
+    def forward(self, data: pt.Tensor, att_mask: pt.Tensor = None) -> pt.Tensor:
         """
         :param data: Input tensor of shape (length, batch_size, hidden)
-        :param length_mask: Optional data length mask of shape (batch_size * self.heads, 1, length)
-                            to mask self-attention scores. True for padding positions.
+        :param att_mask: Optional data length mask of shape (batch_size * self.heads, 1, length)
+                         to mask self-attention scores. True for padding positions.
         """
         # self-attention
-        data_self_att, _ = self.self_attention(inputs=self.pre_self_attention(data, None),
+        data_self_att, _ = self.self_attention(inputs=self.pre_self_attention(data),
                                                previous_states=None,
-                                               inputs_length_mask=length_mask,
+                                               mask=att_mask,
                                                bias=None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
-        data_ff = self.ff(self.pre_ff(data, None))
+        data_ff = self.ff(self.pre_ff(data))
 
         data = self.post_ff(data_ff, data)
 
@@ -177,29 +177,27 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
 
     def forward(self,
                 target: pt.Tensor,
-                target_bias: Optional[pt.Tensor],
+                target_mask: Optional[pt.Tensor],
                 source: pt.Tensor,
-                source_length_mask: Optional[pt.Tensor],
+                source_mask: Optional[pt.Tensor],
                 autoregr_states: Optional[pt.Tensor],
                 enc_att_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
-        target_autoregr, *new_autoregr_states = self.autoregr_layer(inputs=self.pre_autoregr_layer(target, None),
+        target_autoregr, *new_autoregr_states = self.autoregr_layer(inputs=self.pre_autoregr_layer(target),
                                                                     previous_states=autoregr_states,
-                                                                    inputs_length_mask=None,
-                                                                    bias=target_bias)
+                                                                    mask=target_mask)
 
         target = self.post_autoregr_layer(target_autoregr, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target, None),
+        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target),
                                             key_values=source,
-                                            key_values_length_mask=source_length_mask,
-                                            bias=None,
+                                            mask=source_mask,
                                             projected_memory_kv=enc_att_kv)
 
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
-        target_ff = self.ff(self.pre_ff(target, None))
+        target_ff = self.ff(self.pre_ff(target))
         target = self.post_ff(target_ff, target)
 
         if self.lhuc:
@@ -245,7 +243,7 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
         if dropout > 0.0:
             self.dropout = pt.nn.Dropout(p=dropout)
 
-    def forward(self, data: pt.Tensor, prev: pt.Tensor) -> pt.Tensor:
+    def forward(self, data: pt.Tensor, prev: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
         Apply processing sequence to data with optional previous input.
 
@@ -323,12 +321,9 @@ class PyTorchTransformerFeedForward(pt.nn.Module):
             self.linear.bias.data[:] = pt.as_tensor(block_mx.linear.bias.data().asnumpy())
 
 
-class PyTorchAutoRegressiveBias(pt.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self._dtype = 'float32'
+class AutoRegressiveMask(pt.nn.Module):
 
     def forward(self, x):
-        bias = pt.ones(x.shape[1], x.shape[1], device=x.device) * -C.LARGE_VALUES[self._dtype]
-        bias = pt.triu(bias, diagonal=1).unsqueeze(0).detach()
-        return bias
+        mask = pt.full((x.shape[1], x.shape[1]), fill_value=1, device=x.device, dtype=pt.bool)
+        mask = pt.triu(mask, diagonal=1).unsqueeze(0)
+        return mask.detach()

@@ -91,18 +91,13 @@ def test_mx_pt_eq_transformer_feed_forward(use_glu):
 
 
 @pytest.mark.parametrize('length', [1, 10, 100])
-def test_mx_pt_eq_autoregressive_bias(length):
-    x_mx = np.zeros((2, length, 32))
+def test_pt_autoregressive_mask(length):
     x_pt = pt.zeros(2, length, 32)
+    b_pt = sockeye.transformer_pt.AutoRegressiveMask()
+    result_pt = b_pt(x_pt).detach()
 
-    b_mx = sockeye.transformer.AutoRegressiveBias()
-    b_mx.initialize()
-    b_pt = sockeye.transformer_pt.PyTorchAutoRegressiveBias()
-
-    result_mx = b_mx(x_mx).asnumpy()
-    result_pt = b_pt(x_pt).detach().numpy()
-
-    assert np.allclose(result_mx, result_pt)
+    assert result_pt.dtype == pt.bool
+    assert result_pt.size() == (1, length, length)
 
 
 @pytest.mark.parametrize('sequence', ['rn', 'nr', 'r', 'n', ''])  # not testing dropout
@@ -213,7 +208,7 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
 
     autoregr_bias_mx = sockeye.transformer.AutoRegressiveBias()
     autoregr_bias_mx.initialize()
-    autoregr_bias_pt = sockeye.transformer_pt.PyTorchAutoRegressiveBias()
+    autoregr_bias_pt = sockeye.transformer_pt.AutoRegressiveMask()
     target_bias_mx = autoregr_bias_mx(target_mx)
     target_bias_pt = autoregr_bias_pt(target_pt).detach()
 

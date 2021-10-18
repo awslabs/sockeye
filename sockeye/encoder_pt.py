@@ -172,19 +172,19 @@ class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
 
     def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         # positional embedding
-        data = self.pos_embedding(data, None)
+        data = self.pos_embedding(data)
 
         if self.dropout is not None:
             data = self.dropout(data)
 
         # inverted length_mask for attention masking, (batch_size * heads, 1, max_len)
-        length_mask = layers_pt.prepare_source_length_mask(valid_length, self.config.attention_heads, data.size()[1])
+        att_mask = layers_pt.prepare_source_length_mask(valid_length, self.config.attention_heads, data.size()[1])
 
         data = data.transpose(1, 0)  # batch to time major
         for layer in self.layers:
-            data = layer(data, length_mask=length_mask)
+            data = layer(data, att_mask=att_mask)
 
-        data = self.final_process(data, None)
+        data = self.final_process(data)
         data = data.transpose(1, 0)  # time to batch major
         return data, valid_length
 
