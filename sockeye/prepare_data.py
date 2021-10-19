@@ -19,6 +19,7 @@ import multiprocessing
 from . import arguments
 from . import constants as C
 from . import data_io
+from . import data_io_pt
 from . import utils
 from . import vocab
 from .log import setup_main_logger
@@ -33,6 +34,7 @@ def main():
     prepare_data(args)
 
 def prepare_data(args: argparse.Namespace):
+    data_io_module = data_io_pt if args.use_pytorch else data_io
     output_folder = os.path.abspath(args.output)
     os.makedirs(output_folder, exist_ok=True)
     setup_main_logger(console=not args.quiet,
@@ -72,16 +74,16 @@ def prepare_data(args: argparse.Namespace):
     # Split input into shards and randomly assign data to shards
     with utils.smart_open(source_paths[0], mode='rb') as infile:
         num_sents = sum(1 for _ in infile)
-    num_shards = data_io.get_num_shards(num_sents, samples_per_shard, minimum_num_shards)
+    num_shards = data_io_module.get_num_shards(num_sents, samples_per_shard, minimum_num_shards)
     logger.info("%d samples will be split into %d shard(s) (requested samples/shard=%d, min_num_shards=%d)."
                 % (num_sents, num_shards, samples_per_shard, minimum_num_shards))
-    shards, keep_tmp_shard_files = data_io.create_shards(source_fnames=source_paths,
+    shards, keep_tmp_shard_files = data_io_module.create_shards(source_fnames=source_paths,
                                    target_fnames=target_paths,
                                    num_shards=num_shards,
                                    output_prefix=output_folder)
     shard_source_paths, shard_target_paths = [paths for paths in zip(*shards)]
 
-    # Process shards in parallel using max_processes process    
+    # Process shards in parallel using max_processes process
     with utils.create_pool(args.max_processes) as pool:
         source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
             shard_source_paths=shard_source_paths,
@@ -98,23 +100,23 @@ def prepare_data(args: argparse.Namespace):
             pad_to_multiple_of=args.pad_vocab_to_multiple_of,
             mapper=pool.map)
 
-        data_io.prepare_data(source_fnames=source_paths,
-                            target_fnames=target_paths,
-                            source_vocabs=source_vocabs,
-                            target_vocabs=target_vocabs,
-                            source_vocab_paths=source_vocab_paths,
-                            target_vocab_paths=[args.target_vocab],
-                            shared_vocab=args.shared_vocab,
-                            max_seq_len_source=max_seq_len_source,
-                            max_seq_len_target=max_seq_len_target,
-                            bucketing=bucketing,
-                            bucket_width=bucket_width,
-                            num_shards=num_shards,
-                            output_prefix=output_folder,
-                            bucket_scaling=bucket_scaling,
-                            pool=pool,
-                            shards=shards,
-                            keep_tmp_shard_files=keep_tmp_shard_files)
+        data_io_module.prepare_data(source_fnames=source_paths,
+                                    target_fnames=target_paths,
+                                    source_vocabs=source_vocabs,
+                                    target_vocabs=target_vocabs,
+                                    source_vocab_paths=source_vocab_paths,
+                                    target_vocab_paths=[args.target_vocab],
+                                    shared_vocab=args.shared_vocab,
+                                    max_seq_len_source=max_seq_len_source,
+                                    max_seq_len_target=max_seq_len_target,
+                                    bucketing=bucketing,
+                                    bucket_width=bucket_width,
+                                    num_shards=num_shards,
+                                    output_prefix=output_folder,
+                                    bucket_scaling=bucket_scaling,
+                                    pool=pool,
+                                    shards=shards,
+                                    keep_tmp_shard_files=keep_tmp_shard_files)
 
 
 if __name__ == "__main__":

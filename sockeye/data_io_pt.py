@@ -1,4 +1,4 @@
-# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -28,9 +28,8 @@ from dataclasses import dataclass
 from itertools import chain
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple, Set
 
-import mxnet as mx
-from mxnet import np, npx, gluon
-import numpy as onp
+import torch as pt
+import numpy as np
 
 from . import config
 from . import constants as C
@@ -440,7 +439,7 @@ def create_shards(source_fnames: List[str],
 
 class RawParallelDatasetLoader:
     """
-    Loads a data set of variable-length parallel source/target sequences into buckets of NDArrays.
+    Loads a data set of variable-length parallel source/target sequences into buckets of ndarrays.
 
     :param buckets: Bucket list.
     :param eos_id: End-of-sentence id.
@@ -487,9 +486,9 @@ class RawParallelDatasetLoader:
         num_source_factors = len(source_iterables)
         num_target_factors = len(target_iterables)
 
-        data_source = [onp.full((num_samples, source_len, num_source_factors), self.pad_id, dtype=self.dtype)
+        data_source = [np.full((num_samples, source_len, num_source_factors), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-        data_target = [onp.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
+        data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
                        for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
 
         bucket_sample_index = [0 for _ in self.buckets]
@@ -536,8 +535,8 @@ class RawParallelDatasetLoader:
             bucket_sample_index[buck_index] += 1
 
         for i in range(len(data_source)):
-            data_source[i] = npx.from_numpy(data_source[i], zero_copy=True)
-            data_target[i] = npx.from_numpy(data_target[i], zero_copy=True)
+            data_source[i] = pt.from_numpy(data_source[i])
+            data_target[i] = pt.from_numpy(data_target[i])
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
@@ -572,7 +571,7 @@ def save_shard(shard_idx: int,
                keep_tmp_shard_files: bool):
     """
     Load raw shard source and target data files, map to integers using the corresponding vocabularies,
-    convert data into NDArrays and save to disk.
+    convert data into ndarrays and save to disk.
     Optionally it can delete the source/target files.
 
     :param shard_idx: The index of the shard.
@@ -605,7 +604,7 @@ def save_shard(shard_idx: int,
 
     shard_stats = shard_stat_accumulator.statistics
 
-    # Convert to NDArray
+    # Convert to ndarray
     dataset = data_loader.load(sources_sentences, targets_sentences, shard_stats.num_sents_per_bucket)
     shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
     shard_stats.log()
@@ -664,7 +663,7 @@ def prepare_data(source_fnames: List[str],
                                                                                                max_seq_len_target)]
     logger.info("Buckets: %s", buckets)
 
-    # Map sentences to ids, assign to buckets, compute shard statistics and convert each shard to serialized NDArrays
+    # Map sentences to ids, assign to buckets, compute shard statistics and convert each shard to serialized ndarrays
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
@@ -926,9 +925,8 @@ def get_training_data_iters(sources: List[str],
                             bucket_scaling: bool = True,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
-                                                                           Optional['BaseParallelSampleIter'],
-                                                                           'DataConfig', 'DataInfo']:
+                            permute: bool = True) -> Tuple['BaseParallelSampleIter', Optional['BaseParallelSampleIter'],
+                                                           'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -1441,8 +1439,8 @@ class ParallelDataSet:
     """
 
     def __init__(self,
-                 source: List[np.ndarray],
-                 target: List[np.ndarray]) -> None:
+                 source: List[pt.Tensor],
+                 target: List[pt.Tensor]) -> None:
         check_condition(len(source) == len(target),
                         "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
         self.source = source
@@ -1458,9 +1456,7 @@ class ParallelDataSet:
         """
         Saves the dataset to a binary .npy file.
         """
-        s = {'s{:0>5d}'.format(i): a for i, a in enumerate(self.source)}
-        t = {'t{:0>5d}'.format(i): a for i, a in enumerate(self.target)}
-        npx.savez(fname, **s, **t)
+        pt.save(self.source + self.target, fname)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1469,11 +1465,10 @@ class ParallelDataSet:
         is sliced and each worker loads a different slice based on its rank.
         Specifically, each of N workers loads 1/N of each bucket.
         """
-        data = npx.load(fname)
-        source_keys = sorted(k for k in data.keys() if k.startswith('s'))
-        target_keys = sorted(k for k in data.keys() if k.startswith('t'))
-        source = [data[k] for k in source_keys]
-        target = [data[k] for k in target_keys]
+        data = pt.load(fname)
+        n = len(data) // 2
+        source = data[:n]
+        target = data[n:2 * n]
         if horovod_mpi.using_horovod() and horovod_mpi.hvd.size() > 1:
             split_index = horovod_mpi.hvd.rank()
             total_splits = horovod_mpi.hvd.size()
@@ -1491,8 +1486,8 @@ class ParallelDataSet:
                     if num_copies > 1:
                         logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
                                     num_sentences, num_copies, total_splits)
-                        source[k] = np.repeat(source[k], repeats=num_copies, axis=0)
-                        target[k] = np.repeat(target[k], repeats=num_copies, axis=0)
+                        source[k] = pt.repeat_interleave(source[k], repeats=num_copies, dim=0)
+                        target[k] = pt.repeat_interleave(target[k], repeats=num_copies, dim=0)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
@@ -1518,7 +1513,7 @@ class ParallelDataSet:
         source = list(self.source)
         target = list(self.target)
 
-        rs = onp.random.RandomState(seed)
+        rs = np.random.RandomState(seed)
 
         for bucket_idx in range(len(self)):
             bucket_batch_size = bucket_batch_sizes[bucket_idx].batch_size
@@ -1543,13 +1538,15 @@ class ParallelDataSet:
             # Fill up the last batch by randomly sampling from the extant items.
             rest = target_num_samples - num_samples
             if rest > 0:
-                desired_indices = np.array(rs.randint(num_samples, size=rest))
-                source[bucket_idx] = np.concatenate((bucket_source, np.take(bucket_source, desired_indices, axis=0)), axis=0)
-                target[bucket_idx] = np.concatenate((bucket_target, np.take(bucket_target, desired_indices, axis=0)), axis=0)
+                desired_indices = pt.tensor(rs.randint(num_samples, size=rest))
+                source[bucket_idx] = pt.cat((bucket_source, pt.index_select(bucket_source, 0, desired_indices)),
+                                            dim=0)
+                target[bucket_idx] = pt.cat((bucket_target, pt.index_select(bucket_target, 0, desired_indices)),
+                                            dim=0)
 
         return ParallelDataSet(source, target)
 
-    def permute(self, permutations: List[np.ndarray]) -> 'ParallelDataSet':
+    def permute(self, permutations: List[pt.Tensor]) -> 'ParallelDataSet':
         """
         Permutes the data within each bucket. The permutation is received as an argument,
         allowing the data to be unpermuted (i.e., restored) later on.
@@ -1558,14 +1555,14 @@ class ParallelDataSet:
         :return: A new, permuted ParallelDataSet.
         """
         assert len(self) == len(permutations)
-        source = []  # type: List[np.ndarray]
-        target = []  # type: List[np.ndarray]
+        source = []  # type: List[pt.Tensor]
+        target = []  # type: List[pt.Tensor]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not an empty bucket
                 permutation = permutations[buck_idx]
-                source.append(np.take(self.source[buck_idx], permutation, axis=0))
-                target.append(np.take(self.target[buck_idx], permutation, axis=0))
+                source.append(pt.index_select(self.source[buck_idx], 0, permutation))
+                target.append(pt.index_select(self.target[buck_idx], 0, permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
@@ -1573,7 +1570,7 @@ class ParallelDataSet:
         return ParallelDataSet(source, target)
 
 
-def get_permutations(bucket_counts: List[int]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+def get_permutations(bucket_counts: List[int]) -> Tuple[List[pt.Tensor], List[pt.Tensor]]:
     """
     Returns the indices of a random permutation for each bucket and the corresponding inverse permutations that can
     restore the original order of the data if applied to the permuted data.
@@ -1581,15 +1578,15 @@ def get_permutations(bucket_counts: List[int]) -> Tuple[List[np.ndarray], List[n
     :param bucket_counts: The number of elements per bucket.
     :return: For each bucket a permutation and inverse permutation is returned.
     """
-    data_permutations = []  # type: List[np.ndarray]
-    inverse_data_permutations = []  # type: List[np.ndarray]
+    data_permutations = []  # type: List[pt.Tensor]
+    inverse_data_permutations = []  # type: List[pt.Tensor]
     for num_samples in bucket_counts:
         if num_samples == 0:
             num_samples = 1
         # new random order:
-        data_permutation = np.array(onp.random.permutation(num_samples))
-        inverse_data_permutation = np.empty(num_samples, np.int32)
-        inverse_data_permutation[data_permutation] = np.arange(num_samples)
+        data_permutation = pt.from_numpy(np.random.permutation(num_samples))
+        inverse_data_permutation = pt.empty(num_samples, dtype=pt.int64)
+        inverse_data_permutation[data_permutation] = pt.arange(num_samples)
         data_permutations.append(data_permutation)
         inverse_data_permutations.append(inverse_data_permutation)
     return data_permutations, inverse_data_permutations
@@ -1625,7 +1622,7 @@ class MetaBaseParallelSampleIter(ABC):
     pass
 
 
-class BaseParallelSampleIter(mx.io.DataIter):
+class BaseParallelSampleIter:
     """
     Base parallel sample iterator.
 
@@ -1634,7 +1631,7 @@ class BaseParallelSampleIter(mx.io.DataIter):
     :param num_source_factors: The number of source factors.
     :param num_target_factors: The number of target factors.
     :param permute: Randomly shuffle the parallel data.
-    :param dtype: The MXNet data type.
+    :param dtype: The data type.
     """
     __metaclass__ = MetaBaseParallelSampleIter
 
@@ -1646,8 +1643,7 @@ class BaseParallelSampleIter(mx.io.DataIter):
                  num_target_factors: int = 1,
                  permute: bool = True,
                  dtype='float32') -> None:
-        super().__init__(batch_size=batch_size)
-
+        self.batch_size = batch_size
         self.buckets = list(buckets)
         self.default_bucket_key = get_default_bucket_key(self.buckets)
         self.bucket_batch_sizes = bucket_batch_sizes
@@ -1655,6 +1651,9 @@ class BaseParallelSampleIter(mx.io.DataIter):
         self.num_target_factors = num_target_factors
         self.permute = permute
         self.dtype = dtype
+
+    def __iter__(self):
+        return self
 
     @abstractmethod
     def reset(self):
@@ -1667,6 +1666,9 @@ class BaseParallelSampleIter(mx.io.DataIter):
     @abstractmethod
     def next(self) -> 'Batch':
         pass
+
+    def __next__(self):
+        return self.next()
 
     @abstractmethod
     def save_state(self, fname: str):
@@ -1762,7 +1764,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         self.next_batch = create_batch_from_parallel_sample(source, target, label)
         return True
 
-    def next(self) -> mx.io.DataBatch:
+    def next(self) -> 'Batch':
         """
         Returns the next batch.
         """
@@ -1897,10 +1899,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.curr_batch_index = 0
 
         # Produces a permutation of the batches within each bucket, along with the permutation that inverts it.
-        self.inverse_data_permutations = [np.arange(0, max(1, self.data.source[i].shape[0]))
+        self.inverse_data_permutations = [pt.arange(0, max(1, self.data.source[i].shape[0]))
                                           for i in range(len(self.data))]
-        self.data_permutations = [np.arange(0, max(1, self.data.source[i].shape[0]))
-                                  for i in range(len(self.data))]
+        self.data_permutations = [pt.arange(0, max(1, self.data.source[i].shape[0])) for i in range(len(self.data))]
 
         self.reset()
 
@@ -1957,8 +1958,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "wb") as fp:
             pickle.dump(self.batch_indices, fp)
             pickle.dump(self.curr_batch_index, fp)
-            onp.save(fp, [a for a in self.inverse_data_permutations], allow_pickle=True)
-            onp.save(fp, [a for a in self.data_permutations], allow_pickle=True)
+            np.save(fp, [a for a in self.inverse_data_permutations], allow_pickle=True)
+            np.save(fp, [a for a in self.data_permutations], allow_pickle=True)
 
     def load_state(self, fname: str):
         """
@@ -1973,8 +1974,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "rb") as fp:
             self.batch_indices = pickle.load(fp)
             self.curr_batch_index = pickle.load(fp)
-            inverse_data_permutations = onp.load(fp, allow_pickle=True)  # pylint: disable=unexpected-keyword-arg
-            data_permutations = onp.load(fp, allow_pickle=True)  # pylint: disable=unexpected-keyword-arg
+            inverse_data_permutations = np.load(fp, allow_pickle=True)  # pylint: disable=unexpected-keyword-arg
+            data_permutations = np.load(fp, allow_pickle=True)  # pylint: disable=unexpected-keyword-arg
 
         # Right after loading the iterator state, next() should be called
         self.curr_batch_index -= 1
@@ -1992,41 +1993,43 @@ class ParallelSampleIter(BaseParallelSampleIter):
 
 @dataclass
 class Batch:
-    source: mx.nd.NDArray
-    source_length: mx.nd.NDArray
-    target: mx.nd.NDArray
-    target_length: mx.nd.NDArray
-    labels: Dict[str, mx.nd.NDArray]
+    source: pt.Tensor
+    source_length: pt.Tensor
+    target: pt.Tensor
+    target_length: pt.Tensor
+    labels: Dict[str, pt.Tensor]
     samples: int
     tokens: int
 
-    def split_and_load(self, ctx: List[mx.context.Context]) -> 'Batch':
-        source = mx.gluon.utils.split_and_load(self.source, ctx, batch_axis=0)
-        source_length = mx.gluon.utils.split_and_load(self.source_length, ctx, batch_axis=0)
-        target = mx.gluon.utils.split_and_load(self.target, ctx, batch_axis=0)
-        target_length = mx.gluon.utils.split_and_load(self.target_length, ctx, batch_axis=0)
-        labels = {name: mx.gluon.utils.split_and_load(label, ctx, batch_axis=0) for name, label in self.labels.items()}
+    def split_and_load(self, device: pt.device) -> 'Batch':
+        # TODO (mdenkows): Are we ready to move to fully multi-process training?
+        # Using 1 device (GPU) per process simplifies data/training logic.
+        source = self.source.to(device)
+        source_length = self.source_length.to(device)
+        target = self.target.to(device)
+        target_length = self.target_length.to(device)
+        labels = {name: label.to(device) for name, label in self.labels.items()}
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
 
-    def shards(self) -> Iterable[Tuple[Tuple, Dict[str, np.ndarray]]]:
+    def shards(self) -> Iterable[Tuple[Tuple, Dict[str, pt.Tensor]]]:
         assert isinstance(self.source, list), "Must call split_and_load() first"
         for i, inputs in enumerate(zip(self.source, self.source_length, self.target, self.target_length)):
             # model inputs, labels
             yield inputs, {name: label[i] for name, label in self.labels.items()}
 
 
-def create_target_and_shifted_label_sequences(target_and_label: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def create_target_and_shifted_label_sequences(target_and_label: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
     """
     Returns the target and label sequence from a joint array of varying-length sequences including both <bos> and <eos>.
-    Both ndarrays returned have input size of second dimension - 1.
+    Both tensors returned have input size of second dimension - 1.
     """
     target = target_and_label[:, :-1, :]  # skip last column (for longest-possible sequence, this already removes <eos>)
-    target = np.where(target == C.EOS_ID, np.zeros_like(target), target)  # replace other <eos>'s with <pad>
+    target = pt.where(target == C.EOS_ID, pt.zeros_like(target), target)  # replace other <eos>'s with <pad>
     label = target_and_label[:, 1:, :]  # label skips <bos>
     return target, label
 
 
-def create_batch_from_parallel_sample(source: np.ndarray, target: np.ndarray, label: np.ndarray) -> Batch:
+def create_batch_from_parallel_sample(source: pt.Tensor, target: pt.Tensor, label: pt.Tensor) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
@@ -2034,10 +2037,10 @@ def create_batch_from_parallel_sample(source: np.ndarray, target: np.ndarray, la
     :param target: Target array. Shape: (batch, target_length, num_target_factors).
     :param label: Time-shifted label array. Shape: (batch, target_length, num_target_factors).
     """
-    source_words = npx.slice(source, begin=(None, None, 0), end=(None, None, 1)).squeeze(axis=2)
-    source_length = np.sum(source_words != C.PAD_ID, axis=1)
-    target_words = np.squeeze(npx.slice(target, begin=(None, None, 0), end=(None, None, 1)), axis=2)
-    target_length = np.sum(target_words != C.PAD_ID, axis=1)
+    source_words = source[:, :, 0:1].squeeze(dim=2)
+    source_length = pt.sum(source_words != C.PAD_ID, dim=1)
+    target_words = target[:, :, 0:1].squeeze(dim=2)
+    target_length = pt.sum(target_words != C.PAD_ID, dim=1)
     length_ratio = source_length / target_length
 
     source_shape = source.shape
@@ -2047,9 +2050,9 @@ def create_batch_from_parallel_sample(source: np.ndarray, target: np.ndarray, la
     labels = {C.LENRATIO_LABEL_NAME: length_ratio}
 
     if label.shape[2] == 1:
-        labels[C.TARGET_LABEL_NAME] = np.squeeze(label, axis=2)
+        labels[C.TARGET_LABEL_NAME] = pt.squeeze(label, dim=2)
     else:
-        primary_label, *factor_labels = (np.squeeze(x, axis=2) for x in np.split(label, label.shape[2], axis=2))
+        primary_label, *factor_labels = (pt.squeeze(x, dim=2) for x in pt.split(label, label.shape[2], dim=2))
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 

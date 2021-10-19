@@ -302,7 +302,8 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           loglevel='INFO',
           loglevel_secondary_workers='INFO',
           no_logfile=False,
-          max_processes=1
+          max_processes=1,
+          use_pytorch=False
           ))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
@@ -338,7 +339,8 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           loglevel='INFO',
           loglevel_secondary_workers='INFO',
           no_logfile=False,
-          max_processes=1
+          max_processes=1,
+          use_pytorch=False
           ))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):
