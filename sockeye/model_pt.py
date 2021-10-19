@@ -116,6 +116,10 @@ class PyTorchSockeyeModel(pt.nn.Module):
         if dtype == C.DTYPE_FP16:
             self.half()
             self.dtype = pt.float16
+        elif dtype == C.DTYPE_INT8:
+            logger.info("Dynamic quantization to int8 for (fused) Linear layers")
+            # TODO: explore quantization of OutputLayer
+            pt.quantization.quantize_dynamic(self, {pt.nn.Linear}, dtype=pt.qint8, inplace=True)
         else:
             self.dtype = pt.float32
 
@@ -307,9 +311,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
                         filename: str,
                         device: Optional[pt.device] = None,
                         allow_missing: bool = False,
-                        ignore_extra: bool = False,
-                        cast_dtype: bool = False,
-                        dtype_source: str = 'current'):
+                        ignore_extra: bool = False):
         """Load parameters from file previously saved by `save_parameters`.
         See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
 
@@ -324,13 +326,6 @@ class PyTorchSockeyeModel(pt.nn.Module):
         ignore_extra : bool, default False
             Whether to silently ignore parameters from the file that are not
             present in this Block.
-        cast_dtype : bool, default False
-            Cast the data type of the ndarray loaded from the checkpoint to the dtype
-            provided by the Parameter if any.
-        dtype_source : str, default 'current'
-            must be in {'current', 'saved'}
-            Only valid if cast_dtype=True, specify the source of the dtype for casting
-            the parameters
         References
         ----------
         `Saving and Loading Gluon Models \
@@ -473,6 +468,20 @@ class PyTorchSockeyeModel(pt.nn.Module):
 
         return cache_func
 
+    def fuse_model(self):
+        """"
+        Fuses ff1 linear layers and their activations.
+        See https://pytorch.org/tutorials/recipes/fuse.html
+        """
+        logger.info("Fusing ff1 and act modules in TransformerFeedForward")
+        from sockeye.transformer_pt import PyTorchTransformerFeedForward
+        n = 0
+        for module in self.modules():
+            if type(module) == PyTorchTransformerFeedForward:
+                n += 1
+                pt.quantization.fuse_modules(module, ['ff1', 'act'], inplace=True)
+        logger.info(f"{n} modules fused.")
+
 
 def make_pytorch_model_from_mxnet_model(mx_model: SockeyeModel) -> PyTorchSockeyeModel:
     """
@@ -523,7 +532,7 @@ def load_model(model_folder: str,
     assert not train_decoder_only, 'not implemented yet'
     assert not forward_pass_cache_size, 'not implemented yet'
     assert not for_disk_saving, 'not implemented yet'
-    assert dtype in (None, C.DTYPE_FP32, C.DTYPE_FP16), 'not implemented yet'
+    assert dtype in (None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8), 'not implemented yet'
 
     source_vocabs = vocab.load_source_vocabs(model_folder)
     target_vocabs = vocab.load_target_vocabs(model_folder)
@@ -545,60 +554,25 @@ def load_model(model_folder: str,
         params_fname = os.path.join(model_folder, f'{C.PARAMS_NAME % checkpoint}.{C.TORCH_SUFFIX}')
     assert os.path.exists(params_fname), "Torch parameters not found. Run sockeye.mx_to_pt first."
 
-    # if (dtype == C.DTYPE_INT8 or
-    #     model_config.dtype == C.DTYPE_INT8 or
-    #     for_disk_saving is not None) and "intgemm_fully_connected" not in dir(npx):
-    #     # We're going to use int8 but it's not compiled into mxnet.
-    #     path = os.path.abspath(model_config.intgemm_custom_lib)
-    #     try:
-    #         mx.library.load(path)
-    #     except mx.base.MXNetError:
-    #         raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a "
-    #                                   "custom operator library was not found in `%s`.  Compile the custom "
-    #                                   "operator then set the path using intgemm_custom_lib in the config file." % path)
-
-    # Are we converting the model to 8-bit?
-    quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
-    if quantizing:
-        model_config.dtype = C.DTYPE_INT8  # Ensure the scaling factor parameters are created.
-
     model = PyTorchSockeyeModel(model_config, inference_only=inference_only,
                                 mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
-
-    # if model_config.dtype != C.DTYPE_INT8:
-    #     # If model_config.dtype is int8, then the above model construction
-    #     # (which also used model_config) already set everything to the correct
-    #     # mix of float32 and int8.  Cast would try to make everything int8.
-    #     model.cast(model_config.dtype)
-
-    if quantizing:
-        logger.info("Model dtype: quantizing from float32 to int8")
-        allow_missing = True  # The scaling factors are missing
-        cast_dtype = True
-        dtype_source = 'saved'
-    elif dtype is None or dtype == model_config.dtype:
-        logger.info("Model dtype: %s" % model_config.dtype)
-        allow_missing = allow_missing
-        cast_dtype = False
-        dtype_source = 'saved'
-    else:
-        logger.info("Model dtype: overridden to %s" % dtype)
-        model.cast(dtype)
-        allow_missing = allow_missing
-        cast_dtype = True
-        dtype_source = 'current'
 
     model.load_parameters(filename=params_fname,
                           device=device,
                           allow_missing=allow_missing,
-                          ignore_extra=True,  # Scaling factors may be present in float32 models.
-                          cast_dtype=cast_dtype,
-                          dtype_source=dtype_source)
+                          ignore_extra=False)
 
     model.to(device)
 
     if set_grad_req_null:
         model.eval()
+        model.fuse_model()  # fuses ff1 & act modules in TransformerFeedForward modules
+
+    if dtype is None or dtype == model_config.dtype:
+        logger.info("Model dtype: %s" % model_config.dtype)
+    else:
+        logger.info("Model dtype: overridden to %s" % dtype)
+        model.cast(dtype)
 
     # if for_disk_saving is not None:
     #     # Saving scaling factors and possibly int8 values to disk.

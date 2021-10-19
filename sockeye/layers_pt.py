@@ -109,15 +109,14 @@ class PyTorchOutputLayer(pt.nn.Module):
         self.in_features = hidden_size
         self.out_features = vocab_size
 
-        if dtype == C.DTYPE_INT8:
-            raise NotImplementedError("int8 not implemented yet")
-            # self.scaling = gluon.Parameter('scaling',
-            #                                shape=(1,), init=mx.initializer.Constant(-1.0),
-            #                                dtype=C.DTYPE_FP32, allow_deferred_init=False)
-            # # This is only for inference but MXNet tries to create an
-            # # initializer anyway, then fails because most random
-            # # generators don't support int8 output.
-            # weight_initializer = 'zeros'
+        # if dtype == C.DTYPE_INT8:
+        #     self.scaling = gluon.Parameter('scaling',
+        #                                    shape=(1,), init=mx.initializer.Constant(-1.0),
+        #                                    dtype=C.DTYPE_FP32, allow_deferred_init=False)
+        #     # This is only for inference but MXNet tries to create an
+        #     # initializer anyway, then fails because most random
+        #     # generators don't support int8 output.
+        #     weight_initializer = 'zeros'
         if weight is None:
             self.weight = pt.nn.Parameter(pt.Tensor(vocab_size, hidden_size))
         else:
