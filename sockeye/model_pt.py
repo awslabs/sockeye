@@ -468,20 +468,6 @@ class PyTorchSockeyeModel(pt.nn.Module):
 
         return cache_func
 
-    def fuse_model(self):
-        """"
-        Fuses ff1 linear layers and their activations.
-        See https://pytorch.org/tutorials/recipes/fuse.html
-        """
-        logger.info("Fusing ff1 and act modules in TransformerFeedForward")
-        from sockeye.transformer_pt import PyTorchTransformerFeedForward
-        n = 0
-        for module in self.modules():
-            if type(module) == PyTorchTransformerFeedForward:
-                n += 1
-                pt.quantization.fuse_modules(module, ['ff1', 'act'], inplace=True)
-        logger.info(f"{n} modules fused.")
-
 
 def make_pytorch_model_from_mxnet_model(mx_model: SockeyeModel) -> PyTorchSockeyeModel:
     """
@@ -566,7 +552,6 @@ def load_model(model_folder: str,
 
     if set_grad_req_null:
         model.eval()
-        model.fuse_model()  # fuses ff1 & act modules in TransformerFeedForward modules
 
     if dtype is None or dtype == model_config.dtype:
         logger.info("Model dtype: %s" % model_config.dtype)
