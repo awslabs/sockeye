@@ -59,6 +59,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
+        self.inference_only = inference_only
         logger.info("%s", self.config)
         self.dtype = pt.float32  # config.dtype == C.DTYPE_FP32
         self.mc_dropout = mc_dropout
@@ -76,8 +77,10 @@ class PyTorchSockeyeModel(pt.nn.Module):
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder, dtype=config.dtype)
+        self.traced_encoder = None
         self.decoder = decoder_pt.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only,
                                                       dtype=config.dtype)
+        self.traced_decoder = None
 
         self.output_layer = layers_pt.PyTorchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                          vocab_size=self.config.vocab_target_size,
@@ -140,7 +143,13 @@ class PyTorchSockeyeModel(pt.nn.Module):
             Outputs of the encoder.
         """
         source_embed, source_embed_length = self.embedding_source(inputs, valid_length)
-        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        if self.inference_only:
+            if self.traced_encoder is None:
+                logger.info("Tracing encoder")
+                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, source_embed_length))
+            source_encoded, source_encoded_length = self.traced_encoder(source_embed, source_embed_length)
+        else:
+            source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
         return source_encoded, source_encoded_length
 
     def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None,
@@ -227,7 +236,13 @@ class PyTorchSockeyeModel(pt.nn.Module):
 
         valid_length = pt.ones(step_input.size()[0], device=step_input.device)
         target_embed, _ = self.embedding_target(step_input.unsqueeze(1), valid_length=valid_length)
-        decoder_out, new_states = self.decoder(target_embed, states)
+        if self.inference_only:
+            if self.traced_decoder is None:
+                logger.info("Tracing decoder step")
+                self.traced_decoder = pt.jit.trace(self.decoder, (target_embed, states))
+            decoder_out, new_states = self.traced_decoder(target_embed, states)
+        else:
+            decoder_out, new_states = self.decoder(target_embed, states)
         decoder_out = decoder_out.squeeze(1)
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
