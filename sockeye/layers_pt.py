@@ -212,6 +212,7 @@ class PyTorchLengthRatio(pt.nn.Module):
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
+@pt.jit.script
 def pytorch_interleaved_matmul_encdec_qk(q: pt.Tensor,
                                          kv: pt.Tensor,
                                          heads: int) -> pt.Tensor:
@@ -240,6 +241,7 @@ def pytorch_interleaved_matmul_encdec_qk(q: pt.Tensor,
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
+@pt.jit.script
 def pytorch_interleaved_matmul_encdec_valatt(kv: pt.Tensor,
                                              att: pt.Tensor,
                                              heads: int) -> pt.Tensor:
@@ -481,6 +483,7 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
         self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
 
 
+@pt.jit.script
 def pytorch_get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
     utils.check_condition(depth % 2 == 0, "Positional embeddings require an even embedding size it "
                                           "is however %d." % depth)
