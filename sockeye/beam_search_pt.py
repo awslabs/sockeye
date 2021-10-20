@@ -362,22 +362,28 @@ class TopK(pt.nn.Module):
 #         return best_hyp_indices, best_word_indices, values
 
 
-def _repeat_states(states: List, beam_size: int, state_structure: List) -> List:
-    repeated_states = []
-    flat_structure = functools.reduce(operator.add, state_structure)
-    assert len(states) == len(flat_structure), "Number of states do not match the defined state structure"
-    for state, state_format in zip(states, flat_structure):
-        if state_format == C.STEP_STATE or state_format == C.MASK_STATE:
-            # Steps and source_bias have batch dimension on axis 0
-            repeat_axis = 0
-        elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
-            # Decoder and encoder layer states have batch dimension on axis 1
-            repeat_axis = 1
-        else:
-            raise ValueError("Provided state format %s not recognized." % state_format)
-        repeated_state = state.repeat_interleave(repeats=beam_size, dim=repeat_axis)
-        repeated_states.append(repeated_state)
-    return repeated_states
+class RepeatStates(pt.nn.Module):
+
+    def __init__(self, beam_size: int, state_structure: List):
+        super().__init__()
+        self.beam_size = beam_size
+        self.flat_structure = functools.reduce(operator.add, state_structure)
+
+    def forward(self, *states):
+        repeated_states = []
+        assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
+        for state, state_format in zip(states, self.flat_structure):
+            if state_format == C.STEP_STATE or state_format == C.MASK_STATE:
+                # Steps and source_bias have batch dimension on axis 0
+                repeat_axis = 0
+            elif state_format == C.DECODER_STATE or state_format == C.ENCODER_STATE:
+                # Decoder and encoder layer states have batch dimension on axis 1
+                repeat_axis = 1
+            else:
+                raise ValueError("Provided state format %s not recognized." % state_format)
+            repeated_state = state.repeat_interleave(repeats=self.beam_size, dim=repeat_axis)
+            repeated_states.append(repeated_state)
+        return repeated_states
 
 
 class SortStates(pt.nn.Module):
@@ -601,13 +607,16 @@ class BeamSearch(pt.nn.Module):
         self.global_avoid_trie = global_avoid_trie
         self.prevent_unk = prevent_unk
 
+        self._repeat_states = RepeatStates(beam_size=beam_size, state_structure=self._inference.state_structure())
+        self._traced_repeat_states = None
         self._sort_states = SortStates(state_structure=self._inference.state_structure())
-        self._update_scores = UpdateScores()
-        self._scorer = scorer
+        self._traced_sort_states = None
+        self._update_scores = UpdateScores()  # not tracing UpdateScores for now because of optional None input
         self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
             pad_id=C.PAD_ID,
             eos_id=eos_id,
             scorer=scorer)
+        self._traced_sort_norm_and_update_finished = None
 
         self._sample = None  # type: Optional[pt.nn.Module]
         self._top = None  # type: Optional[pt.nn.Module]
@@ -616,6 +625,7 @@ class BeamSearch(pt.nn.Module):
             #self._sample = SampleK(sample)
         else:
             self._top = TopK(self.beam_size)
+        self._traced_top = None
 
     def forward(self,
                 source: pt.tensor,
@@ -718,7 +728,10 @@ class BeamSearch(pt.nn.Module):
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
         # repeat states to beam_size
-        model_states = _repeat_states(model_states, self.beam_size, self._inference.state_structure())
+        if self._traced_repeat_states is None:
+            logger.info("Tracing repeat_states")
+            self._traced_repeat_states = pt.jit.trace(self._repeat_states, model_states)
+        model_states = self._traced_repeat_states(*model_states)
         # repeat estimated_reference_lengths to shape (batch_size * beam_size)
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
 
@@ -767,7 +780,10 @@ class BeamSearch(pt.nn.Module):
                 if t == 1:
                     scores += first_step_mask
 
-                best_hyp_indices, best_word_indices, scores_accumulated = self._top(scores, offset)
+                if self._traced_top is None:
+                    logger.info("Tracing _top")
+                    self._traced_top = pt.jit.trace(self._top, (scores, offset))
+                best_hyp_indices, best_word_indices, scores_accumulated = self._traced_top(scores, offset)
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
@@ -792,8 +808,11 @@ class BeamSearch(pt.nn.Module):
                             estimated_reference_lengths]
             if target_factors is not None:
                 _sort_inputs.append(target_factors)
+            if self._traced_sort_norm_and_update_finished is None:
+                self._traced_sort_norm_and_update_finished = pt.jit.trace(self._sort_norm_and_update_finished,
+                                                                          _sort_inputs)
             best_word_indices, finished, scores_accumulated, lengths, estimated_reference_lengths = \
-                self._sort_norm_and_update_finished(*_sort_inputs)
+                self._traced_sort_norm_and_update_finished(*_sort_inputs)
 
             # Collect best hypotheses, best word indices
             best_word_indices_list.append(best_word_indices)
@@ -803,7 +822,10 @@ class BeamSearch(pt.nn.Module):
                 break
 
             # (5) update models' state with winning hypotheses (ascending)
-            model_states = self._sort_states(best_hyp_indices, *model_states)
+            if self._traced_sort_states is None:
+                logger.info("Tracing sort_states")
+                self._traced_sort_states = pt.jit.trace(self._sort_states, (best_hyp_indices, *model_states))
+            model_states = self._traced_sort_states(best_hyp_indices, *model_states)
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
 
