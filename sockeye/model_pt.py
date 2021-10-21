@@ -55,13 +55,15 @@ class PyTorchSockeyeModel(pt.nn.Module):
     def __init__(self,
                  config: ModelConfig,
                  inference_only: bool = False,
+                 train_decoder_only: bool = False,
                  mc_dropout: bool = False,
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
         self.inference_only = inference_only
         logger.info("%s", self.config)
-        self.dtype = pt.float32  # config.dtype == C.DTYPE_FP32
+        self.dtype = config.dtype
+        self.train_decoder_only = train_decoder_only
         self.mc_dropout = mc_dropout
         self._output_layer_factor_format_string = 'output_layer_factor%i'
         self.forward_pass_cache_size = forward_pass_cache_size
@@ -259,8 +261,12 @@ class PyTorchSockeyeModel(pt.nn.Module):
         return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
-        source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
-                                                                                            target, target_length)
+        # When updating only the decoder (specified directly or implied by
+        # caching the encoder and embedding forward passes), turn off autograd
+        # for the encoder and embeddings to save memory.
+        with pt.no_grad() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
+            source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
+                                                                                                target, target_length)
 
         target = self.decoder.decode_seq(target_embed, states=states)
 
@@ -558,7 +564,7 @@ def load_model(model_folder: str,
         params_fname = os.path.join(model_folder, f'{C.PARAMS_NAME % checkpoint}.{C.TORCH_SUFFIX}')
     assert os.path.exists(params_fname), "Torch parameters not found. Run sockeye.mx_to_pt first."
 
-    model = PyTorchSockeyeModel(model_config, inference_only=inference_only,
+    model = PyTorchSockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
                                 mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
 
     model.load_parameters(filename=params_fname,

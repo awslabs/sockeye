@@ -20,7 +20,6 @@ from itertools import islice
 from typing import List, Optional, Tuple, Type
 
 import torch as pt
-from mxnet import npx
 
 from . import constants as C
 from . import layers_pt
