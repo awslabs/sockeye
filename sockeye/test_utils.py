@@ -191,6 +191,8 @@ TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepare
 TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} " \
                            "--output-type json"
 
+TRANSLATE_PARAMS_COMMON_PYTORCH = TRANSLATE_PARAMS_COMMON + " --use-pytorch"
+
 TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
@@ -345,33 +347,6 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str) -> Dict[
     # Collect test translate outputs and scores
     data['test_outputs_restricted'] = collect_translate_output_and_scores(out_path)
     assert len(data['test_outputs_restricted']) == len(data['test_outputs'])
-    return data
-
-
-def check_pytorch_translate(data: Dict[str, Any], translate_params: str) -> Dict[str, Any]:
-    # convert model to pytorch
-    convert_params = f"{sockeye.mx_to_pt.__file__} -m {data['model']}"
-    with patch.object(sys, "argv", convert_params.split()):
-        sockeye.mx_to_pt.main()
-
-    out_path = os.path.join(data['work_dir'], "out-torch.txt")
-    params = "{} {} {} --use-pytorch".format(sockeye.translate.__file__,
-                               TRANSLATE_PARAMS_COMMON.format(model=data['model'],
-                                                              input=data['test_source'],
-                                                              output=out_path),
-                               translate_params)
-    if 'test_source_factors' in data:
-        params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
-    with patch.object(sys, "argv", params.split()):
-        sockeye.translate.main()
-
-    # Collect test translate outputs and scores
-    data['test_outputs_torch'] = collect_translate_output_and_scores(out_path)
-    assert len(data['test_outputs_torch']) == len(data['test_outputs'])
-    for json_output, json_output_equiv in zip(data['test_outputs_torch'], data['test_outputs']):
-        assert json_output['translation'] == json_output_equiv['translation']
-        assert abs(json_output['score'] - json_output_equiv['score']) < 0.01 or \
-               np.isnan(json_output['score'] - json_output_equiv['score'])
     return data
 
 
