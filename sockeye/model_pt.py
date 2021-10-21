@@ -146,7 +146,10 @@ class PyTorchSockeyeModel(pt.nn.Module):
         if self.inference_only:
             if self.traced_encoder is None:
                 logger.info("Tracing encoder")
-                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, source_embed_length))
+                if not source_embed.is_cuda:
+                    logger.warning("check_trace=False to not fail on CPU-based batch decoding")
+                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, source_embed_length),
+                                                   check_trace=source_embed.is_cuda)
             source_encoded, source_encoded_length = self.traced_encoder(source_embed, source_embed_length)
         else:
             source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
