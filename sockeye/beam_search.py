@@ -471,13 +471,13 @@ class SortStates(mx.gluon.HybridBlock):
         sorted_states = []
         assert len(states) == len(self.flat_structure), "Number of states do not match the defined state structure"
         for state, state_format in zip(states, self.flat_structure):
-            if state_format == C.STEP_STATE or state_format == C.BIAS_STATE:
-                # Steps and source_bias have batch dimension on axis 0
+            if state_format == C.STEP_STATE:
+                # Step has batch dimension on axis 0
                 sorted_state = F.take(state, best_hyp_indices)
             elif state_format == C.DECODER_STATE:
                 # Decoder and encoder layer states have batch dimension on axis 1
                 sorted_state = F.take(state, best_hyp_indices, axis=1)
-            elif state_format == C.ENCODER_STATE:
+            elif state_format == C.ENCODER_STATE or state_format == C.BIAS_STATE:
                 # No need for takes on encoder layer states
                 sorted_state = state
             else:

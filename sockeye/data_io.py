@@ -135,17 +135,11 @@ def get_bucket(seq_len: int, buckets: List[int]) -> Optional[int]:
     return buckets[bucket_idx]
 
 
+@dataclass
 class BucketBatchSize:
-    """
-    :param bucket: The corresponding bucket.
-    :param batch_size: Number of sequences in each batch.
-    :param average_target_words_per_batch: Approximate number of target non-padding tokens in each batch.
-    """
-
-    def __init__(self, bucket: Tuple[int, int], batch_size: int, average_target_words_per_batch: float) -> None:
-        self.bucket = bucket
-        self.batch_size = batch_size
-        self.average_target_words_per_batch = average_target_words_per_batch
+    bucket: Tuple[int, int]  # The corresponding bucket.
+    batch_size: int  # Number of sequences in each batch.
+    average_target_words_per_batch: float  # Approximate number of target non-padding tokens in each batch.
 
 
 def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
@@ -1996,18 +1990,15 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.data = self.data.permute(self.data_permutations)
 
 
+@dataclass
 class Batch:
-
-    __slots__ = ['source', 'source_length', 'target', 'target_length', 'labels', 'samples', 'tokens']
-
-    def __init__(self, source, source_length, target, target_length, labels, samples, tokens):
-        self.source = source
-        self.source_length = source_length
-        self.target = target
-        self.target_length = target_length
-        self.labels = labels
-        self.samples = samples
-        self.tokens = tokens
+    source: mx.nd.NDArray
+    source_length: mx.nd.NDArray
+    target: mx.nd.NDArray
+    target_length: mx.nd.NDArray
+    labels: Dict[str, mx.nd.NDArray]
+    samples: int
+    tokens: int
 
     def split_and_load(self, ctx: List[mx.context.Context]) -> 'Batch':
         source = mx.gluon.utils.split_and_load(self.source, ctx, batch_axis=0)
