@@ -26,11 +26,12 @@ logger = logging.getLogger(__name__)
 
 
 def pytorch_get_activation(act_type: str) -> pt.nn.Module:
+    # TODO: Can we use inplace=True during training?
     if act_type == C.SWISH1:
-        return pt.nn.SiLU()
+        return pt.nn.SiLU(inplace=True)
     if act_type == C.GELU:
         return pt.nn.GELU()
-    return pt.nn.ReLU()
+    return pt.nn.ReLU(inplace=True)
 
 
 class PyTorchLHUC(pt.nn.Module):
