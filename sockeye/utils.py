@@ -32,6 +32,8 @@ from functools import reduce
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 from itertools import starmap
 
+import torch as pt
+
 import mxnet as mx
 import numpy as onp
 import portalocker
@@ -245,7 +247,7 @@ def combine_means(means: List[Optional[float]], num_sents: List[int]) -> float:
 
 def combine_stds(stds: List[Optional[float]], means: List[Optional[float]], num_sents: List[int]) -> float:
     """
-    Takes a list of standard deviations, means and number of sentences of the same length and computes 
+    Takes a list of standard deviations, means and number of sentences of the same length and computes
     the combined standard deviation.
 
     :param stds: A list of standard deviations.
@@ -358,6 +360,41 @@ def determine_context(device_ids: List[int],
                 context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
             context = [mx.gpu(gpu_id) for gpu_id in context]
     return context
+
+
+def determine_device(device_id: int,
+                     use_cpu: bool,
+                     disable_device_locking: bool,
+                     lock_dir: str,
+                     exit_stack: ExitStack) -> pt.device:
+    """
+    Determine the PyTorch device to run on (CPU or GPU).
+
+    :param device_id: Device as defined from the CLI.
+    :param use_cpu: Whether to use the CPU instead of GPU(s).
+    :param disable_device_locking: Disable Sockeye's device locking feature.
+    :param lock_dir: Directory to place device lock files in.
+    :param exit_stack: An ExitStack from contextlib.
+
+    :return: The PyTorch device to run on.
+    """
+    if use_cpu:
+        device = pt.device('cpu')
+    else:
+        num_gpus = pt.cuda.device_count()
+        check_condition(num_gpus >= 1,
+                        "No GPUs found, consider running on the CPU with --use-cpu ")
+        if horovod_mpi.using_horovod():
+            # Running with Horovod/MPI: GPU(s) are determined by local rank
+            device = pt.device(f'cuda:{horovod_mpi.hvd.local_rank()}')
+        else:
+            if disable_device_locking:
+                device = pt.device(f'cuda:{device_id}')
+            else:
+                acquired_device_id = exit_stack.enter_context(acquire_gpus([-1], lock_dir=lock_dir,
+                                                                           num_gpus_available=num_gpus))[0]
+                device = pt.device(f'cuda:{acquired_device_id}')
+    return device
 
 
 def expand_requested_device_ids(requested_device_ids: List[int]) -> List[int]:
@@ -649,7 +686,11 @@ _DTYPE_TO_STRING = {
     onp.float32: 'float32',
     onp.float16: 'float16',
     onp.int8: 'int8',
-    onp.int32: 'int32'
+    onp.int32: 'int32',
+    pt.float32: 'float32',
+    pt.float16: 'float16',
+    pt.int32: 'int32',
+    pt.int8: 'int8',
 }
 
 
@@ -672,6 +713,41 @@ def log_parameters(params: C.ParameterDict):
         if size == 0:
             logger.debug("Parameter shape for '%s' not yet fully inferred, using 0", name)
         if param.grad_req == 'null':
+            fixed_parameter_names.append(repr)
+            total_fixed += size
+        else:
+            total_learned += size if param not in visited else 0
+            learned_parameter_names.append(repr)
+        visited[param].append(name)
+    shared_parameter_names = []
+    for param, names in visited.items():
+        if len(names) > 1:
+            shared_parameter_names.append(" = ".join(names))
+    total_parameters = total_learned + total_fixed
+    logger.info("# of parameters: %d | trainable: %d (%.2f%%) | fixed: %d (%.2f%%)",
+                total_parameters,
+                total_learned, total_learned / total_parameters * 100,
+                total_fixed, total_fixed / total_parameters * 100)
+    logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
+    logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names))
+    logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
+
+
+def log_parameters_pt(params: pt.nn.ParameterDict):
+    """
+    Logs information about model parameters.
+    """
+    fixed_parameter_names = []
+    learned_parameter_names = []
+    total_learned = 0
+    total_fixed = 0
+    visited = defaultdict(list)
+    for name, param in sorted(params.items()):
+        repr = "%s [%s, %s]" % (name, tuple(param.shape), _print_dtype(param.dtype))
+        size = param.shape.numel()
+        if size == 0:
+            logger.debug("Parameter shape for '%s' not yet fully inferred, using 0", name)
+        if not param.requires_grad:
             fixed_parameter_names.append(repr)
             total_fixed += size
         else:

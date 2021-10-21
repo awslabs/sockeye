@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,6 +14,7 @@
 """
 Simple Training CLI.
 """
+# TODO(mdenkows) pre_mxnet -> pre_pytorch
 from . import pre_mxnet
 # Called before importing mxnet or any module that imports mxnet
 pre_mxnet.init()
@@ -25,25 +26,23 @@ import shutil
 import sys
 import tempfile
 from contextlib import ExitStack
-from typing import cast, Callable, Optional, Dict, List, Tuple
+from typing import cast, Callable, Iterator, Optional, Dict, List, Tuple
 
-import mxnet as mx
-from mxnet import gluon
-from mxnet import amp
+import torch as pt
 
 from . import arguments
 from . import checkpoint_decoder
 from . import constants as C
-from . import data_io
-from . import decoder
-from . import encoder
+from . import data_io_pt
+from . import encoder_pt
+from .encoder import FactorConfig
 from . import horovod_mpi
-from . import layers
-from . import loss
+from .layers import LengthRatioConfig
+from . import loss_pt
 from . import lr_scheduler
-from . import model
-from . import training
-from . import transformer
+from . import model_pt
+from . import training_pt
+from . import transformer_pt
 from . import utils
 from . import vocab
 from .config import Config
@@ -156,6 +155,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
             # Remove args that may differ without affecting the training.
             arg_diffs -= set(C.ARGS_MAY_DIFFER)
             # allow different device-ids provided their total count is the same
+            # TODO(mdenkows): device_ids -> device_id with backward compatibility
             if 'device_ids' in arg_diffs and len(old_args['device_ids']) == len(vars(args)['device_ids']):
                 arg_diffs.discard('device_ids')
             if not arg_diffs:
@@ -186,11 +186,10 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
 def create_checkpoint_decoder(
         args: argparse.Namespace,
         exit_stack: ExitStack,
-        train_context: List[mx.Context],
-        sockeye_model: model.SockeyeModel,
+        train_device: pt.device,
+        sockeye_model: model_pt.PyTorchSockeyeModel,
         source_vocabs: List[vocab.Vocab],
-        target_vocabs: List[vocab.Vocab],
-        hybridize: bool = True) -> Optional[checkpoint_decoder.CheckpointDecoder]:
+        target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
     """
     Returns a checkpoint decoder or None.
 
@@ -200,7 +199,6 @@ def create_checkpoint_decoder(
     :param sockeye_model: The Sockeye model instance.
     :param source_vocabs: The source vocabs.
     :param target_vocabs: The target vocabs.
-    :param hybridize: Turn hybridization of the Translator on/off (the model is already hybridized or not).
     :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
     sample_size = args.decode_and_evaluate
@@ -218,24 +216,24 @@ def create_checkpoint_decoder(
         return None
 
     if args.decode_and_evaluate_device_id is not None:
-        context = utils.determine_context(device_ids=[args.decode_and_evaluate_device_id],
-                                          use_cpu=False,
-                                          disable_device_locking=args.disable_device_locking,
-                                          lock_dir=args.lock_dir,
-                                          exit_stack=exit_stack)[0]
+        device = utils.determine_device(device_id=args.decode_and_evaluate_device_id,
+                                        use_cpu=False,
+                                        disable_device_locking=args.disable_device_locking,
+                                        lock_dir=args.lock_dir,
+                                        exit_stack=exit_stack)
     else:
         # default decode context is the last training device
-        context = train_context[-1]
+        device = train_device
 
-    return checkpoint_decoder.CheckpointDecoder(model_folder=args.output,
+    raise NotImplementedError('Checkpoint decoder is not yet implemented for PyTorch Sockeye')
+    return checkpoint_decoder_pt.CheckpointDecoder(model_folder=args.output,
                                                 inputs=[args.validation_source] + args.validation_source_factors,
                                                 references=[args.validation_target] + args.validation_target_factors,
                                                 sample_size=sample_size,
                                                 model=sockeye_model,
                                                 source_vocabs=source_vocabs,
                                                 target_vocabs=target_vocabs,
-                                                context=context,
-                                                hybridize=hybridize)
+                                                device=device)
 
 
 def use_shared_vocab(args: argparse.Namespace) -> bool:
@@ -259,9 +257,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  max_seq_len_target: int,
                                  shared_vocab: bool,
                                  resume_training: bool,
-                                 output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
-                                                              'data_io.BaseParallelSampleIter',
-                                                              'data_io.DataConfig',
+                                 output_folder: str) -> Tuple['data_io_pt.BaseParallelSampleIter',
+                                                              'data_io_pt.BaseParallelSampleIter',
+                                                              'data_io_pt.DataConfig',
                                                               List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Create the data iterators and the vocabularies.
@@ -279,7 +277,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     num_words_target = num_words_target if num_words_target > 0 else None
 
     word_min_count_source, word_min_count_target = args.word_min_count
-    batch_num_devices = 1 if args.use_cpu else sum(-di if di < 0 else 1 for di in args.device_ids)
+    batch_num_devices = 1
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
@@ -300,7 +298,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
-        train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io.get_prepared_data_iters(
+        train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io_pt.get_prepared_data_iters(
             prepared_data_dir=args.prepared_data,
             validation_sources=validation_sources,
             validation_targets=validation_targets,
@@ -353,7 +351,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             target_vocabs = vocab.load_target_vocabs(output_folder)
 
             # Recover the vocabulary path from the data info file:
-            data_info = cast(data_io.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
+            data_info = cast(data_io_pt.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
             source_vocab_paths = data_info.source_vocabs
             target_vocab_paths = data_info.target_vocabs
 
@@ -402,7 +400,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                         'Training and validation data must have the same number of target factors, '
                         'but found %d and %d.' % (len(source_vocabs), len(validation_sources)))
 
-        train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
+        train_iter, validation_iter, config_data, data_info = data_io_pt.get_training_data_iters(
             sources=sources,
             targets=targets,
             validation_sources=validation_sources,
@@ -432,7 +430,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 def create_encoder_config(args: argparse.Namespace,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          num_embed_source: int) -> Tuple[encoder.EncoderConfig, int]:
+                          num_embed_source: int) -> Tuple[transformer_pt.TransformerConfig, int]:
     """
     Create the encoder config.
 
@@ -457,7 +455,7 @@ def create_encoder_config(args: argparse.Namespace,
             encoder_transformer_model_size, num_embed_source + total_source_factor_size))
         encoder_transformer_model_size = num_embed_source + total_source_factor_size
 
-    config_encoder = transformer.TransformerConfig(
+    config_encoder = transformer_pt.TransformerConfig(
         model_size=encoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[0],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[0],
@@ -484,7 +482,7 @@ def create_decoder_config(args: argparse.Namespace,
                           encoder_num_hidden: int,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          num_embed_target: int) -> decoder.DecoderConfig:
+                          num_embed_target: int) -> transformer_pt.TransformerConfig:
     """
     Create the config for the decoder.
 
@@ -510,7 +508,7 @@ def create_decoder_config(args: argparse.Namespace,
             decoder_transformer_model_size, num_embed_target + total_target_factor_size))
         decoder_transformer_model_size = num_embed_target + total_target_factor_size
 
-    config_decoder = transformer.TransformerConfig(
+    config_decoder = transformer_pt.TransformerConfig(
         model_size=decoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[1],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
@@ -603,7 +601,7 @@ def create_model_config(args: argparse.Namespace,
                         target_vocab_sizes: List[int],
                         max_seq_len_source: int,
                         max_seq_len_target: int,
-                        config_data: data_io.DataConfig) -> model.ModelConfig:
+                        config_data: data_io_pt.DataConfig) -> model_pt.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -644,7 +642,7 @@ def create_model_config(args: argparse.Namespace,
                                 "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     source_factors_num_embed[i] = num_embed_source
 
-        source_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
+        source_factor_configs = [FactorConfig(size, dim, combine, share) \
                                  for size, dim, combine, share in zip(source_factor_vocab_sizes,
                                                                       source_factors_num_embed,
                                                                       args.source_factors_combine,
@@ -668,7 +666,7 @@ def create_model_config(args: argparse.Namespace,
                                 "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     target_factors_num_embed[i] = num_embed_target
 
-        target_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
+        target_factor_configs = [FactorConfig(size, dim, combine, share) \
                                  for size, dim, combine, share in zip(target_factor_vocab_sizes,
                                                                       target_factors_num_embed,
                                                                       args.target_factors_combine,
@@ -676,13 +674,13 @@ def create_model_config(args: argparse.Namespace,
 
     allow_sparse_grad = args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
 
-    config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
+    config_embed_source = encoder_pt.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
                                                   dropout=embed_dropout_source,
                                                   factor_configs=source_factor_configs,
                                                   allow_sparse_grad=allow_sparse_grad)
 
-    config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
+    config_embed_target = encoder_pt.EmbeddingConfig(vocab_size=target_vocab_size,
                                                   num_embed=num_embed_target,
                                                   dropout=embed_dropout_target,
                                                   factor_configs=target_factor_configs,
@@ -690,10 +688,10 @@ def create_model_config(args: argparse.Namespace,
 
     config_length_task = None
     if args.length_task is not None:
-        config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers,
+        config_length_task = LengthRatioConfig(num_layers=args.length_task_layers,
                                                       weight=args.length_task_weight)
 
-    model_config = model.ModelConfig(config_data=config_data,
+    model_config = model_pt.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
                                      config_embed_source=config_embed_source,
@@ -707,7 +705,7 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss.Loss]:
+def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss_pt.PyTorchLoss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
 
     # loss weights per factor
@@ -719,7 +717,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         factor_weights = args.target_factors_weight
     loss_weights = [softmax_output_grad_scale] + factor_weights
 
-    losses = []  # type: List[loss.Loss]
+    losses = []  # type: List[loss_pt.PyTorchLoss]
 
     # Cross-Entropy losses for all target streams/factors
     for i, (num_classes, weight) in enumerate(zip(all_num_classes, loss_weights)):
@@ -734,42 +732,44 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
                            "Using 'cross-entropy-without-softmax-output'")
 
         if args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT or args.loss == C.CROSS_ENTROPY:
-            losses.append(loss.CrossEntropyLossWithoutSoftmaxOutput(name=name,
-                                                                    weight=weight,
-                                                                    label_smoothing=label_smoothing,
-                                                                    dtype=args.dtype,
-                                                                    output_name=output_name,
-                                                                    label_name=label_name,
-                                                                    num_labels=num_classes,
-                                                                    metric_prefix=metric_prefix))
+            losses.append(loss_pt.PyTorchCrossEntropyLoss(name=name,
+                                                          weight=weight,
+                                                          label_smoothing=label_smoothing,
+                                                          dtype=args.dtype,
+                                                          output_name=output_name,
+                                                          label_name=label_name,
+                                                          num_labels=num_classes,
+                                                          metric_prefix=metric_prefix))
         else:
             raise ValueError('Unknown loss %s', args.loss)
 
     if args.length_task is not None:
+        raise NotImplementedError('Length tasks are not yet implemented for PyTorch Sockeye')
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:
-            length_loss = loss.MSELoss(name=C.LENRATIO_NAME + "_" + C.LINK_NORMAL,
-                                       weight=weight,
-                                       output_name=C.LENRATIO_NAME,
-                                       label_name=C.LENRATIO_LABEL_NAME)
+            length_loss = loss_pt.MSELoss(name=C.LENRATIO_NAME + "_" + C.LINK_NORMAL,
+                                          weight=weight,
+                                          output_name=C.LENRATIO_NAME,
+                                          label_name=C.LENRATIO_LABEL_NAME)
         else:
-            length_loss = loss.PoissonLoss(name=C.LENRATIO_NAME + "_" + C.LINK_POISSON,
-                                           weight=weight,
-                                           output_name=C.LENRATIO_NAME,
-                                           label_name=C.LENRATIO_LABEL_NAME)
+            length_loss = loss_pt.PoissonLoss(name=C.LENRATIO_NAME + "_" + C.LINK_POISSON,
+                                              weight=weight,
+                                              output_name=C.LENRATIO_NAME,
+                                              label_name=C.LENRATIO_LABEL_NAME)
         losses.append(length_loss)
     return losses
 
 
 def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
+    # TODO(mdenkows) Revise to match what PyTorch optimizers expect
     """
     Returns an OptimizerConfig.
 
     :param args: Arguments as returned by argparse.
     :return: The optimizer type and its parameters as well as the kvstore.
     """
-    optimizer_params = {'wd': args.weight_decay,
-                        "learning_rate": args.initial_learning_rate}
+    optimizer_params = {'weight_decay': args.weight_decay,
+                        'lr': args.initial_learning_rate}
 
     gradient_clipping_threshold = none_if_negative(args.gradient_clipping_threshold)
     if gradient_clipping_threshold is None:
@@ -797,15 +797,6 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     if args.optimizer_params:
         optimizer_params.update(args.optimizer_params)
 
-    if args.weight_init == C.INIT_XAVIER:
-        weight_init = mx.init.Xavier(rnd_type=args.weight_init_xavier_rand_type,
-                                     factor_type=args.weight_init_xavier_factor_type,
-                                     magnitude=args.weight_init_scale)
-    elif args.weight_init == C.INIT_UNIFORM:
-        weight_init = mx.init.Uniform(scale=args.weight_init_scale)
-    else:
-        raise ValueError("Invalid weight initialization type: %s" % args.weight_init)
-
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.learning_rate_t_scale,
                                              args.learning_rate_reduce_factor,
@@ -815,7 +806,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     config = OptimizerConfig(name=args.optimizer,
                              params=optimizer_params,
                              kvstore=args.kvstore,
-                             initializer=weight_init,
+                             initializer=None,
                              gradient_clipping_type=gradient_clipping_type,
                              gradient_clipping_threshold=gradient_clipping_threshold,
                              update_interval=args.update_interval)
@@ -827,8 +818,8 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     return config
 
 
-def set_grad_req_for_fixed_params(config: model.ModelConfig,
-                                  params: C.ParameterDict,
+def set_grad_req_for_fixed_params(config: model_pt.ModelConfig,
+                                  params: Dict[str, pt.nn.parameter.Parameter],
                                   fixed_param_names: List[str],
                                   fixed_param_strategy: Optional[str] = None):
     utils.check_condition(not config.lhuc or fixed_param_strategy is None,
@@ -838,7 +829,7 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
         fixed_param_names += [name for name in params if not name.endswith("lhuc.weight")]
         logger.info("LHUC enabled, fixing all non-LHUC parameters")
     elif fixed_param_strategy is not None:
-        fixed_param_names += fixed_param_names_from_stragegy(config, params, fixed_param_strategy)
+        fixed_param_names += fixed_param_names_from_strategy(config, params, fixed_param_strategy)
         logger.info("Fixed param strategy: '%s'", fixed_param_strategy)
 
     # set grad_req for fixed params
@@ -846,13 +837,13 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
         if name not in params:
             logger.warning("Fixed parameter name '%s' not part of model parameters, ignoring", name)
             continue
-        params[name].grad_req = 'null'
+        params[name].requires_grad = False
 
     return params
 
 
-def fixed_param_names_from_stragegy(config: model.ModelConfig,
-                                    params: C.ParameterDict,
+def fixed_param_names_from_strategy(config: model_pt.ModelConfig,
+                                    params: Dict[str, pt.nn.parameter.Parameter],
                                     strategy: str) -> List[str]:
     """
     Generate a fixed parameter list given a list of all parameter names and
@@ -906,13 +897,13 @@ def main():
 
 
 def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None,
-          checkpoint_callback: Optional[Callable] = None) -> training.TrainState:
+          checkpoint_callback: Optional[Callable] = None) -> training_pt.TrainState:
     """
     :param custom_metrics_logger: Optional custom metrics logging function. If supplied, takes care of metrics produced
                                   during training in a custom way. It should accept a list or a dictionary of
                                   (metric name, metric value) pairs, and an optional global_step/checkpoint parameter.
     :param checkpoint_callback: An optional callback function (int -> None). The function will be called
-+                                each time a checkpoint has been reached
+                                each time a checkpoint has been reached
     """
 
     if args.dry_run:
@@ -977,18 +968,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
-        context = utils.determine_context(device_ids=args.device_ids,
-                                          use_cpu=args.use_cpu,
-                                          disable_device_locking=args.disable_device_locking,
-                                          lock_dir=args.lock_dir,
-                                          exit_stack=exit_stack)
-        if args.batch_type == C.BATCH_TYPE_SENTENCE:
-            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
-                                                                 "divisible by the number of devices. Choose a batch "
-                                                                 "size that is a multiple of %d." % len(context))
-        logger.info("Training Device(s): %s", ", ".join(str(c) for c in context))
-
-        utils.seed_rngs(args.seed, ctx=context)
+        device = utils.determine_device(device_id=args.device_ids,
+                                        use_cpu=args.use_cpu,
+                                        disable_device_locking=args.disable_device_locking,
+                                        lock_dir=args.lock_dir,
+                                        exit_stack=exit_stack)
+        logger.info(f'Training Device: {device}')
+        utils.seed_rngs(args.seed)
 
         train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
             args=args,
@@ -1025,12 +1011,12 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                            max_seq_len_target=max_seq_len_target,
                                            config_data=config_data)
 
-        training_model = model.SockeyeModel(
+        training_model = model_pt.PyTorchSockeyeModel(
             model_config,
             train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
 
         # Handle options that override training settings
-        trainer_config = training.TrainerConfig(
+        trainer_config = training_pt.TrainerConfig(
             output_dir=args.output,
             early_stopping_metric=args.optimized_metric,
             max_params_files_to_keep=args.keep_last_params,
@@ -1057,17 +1043,17 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                             "Minimum number of epochs must be smaller than maximum number of epochs")
 
         optimizer_config = create_optimizer_config(args)
-        training_model.initialize(optimizer_config.initializer, ctx=context)
-        #training_model.save_parameters(os.path.join(args.output, 'params.init'))
+
+        training_model.to(device)
+        training_model.apply(model_pt.initialize_parameters)
+        training_model.save_parameters(os.path.join(args.output, 'params.init'))
 
         if args.params is not None:  # load existing parameters if present
             training_model.load_parameters(filename=args.params,
-                                           ctx=context,
+                                           device=device,
                                            allow_missing=args.allow_missing_params or model_config.lhuc,
-                                           ignore_extra=args.ignore_extra_params,
-                                           cast_dtype=True,
-                                           dtype_source='current')
-        params = training_model.collect_params()
+                                           ignore_extra=args.ignore_extra_params)
+        params = dict(training_model.named_parameters())
         # set grad_req for fixed params
         params = set_grad_req_for_fixed_params(config=model_config,
                                                params=params,
@@ -1085,7 +1071,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         if args.dtype == C.DTYPE_FP16:
             training_model.cast(C.DTYPE_FP16)
-        utils.log_parameters(params)
+        utils.log_parameters_pt(params)
 
         # set grad_req to 'add' for trainable parameters
         if args.update_interval > 1:
@@ -1117,35 +1103,22 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
-        hybridize = not args.no_hybridization
-        if hybridize:
-            training_model.hybridize(static_alloc=True)
-            if not using_amp:
-                # Do not hybridize losses when using AMP.  Dynamic loss scaling
-                # requires adjusting SoftmaxOutput's grad_rescale value
-                # throughout training, which is not possible when using the
-                # Symbol API.
-                for lf in losses:
-                    lf.hybridize(static_alloc=True)
+        with pt.autograd.set_detect_anomaly(True):
+            trainer = training_pt.PyTorchEarlyStoppingTrainer(
+                config=trainer_config,
+                optimizer_config=optimizer_config,
+                sockeye_model=training_model,
+                trainer=gluon_trainer,
+                loss_functions=losses,
+                device=device,
+                dtype=args.dtype,
+                using_amp=using_amp,
+                custom_metrics_logger=custom_metrics_logger,
+                checkpoint_callback=checkpoint_callback
+            )
 
-        trainer = training.GluonEarlyStoppingTrainer(
-            config=trainer_config,
-            optimizer_config=optimizer_config,
-            sockeye_model=training_model,
-            trainer=gluon_trainer,
-            loss_functions=losses,
-            context=context,
-            dtype=args.dtype,
-            using_amp=using_amp,
-            custom_metrics_logger=custom_metrics_logger,
-            checkpoint_callback=checkpoint_callback
-        )
-
-        cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
-                                            training_model, source_vocabs, target_vocabs, hybridize=hybridize)
-
-        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
-        return training_state
+            training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=None)
+            return training_state
 
 
 if __name__ == "__main__":

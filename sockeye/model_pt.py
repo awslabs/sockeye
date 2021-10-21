@@ -22,17 +22,53 @@ import mxnet as mx
 import torch as pt
 from mxnet import gluon
 
-from sockeye import __version__
+from sockeye import __version__, transformer_pt
 from . import constants as C
+from . import data_io_pt
 from . import decoder_pt
 from . import encoder_pt
 from . import layers_pt
 from . import utils
 from . import vocab
+from .config import Config
 from .encoder import FactorConfig
-from .model import ModelConfig, SockeyeModel
+from .layers import LengthRatioConfig
+from .model import SockeyeModel
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ModelConfig(Config):
+    """
+    ModelConfig defines model parameters defined at training time which are relevant to model inference.
+    Add new model parameters here. If you want backwards compatibility for models trained with code that did not
+    contain these parameters, provide a reasonable default under default_values.
+
+    :param config_data: Used training data.
+    :param vocab_source_size: Source vocabulary size.
+    :param vocab_target_size: Target vocabulary size.
+    :param config_embed_source: Embedding config for source.
+    :param config_embed_target: Embedding config for target.
+    :param config_encoder: Encoder configuration.
+    :param config_decoder: Decoder configuration.
+    :param config_length_task: Optional length task configuration.
+    :param weight_tying_type: Determines which weights get tied.
+    :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
+    :param dtype: Data type of model parameters. Default: float32.
+    """
+    config_data: data_io_pt.DataConfig
+    vocab_source_size: int
+    vocab_target_size: int
+    config_embed_source: encoder_pt.EmbeddingConfig
+    config_embed_target: encoder_pt.EmbeddingConfig
+    config_encoder: transformer_pt.TransformerConfig
+    config_decoder: transformer_pt.TransformerConfig
+    config_length_task: Optional[LengthRatioConfig] = None
+    weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX
+    lhuc: bool = False
+    dtype: str = C.DTYPE_FP32
 
 
 class PyTorchSockeyeModel(pt.nn.Module):

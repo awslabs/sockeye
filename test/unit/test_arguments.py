@@ -235,8 +235,7 @@ def test_inference_args(test_params, expected_params):
               cache_last_best_params=0,
               cache_strategy=C.AVERAGE_BEST,
               cache_metric=C.PERPLEXITY,
-              dry_run=False,
-              use_pytorch=False)),
+              dry_run=False)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)
