@@ -46,7 +46,8 @@ def test_mx_pt_eq_lhuc():
     inp_pt = pt.as_tensor(inp_mx.asnumpy())
     b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init='zeros')
     b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden, weight_init=pt.nn.init.zeros_)
+    b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
+    pt.nn.init.zeros_(b_pt.weight)
 
     out_mx = b_mx(inp_mx).asnumpy()
     out_pt = b_pt(inp_pt).detach().numpy()
@@ -55,7 +56,8 @@ def test_mx_pt_eq_lhuc():
 
     b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mx.init.Constant(value=20.0))
     b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden, weight_init=partial(pt.nn.init.constant, val=20.0))
+    b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
+    pt.nn.init.constant_(b_pt.weight, 20.0)
 
     out_mx = b_mx(inp_mx).asnumpy()
     out_pt = b_pt(inp_pt).detach().numpy()
