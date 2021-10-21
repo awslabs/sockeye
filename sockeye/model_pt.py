@@ -508,7 +508,7 @@ def make_pytorch_model_from_mxnet_model(mx_model: SockeyeModel) -> PyTorchSockey
 
 def initialize_parameters(module: pt.nn.Module):
     """
-    Can be applied to a SockeyeModel (via `model.apply(partial(initialize_parameters, ...))`)
+    Can be applied to a SockeyeModel (via `model.apply(initialize_parameters)`)
     to initialize the parameters of a PyTorch SockeyeModel.
     For reproducibility, set pt.random.manual_seed.
 
@@ -537,8 +537,6 @@ def initialize_parameters(module: pt.nn.Module):
             pt.nn.init.zeros_(module.bias)
     elif isinstance(module, layers_pt.PyTorchLHUC):
         pt.nn.init.uniform_(module.weight, a=0.1)
-
-
 
 
 def load_model(model_folder: str,
