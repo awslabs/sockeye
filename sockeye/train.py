@@ -27,6 +27,8 @@ import tempfile
 from contextlib import ExitStack
 from typing import cast, Callable, Optional, Dict, List, Tuple
 
+import torch as pt
+
 import mxnet as mx
 from mxnet import gluon
 from mxnet import amp
@@ -42,6 +44,7 @@ from . import layers
 from . import loss
 from . import lr_scheduler
 from . import model
+from . import model_pt
 from . import training
 from . import transformer
 from . import utils
@@ -1058,6 +1061,14 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         optimizer_config = create_optimizer_config(args)
         training_model.initialize(optimizer_config.initializer, ctx=context)
+        #training_model.save_parameters(os.path.join(args.output, 'params.init'))
+
+        #training_model_pt = model_pt.PyTorchSockeyeModel(
+        #    model_config,
+        #    train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
+        #training_model_pt.apply(model_pt.initialize_parameters)
+        #training_model_pt.save_parameters(os.path.join(args.output, 'params.init_pt'))
+
         if args.params is not None:  # load existing parameters if present
             training_model.load_parameters(filename=args.params,
                                            ctx=context,

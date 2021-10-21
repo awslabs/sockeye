@@ -111,9 +111,15 @@ def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = No
            device-specific generators with a fixed offset. E.g. for 2 devices and seed=13, seed for gpu(0) will be 13,
            14 for gpu(1). See https://beta.mxnet.io/api/gluon-related/_autogen/mxnet.random.seed.html.
     """
-    logger.info("Random seed: %d", seed)
+    logger.info(f"Random seed: {seed}")
     onp.random.seed(seed)
     random.seed(seed)
+    try:
+        import torch
+        torch.manual_seed(seed)
+        logger.info(f"PyTorch seed: {seed}")
+    except ImportError:
+        pass
     if ctx is None:
         mx.random.seed(seed, ctx='all')
     else:

@@ -506,6 +506,41 @@ def make_pytorch_model_from_mxnet_model(mx_model: SockeyeModel) -> PyTorchSockey
     return model
 
 
+def initialize_parameters(module: pt.nn.Module):
+    """
+    Can be applied to a SockeyeModel (via `model.apply(partial(initialize_parameters, ...))`)
+    to initialize the parameters of a PyTorch SockeyeModel.
+    For reproducibility, set pt.random.manual_seed.
+
+    This implementation follows the default MXNet initialization scheme:
+    - weights: Xavier(uniform, avg, magnitude=3.0)
+    - biases: 0.0
+    - layer norm gamma / weight: 1.0
+    - layer norm beta / bias: 0.0
+
+    MXNet computes the uniform bounds for Xavier initialization as follows:
+      sqrt(3 / ((fan_in + fan_out) / 2))
+    PyTorch computes the uniform bounds for Xavier initialization as follows:
+      (sqrt(2/(fan_in + fan_out)) * gain) * sqrt(3)
+      where gain is set to 1.0 by default
+    Both are equivalent.
+    For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
+    https: // jamesmccaffrey.wordpress.com / 2020 / 11 / 20 / the - gain - parameter -
+    """
+    if isinstance(module, pt.nn.Linear) or isinstance(module, layers_pt.PyTorchOutputLayer):
+        pt.nn.init.xavier_uniform_(module.weight, gain=1.0)
+        if module.bias is not None:
+            pt.nn.init.zeros_(module.bias)
+    elif isinstance(module, pt.nn.LayerNorm):
+        if module.elementwise_affine:
+            pt.nn.init.ones_(module.weight)
+            pt.nn.init.zeros_(module.bias)
+    elif isinstance(module, layers_pt.PyTorchLHUC):
+        pt.nn.init.uniform_(module.weight, a=0.1)
+
+
+
+
 def load_model(model_folder: str,
                device: pt.device,
                dtype: Optional[str] = None,

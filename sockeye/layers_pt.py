@@ -43,16 +43,9 @@ class PyTorchLHUC(pt.nn.Module):
     :param num_hidden: Number of hidden units of the layer to be modified.
     """
 
-    def __init__(self,
-                 num_hidden: int,
-                 weight_init: Callable = partial(pt.nn.init.uniform_, a=0.1)) -> None:
+    def __init__(self, num_hidden: int) -> None:
         super().__init__()
-        self._weight_init = weight_init
         self.weight = pt.nn.Parameter(pt.Tensor(num_hidden,))
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        self._weight_init(self.weight)
 
     def forward(self, data: pt.Tensor) -> pt.Tensor:
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
@@ -128,14 +121,6 @@ class PyTorchOutputLayer(pt.nn.Module):
         self._cache_key = None  # type: Optional[pt.tensor]
         self._weight_slice_cache = None  # type: Optional[pt.tensor]
         self._bias_slice_cache = None  # type: Optional[pt.tensor]
-
-    def reset_parameters(self) -> None:
-        # TODO: match mxnet / implement global weight initialization
-        pt.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = pt.nn.init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            pt.nn.init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={} dtype={}'.format(
