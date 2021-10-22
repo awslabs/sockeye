@@ -166,6 +166,7 @@ class PyTorchEarlyStoppingTrainer:
         self.config = config
         self.optimizer_config = optimizer_config
         self.model = sockeye_model
+        self.traced_models = {}  # type: Dict[Tuple[int, int], PyTorchSockeyeModel]
         self.optimizer = optimizer
         self.loss_functions = loss_functions
         self.device = device
@@ -309,9 +310,14 @@ class PyTorchEarlyStoppingTrainer:
         """
         batch = batch.load(device=self.device)
         # Forward
-        # TODO(mdenkows): Investigate: tracing the model currently causes errors
-        # for different batch shapes.
-        outputs = self.model(batch.source, batch.source_length, batch.target, batch.target_length)
+        # TODO(mdenkows): Using a single traced model instance currently causes
+        # errors for different sequence lengths. Use bucketing for now.
+        seq_len = (batch.source.shape[1], batch.target.shape[1])
+        if seq_len not in self.traced_models:
+            logger.info(f'Tracing model for seq_len={seq_len}')
+            self.traced_models[seq_len] = pt.jit.trace(self.model, (batch.source, batch.source_length,
+                                                                    batch.target, batch.target_length), strict=False)
+        outputs = self.traced_models[seq_len](batch.source, batch.source_length, batch.target, batch.target_length)
         # Loss
         loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
         loss_values = [v for v, _ in loss_outputs]
