@@ -60,7 +60,7 @@ class PyTorchLoss(pt.nn.Module):
         output = outputs[self.output_name]
         label = labels[self.label_name]
 
-        return super().__call__(output.to(dtype=label.dtype), label)
+        return super().__call__(output, label)
 
     @abstractmethod
     def create_metric(self) -> 'LossMetric':
@@ -166,7 +166,8 @@ class PyTorchCrossEntropyLoss(PyTorchLoss):
     def forward(self, logits: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         if self._alpha == 0.0:
             logits = logits.view(-1, logits.size()[-1])
-            labels = labels.view(-1)
+            # Reshape due to: view size is not compatible with input tensor's size and stride (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+            labels = labels.reshape(-1)
             ce = pt.nn.functional.cross_entropy(logits, labels.long(),
                                                 weight=None, ignore_index=self.ignore_label, reduction=self._reduction)
             ce *= self.weight

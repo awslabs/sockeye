@@ -26,24 +26,23 @@ from dataclasses import dataclass
 from math import sqrt
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
+import torch as pt
 import mxnet as mx
 import numpy as onp
-import torch
 from mxnet import amp, np, npx, gluon
 
 from sockeye.model_pt import PyTorchSockeyeModel
 from . import average
 from . import constants as C
-from . import data_io
+from . import data_io_pt
 from . import horovod_mpi
-from . import loss
+from . import loss_pt
 from . import lr_scheduler
-from . import parallel
 from . import utils
 from . import vocab
 from .checkpoint_decoder import CheckpointDecoder
 from .config import Config
-from .optimizers import OptimizerConfig
+from .optimizers import PyTorchOptimizerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -155,11 +154,11 @@ class PyTorchEarlyStoppingTrainer:
 
     def __init__(self,
                  config: TrainerConfig,
-                 optimizer_config: OptimizerConfig,
+                 optimizer_config: PyTorchOptimizerConfig,
                  sockeye_model: PyTorchSockeyeModel,
-                 trainer: gluon.Trainer,
-                 loss_functions: List[loss.Loss],
-                 context: List[mx.context.Context],
+                 optimizer: pt.optim.Optimizer,
+                 loss_functions: List[loss_pt.PyTorchLoss],
+                 device: pt.device,
                  dtype: str,
                  using_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
@@ -167,18 +166,11 @@ class PyTorchEarlyStoppingTrainer:
         self.config = config
         self.optimizer_config = optimizer_config
         self.model = sockeye_model
-        self.trainer = trainer
+        self.optimizer = optimizer
         self.loss_functions = loss_functions
-        self.loss_fn = torch.nn.CrossEntropyLoss()
-        self.context = context
+        self.device = device
         self.dtype = dtype
         self.using_amp = using_amp
-        self.optimizer = torch.optim.Adam(sockeye_model.parameters(), lr=0.0002)
-        # self._parallel = parallel.Parallel(len(context) if len(context) > 1 else 0,
-        #                                    ParallelModel(sockeye_model,
-        #                                                  loss_functions,
-        #                                                  trainer,
-        #                                                  using_amp=using_amp))
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
@@ -186,8 +178,8 @@ class PyTorchEarlyStoppingTrainer:
         self.checkpoint_callback = checkpoint_callback
 
     def fit(self,
-            train_iter: data_io.BaseParallelSampleIter,
-            validation_iter: data_io.BaseParallelSampleIter,
+            train_iter: data_io_pt.BaseParallelSampleIter,
+            validation_iter: data_io_pt.BaseParallelSampleIter,
             checkpoint_decoder: Optional[CheckpointDecoder] = None):
         logger.info("Early stopping by optimizing '%s'", self.config.early_stopping_metric)
 
@@ -203,6 +195,7 @@ class PyTorchEarlyStoppingTrainer:
             self.state = TrainState(self.config.early_stopping_metric)
             self.model.save_config(self.config.output_dir)
             self.model.save_version(self.config.output_dir)
+            # TODO: Revisit this now that we're using PyTorch
             # self._save_training_state(train_iter)
             # self._save_trainer_states(self.best_optimizer_states_fname)  # not saving due to deferred initialization
             logger.info("Training started.")
@@ -275,7 +268,8 @@ class PyTorchEarlyStoppingTrainer:
         return self.state
 
     def _create_checkpoint(self, checkpoint_decoder: CheckpointDecoder, time_cost: float,
-                           train_iter: data_io.BaseParallelSampleIter, validation_iter: data_io.BaseParallelSampleIter):
+                           train_iter: data_io_pt.BaseParallelSampleIter,
+                           validation_iter: data_io_pt.BaseParallelSampleIter):
         """
         Creates a checkpoint, which will update self.state.converged/self.state.diverged, evaluate validation
         metrics and update the best known parameters accordingly.
@@ -306,39 +300,36 @@ class PyTorchEarlyStoppingTrainer:
         if self.checkpoint_callback:
             self.checkpoint_callback(self.state.checkpoint)
 
-    def _forward_backward(self, batch: data_io.Batch):
+    def _forward_backward(self, batch: data_io_pt.Batch):
         """
-        Performs forward-backward pass on a batch in data-parallel mode.
+        Performs forward-backward pass on a batch.
 
         :param batch: Current data batch.
-        :return: List loss outputs (tuple of loss value and number of samples) for each loss function.
+        :return: List loss values.
         """
-        # split batch into shards
-        batch = batch.split_and_load(ctx=self.context)
+        batch = batch.load(device=self.device)
+        # Forward
+        # TODO(mdenkows): Investigate: tracing the model currently causes errors
+        # for different batch shapes.
+        outputs = self.model(batch.source, batch.source_length, batch.target, batch.target_length)
+        # Loss
+        loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
+        loss_values = [v for v, _ in loss_outputs]
+        # Backward
+        sum_losses = pt.add(*loss_values)
+        if self.using_amp:
+            # AMP applies dynamic loss scaling to the losses (scale up) and
+            # the Trainer (scale down).
+            with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
+                mx.autograd.backward(scaled_loss)
+        else:
+            # backward on the sum of losses, weights are defined in the loss modules themselves.
+            sum_losses.backward()
+        return loss_values
 
-        losses = []
-        # send sharded inputs to the backend
-        for inputs, labels in batch.shards():
-            source, source_length, target, target_length = inputs
-            source = torch.tensor(source.asnumpy()).int()
-            source_length = torch.tensor(source_length.asnumpy())
-            target = torch.tensor(target.asnumpy()).int()
-            target_length = torch.tensor(target_length.asnumpy())
-            outputs = self.model(source, source_length, target, target_length)
-            target_label = labels[C.TARGET_LABEL_NAME]
-            target_label = torch.tensor(target_label.asnumpy()).long()
-            # loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
-            logits_flat = outputs['logits'].reshape((-1, outputs['logits'].shape[-1]))
-            target_label_flat = target_label.reshape((-1))
-            loss = self.loss_fn(logits_flat, target_label_flat)
-            loss.backward()
-            losses.append(loss)
-        assert len(losses) == 1
-        return [(np.array(losses[0].item()), np.ones((1,)))]
-
-    def _step(self, batch: data_io.Batch) -> bool:
+    def _step(self, batch: data_io_pt.Batch) -> bool:
         self.state.batches += 1
-        loss_outputs = self._forward_backward(batch)
+        loss_values = self._forward_backward(batch)
 
         did_grad_step = False
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
@@ -346,47 +337,43 @@ class PyTorchEarlyStoppingTrainer:
             # update.
             # TODO: replace
             # self.trainer.step(batch_size=self.config.update_interval)
+            # TODO(mdenkows): Add steps handled by Gluon Trainer and MXNet
+            # Optimizer not covered by PyTorch Optimizer
             self.optimizer.step()
             if self.config.update_interval > 1:
                 # Multi-batch updates sum gradients for each batch instead of
                 # overwriting, so gradients must be manually zeroed after each
                 # update.
-                self.model.zero_grad()
+                self.optimizer.zero_grad()
             self.state.updates += 1
             did_grad_step = True
 
         self.state.samples += batch.samples
-        for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
-            loss_func.metric.update(loss_value.item(), num_samples.item())
+        for loss_func, loss_value in zip(self.loss_functions, loss_values):
+            loss_func.metric.update(loss_value.item(), 1)
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
         return did_grad_step
 
-    def _evaluate(self, checkpoint: int, data_iter, checkpoint_decoder: Optional[CheckpointDecoder]) -> List[loss.LossMetric]:
+    def _evaluate(self, checkpoint: int, data_iter, checkpoint_decoder: Optional[CheckpointDecoder]) -> List[loss_pt.LossMetric]:
         """
         Computes loss(es) on validation data and returns their metrics.
         :param data_iter: Validation data iterator.
         :return: List of validation metrics, same order as self.loss_functions.
         """
+        raise NotImplementedError('Checkpoint evaluation is not yet implemented for PyTorch Sockeye')
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
-            batch = batch.split_and_load(ctx=self.context)
-            sharded_loss_outputs = []  # type: List[List[Tuple[np.ndarray, np.ndarray]]]
-            for inputs, labels in batch.shards():
-                # TODO: implement
-                outputs = self.model(*inputs)  # type: Dict[str, np.ndarray]
-                loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
-                sharded_loss_outputs.append(loss_outputs)
-
-            # repack outputs into a list of loss_values (length = number of shards) for each loss function
-            sharded_loss_outputs_per_loss_function = list(zip(*sharded_loss_outputs))
-            # sum loss values (on the cpu) and number of samples for each loss function
-            output_per_loss_function = [tuple(npx.add_n(*(s.as_in_context(mx.cpu()) for s in shard))
-                                        for shard in zip(*outs)) for outs in sharded_loss_outputs_per_loss_function]
+            batch = batch.load(device=self.device)
+            # Forward
+            outputs = self.model(batch.source, batch.source_length, batch.target, batch.target_length)
+            # Loss
+            loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
+            loss_values = [v for v, _ in loss_outputs]
             # update validation metrics for batch
-            for loss_metric, (loss_value, num_samples) in zip(val_metrics, output_per_loss_function):
-                loss_metric.update(loss_value.item(), num_samples.item())
+            for loss_metric, loss_value in zip(val_metrics, loss_values):
+                loss_metric.update(loss_value.item(), 1)
 
         # Optionally run the checkpoint decoder
         if checkpoint_decoder is not None:
@@ -394,7 +381,7 @@ class PyTorchEarlyStoppingTrainer:
             decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
             for metric_name, metric_value in decoder_metrics.items():
                 assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
-                metric = loss.LossMetric(name=metric_name)
+                metric = loss_pt.LossMetric(name=metric_name)
                 metric.update(metric_value, num_samples=1)
                 val_metrics.append(metric)
 
@@ -403,7 +390,7 @@ class PyTorchEarlyStoppingTrainer:
 
         return val_metrics
 
-    def _determine_improvement(self, val_metrics: List[loss.LossMetric]) -> bool:
+    def _determine_improvement(self, val_metrics: List[loss_pt.LossMetric]) -> bool:
         """
         Determines whether early stopping metric on validation data improved and updates best value and checkpoint in
         the state.
@@ -494,7 +481,7 @@ class PyTorchEarlyStoppingTrainer:
 
         return False
 
-    def _determine_divergence(self, val_metrics: List[loss.LossMetric]) -> bool:
+    def _determine_divergence(self, val_metrics: List[loss_pt.LossMetric]) -> bool:
         """
         True if last perplexity is infinite or >2*target_vocab_size.
         """
@@ -531,7 +518,7 @@ class PyTorchEarlyStoppingTrainer:
                 # overwriting here. TODO: make this better...
                 self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
 
-    def _write_and_log_metrics(self, train_metrics: Iterable[loss.LossMetric], val_metrics: Iterable[loss.LossMetric]):
+    def _write_and_log_metrics(self, train_metrics: Iterable[loss_pt.LossMetric], val_metrics: Iterable[loss_pt.LossMetric]):
         """
         Updates metrics for current checkpoint.
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
@@ -601,7 +588,7 @@ class PyTorchEarlyStoppingTrainer:
         self.trainer.optimizer.begin_num_update = self.state.updates
         self.trainer.optimizer.num_update = self.state.updates
 
-    def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
+    def _save_training_state(self, train_iter: data_io_pt.BaseParallelSampleIter):
         """
         Saves current training state.
         """
@@ -663,7 +650,7 @@ class PyTorchEarlyStoppingTrainer:
                 # during training is usually fine.
                 logger.warning('Directory has already been removed: %s', delete_training_state_dirname)
 
-    def _load_training_state(self, train_iter: data_io.BaseParallelSampleIter):
+    def _load_training_state(self, train_iter: data_io_pt.BaseParallelSampleIter):
         """
         Loads the full training state from disk.
         :param train_iter: training data iterator.
@@ -748,39 +735,6 @@ class PyTorchEarlyStoppingTrainer:
         return os.path.join(self.config.output_dir, C.LR_SCHEDULER_BEST)
 
 
-class ParallelModel(parallel.Parallelizable):
-
-    def __init__(self,
-                 model: Callable,
-                 loss_functions: List[loss.Loss],
-                 trainer: gluon.Trainer,
-                 using_amp: bool = False) -> None:
-        self.model = model
-        self.loss_functions = loss_functions
-        self.trainer = trainer
-        self.using_amp = using_amp
-
-    def forward_backward(self, shard: Tuple) -> List[Tuple[np.ndarray, np.ndarray]]:
-        """
-        Applies forward-backward pass for a single shard of a batch (data-parallel training).
-        """
-        inputs, labels = shard
-        with mx.autograd.record():
-            outputs = self.model(*inputs)  # type: Dict[str, np.ndarray]
-            loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
-            loss_values = (v for v, _ in loss_outputs)
-            sum_losses = npx.add_n(*loss_values)
-            if self.using_amp:
-                # AMP applies dynamic loss scaling to the losses (scale up) and
-                # the Trainer (scale down).
-                with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
-                    mx.autograd.backward(scaled_loss)
-            else:
-                # backward on the sum of losses, weights are defined in the loss blocks themselves.
-                sum_losses.backward()
-        return loss_outputs
-
-
 class TensorboardLogger:
     """
     Thin wrapper for MXBoard API to log training events.
@@ -854,7 +808,7 @@ class Speedometer:
         self.msg = 'E=%d B=%d\ts/sec=%.2f tok/sec=%.2f u/sec=%.2f\t'
 
     def __call__(self, epoch: int, batches: int, updates: int, samples: int,
-                 tokens: int, metrics: Optional[Iterable[loss.LossMetric]] = None):
+                 tokens: int, metrics: Optional[Iterable[loss_pt.LossMetric]] = None):
         count = batches
         if self.last_count > count:
             self.init = False

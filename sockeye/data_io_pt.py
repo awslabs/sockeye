@@ -468,7 +468,7 @@ class RawParallelDatasetLoader:
                  eos_id: int,
                  pad_id: int,
                  skip_blanks: bool = True,
-                 dtype: str = 'float32',
+                 dtype: str = 'int32',
                  shift_target_factors: bool = C.TARGET_FACTOR_SHIFT) -> None:
         self.buckets = buckets
         self.eos_id = eos_id
@@ -1642,7 +1642,7 @@ class BaseParallelSampleIter:
                  num_source_factors: int = 1,
                  num_target_factors: int = 1,
                  permute: bool = True,
-                 dtype='float32') -> None:
+                 dtype='int32') -> None:
         self.batch_size = batch_size
         self.buckets = list(buckets)
         self.default_bucket_key = get_default_bucket_key(self.buckets)
@@ -1697,7 +1697,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                  max_lens: Tuple[int, int],
                  num_source_factors: int = 1,
                  num_target_factors: int = 1,
-                 dtype='float32') -> None:
+                 dtype='int32') -> None:
         super().__init__(buckets=[bucket],
                          batch_size=batch_size,
                          bucket_batch_sizes=[BucketBatchSize(bucket, batch_size, None)],
@@ -1793,7 +1793,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  num_source_factors: int = 1,
                  num_target_factors: int = 1,
                  permute: bool = True,
-                 dtype: str = 'float32') -> None:
+                 dtype: str = 'int32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          num_source_factors=num_source_factors, num_target_factors=num_target_factors,
                          permute=permute, dtype=dtype)
@@ -1885,7 +1885,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
                  num_source_factors: int = 1,
                  num_target_factors: int = 1,
                  permute: bool = True,
-                 dtype='float32') -> None:
+                 dtype='int32') -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          num_source_factors=num_source_factors, num_target_factors=num_target_factors,
                          permute=permute, dtype=dtype)
@@ -2001,21 +2001,13 @@ class Batch:
     samples: int
     tokens: int
 
-    def split_and_load(self, device: pt.device) -> 'Batch':
-        # TODO (mdenkows): Are we ready to move to fully multi-process training?
-        # Using 1 device (GPU) per process simplifies data/training logic.
+    def load(self, device: pt.device) -> 'Batch':
         source = self.source.to(device)
         source_length = self.source_length.to(device)
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
-
-    def shards(self) -> Iterable[Tuple[Tuple, Dict[str, pt.Tensor]]]:
-        assert isinstance(self.source, list), "Must call split_and_load() first"
-        for i, inputs in enumerate(zip(self.source, self.source_length, self.target, self.target_length)):
-            # model inputs, labels
-            yield inputs, {name: label[i] for name, label in self.labels.items()}
 
 
 def create_target_and_shifted_label_sequences(target_and_label: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
@@ -2052,7 +2044,7 @@ def create_batch_from_parallel_sample(source: pt.Tensor, target: pt.Tensor, labe
     if label.shape[2] == 1:
         labels[C.TARGET_LABEL_NAME] = pt.squeeze(label, dim=2)
     else:
-        primary_label, *factor_labels = (pt.squeeze(x, dim=2) for x in pt.split(label, label.shape[2], dim=2))
+        primary_label, *factor_labels = (pt.squeeze(x, dim=2) for x in pt.split(label, 1, dim=2))
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 

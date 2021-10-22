@@ -23,8 +23,8 @@ from . import layers_pt
 from . import transformer_pt
 
 
-def pytorch_get_transformer_encoder(config: transformer_pt.TransformerConfig):
-    return PyTorchTransformerEncoder(config=config)
+def pytorch_get_transformer_encoder(config: transformer_pt.TransformerConfig, inference_only: bool = False):
+    return PyTorchTransformerEncoder(config=config, inference_only=inference_only)
 
 
 get_encoder = pytorch_get_transformer_encoder
@@ -171,7 +171,7 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
     :param config: Configuration for transformer encoder.
     """
 
-    def __init__(self, config: transformer_pt.TransformerConfig) -> None:
+    def __init__(self, config: transformer_pt.TransformerConfig, inference_only: bool = False) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
 
@@ -184,7 +184,8 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
                                                                    scale_down_positions=False)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.PyTorchTransformerEncoderBlock(config) for _ in range(config.num_layers))
+            transformer_pt.PyTorchTransformerEncoderBlock(config, inference_only=inference_only)
+            for _ in range(config.num_layers))
 
         self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                            dropout=config.dropout_prepost,

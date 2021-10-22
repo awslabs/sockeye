@@ -49,7 +49,7 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
     in between.
     """
 
-    def __init__(self, config: TransformerConfig) -> None:
+    def __init__(self, config: TransformerConfig, inference_only: bool = False) -> None:
         super().__init__()
 
         self.pre_self_attention = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
@@ -70,7 +70,8 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
                                                 num_model=config.model_size,
                                                 act_type=config.act_type,
                                                 dropout=config.dropout_act,
-                                                use_glu=config.use_glu)
+                                                use_glu=config.use_glu,
+                                                inference_only=inference_only)
         self.post_ff = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
                                                       dropout=config.dropout_prepost,
                                                       num_hidden=config.model_size)
@@ -160,7 +161,8 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
                                                 num_model=config.model_size,
                                                 act_type=config.act_type,
                                                 dropout=config.dropout_act,
-                                                use_glu=config.use_glu)
+                                                use_glu=config.use_glu,
+                                                inference_only=inference_only)
         self.post_ff = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
                                                       dropout=config.dropout_prepost,
                                                       num_hidden=config.model_size)
@@ -250,9 +252,10 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
             # do not use Apex' FusedLayerNorm because of
             # https://github.com/huggingface/transformers/issues/9377
             self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
-        self.dropout = None  # type: Optional[pt.nn.Module]
+        self.dropout = dropout
+        self.dropout_layer = None  # type: Optional[pt.nn.Module]
         if dropout > 0.0:
-            self.dropout = pt.nn.Dropout(p=dropout)
+            self.dropout_layer = pt.nn.Dropout(p=dropout)
 
     def forward(self, data: pt.Tensor, prev: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
@@ -277,8 +280,8 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
                 data = self.layer_norm(data)
 
             elif step == "d":
-                if self.dropout is not None and self.dropout > 0.0:
-                    data = self.dropout(data)
+                if self.dropout_layer is not None and self.dropout > 0.0:
+                    data = self.dropout_layer(data)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
@@ -298,12 +301,13 @@ class PyTorchTransformerFeedForward(pt.nn.Module):
                  num_model: int,
                  act_type: str,
                  dropout: float,
-                 use_glu: bool = False) -> None:
+                 use_glu: bool = False,
+                 inference_only: bool = False) -> None:
         super().__init__()
         self.dropout = dropout
         self.use_glu = use_glu
         self.ff1 = pt.nn.Linear(in_features=num_model, out_features=num_hidden)
-        self.act = sockeye.layers_pt.pytorch_get_activation(act_type)
+        self.act = sockeye.layers_pt.pytorch_get_activation(act_type, inplace=inference_only)
         if self.use_glu:
             self.linear = pt.nn.Linear(in_features=num_model, out_features=num_hidden)
         if self.dropout > 0.0:

@@ -114,7 +114,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         self.embedding_target = encoder_pt.PyTorchEmbedding(config.config_embed_target, embedding=target_embedding)
 
         # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder)
+        self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder,
+                                                                  inference_only=inference_only)
         self.traced_encoder = None
         self.decoder = decoder_pt.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
         self.traced_decoder = None

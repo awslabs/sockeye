@@ -15,11 +15,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 import mxnet as mx
+import torch as pt
 
 from . import config
 from . import constants as C
 from .lr_scheduler import LearningRateScheduler
-
+from .model_pt import PyTorchSockeyeModel
 
 @dataclass
 class OptimizerConfig(config.Config):
@@ -60,3 +61,16 @@ class PyTorchOptimizerConfig(config.Config):
     rescale_grad: float = 1.
 
     lr_scheduler: Optional[LearningRateScheduler] = None
+
+
+def get_optimizer(model: PyTorchSockeyeModel, config: PyTorchOptimizerConfig) -> pt.optim.Optimizer:
+    """
+    Create an optimizer for a Sockeye model using the specified config settings.
+    """
+    if config.name == C.OPTIMIZER_ADAM:
+        return pt.optim.Adam(model.parameters(), lr=config.lr, betas=config.betas, eps=config.eps,
+                             weight_decay=config.weight_decay)
+    elif config.name == C.OPTIMIZER_SGD:
+        return pt.optim.SGD(model.parameters(), lr=config.lr, momentum=config.momentum,
+                            weight_decay=config.weight_decay)
+    raise ValueError(f'Unknown optimizer: {config.name}')

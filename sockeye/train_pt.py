@@ -671,8 +671,9 @@ def create_model_config(args: argparse.Namespace,
                                                                       args.target_factors_combine,
                                                                       args.target_factors_share_embedding)]
 
-    # TODO(mdenkows): Does this work with gradient accumulation in PyTorch?
-    allow_sparse_grad = True #args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
+    # TODO(mdenkows): Investigate SparseAdam
+    # Due to: Adam does not support sparse gradients, please consider SparseAdam instead
+    allow_sparse_grad = False
 
     config_embed_source = encoder_pt.EmbeddingConfig(vocab_size=source_vocab_size,
                                                      num_embed=num_embed_source,
@@ -1001,10 +1002,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                            max_seq_len_target=max_seq_len_target,
                                            config_data=config_data)
 
-        training_model = model_pt.PyTorchSockeyeModel(
-            model_config,
-            train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
-
         # Handle options that override training settings
         trainer_config = training_pt.TrainerConfig(
             output_dir=args.output,
@@ -1033,6 +1030,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                             "Minimum number of epochs must be smaller than maximum number of epochs")
 
         optimizer_config = create_optimizer_config(args)
+
+        training_model = model_pt.PyTorchSockeyeModel(
+            model_config,
+            train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
 
         training_model.to(device)
         training_model.apply(model_pt.initialize_parameters)
@@ -1063,13 +1064,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             training_model.cast(C.DTYPE_FP16)
         utils.log_parameters_pt(training_model)
 
-        # set grad_req to 'add' for trainable parameters
-        if args.update_interval > 1:
-            for name, param in params.items():
-                if param.grad_req != 'null':
-                    param.grad_req = 'add'
-
-        #kvstore = mx.kvstore.create(args.kvstore)
+        optimizer = optimizers.get_optimizer(training_model, optimizer_config)
 
         if horovod_mpi.using_horovod():
             # Horovod provides a trainer that subclasses gluon.Trainer and uses
@@ -1078,12 +1073,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             gluon_trainer = horovod_mpi.hvd.DistributedTrainer(params,
                                                                optimizer_config.name,
                                                                optimizer_config.params)
-        else:
-            gluon_trainer = gluon.Trainer(params,
-                                          optimizer_config.name,
-                                          optimizer_config.params,
-                                          kvstore=kvstore,
-                                          update_on_kvstore=False if using_amp else None)
 
         if using_amp:
             amp.init_trainer(gluon_trainer)
@@ -1098,14 +1087,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 config=trainer_config,
                 optimizer_config=optimizer_config,
                 sockeye_model=training_model,
-                trainer=gluon_trainer,
+                optimizer=optimizer,
                 loss_functions=losses,
                 device=device,
                 dtype=args.dtype,
                 using_amp=using_amp,
                 custom_metrics_logger=custom_metrics_logger,
-                checkpoint_callback=checkpoint_callback
-            )
+                checkpoint_callback=checkpoint_callback)
 
             training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=None)
             return training_state

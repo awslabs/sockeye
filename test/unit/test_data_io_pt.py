@@ -551,12 +551,11 @@ def test_get_training_data_iters():
         assert val_iter.batch_size == batch_size
         assert train_iter.default_bucket_key == (train_max_length, train_max_length)
         assert val_iter.default_bucket_key == (dev_max_length, dev_max_length)
-        assert train_iter.dtype == 'float32'
 
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]
         eos_id = vcb[C.EOS_SYMBOL]
-        expected_first_target_symbols = pt.full((batch_size, 1), bos_id, dtype=pt.float32)
+        expected_first_target_symbols = pt.full((batch_size, 1), bos_id, dtype=pt.int32)
         for epoch in range(2):
             while train_iter.iter_next():
                 batch = train_iter.next()
