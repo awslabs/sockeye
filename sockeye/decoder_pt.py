@@ -30,8 +30,8 @@ from .transformer import TransformerConfig
 logger = logging.getLogger(__name__)
 
 
-def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False, dtype: str = C.DTYPE_FP32) -> 'PyTorchDecoder':
-    return PyTorchDecoder.get_decoder(config, inference_only, dtype)
+def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'PyTorchDecoder':
+    return PyTorchDecoder.get_decoder(config, inference_only)
 
 
 class PyTorchDecoder(pt.nn.Module):
@@ -62,7 +62,7 @@ class PyTorchDecoder(pt.nn.Module):
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool, dtype: str) -> 'PyTorchDecoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool) -> 'PyTorchDecoder':
         """
         Creates decoder based on config type.
 
@@ -76,7 +76,7 @@ class PyTorchDecoder(pt.nn.Module):
         if config_type not in cls.__registry:
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls = cls.__registry[config_type]
-        return decoder_cls(config=config, inference_only=inference_only, dtype=dtype)  # type: ignore
+        return decoder_cls(config=config, inference_only=inference_only)  # type: ignore
 
     @abstractmethod
     def __init__(self):
@@ -129,10 +129,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
                            such as disabling the auto-regressive mask.
     """
 
-    def __init__(self,
-                 config: TransformerConfig,
-                 inference_only: bool = False,
-                 dtype: str = C.DTYPE_FP32) -> None:
+    def __init__(self, config: TransformerConfig, inference_only: bool = False) -> None:
         PyTorchDecoder.__init__(self)
         pt.nn.Module.__init__(self)
         self.config = config
@@ -145,9 +142,8 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         self.autoregressive_mask = transformer_pt.AutoRegressiveMask()
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.PyTorchTransformerDecoderBlock(config,
-                                                          inference_only=self.inference_only,
-                                                          dtype=dtype) for _ in range(config.num_layers))
+            transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only=self.inference_only
+                                                          ) for _ in range(config.num_layers))
 
         self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                            dropout=config.dropout_prepost,

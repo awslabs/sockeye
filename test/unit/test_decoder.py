@@ -86,7 +86,7 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
         output_mx, new_states_mx = decoder_mx(output_mx, new_states_mx)
 
     # pt
-    decoder_pt = sockeye.decoder_pt.pytorch_get_decoder(config, inference_only=inference_only, dtype=C.DTYPE_FP32)
+    decoder_pt = sockeye.decoder_pt.pytorch_get_decoder(config, inference_only=inference_only)
     decoder_pt.weights_from_mxnet_block(decoder_mx)
     init_states_pt = decoder_pt.init_state_from_encoder(encoder_outputs_pt, encoder_valid_length_pt)
     output_pt, new_states_pt = decoder_pt(inputs_pt, init_states_pt)

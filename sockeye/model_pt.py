@@ -114,15 +114,14 @@ class PyTorchSockeyeModel(pt.nn.Module):
         self.embedding_target = encoder_pt.PyTorchEmbedding(config.config_embed_target, embedding=target_embedding)
 
         # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder, dtype=config.dtype)
+        self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder)
         self.traced_encoder = None
-        self.decoder = decoder_pt.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only,
-                                                      dtype=config.dtype)
+        self.decoder = decoder_pt.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
         self.traced_decoder = None
 
         self.output_layer = layers_pt.PyTorchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                          vocab_size=self.config.vocab_target_size,
-                                                         weight=output_weight, dtype=config.dtype)
+                                                         weight=output_weight)
 
         self.factor_output_layers = pt.nn.ModuleList()
         # Optional target factor output layers
@@ -131,8 +130,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
             # TODO also consider weight tying with target factor input embeddings
             output_layer = layers_pt.PyTorchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                         vocab_size=factor_config.vocab_size,
-                                                        weight=None,
-                                                        dtype=config.dtype)
+                                                        weight=None)
             self.factor_output_layers.append(output_layer)
 
         self.length_ratio = None  # type: Optional[layers_pt.PyTorchLengthRatio]
@@ -442,7 +440,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _get_embeddings(self) -> Tuple[pt.nn.Embedding, pt.nn.Embedding, Optional[pt.Tensor]]:
+    def _get_embeddings(self) -> Tuple[pt.nn.Embedding, pt.nn.Embedding, Optional[pt.nn.Parameter]]:
         """
         Returns embeddings for source, target, and output layer. Handles sharing and weight tying.
         """
@@ -461,8 +459,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         else:
             target_grad_sparse = self.config.config_embed_target.allow_sparse_grad and not tie_weights
             target_embedding = pt.nn.Embedding(self.config.config_embed_target.vocab_size,
-                                           self.config.config_embed_target.num_embed,
-                                           sparse=target_grad_sparse)
+                                               self.config.config_embed_target.num_embed,
+                                               sparse=target_grad_sparse)
 
         if tie_weights:
             output_weight = target_embedding.weight

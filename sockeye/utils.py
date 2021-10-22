@@ -733,7 +733,7 @@ def log_parameters(params: C.ParameterDict):
     logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
 
 
-def log_parameters_pt(params: pt.nn.ParameterDict):
+def log_parameters_pt(model: pt.nn.Module):
     """
     Logs information about model parameters.
     """
@@ -742,26 +742,28 @@ def log_parameters_pt(params: pt.nn.ParameterDict):
     total_learned = 0
     total_fixed = 0
     visited = defaultdict(list)
-    for name, param in sorted(params.items()):
-        repr = "%s [%s, %s]" % (name, tuple(param.shape), _print_dtype(param.dtype))
-        size = param.shape.numel()
-        if size == 0:
-            logger.debug("Parameter shape for '%s' not yet fully inferred, using 0", name)
-        if not param.requires_grad:
-            fixed_parameter_names.append(repr)
-            total_fixed += size
-        else:
-            total_learned += size if param not in visited else 0
-            learned_parameter_names.append(repr)
-        visited[param].append(name)
-    shared_parameter_names = []
+    for name, module in model.named_modules(remove_duplicate=False):
+        for param_name, param in module.named_parameters(prefix=name, recurse=False):
+            repr = "%s [%s, %s]" % (name, tuple(param.shape), _print_dtype(param.dtype))
+            size = param.shape.numel()
+            if not param.requires_grad:
+                fixed_parameter_names.append(repr)
+                total_fixed += size if param not in visited else 0
+            else:
+                total_learned += size if param not in visited else 0
+                learned_parameter_names.append(repr)
+            visited[param].append(name)
+    shared_parameter_names = []  # type: List[str]
+    total_shared = 0
     for param, names in visited.items():
         if len(names) > 1:
+            total_shared += param.shape.numel()
             shared_parameter_names.append(" = ".join(names))
     total_parameters = total_learned + total_fixed
-    logger.info("# of parameters: %d | trainable: %d (%.2f%%) | fixed: %d (%.2f%%)",
+    logger.info("# of parameters: %d | trainable: %d (%.2f%%) | shared: %d (%.2f%%) | fixed: %d (%.2f%%)",
                 total_parameters,
                 total_learned, total_learned / total_parameters * 100,
+                total_shared, total_shared / total_parameters * 100,
                 total_fixed, total_fixed / total_parameters * 100)
     logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
     logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names))

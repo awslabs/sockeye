@@ -27,9 +27,7 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
     in between.
     """
 
-    def __init__(self,
-                 config: TransformerConfig,
-                 dtype: str) -> None:
+    def __init__(self, config: TransformerConfig) -> None:
         super().__init__()
 
         self.pre_self_attention = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
@@ -98,10 +96,7 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
     and a feed-forward layer with pre/post process blocks in between.
     """
 
-    def __init__(self,
-                 config: TransformerConfig,
-                 inference_only: bool,
-                 dtype: str) -> None:
+    def __init__(self, config: TransformerConfig, inference_only: bool) -> None:
         super().__init__()
         self.decoder_type = config.decoder_type
 

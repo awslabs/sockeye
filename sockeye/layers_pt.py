@@ -85,36 +85,25 @@ class PyTorchOutputLayer(pt.nn.Module):
     :param hidden_size: Input hidden size.
     :param vocab_size: Target vocabulary size.
     :param weight: Optional shared weight Parameter.
-    :param weight_initializer: Initializer for weight.
-    :param bias_initializer: Initializer for bias.
-    :param dtype: Data type.
-    :params params: Optional parameter dict for shared parameters.
     """
 
     def __init__(self,
                  hidden_size: int,
                  vocab_size: int,
-                 weight: Optional[pt.Tensor] = None,
-                 weight_initializer: Optional[str] = None,
-                 bias_initializer: str = 'zeros',
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 weight: Optional[pt.nn.Parameter] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.in_features = hidden_size
         self.out_features = vocab_size
 
-        # if dtype == C.DTYPE_INT8:
-        #     self.scaling = gluon.Parameter('scaling',
-        #                                    shape=(1,), init=mx.initializer.Constant(-1.0),
-        #                                    dtype=C.DTYPE_FP32, allow_deferred_init=False)
-        #     # This is only for inference but MXNet tries to create an
-        #     # initializer anyway, then fails because most random
-        #     # generators don't support int8 output.
-        #     weight_initializer = 'zeros'
         if weight is None:
             self.weight = pt.nn.Parameter(pt.Tensor(vocab_size, hidden_size))
         else:
-            self.weight = pt.nn.Parameter(weight)
+            # Note: its unclear whether wrapping weight in pt.nn.Parameter again works correctly
+            # w.r.t weight sharing. The resulting hash of this object differs which causes utils.log_parameters
+            # to report shared weights incorrectly
+            # self.weight = pt.nn.Parameter(weight)
+            self.weight = weight
 
         # Bias stays fp32 even with int8 weights.
         self.bias = pt.nn.Parameter(pt.Tensor(vocab_size))

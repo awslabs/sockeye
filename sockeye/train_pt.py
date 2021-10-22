@@ -821,7 +821,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
 def set_grad_req_for_fixed_params(config: model_pt.ModelConfig,
                                   params: Dict[str, pt.nn.parameter.Parameter],
                                   fixed_param_names: List[str],
-                                  fixed_param_strategy: Optional[str] = None):
+                                  fixed_param_strategy: Optional[str] = None) -> Dict[str, pt.nn.parameter.Parameter]:
     utils.check_condition(not config.lhuc or fixed_param_strategy is None,
                           "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
     if config.lhuc:
@@ -1071,7 +1071,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         if args.dtype == C.DTYPE_FP16:
             training_model.cast(C.DTYPE_FP16)
-        utils.log_parameters_pt(params)
+        utils.log_parameters_pt(training_model)
 
         # set grad_req to 'add' for trainable parameters
         if args.update_interval > 1:

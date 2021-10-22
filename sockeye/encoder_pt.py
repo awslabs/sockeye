@@ -23,11 +23,11 @@ from . import transformer
 from . import transformer_pt
 
 
-def pytorch_get_transformer_encoder(config: transformer.TransformerConfig, dtype):
-    return PyTorchTransformerEncoder(config=config, dtype=dtype)
+def pytorch_get_transformer_encoder(config: transformer.TransformerConfig):
+    return PyTorchTransformerEncoder(config=config)
 
 
-class PyTorchEncoder():
+class PyTorchEncoder:
     """
     Generic encoder interface.
     """
@@ -61,13 +61,9 @@ class PyTorchEmbedding(PyTorchEncoder, pt.nn.Module):
     :param dtype: Data type. Default: 'float32'.
     """
 
-    def __init__(self,
-                 config: EmbeddingConfig,
-                 embedding: Optional[pt.nn.Embedding] = None,
-                 dtype: str = C.DTYPE_FP32) -> None:
+    def __init__(self, config: EmbeddingConfig, embedding: Optional[pt.nn.Embedding] = None) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
-        self._dtype = dtype
 
         if embedding is not None:
             self.embedding = embedding
@@ -149,9 +145,7 @@ class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
     :param config: Configuration for transformer encoder.
     """
 
-    def __init__(self,
-                 config: transformer.TransformerConfig,
-                 dtype: str = C.DTYPE_FP32) -> None:
+    def __init__(self, config: transformer.TransformerConfig) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
 
@@ -164,7 +158,7 @@ class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
                                                                    scale_down_positions=False)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.PyTorchTransformerEncoderBlock(config, dtype) for _ in range(config.num_layers))
+            transformer_pt.PyTorchTransformerEncoderBlock(config) for _ in range(config.num_layers))
 
         self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                            dropout=config.dropout_prepost,
