@@ -969,6 +969,14 @@ def add_training_args(params):
                               type=simple_dict(),
                               default=None,
                               help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
+    train_params.add_argument('--optimizer-betas',
+                              type=multiple_values(2, data_type=float),
+                              default=(0.9, 0.999),
+                              help='Beta1 and beta2 for Adam-like optimizers, specified "x:x". Default: %(default)s.')
+    train_params.add_argument('--optimizer-eps',
+                              type=float_greater_or_equal(0),
+                              default=1e-08,
+                              help='Optimizer epsilon. Default: %(default)s.')
 
     train_params.add_argument('--horovod',
                               action='store_true',
@@ -1016,7 +1024,7 @@ def add_training_args(params):
                               help='Weight decay constant. Default: %(default)s.')
     train_params.add_argument('--momentum',
                               type=float,
-                              default=None,
+                              default=0.0,
                               help='Momentum constant. Default: %(default)s.')
     train_params.add_argument('--gradient-clipping-threshold',
                               type=float,

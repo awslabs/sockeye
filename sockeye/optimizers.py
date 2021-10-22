@@ -12,11 +12,12 @@
 # permissions and limitations under the License.
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import mxnet as mx
 
 from . import config
+from . import constants as C
 from .lr_scheduler import LearningRateScheduler
 
 
@@ -36,3 +37,26 @@ class OptimizerConfig(config.Config):
 
     def set_lr_scheduler(self, lr_scheduler: Optional[LearningRateScheduler]):
         self.params["lr_scheduler"] = lr_scheduler
+
+
+@dataclass
+class PyTorchOptimizerConfig(config.Config):
+    # Optimizer
+    name: str
+
+    # Adam default values
+    lr: float = 0.001
+    betas: Tuple[float, float] = (0.9, 0.999)
+    eps: float = 1e-08
+    weight_decay: float = 0.
+
+    # SGD default value
+    momentum: float = 0.
+
+    # Applied outside of optimizer
+    gradient_clipping_type: str = C.GRADIENT_CLIPPING_TYPE_NONE
+    gradient_clipping_threshold: Optional[float] = None
+    update_interval: int = 1
+    rescale_grad: float = 1.
+
+    lr_scheduler: Optional[LearningRateScheduler] = None

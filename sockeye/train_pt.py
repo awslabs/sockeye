@@ -35,19 +35,18 @@ from . import checkpoint_decoder
 from . import constants as C
 from . import data_io_pt
 from . import encoder_pt
-from .encoder import FactorConfig
 from . import horovod_mpi
-from .layers_pt import LengthRatioConfig
+from . import layers_pt
 from . import loss_pt
 from . import lr_scheduler
 from . import model_pt
+from . import optimizers
 from . import training_pt
 from . import transformer_pt
 from . import utils
 from . import vocab
 from .config import Config
 from .log import setup_main_logger
-from .optimizers import OptimizerConfig
 from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
@@ -642,7 +641,7 @@ def create_model_config(args: argparse.Namespace,
                                 "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     source_factors_num_embed[i] = num_embed_source
 
-        source_factor_configs = [FactorConfig(size, dim, combine, share) \
+        source_factor_configs = [encoder_pt.FactorConfig(size, dim, combine, share) \
                                  for size, dim, combine, share in zip(source_factor_vocab_sizes,
                                                                       source_factors_num_embed,
                                                                       args.source_factors_combine,
@@ -666,13 +665,14 @@ def create_model_config(args: argparse.Namespace,
                                 "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     target_factors_num_embed[i] = num_embed_target
 
-        target_factor_configs = [FactorConfig(size, dim, combine, share) \
+        target_factor_configs = [encoder_pt.FactorConfig(size, dim, combine, share) \
                                  for size, dim, combine, share in zip(target_factor_vocab_sizes,
                                                                       target_factors_num_embed,
                                                                       args.target_factors_combine,
                                                                       args.target_factors_share_embedding)]
 
-    allow_sparse_grad = args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
+    # TODO(mdenkows): Does this work with gradient accumulation in PyTorch?
+    allow_sparse_grad = True #args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
 
     config_embed_source = encoder_pt.EmbeddingConfig(vocab_size=source_vocab_size,
                                                      num_embed=num_embed_source,
@@ -688,8 +688,8 @@ def create_model_config(args: argparse.Namespace,
 
     config_length_task = None
     if args.length_task is not None:
-        config_length_task = LengthRatioConfig(num_layers=args.length_task_layers,
-                                                      weight=args.length_task_weight)
+        config_length_task = layers_pt.LengthRatioConfig(num_layers=args.length_task_layers,
+                                                         weight=args.length_task_weight)
 
     model_config = model_pt.ModelConfig(config_data=config_data,
                                         vocab_source_size=source_vocab_size,
@@ -760,17 +760,16 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
     return losses
 
 
-def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
-    # TODO(mdenkows) Revise to match what PyTorch optimizers expect
+def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptimizerConfig:
     """
     Returns an OptimizerConfig.
 
     :param args: Arguments as returned by argparse.
-    :return: The optimizer type and its parameters as well as the kvstore.
-    """
-    optimizer_params = {'weight_decay': args.weight_decay,
-                        'lr': args.initial_learning_rate}
 
+    :return: The config dataclass specifying the optimizer and related settings.
+    """
+
+    # TODO(mdenkows): Support different gradient clipping types
     gradient_clipping_threshold = none_if_negative(args.gradient_clipping_threshold)
     if gradient_clipping_threshold is None:
         logger.info("Gradient clipping threshold set to negative value. Will not perform gradient clipping.")
@@ -778,24 +777,10 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
-    num_workers = 1 if not args.horovod else horovod_mpi.hvd.size()
-    effective_batch_size = args.batch_size * args.update_interval * num_workers
-
-    # Note: for 'abs' we use the implementation inside of MXNet's optimizer and 'norm_*' we implement ourselves
-    # inside the TrainingModel.
-    if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
-        optimizer_params["clip_gradient"] = gradient_clipping_threshold
-    if args.momentum is not None:
-        optimizer_params["momentum"] = args.momentum
     # We normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
-    optimizer_params["rescale_grad"] = 1.0
+    rescale_grad = 1.0
     if args.dtype == C.DTYPE_FP16:
-        os.environ[C.MXNET_SAFE_ACCUMULATION] = '1'
-        optimizer_params["multi_precision"] = True
-        optimizer_params["rescale_grad"] /= C.FIXED_GRAD_SCALE_FP16
-    # Manually specified params
-    if args.optimizer_params:
-        optimizer_params.update(args.optimizer_params)
+        rescale_grad /= C.FIXED_GRAD_SCALE_FP16
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.learning_rate_t_scale,
@@ -803,18 +788,23 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
                                              args.learning_rate_reduce_num_not_improved,
                                              args.learning_rate_warmup,
                                              args.max_updates)
-    config = OptimizerConfig(name=args.optimizer,
-                             params=optimizer_params,
-                             kvstore=args.kvstore,
-                             initializer=None,
-                             gradient_clipping_type=gradient_clipping_type,
-                             gradient_clipping_threshold=gradient_clipping_threshold,
-                             update_interval=args.update_interval)
-    config.set_lr_scheduler(lr_sched)
-    logger.info("Optimizer: %s | kvstore=%s | params=%s | initializer=%s",
-                config.name, config.kvstore, config.params, config.initializer)
-    logger.info("Gradient accumulation over %d batch(es) by %d worker(s). Effective batch size: %d",
-                args.update_interval, num_workers, effective_batch_size)
+
+    config = optimizers.PyTorchOptimizerConfig(name=args.optimizer,
+                                               lr=args.initial_learning_rate,
+                                               betas=args.optimizer_betas,
+                                               eps=args.optimizer_eps,
+                                               weight_decay=args.weight_decay,
+                                               momentum=args.momentum,
+                                               gradient_clipping_type=gradient_clipping_type,
+                                               gradient_clipping_threshold=gradient_clipping_threshold,
+                                               lr_scheduler=lr_sched)
+
+    num_workers = 1 if not args.horovod else horovod_mpi.hvd.size()
+    effective_batch_size = args.batch_size * args.update_interval * num_workers
+    logger.info(config)
+    logger.info(f'Gradient accumulation over {args.update_interval} batch(es) by {num_workers} worker(s). Effective '
+                f'batch size: {effective_batch_size}')
+
     return config
 
 

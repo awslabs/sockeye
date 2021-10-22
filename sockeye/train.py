@@ -785,7 +785,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     # inside the TrainingModel.
     if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
         optimizer_params["clip_gradient"] = gradient_clipping_threshold
-    if args.momentum is not None:
+    if args.momentum > 0:
         optimizer_params["momentum"] = args.momentum
     # We normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
     optimizer_params["rescale_grad"] = 1.0
