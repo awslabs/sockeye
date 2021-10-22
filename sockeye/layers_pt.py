@@ -12,15 +12,14 @@
 # permissions and limitations under the License.
 
 import logging
-import math
-from functools import partial
-from typing import Callable, Optional, Tuple
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import torch as pt
 
 from sockeye import constants as C, utils
 from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings, OutputLayer, LengthRatio
-
+from . import config
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +152,12 @@ class PyTorchOutputLayer(pt.nn.Module):
         self.bias.data[:] = pt.as_tensor(block_mx.bias.data().asnumpy())
 
 
+@dataclass
+class LengthRatioConfig(config.Config):
+    num_layers: int  # Number of layers
+    weight: float  # Weight of this loss
+
+
 class PyTorchLengthRatio(pt.nn.Module):
     """
     Defines the length-ratio prediction layer of Sockeye.
@@ -170,8 +175,8 @@ class PyTorchLengthRatio(pt.nn.Module):
         self.hidden_size = hidden_size
 
         modules = []
-        for l in range(num_layers - 1):
-            modules.append(pt.nn.Linear(in_features=hidden_size, out_features=hidden_size))  # TODO quantization?
+        for _ in range(num_layers - 1):
+            modules.append(pt.nn.Linear(in_features=hidden_size, out_features=hidden_size))
             modules.append(pt.nn.Tanh())
         modules.append(pt.nn.Linear(in_features=hidden_size, out_features=1))
         modules.append(pt.nn.Softplus())  # SoftReLU activation to ensure positiveness of the predicted length ratio

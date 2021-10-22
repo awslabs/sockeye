@@ -26,7 +26,7 @@ import shutil
 import sys
 import tempfile
 from contextlib import ExitStack
-from typing import cast, Callable, Iterator, Optional, Dict, List, Tuple
+from typing import cast, Callable, Optional, Dict, List, Tuple
 
 import torch as pt
 
@@ -37,7 +37,7 @@ from . import data_io_pt
 from . import encoder_pt
 from .encoder import FactorConfig
 from . import horovod_mpi
-from .layers import LengthRatioConfig
+from .layers_pt import LengthRatioConfig
 from . import loss_pt
 from . import lr_scheduler
 from . import model_pt
@@ -675,16 +675,16 @@ def create_model_config(args: argparse.Namespace,
     allow_sparse_grad = args.update_interval == 1  # sparse embedding gradients do not work with grad_req='add'
 
     config_embed_source = encoder_pt.EmbeddingConfig(vocab_size=source_vocab_size,
-                                                  num_embed=num_embed_source,
-                                                  dropout=embed_dropout_source,
-                                                  factor_configs=source_factor_configs,
-                                                  allow_sparse_grad=allow_sparse_grad)
+                                                     num_embed=num_embed_source,
+                                                     dropout=embed_dropout_source,
+                                                     factor_configs=source_factor_configs,
+                                                     allow_sparse_grad=allow_sparse_grad)
 
     config_embed_target = encoder_pt.EmbeddingConfig(vocab_size=target_vocab_size,
-                                                  num_embed=num_embed_target,
-                                                  dropout=embed_dropout_target,
-                                                  factor_configs=target_factor_configs,
-                                                  allow_sparse_grad=allow_sparse_grad)
+                                                     num_embed=num_embed_target,
+                                                     dropout=embed_dropout_target,
+                                                     factor_configs=target_factor_configs,
+                                                     allow_sparse_grad=allow_sparse_grad)
 
     config_length_task = None
     if args.length_task is not None:
@@ -692,16 +692,16 @@ def create_model_config(args: argparse.Namespace,
                                                       weight=args.length_task_weight)
 
     model_config = model_pt.ModelConfig(config_data=config_data,
-                                     vocab_source_size=source_vocab_size,
-                                     vocab_target_size=target_vocab_size,
-                                     config_embed_source=config_embed_source,
-                                     config_embed_target=config_embed_target,
-                                     config_encoder=config_encoder,
-                                     config_decoder=config_decoder,
-                                     config_length_task=config_length_task,
-                                     weight_tying_type=args.weight_tying_type,
-                                     lhuc=args.lhuc is not None,
-                                     dtype=args.dtype)
+                                        vocab_source_size=source_vocab_size,
+                                        vocab_target_size=target_vocab_size,
+                                        config_embed_source=config_embed_source,
+                                        config_embed_target=config_embed_target,
+                                        config_encoder=config_encoder,
+                                        config_decoder=config_decoder,
+                                        config_length_task=config_length_task,
+                                        weight_tying_type=args.weight_tying_type,
+                                        lhuc=args.lhuc is not None,
+                                        dtype=args.dtype)
     return model_config
 
 
@@ -1079,7 +1079,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 if param.grad_req != 'null':
                     param.grad_req = 'add'
 
-        kvstore = mx.kvstore.create(args.kvstore)
+        #kvstore = mx.kvstore.create(args.kvstore)
 
         if horovod_mpi.using_horovod():
             # Horovod provides a trainer that subclasses gluon.Trainer and uses

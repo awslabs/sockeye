@@ -20,9 +20,6 @@ import os
 import pickle
 import random
 import shutil
-
-import torch
-from sockeye.model_pt import PyTorchSockeyeModel
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -31,8 +28,10 @@ from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
 import mxnet as mx
 import numpy as onp
+import torch
 from mxnet import amp, np, npx, gluon
 
+from sockeye.model_pt import PyTorchSockeyeModel
 from . import average
 from . import constants as C
 from . import data_io
@@ -44,7 +43,6 @@ from . import utils
 from . import vocab
 from .checkpoint_decoder import CheckpointDecoder
 from .config import Config
-from .model import SockeyeModel
 from .optimizers import OptimizerConfig
 
 logger = logging.getLogger(__name__)
