@@ -158,11 +158,9 @@ def test_mx_pt_eq_positional_embeddings(data_len, num_embed, scale_up_input, sca
                                                          num_embed=num_embed,
                                                          max_seq_len=max_seq_len,
                                                          scale_up_input=scale_up_input,
-                                                         scale_down_positions=scale_down_positions,
-                                                         weight_init=None)
+                                                         scale_down_positions=scale_down_positions)
     b_pt.weights_from_mxnet_block(b_mx)
     r_pt = b_pt(data_pt, steps_pt).detach().numpy()
-
 
     np.allclose(r_mx, r_pt)
 

@@ -512,7 +512,6 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
     :param max_seq_len: Maximum sequence length.
     :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
     :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
-    :param weight_init: Optional initializer for learned embeddings.
     """
 
     def __init__(self,
@@ -520,8 +519,7 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
                  num_embed: int,
                  max_seq_len: int,
                  scale_up_input: bool,
-                 scale_down_positions: bool,
-                 weight_init: Optional[Callable] = None) -> None:
+                 scale_down_positions: bool) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
                                                   "is however %d." % num_embed)
         super().__init__()
@@ -540,7 +538,6 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
             self.weight = pt.nn.Parameter(pt.Tensor(self.max_seq_len, self.num_embed))
         else:
             raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
-        # TODO consider weight initialization
 
     def forward(self, data: pt.Tensor, steps: Optional[pt.Tensor] = None) -> pt.Tensor:
         """

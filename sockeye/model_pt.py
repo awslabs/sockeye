@@ -573,6 +573,9 @@ def initialize_parameters(module: pt.nn.Module):
             pt.nn.init.zeros_(module.bias)
     elif isinstance(module, layers_pt.PyTorchLHUC):
         pt.nn.init.uniform_(module.weight, a=0.1)
+    elif isinstance(module, layers_pt.PyTorchPositionalEmbeddings):
+        if module.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+            pt.nn.init.xavier_uniform(module.weight, gain=1.0)
 
 
 def load_model(model_folder: str,
