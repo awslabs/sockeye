@@ -316,7 +316,7 @@ class PyTorchEarlyStoppingTrainer:
         loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
         loss_values = [v for v, _ in loss_outputs]
         # Backward
-        sum_losses = pt.add(*loss_values)
+        sum_losses = pt.add(*loss_values) if len(loss_values) > 1 else loss_values[0]
         if self.using_amp:
             # AMP applies dynamic loss scaling to the losses (scale up) and
             # the Trainer (scale down).
@@ -330,21 +330,22 @@ class PyTorchEarlyStoppingTrainer:
     def _step(self, batch: data_io_pt.Batch) -> bool:
         self.state.batches += 1
         loss_values = self._forward_backward(batch)
-
         did_grad_step = False
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
-            # `step` rescales the gradients for the number of batches in this
-            # update.
-            # TODO: replace
-            # self.trainer.step(batch_size=self.config.update_interval)
-            # TODO(mdenkows): Add steps handled by Gluon Trainer and MXNet
-            # Optimizer not covered by PyTorch Optimizer
-            self.optimizer.step()
+            # Rescale gradients for number of batches in this update
             if self.config.update_interval > 1:
-                # Multi-batch updates sum gradients for each batch instead of
-                # overwriting, so gradients must be manually zeroed after each
-                # update.
-                self.optimizer.zero_grad()
+                for p in filter(lambda p: p.grad is not None, self.model.parameters()):
+                    p.grad.data = p.grad.data / self.config.update_interval
+            # Clip gradients
+            if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
+                pt.nn.utils.clip_grad.clip_grad_value_(self.model.parameters(),
+                                                       self.optimizer_config.gradient_clipping_threshold)
+            elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
+                pt.nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(),
+                                                      self.optimizer_config.gradient_clipping_threshold)
+            # Update weights / reset gradients
+            self.optimizer.step()
+            self.optimizer.zero_grad()
             self.state.updates += 1
             did_grad_step = True
 
