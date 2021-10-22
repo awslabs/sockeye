@@ -92,6 +92,7 @@ class PyTorchLoss(pt.nn.Module):
         return self._label_name
 
 
+# TODO(fhieber): should be scriptable/traceable
 class PyTorchCrossEntropyLoss(PyTorchLoss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
@@ -164,7 +165,7 @@ class PyTorchCrossEntropyLoss(PyTorchLoss):
 
     def forward(self, logits: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         if self._alpha == 0.0:
-            logits = logits.view(-1, logits.size(-1))
+            logits = logits.view(-1, logits.size()[-1])
             labels = labels.view(-1)
             ce = pt.nn.functional.cross_entropy(logits, labels.long(),
                                                 weight=None, ignore_index=self.ignore_label, reduction=self._reduction)
