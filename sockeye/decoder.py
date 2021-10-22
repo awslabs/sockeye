@@ -72,9 +72,9 @@ class Decoder(gluon.Block):
         :return: Decoder instance.
         """
         config_type = type(config)
-        if config_type not in cls.__registry:
-            raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
-        decoder_cls = cls.__registry[config_type]
+        #if config_type not in cls.__registry:
+        #    raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
+        decoder_cls = TransformerDecoder
         return decoder_cls(config=config, inference_only=inference_only, dtype=dtype)  # type: ignore
 
     @abstractmethod

@@ -11,21 +11,18 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from functools import partial
-import random
-import mxnet as mx
-import numpy as onp
-import pytest
 import os
 from tempfile import TemporaryDirectory
 import torch as pt
-from mxnet import np, npx
+from mxnet import np
 import sockeye.constants as C
 
 import sockeye.layers
 import sockeye.layers_pt
 import sockeye.transformer
+import sockeye.transformer_pt
 import sockeye.encoder
+import sockeye.encoder_pt
 import sockeye.model
 import sockeye.model_pt
 import sockeye.data_io
@@ -53,6 +50,20 @@ config_encoder = sockeye.transformer.TransformerConfig(model_size=model_size,
                                                        max_seq_len_source=max_seq_len_source,
                                                        max_seq_len_target=max_seq_len_target,
                                                        use_lhuc=False)
+config_encoder_pt = sockeye.transformer_pt.TransformerConfig(model_size=model_size,
+                                                             attention_heads=8,
+                                                             feed_forward_num_hidden=256,
+                                                             act_type='relu',
+                                                             num_layers=num_layers,
+                                                             dropout_attention=0,
+                                                             dropout_act=0,
+                                                             dropout_prepost=0,
+                                                             positional_embedding_type=C.FIXED_POSITIONAL_EMBEDDING,
+                                                             preprocess_sequence='n',
+                                                             postprocess_sequence='r',
+                                                             max_seq_len_source=max_seq_len_source,
+                                                             max_seq_len_target=max_seq_len_target,
+                                                             use_lhuc=False)
 config_decoder = sockeye.transformer.TransformerConfig(model_size=model_size,
                                                        attention_heads=8,
                                                        feed_forward_num_hidden=256,
@@ -68,6 +79,21 @@ config_decoder = sockeye.transformer.TransformerConfig(model_size=model_size,
                                                        max_seq_len_target=max_seq_len_target,
                                                        depth_key_value=model_size,
                                                        use_lhuc=False)
+config_decoder_pt = sockeye.transformer_pt.TransformerConfig(model_size=model_size,
+                                                             attention_heads=8,
+                                                             feed_forward_num_hidden=256,
+                                                             act_type='relu',
+                                                             num_layers=num_layers,
+                                                             dropout_attention=0,
+                                                             dropout_act=0,
+                                                             dropout_prepost=0,
+                                                             positional_embedding_type=C.FIXED_POSITIONAL_EMBEDDING,
+                                                             preprocess_sequence='n',
+                                                             postprocess_sequence='r',
+                                                             max_seq_len_source=max_seq_len_source,
+                                                             max_seq_len_target=max_seq_len_target,
+                                                             depth_key_value=model_size,
+                                                             use_lhuc=False)
 config_embed_source = sockeye.encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                       num_embed=num_embed_source,
                                                       dropout=0,
@@ -111,7 +137,17 @@ model_config = sockeye.model.ModelConfig(config_data=data_config,
                                          weight_tying_type=C.WEIGHT_TYING_NONE,
                                          lhuc=False,
                                          dtype=C.DTYPE_FP32)
-
+model_config_pt = sockeye.model.ModelConfig(config_data=data_config,
+                                            vocab_source_size=source_vocab_size,
+                                            vocab_target_size=target_vocab_size,
+                                            config_embed_source=config_embed_source,
+                                            config_embed_target=config_embed_target,
+                                            config_encoder=config_encoder_pt,
+                                            config_decoder=config_decoder_pt,
+                                            config_length_task=config_length_task,
+                                            weight_tying_type=C.WEIGHT_TYING_NONE,
+                                            lhuc=False,
+                                            dtype=C.DTYPE_FP32)
 
 # inputs
 source_inputs_mx = np.random.randint(0, max_seq_len_source, (batch_size, max_seq_len_source, num_source_factors))
@@ -133,7 +169,7 @@ def test_mx_pt_eq_sockeye_model():
                                       forward_pass_cache_size=0)
     b_mx.initialize()
 
-    b_pt = sockeye.model_pt.PyTorchSockeyeModel(model_config, inference_only=False, mc_dropout=False,
+    b_pt = sockeye.model_pt.PyTorchSockeyeModel(model_config_pt, inference_only=False, mc_dropout=False,
                                                 forward_pass_cache_size=0)
 
     assert b_mx.state_structure() == b_pt.state_structure()

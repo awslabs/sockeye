@@ -21,6 +21,7 @@ import sockeye.constants as C
 import sockeye.decoder
 import sockeye.decoder_pt
 import sockeye.transformer
+import sockeye.transformer_pt
 
 
 @pytest.mark.parametrize('lhuc', [
@@ -52,7 +53,7 @@ def test_get_decoder(lhuc):
 def test_mx_pt_eq_transformer_decoder(inference_only):
     pt.manual_seed(13)
     mx.random.seed(13)
-    config = sockeye.transformer.TransformerConfig(model_size=128,
+    config_mx = sockeye.transformer.TransformerConfig(model_size=128,
                                                    attention_heads=8,
                                                    feed_forward_num_hidden=256,
                                                    act_type='relu',
@@ -62,23 +63,38 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
                                                    dropout_prepost=0,
                                                    positional_embedding_type=C.FIXED_POSITIONAL_EMBEDDING,
                                                    preprocess_sequence='n',
-                                                   postprocess_sequence='r',
-                                                   max_seq_len_source=50,
-                                                   max_seq_len_target=60,
-                                                   depth_key_value=128,
-                                                   use_lhuc=False)
+                                                      postprocess_sequence='r',
+                                                      max_seq_len_source=50,
+                                                      max_seq_len_target=60,
+                                                      depth_key_value=128,
+                                                      use_lhuc=False)
+    config_pt = sockeye.transformer_pt.TransformerConfig(model_size=128,
+                                                         attention_heads=8,
+                                                         feed_forward_num_hidden=256,
+                                                         act_type='relu',
+                                                         num_layers=12,
+                                                         dropout_attention=0,
+                                                         dropout_act=0,
+                                                         dropout_prepost=0,
+                                                         positional_embedding_type=C.FIXED_POSITIONAL_EMBEDDING,
+                                                         preprocess_sequence='n',
+                                                         postprocess_sequence='r',
+                                                         max_seq_len_source=50,
+                                                         max_seq_len_target=60,
+                                                         depth_key_value=128,
+                                                         use_lhuc=False)
     batch = 12
     encoder_seq_len = 45
     decoder_seq_len = 39 if not inference_only else 1
-    encoder_outputs_mx = np.random.uniform(0, 1, (batch, encoder_seq_len, config.model_size))
+    encoder_outputs_mx = np.random.uniform(0, 1, (batch, encoder_seq_len, config_mx.model_size))
     encoder_outputs_pt = pt.tensor(encoder_outputs_mx.asnumpy())
     encoder_valid_length_mx = np.random.randint(0, encoder_seq_len, (batch,))
     encoder_valid_length_pt = pt.tensor(encoder_valid_length_mx.asnumpy())
-    inputs_mx = np.random.uniform(0, 1, (batch, decoder_seq_len, config.model_size))
+    inputs_mx = np.random.uniform(0, 1, (batch, decoder_seq_len, config_mx.model_size))
     inputs_pt = pt.tensor(inputs_mx.asnumpy())
 
     # mx
-    decoder_mx = sockeye.decoder.get_decoder(config, inference_only=inference_only, dtype=C.DTYPE_FP32)
+    decoder_mx = sockeye.decoder.get_decoder(config_mx, inference_only=inference_only, dtype=C.DTYPE_FP32)
     decoder_mx.initialize()
     init_states_mx = decoder_mx.init_state_from_encoder(encoder_outputs_mx, encoder_valid_length_mx)
     output_mx, new_states_mx = decoder_mx(inputs_mx, init_states_mx)
@@ -86,7 +102,7 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
         output_mx, new_states_mx = decoder_mx(output_mx, new_states_mx)
 
     # pt
-    decoder_pt = sockeye.decoder_pt.pytorch_get_decoder(config, inference_only=inference_only)
+    decoder_pt = sockeye.decoder_pt.pytorch_get_decoder(config_pt, inference_only=inference_only)
     decoder_pt.weights_from_mxnet_block(decoder_mx)
     init_states_pt = decoder_pt.init_state_from_encoder(encoder_outputs_pt, encoder_valid_length_pt)
     output_pt, new_states_pt = decoder_pt(inputs_pt, init_states_pt)

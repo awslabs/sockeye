@@ -12,22 +12,26 @@
 # permissions and limitations under the License.
 
 from abc import abstractmethod
-from typing import List, Tuple, Optional
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional, Union
 
 import torch as pt
 
 import sockeye.constants as C
-from sockeye.encoder import TransformerEncoder, EmbeddingConfig, Embedding
+from . import config
 from . import layers_pt
-from . import transformer
 from . import transformer_pt
 
 
-def pytorch_get_transformer_encoder(config: transformer.TransformerConfig):
+def pytorch_get_transformer_encoder(config: transformer_pt.TransformerConfig):
     return PyTorchTransformerEncoder(config=config)
 
 
-class PyTorchEncoder:
+get_encoder = pytorch_get_transformer_encoder
+EncoderConfig = Union[transformer_pt.TransformerConfig]
+
+
+class PyTorchEncoder(pt.nn.Module):
     """
     Generic encoder interface.
     """
@@ -52,17 +56,39 @@ class PyTorchEncoder:
         return None
 
 
-class PyTorchEmbedding(PyTorchEncoder, pt.nn.Module):
+@dataclass
+class FactorConfig(config.Config):
+    vocab_size: int
+    num_embed: int
+    combine: str  # From C.FACTORS_COMBINE_CHOICES
+    share_embedding: bool
+
+
+@dataclass
+class EmbeddingConfig(config.Config):
+    vocab_size: int
+    num_embed: int
+    dropout: float
+    num_factors: int = field(init=False)
+    factor_configs: Optional[List[FactorConfig]] = None
+    allow_sparse_grad: bool = False
+
+    def __post_init__(self):
+        self.num_factors = 1
+        if self.factor_configs is not None:
+            self.num_factors += len(self.factor_configs)
+
+
+class PyTorchEmbedding(PyTorchEncoder):
     """
     Thin wrapper around PyTorch's Embedding op.
 
     :param config: Embedding config.
     :param embedding: pre-existing embedding Module.
-    :param dtype: Data type. Default: 'float32'.
     """
 
     def __init__(self, config: EmbeddingConfig, embedding: Optional[pt.nn.Embedding] = None) -> None:
-        pt.nn.Module.__init__(self)
+        super().__init__()
         self.config = config
 
         if embedding is not None:
@@ -128,14 +154,14 @@ class PyTorchEmbedding(PyTorchEncoder, pt.nn.Module):
         """
         return self.config.num_embed
 
-    def weights_from_mxnet_block(self, block_mx: Embedding):
+    def weights_from_mxnet_block(self, block_mx: 'Embedding'):
         self.embedding.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
         if self.config.factor_configs is not None:
             for embedding, mx_weight, fc in zip(self.factor_embeds, block_mx.factor_weights, self.config.factor_configs):
                 embedding.weight.data[:] = pt.as_tensor(mx_weight.data().asnumpy())
 
 
-class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
+class PyTorchTransformerEncoder(PyTorchEncoder):
     """
     Non-recurrent encoder based on the transformer architecture in:
 
@@ -145,7 +171,7 @@ class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
     :param config: Configuration for transformer encoder.
     """
 
-    def __init__(self, config: transformer.TransformerConfig) -> None:
+    def __init__(self, config: transformer_pt.TransformerConfig) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
 
@@ -188,7 +214,7 @@ class PyTorchTransformerEncoder(PyTorchEncoder, pt.nn.Module):
         """
         return self.config.model_size
 
-    def weights_from_mxnet_block(self, block_mx: TransformerEncoder):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerEncoder'):
         self.pos_embedding.weights_from_mxnet_block(block_mx.pos_embedding)
         for i, l in enumerate(self.layers):
             l.weights_from_mxnet_block(block_mx.layers[i])

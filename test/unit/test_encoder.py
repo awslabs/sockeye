@@ -120,7 +120,7 @@ def test_mx_pt_eq_embedding(vocab_size, num_embed, factor_configs, sparse):
 
     block_mx = sockeye.encoder.Embedding(config, None, C.DTYPE_FP32)
     block_mx.initialize()
-    block_pt = sockeye.encoder_pt.PyTorchEmbedding(config, None, C.DTYPE_FP32)
+    block_pt = sockeye.encoder_pt.PyTorchEmbedding(config, None)
     block_pt.weights_from_mxnet_block(block_mx)
 
     batch, seq_len, num_factors = 4, 10, len(factor_configs) + 1 if factor_configs is not None else 1

@@ -1,4 +1,4 @@
-# Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,13 +12,35 @@
 # permissions and limitations under the License.
 
 
+from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import torch as pt
 
 import sockeye.layers_pt
 from sockeye import constants as C
-from sockeye.transformer import TransformerConfig, TransformerEncoderBlock, TransformerDecoderBlock, TransformerProcessBlock
+from . import config
+
+
+@dataclass
+class TransformerConfig(config.Config):
+    model_size: int
+    attention_heads: int
+    feed_forward_num_hidden: int
+    act_type: str
+    num_layers: int
+    dropout_attention: float
+    dropout_act: float
+    dropout_prepost: float
+    positional_embedding_type: str
+    preprocess_sequence: str
+    postprocess_sequence: str
+    max_seq_len_source: int
+    max_seq_len_target: int
+    decoder_type: str = C.TRANSFORMER_TYPE
+    use_lhuc: bool = False
+    depth_key_value: int = 0
+    use_glu: bool = False
 
 
 class PyTorchTransformerEncoderBlock(pt.nn.Module):
@@ -79,7 +101,7 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
 
         return data
 
-    def weights_from_mxnet_block(self, block_mx: TransformerEncoderBlock):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerEncoderBlock'):
         self.pre_self_attention.weights_from_mxnet_block(block_mx.pre_self_attention)
         self.self_attention.weights_from_mxnet_block(block_mx.self_attention)
         self.post_self_attention.weights_from_mxnet_block(block_mx.post_self_attention)
@@ -194,7 +216,7 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
 
         return target, new_autoregr_states
 
-    def weights_from_mxnet_block(self, block_mx: TransformerDecoderBlock):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerDecoderBlock'):
         self.pre_autoregr_layer.weights_from_mxnet_block(block_mx.pre_autoregr_layer)
         self.autoregr_layer.weights_from_mxnet_block(block_mx.autoregr_layer)
         self.post_autoregr_layer.weights_from_mxnet_block(block_mx.post_autoregr_layer)
@@ -262,7 +284,7 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
 
         return data
 
-    def weights_from_mxnet_block(self, block_mx: TransformerProcessBlock):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerProcessBlock'):
         if 'n' in self.sequence:
             assert 'n' in block_mx.sequence
             self.layer_norm.bias.data[:] = pt.as_tensor(block_mx.layer_norm.beta.data().asnumpy())

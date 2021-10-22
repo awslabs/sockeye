@@ -1,4 +1,4 @@
-# Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,13 +12,13 @@
 # permissions and limitations under the License.
 
 import logging
+from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import torch as pt
 
 from sockeye import constants as C, utils
-from sockeye.layers import AutoregressiveLayer, SSRU, PositionalEmbeddings, OutputLayer, LengthRatio
 from . import config
 
 logger = logging.getLogger(__name__)
@@ -147,7 +147,7 @@ class PyTorchOutputLayer(pt.nn.Module):
         else:
             return pt.nn.functional.linear(data, weight, bias)
 
-    def weights_from_mxnet_block(self, block_mx: OutputLayer):
+    def weights_from_mxnet_block(self, block_mx: 'OutputLayer'):
         self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
         self.bias.data[:] = pt.as_tensor(block_mx.bias.data().asnumpy())
 
@@ -199,7 +199,7 @@ class PyTorchLengthRatio(pt.nn.Module):
         data = self.layers(data).squeeze(1)  # (n, 1)
         return data
 
-    def weights_from_mxnet_block(self, block_mx: LengthRatio):
+    def weights_from_mxnet_block(self, block_mx: 'LengthRatio'):
         for l_pt, l_mx in zip(self.layers, block_mx.layers):
             if isinstance(l_pt, pt.nn.Linear):
                 l_pt.weight.data[:] = pt.as_tensor(l_mx.weight.data().asnumpy())
@@ -355,6 +355,38 @@ class PyTorchMultiHeadAttentionBase(pt.nn.Module):
         contexts = self.ff_out(contexts)
 
         return contexts
+
+
+class AutoregressiveLayer(pt.nn.Module):
+    @property
+    @abstractmethod
+    def num_state_tensors(self) -> int:
+        """ Number of state tensors returned by the layer """
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def needs_mask(self) -> bool:
+        """ Whether the layer makes use of a mask tensor or not """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_state_shape(self, batch_size) -> Tuple:
+        """
+        :param batch_size: current batch size
+        :return: dimensions of each output state (assuming all of them have the same shape)
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def forward(self, inputs: pt.Tensor, previous_states: pt.Tensor, *args) -> Tuple:
+        """
+        :param inputs: layer input
+        :param previous_states: Previous states array or list of arrays
+        :param args: layer-specific arguments and/or arguments to be ignored
+        :return: layer output and new states
+        """
+        raise NotImplementedError
 
 
 class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, AutoregressiveLayer):
@@ -561,12 +593,12 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
 
         return data + pos_embedding
 
-    def weights_from_mxnet_block(self, block_mx: PositionalEmbeddings):
+    def weights_from_mxnet_block(self, block_mx: 'PositionalEmbeddings'):
         if self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
             self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
 
 
-class PyTorchSSRU(pt.nn.Module, AutoregressiveLayer):
+class PyTorchSSRU(AutoregressiveLayer):
     """
     Simpler Simple Recurrent Unit
 
@@ -655,7 +687,7 @@ class PyTorchSSRU(pt.nn.Module, AutoregressiveLayer):
 
         return self.relu(cell_state), last_step_state
 
-    def weights_from_mxnet_block(self, block_mx: SSRU):
+    def weights_from_mxnet_block(self, block_mx: 'SSRU'):
         self.forget_gate.weight.data[:] = pt.as_tensor(block_mx.forget_gate.weight.data().asnumpy())
         self.forget_gate.bias.data[:] = pt.as_tensor(block_mx.forget_gate.bias.data().asnumpy())
         self.linear.weight.data[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())

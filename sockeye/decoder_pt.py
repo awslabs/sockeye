@@ -17,17 +17,18 @@ Decoders for sequence-to-sequence models.
 import logging
 from abc import abstractmethod
 from itertools import islice
-from typing import List, Optional, Tuple, Type
+from typing import List, Optional, Tuple, Type, Union
 
 import torch as pt
 
 from . import constants as C
 from . import layers_pt
 from . import transformer_pt
-from .decoder import DecoderConfig, TransformerDecoder
-from .transformer import TransformerConfig
+from .decoder import TransformerDecoder
+from .transformer_pt import TransformerConfig
 
 logger = logging.getLogger(__name__)
+DecoderConfig = Union[TransformerConfig]
 
 
 def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'PyTorchDecoder':

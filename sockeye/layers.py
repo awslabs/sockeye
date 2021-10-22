@@ -358,7 +358,6 @@ class MultiHeadAttentionBase(gluon.HybridBlock):
         return contexts
 
 
-# TODO: Do we need a PyTorch variant of this? Eventually once MXNet is removed
 class AutoregressiveLayer(mx.gluon.HybridBlock):
     @property
     @abstractmethod
