@@ -14,9 +14,9 @@
 """
 Simple Training CLI.
 """
-# TODO(mdenkows) pre_mxnet -> pre_pytorch
+# TODO(mdenkows) pre_mxnet -> before_torch
 from . import pre_mxnet
-# Called before importing mxnet or any module that imports mxnet
+# Called before importing torch or any module that imports torch
 pre_mxnet.init()
 
 import argparse
@@ -28,7 +28,7 @@ import tempfile
 from contextlib import ExitStack
 from typing import cast, Callable, Optional, Dict, List, Tuple
 
-import torch as pt
+import torch
 
 from . import arguments
 from . import checkpoint_decoder
@@ -138,6 +138,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
+    # TODO(mdenkows): Migrate to PyTorch distributed training
     if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
         # Horovod secondary workers: wait for primary worker to create the sub-
         # directory where secondary workers create output directories.
@@ -153,10 +154,6 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
             arg_diffs = _dict_difference(vars(args), old_args) | _dict_difference(old_args, vars(args))
             # Remove args that may differ without affecting the training.
             arg_diffs -= set(C.ARGS_MAY_DIFFER)
-            # allow different device-ids provided their total count is the same
-            # TODO(mdenkows): device_ids -> device_id with backward compatibility
-            if 'device_ids' in arg_diffs and len(old_args['device_ids']) == len(vars(args)['device_ids']):
-                arg_diffs.discard('device_ids')
             if not arg_diffs:
                 resume_training = True
             else:
@@ -172,6 +169,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
                         "Will start training from scratch.", output_folder)
     else:
         os.makedirs(output_folder)
+    # TODO(mdenkows): Migrate to PyTorch distributed training
     if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() == 0:
         # Horovod primary worker: make sure sub-directory for secondary worker
         # outputs exists and signal secondary workers.
@@ -185,7 +183,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
 def create_checkpoint_decoder(
         args: argparse.Namespace,
         exit_stack: ExitStack,
-        train_device: pt.device,
+        train_device: torch.device,
         sockeye_model: model_pt.PyTorchSockeyeModel,
         source_vocabs: List[vocab.Vocab],
         target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
@@ -210,6 +208,7 @@ def create_checkpoint_decoder(
     if sample_size == 0:
         return None
 
+    # TODO(mdenkows): Migrate to PyTorch distributed training
     if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0 and args.optimized_metric not in C.METRICS_REQUIRING_DECODER:
         logger.info("This is a secondary worker, not creating a checkpoint decoder for this training instance")
         return None
@@ -766,8 +765,6 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
 
     :return: The config dataclass specifying the optimizer and related settings.
     """
-
-    # TODO(mdenkows): Support different gradient clipping types
     gradient_clipping_threshold = none_if_negative(args.gradient_clipping_threshold)
     if gradient_clipping_threshold is None:
         logger.info("Gradient clipping threshold set to negative value. Will not perform gradient clipping.")
@@ -797,6 +794,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
                                                gradient_clipping_threshold=gradient_clipping_threshold,
                                                lr_scheduler=lr_sched)
 
+    # TODO(mdenkows): Migrate to PyTorch distributed training
     num_workers = 1 if not args.horovod else horovod_mpi.hvd.size()
     effective_batch_size = args.batch_size * args.update_interval * num_workers
     logger.info(config)
@@ -807,9 +805,10 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
 
 
 def set_grad_req_for_fixed_params(config: model_pt.ModelConfig,
-                                  params: Dict[str, pt.nn.parameter.Parameter],
+                                  params: Dict[str, torch.nn.parameter.Parameter],
                                   fixed_param_names: List[str],
-                                  fixed_param_strategy: Optional[str] = None) -> Dict[str, pt.nn.parameter.Parameter]:
+                                  fixed_param_strategy: Optional[str] = None) -> Dict[str,
+                                                                                      torch.nn.parameter.Parameter]:
     utils.check_condition(not config.lhuc or fixed_param_strategy is None,
                           "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
     if config.lhuc:
@@ -831,7 +830,7 @@ def set_grad_req_for_fixed_params(config: model_pt.ModelConfig,
 
 
 def fixed_param_names_from_strategy(config: model_pt.ModelConfig,
-                                    params: Dict[str, pt.nn.parameter.Parameter],
+                                    params: Dict[str, torch.nn.parameter.Parameter],
                                     strategy: str) -> List[str]:
     """
     Generate a fixed parameter list given a list of all parameter names and
@@ -901,12 +900,14 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         args.output = temp_dir.name
         args.max_updates = 0
 
+    # TODO(mdenkows): Migrate to PyTorch mixed precision training
     # Automatic Mixed Precision training
     using_amp = False
     if args.amp:
         using_amp = True
         amp.init()
 
+    # TODO(mdenkows): Migrate to PyTorch distributed training
     # When using Horovod, multiple workers (instances of sockeye.train) are
     # launched via MPI.  Each worker has a rank (unique among all workers in the
     # training run) and a local rank (unique on the current host).  For example,
@@ -1048,6 +1049,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                fixed_param_names=args.fixed_param_names,
                                                fixed_param_strategy=args.fixed_param_strategy)
 
+        # TODO(mdenkows): Migrate to PyTorch distributed training
         # When using Horovod, synchronize the parameter initialization point
         # across all workers by broadcasting worker 0's values.  This is not
         # required when resuming training as synchronized training states
@@ -1071,6 +1073,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                optimizer_config.name,
                                                                optimizer_config.params)
 
+        # TODO(mdenkows): Migrate to PyTorch mixed precision training
         if using_amp:
             amp.init_trainer(gluon_trainer)
             # AMP does not allow passing args when creating the loss scaler, so
@@ -1079,21 +1082,23 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
-        with pt.autograd.set_detect_anomaly(True):
-            trainer = training_pt.PyTorchEarlyStoppingTrainer(
-                config=trainer_config,
-                optimizer_config=optimizer_config,
-                sockeye_model=training_model,
-                optimizer=optimizer,
-                loss_functions=losses,
-                device=device,
-                dtype=args.dtype,
-                using_amp=using_amp,
-                custom_metrics_logger=custom_metrics_logger,
-                checkpoint_callback=checkpoint_callback)
+        # TODO(mdenkows): Add a debug mode that enables anomaly detection
+        #with torch.autograd.set_detect_anomaly(True):
 
-            training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=None)
-            return training_state
+        trainer = training_pt.PyTorchEarlyStoppingTrainer(
+            config=trainer_config,
+            optimizer_config=optimizer_config,
+            sockeye_model=training_model,
+            optimizer=optimizer,
+            loss_functions=losses,
+            device=device,
+            dtype=args.dtype,
+            using_amp=using_amp,
+            custom_metrics_logger=custom_metrics_logger,
+            checkpoint_callback=checkpoint_callback)
+
+        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=None)
+        return training_state
 
 
 if __name__ == "__main__":
