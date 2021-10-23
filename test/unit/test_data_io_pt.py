@@ -16,7 +16,7 @@ import random
 from tempfile import TemporaryDirectory
 from typing import Optional, List, Tuple
 
-import torch as pt
+import torch
 import numpy as np
 
 import pytest
@@ -105,12 +105,6 @@ def test_tokens2ids(tokens, vocab, expected_ids):
 def test_strids2ids(tokens, expected_ids):
     ids = data_io_pt.strids2ids(tokens)
     assert ids == expected_ids
-
-
-@pytest.mark.parametrize("ids, expected_string", [([1, 2, 3, 0], "1 2 3 0"), ([], "")])
-def test_ids2strids(ids, expected_string):
-    string = data_io_pt.ids2strids(ids)
-    assert string == expected_string
 
 
 sequence_reader_tests = [(["1 2 3", "2", "", "2 2 2"], False, False, False),
@@ -238,28 +232,22 @@ def test_sample_based_define_bucket_batch_sizes():
     batch_type = C.BATCH_TYPE_SENTENCE
     batch_size = 32
     max_seq_len = 100
-    buckets = data_io_pt.define_parallel_buckets(max_seq_len, max_seq_len, 10, 1, 1.5)
+    buckets = data_io_pt.define_parallel_buckets(max_seq_len, max_seq_len, 10, True, 1.5)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_type=batch_type,
-                                                           batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     for bbs in bucket_batch_sizes:
         assert bbs.batch_size == batch_size
         assert bbs.average_target_words_per_batch == bbs.bucket[1] * batch_size
 
 
-@pytest.mark.parametrize("batch_num_devices,length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
-        # Reference batch sizes manually inspected for sanity.  Note that for
-        # very unbalanced lengths, the last batch can be very large.  This is
-        # due to the requirement for any size batch (total elements) to fit into
-        # the same allocated space for MXNet's memory sharing.
-        (1, 0.5, 1, [200.0, 100.0, 67.0, 50.0, 40.0, 33.0, 29.0, 25.0, 22.0, 41.0]),
-        (2, 0.5, 1, [200.0, 100.0, 66.0, 50.0, 40.0, 34.0, 28.0, 24.0, 22.0, 40.0]),
-        (8, 0.5, 1, [200.0, 96.0, 64.0, 48.0, 40.0, 32.0, 32.0, 24.0, 24.0, 40.0]),
-        (1, 1.5, 1, [100.0, 50.0, 33.0, 25.0, 20.0, 20.0, 20.0, 20.0]),
-        (1, 1.5, 8, [96.0, 48.0, 32.0, 24.0, 16.0, 16.0, 16.0, 24.0])])
-def test_word_based_define_bucket_batch_sizes(batch_num_devices, length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
+@pytest.mark.parametrize("length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
+        # Reference batch sizes manually inspected for sanity.
+        (0.5, 1, [200, 100, 67, 50, 40, 33, 29, 25, 22, 20]),
+        (1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
+        (1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
+def test_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
     batch_type = C.BATCH_TYPE_WORD
     batch_size = 1000
     max_seq_len = 50
@@ -267,32 +255,20 @@ def test_word_based_define_bucket_batch_sizes(batch_num_devices, length_ratio, b
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_type=batch_type,
-                                                           batch_num_devices=batch_num_devices,
                                                            data_target_average_len=[None] * len(buckets),
                                                            batch_sentences_multiple_of=batch_sentences_multiple_of)
-    max_num_words = 0
-    # last bucket batch size is different
     for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
         assert bbs.batch_size == expected_batch_size
         expected_average_target_words_per_batch = expected_batch_size * bbs.bucket[1]
         assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
-        max_num_words = max(max_num_words, bbs.batch_size * max(*bbs.bucket))
-
-    last_bbs = bucket_batch_sizes[-1]
-    min_expected_batch_size = round((batch_size / last_bbs.bucket[1]) / batch_num_devices)
-    assert last_bbs.batch_size >= min_expected_batch_size
-    last_bbs_num_words = last_bbs.batch_size * max(*last_bbs.bucket)
-    assert last_bbs_num_words >= max_num_words
 
 
-@pytest.mark.parametrize("batch_num_devices,length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
+@pytest.mark.parametrize("length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
         # Reference batch sizes manually inspected for sanity.
-        (1, 0.5, 1, [200, 100, 66, 50, 40, 33, 28, 25, 22, 20]),
-        (2, 0.5, 1, [200, 100, 66, 50, 40, 32, 28, 24, 22, 20]),
-        (8, 0.5, 1, [200, 96, 64, 48, 40, 32, 24, 24, 16, 16]),
-        (1, 1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
-        (1, 1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
-def test_max_word_based_define_bucket_batch_sizes(batch_num_devices, length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
+        (0.5, 1, [200, 100, 66, 50, 40, 33, 28, 25, 22, 20]),
+        (1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
+        (1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
+def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
     batch_type = C.BATCH_TYPE_MAX_WORD
     batch_size = 1000
     max_seq_len = 50
@@ -300,7 +276,6 @@ def test_max_word_based_define_bucket_batch_sizes(batch_num_devices, length_rati
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets=buckets,
                                                            batch_size=batch_size,
                                                            batch_type=batch_type,
-                                                           batch_num_devices=batch_num_devices,
                                                            data_target_average_len=[None] * len(buckets),
                                                            batch_sentences_multiple_of=batch_sentences_multiple_of)
     for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
@@ -327,9 +302,9 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
         bucket_counts = [None for _ in buckets]
     bucket_counts = [random.randint(min_count, max_count) if given_count is None else given_count
                      for given_count in bucket_counts]
-    source = [pt.randint(0, 10, (count, random.randint(1, bucket[0]), 1))
+    source = [torch.randint(0, 10, (count, random.randint(1, bucket[0]), 1))
               for count, bucket in zip(bucket_counts, buckets)]
-    target = [pt.randint(0, 10, (count, random.randint(2, bucket[1]), 1))
+    target = [torch.randint(0, 10, (count, random.randint(2, bucket[1]), 1))
               for count, bucket in zip(bucket_counts, buckets)]
     return source, target
 
@@ -341,7 +316,7 @@ def test_parallel_data_set():
     def check_equal(arrays1, arrays2):
         assert len(arrays1) == len(arrays2)
         for a1, a2 in zip(arrays1, arrays2):
-            assert pt.equal(a1, a2)
+            assert torch.equal(a1, a2)
 
     with TemporaryDirectory() as work_dir:
         dataset = data_io_pt.ParallelDataSet(source, target)
@@ -354,11 +329,10 @@ def test_parallel_data_set():
 
 def test_parallel_data_set_fill_up():
     batch_size = 32
-    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
 
@@ -385,7 +359,7 @@ def test_get_permutations():
         assert len(pi_set) == len(pi)
         assert p_set - pi_set == set()
         if d:
-            d = pt.tensor(d)
+            d = torch.tensor(d)
             assert (d[p][pi] == d).all()
         else:
             assert len(p_set) == 1
@@ -397,7 +371,6 @@ def test_parallel_data_set_permute():
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
         bucket_batch_sizes)
@@ -424,7 +397,6 @@ def test_get_batch_indices():
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets=buckets,
                                                                  min_count=1,
@@ -444,14 +416,6 @@ def test_get_batch_indices():
     computed_bucket_indices = set([i for i, j in indices])
 
     assert not all_bucket_indices - computed_bucket_indices
-
-
-@pytest.mark.parametrize("buckets, expected_default_bucket_key",
-                         [([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)], (50, 50)),
-                          ([(5, 10), (10, 20), (15, 30), (25, 50), (20, 40)], (25, 50))])
-def test_get_default_bucket_key(buckets, expected_default_bucket_key):
-    default_bucket_key = data_io_pt.get_default_bucket_key(buckets)
-    assert default_bucket_key == expected_default_bucket_key
 
 
 get_parallel_bucket_tests = [([(10, 10), (20, 20), (30, 30), (40, 40), (50, 50)], 50, 50, 4, (50, 50)),
@@ -530,7 +494,6 @@ def test_get_training_data_iters():
             shared_vocab=True,
             batch_size=batch_size,
             batch_type=C.BATCH_TYPE_SENTENCE,
-            batch_num_devices=1,
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
             bucketing=True,
@@ -549,13 +512,11 @@ def test_get_training_data_iters():
 
         assert train_iter.batch_size == batch_size
         assert val_iter.batch_size == batch_size
-        assert train_iter.default_bucket_key == (train_max_length, train_max_length)
-        assert val_iter.default_bucket_key == (dev_max_length, dev_max_length)
 
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]
         eos_id = vcb[C.EOS_SYMBOL]
-        expected_first_target_symbols = pt.full((batch_size, 1), bos_id, dtype=pt.int32)
+        expected_first_target_symbols = torch.full((batch_size, 1), bos_id, dtype=torch.int32)
         for epoch in range(2):
             while train_iter.iter_next():
                 batch = train_iter.next()
@@ -568,21 +529,21 @@ def test_get_training_data_iters():
                 assert source.shape[2] == target.shape[2] == num_source_factors == num_target_factors
                 # target first symbol should be BOS
                 # each source sequence contains one EOS symbol
-                assert pt.sum(source == eos_id) == batch_size
-                assert pt.equal(target[:, 0], expected_first_target_symbols)
+                assert torch.sum(source == eos_id) == batch_size
+                assert torch.equal(target[:, 0], expected_first_target_symbols)
                 # label first symbol should be 2nd target symbol
-                assert pt.equal(label[:, 0], target[:, 1, 0])
+                assert torch.equal(label[:, 0], target[:, 1, 0])
                 # each label sequence contains one EOS symbol
-                assert pt.sum(label == eos_id) == batch_size
+                assert torch.sum(label == eos_id) == batch_size
             train_iter.reset()
 
 
 def _data_batches_equal(db1: data_io_pt.Batch, db2: data_io_pt.Batch) -> bool:
     equal = True
-    equal = equal and pt.allclose(db1.source, db2.source)
-    equal = equal and pt.allclose(db1.source_length, db2.source_length)
-    equal = equal and pt.allclose(db1.target, db2.target)
-    equal = equal and pt.allclose(db1.target_length, db2.target_length)
+    equal = equal and torch.allclose(db1.source, db2.source)
+    equal = equal and torch.allclose(db1.source_length, db2.source_length)
+    equal = equal and torch.allclose(db1.target, db2.target)
+    equal = equal and torch.allclose(db1.target_length, db2.target_length)
     equal = equal and db1.labels.keys() == db2.labels.keys()
     equal = equal and db1.samples == db2.samples
     equal = equal and db1.tokens == db2.tokens
@@ -597,7 +558,6 @@ def test_parallel_sample_iter():
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
@@ -655,7 +615,6 @@ def test_sharded_parallel_sample_iter():
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset1 = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
@@ -725,7 +684,6 @@ def test_sharded_parallel_sample_iter_num_batches():
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset1 = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
@@ -759,7 +717,6 @@ def test_sharded_and_parallel_iter_same_num_batches():
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           batch_num_devices=1,
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
@@ -798,18 +755,18 @@ def test_sharded_and_parallel_iter_same_num_batches():
 
 
 def test_create_target_and_shifted_label_sequences():
-    target_and_label = pt.tensor([[C.BOS_ID, 4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
+    target_and_label = torch.tensor([[C.BOS_ID, 4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
                                   [C.BOS_ID, 15, 23, 23, 77, 55, 22, C.EOS_ID],
                                   [C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]])
-    target_and_label = pt.unsqueeze(target_and_label, dim=2)
-    expected_lengths = pt.tensor([5, 7, 2])
+    target_and_label = torch.unsqueeze(target_and_label, dim=2)
+    expected_lengths = torch.tensor([5, 7, 2])
 
     target, label = data_io_pt.create_target_and_shifted_label_sequences(target_and_label)
 
     assert target.shape[0] == label.shape[0] == target_and_label.shape[0]
     assert target.shape[1] == label.shape[1] == target_and_label.shape[1] - 1
     lengths = (target != C.PAD_ID).sum(dim=1).squeeze()
-    assert pt.allclose(lengths, expected_lengths)
+    assert torch.allclose(lengths, expected_lengths)
 
 
 def _assert_mx_pt_batches_equal(mx_batch, pt_batch):
@@ -859,7 +816,6 @@ def test_mx_pt_eq_training_data():
                 shared_vocab=True,
                 batch_size=batch_size,
                 batch_type=C.BATCH_TYPE_SENTENCE,
-                batch_num_devices=1,
                 max_seq_len_source=train_max_length,
                 max_seq_len_target=train_max_length,
                 bucketing=True,
@@ -935,7 +891,6 @@ def test_mx_pt_eq_prepared_data():
                         shared_vocab=True,
                         batch_size=batch_size,
                         batch_type=C.BATCH_TYPE_SENTENCE,
-                        batch_num_devices=1,
                         batch_sentences_multiple_of=batch_sentences_multiple_of,
                         permute=False)
 

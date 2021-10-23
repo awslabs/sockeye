@@ -276,7 +276,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     num_words_target = num_words_target if num_words_target > 0 else None
 
     word_min_count_source, word_min_count_target = args.word_min_count
-    batch_num_devices = 1
 
     validation_sources = [args.validation_source] + args.validation_source_factors
     validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
@@ -304,7 +303,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_type=args.batch_type,
-            batch_num_devices=batch_num_devices,
             batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
         check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
@@ -411,7 +409,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_type=args.batch_type,
-            batch_num_devices=batch_num_devices,
             max_seq_len_source=max_seq_len_source,
             max_seq_len_target=max_seq_len_target,
             bucketing=not args.no_bucketing,

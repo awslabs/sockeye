@@ -146,9 +146,9 @@ class BucketBatchSize:
 def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
                               batch_size: int,
                               batch_type: str,
-                              batch_num_devices: int,
                               data_target_average_len: List[Optional[float]],
-                              batch_sentences_multiple_of: int = 1) -> List[BucketBatchSize]:
+                              batch_sentences_multiple_of: int = 1,
+                              batch_num_devices: int = 1) -> List[BucketBatchSize]:
     """
     Compute bucket-specific batch sizes (sentences, average_target_words).
 
@@ -822,8 +822,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             shared_vocab: bool,
                             batch_size: int,
                             batch_type: str,
-                            batch_num_devices: int,
                             batch_sentences_multiple_of: int = 1,
+                            batch_num_devices: int = 1,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
                                                            'BaseParallelSampleIter',
                                                            'DataConfig', List[vocab.Vocab], List[vocab.Vocab]]:
@@ -874,9 +874,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
                                                    batch_type,
-                                                   batch_num_devices,
                                                    config_data.data_statistics.average_len_target_per_bucket,
-                                                   batch_sentences_multiple_of)
+                                                   batch_sentences_multiple_of,
+                                                   batch_num_devices)
 
     config_data.data_statistics.log(bucket_batch_sizes)
 
@@ -918,7 +918,6 @@ def get_training_data_iters(sources: List[str],
                             shared_vocab: bool,
                             batch_size: int,
                             batch_type: str,
-                            batch_num_devices: int,
                             max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucketing: bool,
@@ -926,6 +925,7 @@ def get_training_data_iters(sources: List[str],
                             bucket_scaling: bool = True,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1,
+                            batch_num_devices: int = 1,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
                                                                            Optional['BaseParallelSampleIter'],
                                                                            'DataConfig', 'DataInfo']:
@@ -983,9 +983,9 @@ def get_training_data_iters(sources: List[str],
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
                                                    batch_type,
-                                                   batch_num_devices,
                                                    data_statistics.average_len_target_per_bucket,
-                                                   batch_sentences_multiple_of)
+                                                   batch_sentences_multiple_of,
+                                                   batch_num_devices)
 
     data_statistics.log(bucket_batch_sizes)
 

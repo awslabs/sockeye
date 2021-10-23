@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from itertools import chain
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple, Set
 
-import torch as pt
+import torch
 import numpy as np
 
 from . import config
@@ -99,28 +99,6 @@ def define_parallel_buckets(max_seq_len_source: int,
     return buckets
 
 
-def define_empty_source_parallel_buckets(max_seq_len_target: int,
-                                         bucket_width: int = 10) -> List[Tuple[int, int]]:
-    """
-    Returns (source, target) buckets up to (None, max_seq_len_target). The source
-    is empty since it is supposed to not contain data that can be bucketized.
-    The target is used as reference to create the buckets.
-
-    :param max_seq_len_target: Maximum target bucket size.
-    :param bucket_width: Width of buckets on longer side.
-    """
-    target_step_size = max(1, bucket_width)
-    target_buckets = define_buckets(max_seq_len_target, step=target_step_size)
-    # source buckets are always 0 since there is no text
-    source_buckets = [0 for b in target_buckets]
-    target_buckets = [max(2, b) for b in target_buckets]
-    parallel_buckets = list(zip(source_buckets, target_buckets))
-    # deduplicate for return
-    buckets = list(OrderedDict.fromkeys(parallel_buckets))
-    buckets.sort()
-    return buckets
-
-
 def get_bucket(seq_len: int, buckets: List[int]) -> Optional[int]:
     """
     Given sequence length and a list of buckets, return corresponding bucket.
@@ -145,7 +123,6 @@ class BucketBatchSize:
 def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
                               batch_size: int,
                               batch_type: str,
-                              batch_num_devices: int,
                               data_target_average_len: List[Optional[float]],
                               batch_sentences_multiple_of: int = 1) -> List[BucketBatchSize]:
     """
@@ -153,20 +130,18 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
 
     If sentence batching: number of sentences is the same for each batch.
 
-    If word batching: number of sentences for each batch is the multiple of
-    number of devices that produces the number of words closest to the target
-    batch size. Number of sentences is finally rounded to the nearest multiple
-    of batch_sentences_multiple_of * batch_num_devices. Average target sentence
+    If word batching: number of sentences for each batch is the number of words
+    closest to the target batch size. Number of sentences is rounded to the
+    nearest multiple of batch_sentences_multiple_of. Average target sentence
     length (non-padding symbols) is used for word number calculations.
 
     If max-word batching: number of sentences for each batch is set to the
-    multiple of batch_sentences_multiple_of * batch_num_devices that is closest
-    to batch_size without exceeding the value.
+    multiple of batch_sentences_multiple_of that is closest to batch_size
+    without exceeding the value.
 
     :param buckets: Bucket list.
     :param batch_size: Batch size.
     :param batch_type: Type of batching.
-    :param batch_num_devices: Number of devices.
     :param data_target_average_len: Optional average target length for each
         bucket.
     :param batch_sentences_multiple_of: Guarantee the number of sentences in
@@ -177,8 +152,6 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
     data_target_average_len = list(data_target_average_len)
     bucket_batch_sizes = []  # type: List[BucketBatchSize]
     largest_total_num_words = 0
-    # Ensure the correct multiple for each batch per device.
-    min_batch_step = batch_sentences_multiple_of * batch_num_devices
 
     for buck_idx, bucket in enumerate(buckets):
         # Target/label length with padding
@@ -199,17 +172,18 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
                                                           " buckets: (%d > %d)" % (padded_seq_len, batch_size))
             # Multiple of minimum batch step closest to target number of words,
             # assuming each sentence is of average length
-            batch_size_seq = min_batch_step * max(1, round((batch_size / average_seq_len) / min_batch_step))
+            batch_size_seq = batch_sentences_multiple_of * max(1, round((batch_size / average_seq_len) /
+                                                                        batch_sentences_multiple_of))
         elif batch_type == C.BATCH_TYPE_MAX_WORD:
             check_condition(padded_seq_len <= batch_size,
                             'Word batch size must cover sequence lengths for all buckets: (%d > %d)'
                             % (padded_seq_len, batch_size))
             # Max number of sequences without exceeding batch size
             batch_size_seq = batch_size // padded_seq_len
-            check_condition(batch_size_seq // min_batch_step > 0,
+            check_condition(batch_size_seq // batch_sentences_multiple_of > 0,
                             'Please increase the batch size to avoid the batch size being rounded down to 0.')
             # Round down to closest multiple
-            batch_size_seq = (batch_size_seq // min_batch_step) * min_batch_step
+            batch_size_seq = (batch_size_seq // batch_sentences_multiple_of) * batch_sentences_multiple_of
         elif batch_type == C.BATCH_TYPE_SENTENCE:
             batch_size_seq = batch_size
         else:
@@ -220,21 +194,6 @@ def define_bucket_batch_sizes(buckets: List[Tuple[int, int]],
         bucket_batch_sizes.append(BucketBatchSize(bucket, batch_size_seq, batch_size_word))
         # Track largest number of source or target word samples in a batch
         largest_total_num_words = max(largest_total_num_words, batch_size_seq * max(*bucket))
-
-    # TODO: This is a legacy step from the bucketing module version of Sockeye.
-    #       It is no longer necessary but is preserved to keep training behavior
-    #       consistent.  Determine whether this can be safely removed.
-    # Final step for average word-based batching: guarantee that largest bucket
-    # by sequence length also has a shape that covers any (batch_size,
-    # len_source) and (batch_size, len_target).
-    if batch_type == C.BATCH_TYPE_WORD:
-        padded_seq_len = max(*buckets[-1])
-        average_seq_len = data_target_average_len[-1]
-        while bucket_batch_sizes[-1].batch_size * padded_seq_len < largest_total_num_words:
-            bucket_batch_sizes[-1] = BucketBatchSize(
-                bucket_batch_sizes[-1].bucket,
-                bucket_batch_sizes[-1].batch_size + min_batch_step,
-                bucket_batch_sizes[-1].average_target_words_per_batch + min_batch_step * average_seq_len)
 
     return bucket_batch_sizes
 
@@ -303,6 +262,7 @@ def are_token_parallel(sequences: Sequence[Sized]) -> bool:
             return True
     else:
         return all(len(s) == len(sequences[0]) for s in sequences)
+
 
 class DataStatisticsAccumulator:
 
@@ -487,9 +447,9 @@ class RawParallelDatasetLoader:
         num_target_factors = len(target_iterables)
 
         data_source = [np.full((num_samples, source_len, num_source_factors), self.pad_id, dtype=self.dtype)
-                       for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
+                       for (source_len, _), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
-                       for (source_len, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
+                       for (_, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
 
         bucket_sample_index = [0 for _ in self.buckets]
 
@@ -500,8 +460,7 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays
-        for sentno, (sources, targets) in enumerate(parallel_iter(source_iterables,
-                                                                  target_iterables, skip_blanks=self.skip_blanks), 1):
+        for sources, targets in parallel_iter(source_iterables, target_iterables, skip_blanks=self.skip_blanks):
             sources = [[] if stream is None else stream for stream in sources]
             targets = [[] if stream is None else stream for stream in targets]
             source_len = len(sources[0])
@@ -535,8 +494,8 @@ class RawParallelDatasetLoader:
             bucket_sample_index[buck_index] += 1
 
         for i in range(len(data_source)):
-            data_source[i] = pt.from_numpy(data_source[i])
-            data_target[i] = pt.from_numpy(data_target[i])
+            data_source[i] = torch.from_numpy(data_source[i])
+            data_target[i] = torch.from_numpy(data_target[i])
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
@@ -599,7 +558,7 @@ def save_shard(shard_idx: int,
         source_len = len(sources[0])
         target_len = len(targets[0])
 
-        buck_idx, buck = get_parallel_bucket(buckets, source_len, target_len)
+        buck_idx, _ = get_parallel_bucket(buckets, source_len, target_len)
         shard_stat_accumulator.sequence_pair(sources[0], targets[0], buck_idx)
 
     shard_stats = shard_stat_accumulator.statistics
@@ -644,7 +603,8 @@ def prepare_data(source_fnames: List[str],
     vocab.save_target_vocabs(target_vocabs, output_prefix)
 
     # Get target/source length ratios.
-    stats_args = ((source_path, target_path, source_vocabs, target_vocabs, max_seq_len_source, max_seq_len_target) for source_path, target_path in shards)
+    stats_args = ((source_path, target_path, source_vocabs, target_vocabs, max_seq_len_source, max_seq_len_target)
+                  for source_path, target_path in shards)
     length_stats = pool.starmap(analyze_sequence_lengths, stats_args)
     shards_num_sents = [stat.num_sents for stat in length_stats]
     shards_mean = [stat.length_ratio_mean for stat in length_stats]
@@ -670,9 +630,9 @@ def prepare_data(source_fnames: List[str],
 
 
     # Process shards in parallel
-    args = ((shard_idx, data_loader, shard_sources, shard_targets, source_vocabs,
-             target_vocabs, length_statistics.length_ratio_mean, length_statistics.length_ratio_std,
-             buckets, output_prefix, keep_tmp_shard_files) for shard_idx, (shard_sources, shard_targets) in enumerate(shards))
+    args = ((shard_idx, data_loader, shard_sources, shard_targets, source_vocabs, target_vocabs,
+             length_statistics.length_ratio_mean, length_statistics.length_ratio_std, buckets, output_prefix,
+             keep_tmp_shard_files) for shard_idx, (shard_sources, shard_targets) in enumerate(shards))
     per_shard_statistics = pool.starmap(save_shard, args)
 
     # Combine per shard statistics to obtain global statistics
@@ -696,23 +656,23 @@ def prepare_data(source_fnames: List[str],
             ratio_mean = combine_means(shards_mean, num_sents_bucket)
             ratio_std = combine_stds([ratio[1] for ratio in len_ratios_bucket], shards_mean, num_sents_bucket)
             length_ratio_stats_per_bucket.append((ratio_mean, ratio_std))
-    data_statistics = DataStatistics(num_sents=sum(shards_num_sents),
-                                     num_discarded=sum(shard_stats.num_discarded for shard_stats in per_shard_statistics),
-                                     num_tokens_source=sum(shard_stats.num_tokens_source for shard_stats in per_shard_statistics),
-                                     num_tokens_target=sum(shard_stats.num_tokens_target for shard_stats in per_shard_statistics),
-                                     num_unks_source=sum(shard_stats.num_unks_source for shard_stats in per_shard_statistics),
-                                     num_unks_target=sum(shard_stats.num_unks_target for shard_stats in per_shard_statistics),
-                                     max_observed_len_source=max(shard_stats.max_observed_len_source for shard_stats in per_shard_statistics),
-                                     max_observed_len_target=max(shard_stats.max_observed_len_target for shard_stats in per_shard_statistics),
-                                     size_vocab_source=per_shard_statistics[0].size_vocab_source,
-                                     size_vocab_target=per_shard_statistics[0].size_vocab_target,
-                                     length_ratio_mean=length_ratio_mean,
-                                     length_ratio_std=length_ratio_std,
-                                     buckets=per_shard_statistics[0].buckets,
-                                     num_sents_per_bucket=num_sents_per_bucket,
-                                     average_len_target_per_bucket=average_len_target_per_bucket,
-                                     length_ratio_stats_per_bucket=length_ratio_stats_per_bucket
-                                     )
+    data_statistics = DataStatistics(
+        num_sents=sum(shards_num_sents),
+        num_discarded=sum(shard_stats.num_discarded for shard_stats in per_shard_statistics),
+        num_tokens_source=sum(shard_stats.num_tokens_source for shard_stats in per_shard_statistics),
+        num_tokens_target=sum(shard_stats.num_tokens_target for shard_stats in per_shard_statistics),
+        num_unks_source=sum(shard_stats.num_unks_source for shard_stats in per_shard_statistics),
+        num_unks_target=sum(shard_stats.num_unks_target for shard_stats in per_shard_statistics),
+        max_observed_len_source=max(shard_stats.max_observed_len_source for shard_stats in per_shard_statistics),
+        max_observed_len_target=max(shard_stats.max_observed_len_target for shard_stats in per_shard_statistics),
+        size_vocab_source=per_shard_statistics[0].size_vocab_source,
+        size_vocab_target=per_shard_statistics[0].size_vocab_target,
+        length_ratio_mean=length_ratio_mean,
+        length_ratio_std=length_ratio_std,
+        buckets=per_shard_statistics[0].buckets,
+        num_sents_per_bucket=num_sents_per_bucket,
+        average_len_target_per_bucket=average_len_target_per_bucket,
+        length_ratio_stats_per_bucket=length_ratio_stats_per_bucket)
     data_statistics.log()
 
     data_info = DataInfo(sources=[os.path.abspath(fname) for fname in source_fnames],
@@ -755,11 +715,11 @@ def get_data_statistics(source_readers: Optional[Sequence[Iterable]],
 
     if source_readers is not None:
         for sources, targets in parallel_iter(source_readers, target_readers):
-            buck_idx, buck = get_parallel_bucket(buckets, len(sources[0]), len(targets[0]))
+            buck_idx, _ = get_parallel_bucket(buckets, len(sources[0]), len(targets[0]))
             data_stats_accumulator.sequence_pair(sources[0], targets[0], buck_idx)
     else:  # Allow stats for target only data
         for targets in target_readers:
-            buck_idx, buck = get_target_bucket(buckets, len(targets[0]))
+            buck_idx, _ = get_target_bucket(buckets, len(targets[0]))
             data_stats_accumulator.sequence_pair([], targets[0], buck_idx)
 
     return data_stats_accumulator.statistics
@@ -821,7 +781,6 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             shared_vocab: bool,
                             batch_size: int,
                             batch_type: str,
-                            batch_num_devices: int,
                             batch_sentences_multiple_of: int = 1,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
                                                            'BaseParallelSampleIter',
@@ -873,7 +832,6 @@ def get_prepared_data_iters(prepared_data_dir: str,
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
                                                    batch_type,
-                                                   batch_num_devices,
                                                    config_data.data_statistics.average_len_target_per_bucket,
                                                    batch_sentences_multiple_of)
 
@@ -917,7 +875,6 @@ def get_training_data_iters(sources: List[str],
                             shared_vocab: bool,
                             batch_size: int,
                             batch_type: str,
-                            batch_num_devices: int,
                             max_seq_len_source: int,
                             max_seq_len_target: int,
                             bucketing: bool,
@@ -941,7 +898,6 @@ def get_training_data_iters(sources: List[str],
     :param shared_vocab: Whether the vocabularies are shared.
     :param batch_size: Batch size.
     :param batch_type: Method for sizing batches.
-    :param batch_num_devices: Number of devices batches will be parallelized across.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :param bucketing: Whether to use bucketing.
@@ -981,7 +937,6 @@ def get_training_data_iters(sources: List[str],
     bucket_batch_sizes = define_bucket_batch_sizes(buckets,
                                                    batch_size,
                                                    batch_type,
-                                                   batch_num_devices,
                                                    data_statistics.average_len_target_per_bucket,
                                                    batch_sentences_multiple_of)
 
@@ -1202,16 +1157,6 @@ def strids2ids(tokens: Iterable[str]) -> List[int]:
     return list(map(int, tokens))
 
 
-def ids2strids(ids: Iterable[int]) -> str:
-    """
-    Returns a string representation of a sequence of integers.
-
-    :param ids: Sequence of integers.
-    :return: String sequence
-    """
-    return C.TOKEN_SEPARATOR.join(map(str, ids))
-
-
 def ids2tokens(token_ids: Iterable[int],
                vocab_inv: Dict[int, str],
                exclude_set: Set[int]) -> Iterator[str]:
@@ -1358,43 +1303,6 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
         "Different number of lines in source(s) and target(s) iterables.")
 
 
-class FileListReader:
-    """
-    Reads sequence samples from path provided in a file.
-
-    :param fname: File name containing a list of relative paths.
-    :param path: Path to read data from, which is prefixed to the relative paths of fname.
-    """
-
-    def __init__(self,
-                 fname: str,
-                 path: str) -> None:
-        self.fname = fname
-        self.path = path
-        self.fd = smart_open(fname)
-        self.count = 0
-
-    def __next__(self):
-        fname = self.fd.readline().strip("\n")
-
-        if fname is None:
-            self.fd.close()
-            raise StopIteration
-
-        self.count += 1
-        return os.path.join(self.path, fname)
-
-
-def get_default_bucket_key(buckets: List[Tuple[int, int]]) -> Tuple[int, int]:
-    """
-    Returns the default bucket from a list of buckets, i.e. the largest bucket.
-
-    :param buckets: List of buckets.
-    :return: The largest bucket in the list.
-    """
-    return max(buckets)
-
-
 def get_parallel_bucket(buckets: List[Tuple[int, int]],
                         length_source: int,
                         length_target: int) -> Tuple[Optional[int], Optional[Tuple[int, int]]]:
@@ -1439,8 +1347,8 @@ class ParallelDataSet:
     """
 
     def __init__(self,
-                 source: List[pt.Tensor],
-                 target: List[pt.Tensor]) -> None:
+                 source: List[torch.Tensor],
+                 target: List[torch.Tensor]) -> None:
         check_condition(len(source) == len(target),
                         "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
         self.source = source
@@ -1456,7 +1364,7 @@ class ParallelDataSet:
         """
         Saves the dataset to a binary .npy file.
         """
-        pt.save(self.source + self.target, fname)
+        torch.save(self.source + self.target, fname)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1465,10 +1373,11 @@ class ParallelDataSet:
         is sliced and each worker loads a different slice based on its rank.
         Specifically, each of N workers loads 1/N of each bucket.
         """
-        data = pt.load(fname)
+        data = torch.load(fname)
         n = len(data) // 2
         source = data[:n]
         target = data[n:2 * n]
+        # TODO(mdenkows): Migrate to PyTorch distributed training
         if horovod_mpi.using_horovod() and horovod_mpi.hvd.size() > 1:
             split_index = horovod_mpi.hvd.rank()
             total_splits = horovod_mpi.hvd.size()
@@ -1486,8 +1395,8 @@ class ParallelDataSet:
                     if num_copies > 1:
                         logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
                                     num_sentences, num_copies, total_splits)
-                        source[k] = pt.repeat_interleave(source[k], repeats=num_copies, dim=0)
-                        target[k] = pt.repeat_interleave(target[k], repeats=num_copies, dim=0)
+                        source[k] = torch.repeat_interleave(source[k], repeats=num_copies, dim=0)
+                        target[k] = torch.repeat_interleave(target[k], repeats=num_copies, dim=0)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
@@ -1527,6 +1436,7 @@ class ParallelDataSet:
             if num_samples % bucket_batch_size != 0:
                 target_num_samples = num_samples + (bucket_batch_size - (num_samples % bucket_batch_size))
 
+            # TODO(mdenkows): Migrate to PyTorch distributed training
             if horovod_mpi.using_horovod():
                 # Workers load different slices of the data.  When the total
                 # number of samples is not evenly divisible by the number of
@@ -1538,15 +1448,15 @@ class ParallelDataSet:
             # Fill up the last batch by randomly sampling from the extant items.
             rest = target_num_samples - num_samples
             if rest > 0:
-                desired_indices = pt.tensor(rs.randint(num_samples, size=rest))
-                source[bucket_idx] = pt.cat((bucket_source, pt.index_select(bucket_source, 0, desired_indices)),
-                                            dim=0)
-                target[bucket_idx] = pt.cat((bucket_target, pt.index_select(bucket_target, 0, desired_indices)),
-                                            dim=0)
+                desired_indices = torch.tensor(rs.randint(num_samples, size=rest))
+                source[bucket_idx] = torch.cat((bucket_source,
+                                                torch.index_select(bucket_source, 0, desired_indices)), dim=0)
+                target[bucket_idx] = torch.cat((bucket_target,
+                                                torch.index_select(bucket_target, 0, desired_indices)), dim=0)
 
         return ParallelDataSet(source, target)
 
-    def permute(self, permutations: List[pt.Tensor]) -> 'ParallelDataSet':
+    def permute(self, permutations: List[torch.Tensor]) -> 'ParallelDataSet':
         """
         Permutes the data within each bucket. The permutation is received as an argument,
         allowing the data to be unpermuted (i.e., restored) later on.
@@ -1555,14 +1465,14 @@ class ParallelDataSet:
         :return: A new, permuted ParallelDataSet.
         """
         assert len(self) == len(permutations)
-        source = []  # type: List[pt.Tensor]
-        target = []  # type: List[pt.Tensor]
+        source = []  # type: List[torch.Tensor]
+        target = []  # type: List[torch.Tensor]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not an empty bucket
                 permutation = permutations[buck_idx]
-                source.append(pt.index_select(self.source[buck_idx], 0, permutation))
-                target.append(pt.index_select(self.target[buck_idx], 0, permutation))
+                source.append(torch.index_select(self.source[buck_idx], 0, permutation))
+                target.append(torch.index_select(self.target[buck_idx], 0, permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
@@ -1570,7 +1480,7 @@ class ParallelDataSet:
         return ParallelDataSet(source, target)
 
 
-def get_permutations(bucket_counts: List[int]) -> Tuple[List[pt.Tensor], List[pt.Tensor]]:
+def get_permutations(bucket_counts: List[int]) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
     """
     Returns the indices of a random permutation for each bucket and the corresponding inverse permutations that can
     restore the original order of the data if applied to the permuted data.
@@ -1578,15 +1488,15 @@ def get_permutations(bucket_counts: List[int]) -> Tuple[List[pt.Tensor], List[pt
     :param bucket_counts: The number of elements per bucket.
     :return: For each bucket a permutation and inverse permutation is returned.
     """
-    data_permutations = []  # type: List[pt.Tensor]
-    inverse_data_permutations = []  # type: List[pt.Tensor]
+    data_permutations = []  # type: List[torch.Tensor]
+    inverse_data_permutations = []  # type: List[torch.Tensor]
     for num_samples in bucket_counts:
         if num_samples == 0:
             num_samples = 1
         # new random order:
-        data_permutation = pt.from_numpy(np.random.permutation(num_samples))
-        inverse_data_permutation = pt.empty(num_samples, dtype=pt.int64)
-        inverse_data_permutation[data_permutation] = pt.arange(num_samples)
+        data_permutation = torch.from_numpy(np.random.permutation(num_samples))
+        inverse_data_permutation = torch.empty(num_samples, dtype=torch.int64)
+        inverse_data_permutation[data_permutation] = torch.arange(num_samples)
         data_permutations.append(data_permutation)
         inverse_data_permutations.append(inverse_data_permutation)
     return data_permutations, inverse_data_permutations
@@ -1606,7 +1516,7 @@ def get_batch_indices(data: ParallelDataSet,
     """
     # create index tuples (i,j) into buckets: i := bucket index ; j := row index of bucket array
     idxs = []  # type: List[Tuple[int, int]]
-    for buck_idx, buck in enumerate(data.source):
+    for buck_idx, _ in enumerate(data.source):
         bucket = bucket_batch_sizes[buck_idx].bucket
         batch_size = bucket_batch_sizes[buck_idx].batch_size
         num_samples = data.source[buck_idx].shape[0]
@@ -1616,10 +1526,6 @@ def get_batch_indices(data: ParallelDataSet,
                         rest, bucket, num_samples)
         idxs.extend([(buck_idx, j) for j in range(0, num_samples - batch_size + 1, batch_size)])
     return idxs
-
-
-class MetaBaseParallelSampleIter(ABC):
-    pass
 
 
 class BaseParallelSampleIter:
@@ -1633,7 +1539,6 @@ class BaseParallelSampleIter:
     :param permute: Randomly shuffle the parallel data.
     :param dtype: The data type.
     """
-    __metaclass__ = MetaBaseParallelSampleIter
 
     def __init__(self,
                  buckets: List[Tuple[int, int]],
@@ -1645,7 +1550,6 @@ class BaseParallelSampleIter:
                  dtype='int32') -> None:
         self.batch_size = batch_size
         self.buckets = list(buckets)
-        self.default_bucket_key = get_default_bucket_key(self.buckets)
         self.bucket_batch_sizes = bucket_batch_sizes
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
@@ -1831,6 +1735,7 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
 
             self.shards_fnames = [next_shard_fname] + remaining_shards
 
+            # TODO(mdenkows): Migrate to PyTorch distributed training
             if horovod_mpi.using_horovod():
                 # Synchronize shard order across workers
                 self.shards_fnames = horovod_mpi.MPI.COMM_WORLD.bcast(self.shards_fnames, root=0)
@@ -1899,9 +1804,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.curr_batch_index = 0
 
         # Produces a permutation of the batches within each bucket, along with the permutation that inverts it.
-        self.inverse_data_permutations = [pt.arange(0, max(1, self.data.source[i].shape[0]))
+        self.inverse_data_permutations = [torch.arange(0, max(1, self.data.source[i].shape[0]))
                                           for i in range(len(self.data))]
-        self.data_permutations = [pt.arange(0, max(1, self.data.source[i].shape[0])) for i in range(len(self.data))]
+        self.data_permutations = [torch.arange(0, max(1, self.data.source[i].shape[0])) for i in range(len(self.data))]
 
         self.reset()
 
@@ -1911,6 +1816,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
         """
         self.curr_batch_index = 0
         if self.permute:
+            # TODO(mdenkows): Migrate to PyTorch distributed training
             # Primary worker or not using Horovod: shuffle batch start indices.
             if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
                 random.shuffle(self.batch_indices)
@@ -1993,15 +1899,15 @@ class ParallelSampleIter(BaseParallelSampleIter):
 
 @dataclass
 class Batch:
-    source: pt.Tensor
-    source_length: pt.Tensor
-    target: pt.Tensor
-    target_length: pt.Tensor
-    labels: Dict[str, pt.Tensor]
+    source: torch.Tensor
+    source_length: torch.Tensor
+    target: torch.Tensor
+    target_length: torch.Tensor
+    labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
 
-    def load(self, device: pt.device) -> 'Batch':
+    def load(self, device: torch.device) -> 'Batch':
         source = self.source.to(device)
         source_length = self.source_length.to(device)
         target = self.target.to(device)
@@ -2010,18 +1916,18 @@ class Batch:
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
 
 
-def create_target_and_shifted_label_sequences(target_and_label: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Returns the target and label sequence from a joint array of varying-length sequences including both <bos> and <eos>.
     Both tensors returned have input size of second dimension - 1.
     """
     target = target_and_label[:, :-1, :]  # skip last column (for longest-possible sequence, this already removes <eos>)
-    target = pt.where(target == C.EOS_ID, pt.zeros_like(target), target)  # replace other <eos>'s with <pad>
+    target = torch.where(target == C.EOS_ID, torch.zeros_like(target), target)  # replace other <eos>'s with <pad>
     label = target_and_label[:, 1:, :]  # label skips <bos>
     return target, label
 
 
-def create_batch_from_parallel_sample(source: pt.Tensor, target: pt.Tensor, label: pt.Tensor) -> Batch:
+def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor, label: torch.Tensor) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
@@ -2030,9 +1936,9 @@ def create_batch_from_parallel_sample(source: pt.Tensor, target: pt.Tensor, labe
     :param label: Time-shifted label array. Shape: (batch, target_length, num_target_factors).
     """
     source_words = source[:, :, 0:1].squeeze(dim=2)
-    source_length = pt.sum(source_words != C.PAD_ID, dim=1)
+    source_length = torch.sum(source_words != C.PAD_ID, dim=1)
     target_words = target[:, :, 0:1].squeeze(dim=2)
-    target_length = pt.sum(target_words != C.PAD_ID, dim=1)
+    target_length = torch.sum(target_words != C.PAD_ID, dim=1)
     length_ratio = source_length / target_length
 
     source_shape = source.shape
@@ -2042,9 +1948,9 @@ def create_batch_from_parallel_sample(source: pt.Tensor, target: pt.Tensor, labe
     labels = {C.LENRATIO_LABEL_NAME: length_ratio}
 
     if label.shape[2] == 1:
-        labels[C.TARGET_LABEL_NAME] = pt.squeeze(label, dim=2)
+        labels[C.TARGET_LABEL_NAME] = torch.squeeze(label, dim=2)
     else:
-        primary_label, *factor_labels = (pt.squeeze(x, dim=2) for x in pt.split(label, 1, dim=2))
+        primary_label, *factor_labels = (torch.squeeze(x, dim=2) for x in torch.split(label, 1, dim=2))
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
