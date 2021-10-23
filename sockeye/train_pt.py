@@ -783,6 +783,9 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
                                              args.learning_rate_reduce_num_not_improved,
                                              args.learning_rate_warmup,
                                              args.max_updates)
+    # TODO(mdenkows): Make this part of the constructor once we use 100% PyTorch
+    if lr_sched is not None:
+        lr_sched.base_lr = args.initial_learning_rate
 
     config = optimizers.PyTorchOptimizerConfig(name=args.optimizer,
                                                lr=args.initial_learning_rate,
@@ -1035,7 +1038,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         training_model.to(device)
         training_model.apply(model_pt.initialize_parameters)
-        training_model.save_parameters(os.path.join(args.output, 'params.init'))
+        training_model.save_parameters(os.path.join(args.output, C.PARAMS_INIT_NAME))
 
         if args.params is not None:  # load existing parameters if present
             training_model.load_parameters(filename=args.params,

@@ -23,34 +23,27 @@ import shutil
 import time
 from collections import deque
 from dataclasses import dataclass
-from math import sqrt
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
-import torch as pt
+import torch
 import mxnet as mx
 import numpy as onp
-from mxnet import amp, np, npx, gluon
+from mxnet import amp, np
 
-from sockeye.model_pt import PyTorchSockeyeModel
 from . import average
 from . import constants as C
 from . import data_io_pt
 from . import horovod_mpi
 from . import loss_pt
 from . import lr_scheduler
+from . import model_pt
+from . import optimizers
 from . import utils
 from . import vocab
 from .checkpoint_decoder import CheckpointDecoder
 from .config import Config
-from .optimizers import PyTorchOptimizerConfig
 
 logger = logging.getLogger(__name__)
-
-
-def global_norm(ndarrays: List[np.ndarray]) -> float:
-    # accumulate in a list, as item() is blocking and this way we can run the norm calculation in parallel.
-    norms = [np.square(np.linalg.norm(arr)) for arr in ndarrays if arr is not None]
-    return sqrt(sum(norm.item() for norm in norms))
 
 
 @dataclass
@@ -98,7 +91,7 @@ class TrainState:
         self.updates = 0
         self.samples = 0
         self.gradient_norm = None  # type: Optional[float]
-        self.gradients = {}  # type: Dict[str, List[np.ndarray]]
+        self.gradients = {}  # type: Dict[str, List[torch.Tensor]]
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
         self.start_tic = time.time()
@@ -154,11 +147,11 @@ class PyTorchEarlyStoppingTrainer:
 
     def __init__(self,
                  config: TrainerConfig,
-                 optimizer_config: PyTorchOptimizerConfig,
-                 sockeye_model: PyTorchSockeyeModel,
-                 optimizer: pt.optim.Optimizer,
+                 optimizer_config: optimizers.PyTorchOptimizerConfig,
+                 sockeye_model: model_pt.PyTorchSockeyeModel,
+                 optimizer: torch.optim.Optimizer,
                  loss_functions: List[loss_pt.PyTorchLoss],
-                 device: pt.device,
+                 device: torch.device,
                  dtype: str,
                  using_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
@@ -166,7 +159,7 @@ class PyTorchEarlyStoppingTrainer:
         self.config = config
         self.optimizer_config = optimizer_config
         self.model = sockeye_model
-        self.traced_models = {}  # type: Dict[Tuple[int, int], PyTorchSockeyeModel]
+        self.traced_models = {}  # type: Dict[Tuple[int, int], model_pt.PyTorchSockeyeModel]
         self.optimizer = optimizer
         self.loss_functions = loss_functions
         self.device = device
@@ -285,14 +278,13 @@ class PyTorchEarlyStoppingTrainer:
         logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
                     "\t".join("Train-%s" % str(metric) for metric in train_metrics))
         val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
-        npx.waitall()
         has_improved = self._determine_improvement(val_metrics)
         self.state.converged = self._determine_convergence()
         self.state.diverged = self._determine_divergence(val_metrics)
         self._adjust_learning_rate(has_improved)
         if has_improved:
             self._update_best_params()
-            self._save_trainer_states(self.best_optimizer_states_fname)
+            self._save_optimizer_state(self.best_optimizer_state_fname)
             self._save_lr_scheduler(self.best_lr_scheduler_fname)
         self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
         for metric in train_metrics:
@@ -315,15 +307,16 @@ class PyTorchEarlyStoppingTrainer:
         seq_len = (batch.source.shape[1], batch.target.shape[1])
         if seq_len not in self.traced_models:
             logger.info(f'Tracing model for seq_len={seq_len}')
-            self.traced_models[seq_len] = pt.jit.trace(self.model, (batch.source, batch.source_length,
-                                                                    batch.target, batch.target_length), strict=False)
+            self.traced_models[seq_len] = torch.jit.trace(self.model, (batch.source, batch.source_length,
+                                                                       batch.target, batch.target_length), strict=False)
         outputs = self.traced_models[seq_len](batch.source, batch.source_length, batch.target, batch.target_length)
         # Loss
         loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
         loss_values = [v for v, _ in loss_outputs]
         # Backward
-        sum_losses = pt.add(*loss_values) if len(loss_values) > 1 else loss_values[0]
+        sum_losses = torch.add(*loss_values) if len(loss_values) > 1 else loss_values[0]
         if self.using_amp:
+            # TODO(mdenkows): Migrate to PyTorch mixed precision training
             # AMP applies dynamic loss scaling to the losses (scale up) and
             # the Trainer (scale down).
             with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
@@ -337,6 +330,7 @@ class PyTorchEarlyStoppingTrainer:
         self.state.batches += 1
         loss_values = self._forward_backward(batch)
         did_grad_step = False
+
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
             # Rescale gradients for number of batches in this update
             if self.config.update_interval > 1:
@@ -344,11 +338,11 @@ class PyTorchEarlyStoppingTrainer:
                     p.grad.data = p.grad.data / self.config.update_interval
             # Clip gradients
             if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
-                pt.nn.utils.clip_grad.clip_grad_value_(self.model.parameters(),
-                                                       self.optimizer_config.gradient_clipping_threshold)
+                torch.nn.utils.clip_grad.clip_grad_value_(self.model.parameters(),
+                                                          self.optimizer_config.gradient_clipping_threshold)
             elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-                pt.nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(),
-                                                      self.optimizer_config.gradient_clipping_threshold)
+                torch.nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(),
+                                                         self.optimizer_config.gradient_clipping_threshold)
             # Update weights / reset gradients
             self.optimizer.step()
             self.optimizer.zero_grad()
@@ -368,7 +362,6 @@ class PyTorchEarlyStoppingTrainer:
         :param data_iter: Validation data iterator.
         :return: List of validation metrics, same order as self.loss_functions.
         """
-        raise NotImplementedError('Checkpoint evaluation is not yet implemented for PyTorch Sockeye')
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
@@ -409,6 +402,7 @@ class PyTorchEarlyStoppingTrainer:
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
+                # TODO(mdenkows): Migrate to PyTorch distributed training
                 # When using Horovod, the primary worker makes an authoritative
                 # check of whether metric value has improved and broadcasts the
                 # result to secondary workers.  Non-determinism in the order of
@@ -468,6 +462,7 @@ class PyTorchEarlyStoppingTrainer:
         if (self.config.max_num_checkpoint_not_improved is not None
                 and 0 <= self.config.max_num_checkpoint_not_improved
                 and self.state.checkpoint >= self.config.max_num_checkpoint_not_improved):
+            # TODO(mdenkows): Migrate to PyTorch distributed training
             # When using Horovod, the primary worker makes the authoritative
             # calculation of improvement over the window for evaluating stopping
             window_improvement = 0.
@@ -499,7 +494,7 @@ class PyTorchEarlyStoppingTrainer:
                 last_ppl = metric.get()
                 break
         # using a double of uniform distribution's value as a threshold
-        if not np.isfinite(last_ppl) or last_ppl > 2 * self.model.config.vocab_target_size:
+        if not onp.isfinite(last_ppl) or last_ppl > 2 * self.model.config.vocab_target_size:
             logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f", last_ppl)
             return True
         return False
@@ -508,7 +503,7 @@ class PyTorchEarlyStoppingTrainer:
         """
         Adjusts the optimizer learning rate if required.
         """
-        scheduler = self.trainer.optimizer.lr_scheduler
+        scheduler = self.optimizer_config.lr_scheduler
         if scheduler is not None:
             if issubclass(type(scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
                 lr_adjusted = scheduler.new_evaluation_result(has_improved)  # type: ignore
@@ -517,13 +512,11 @@ class PyTorchEarlyStoppingTrainer:
             if lr_adjusted and not has_improved:
                 logger.info("Loading model parameters and optimizer states from best checkpoint: %d",
                             self.state.best_checkpoint)
-                adjusted_lr = self.trainer.optimizer.lr_scheduler.lr
-                # trainer.load_states also reloads the parameters
-                if os.path.exists(self.best_optimizer_states_fname):
-                    self._load_trainer_states(self.best_optimizer_states_fname)
-                # state loading replaces the lr_scheduler instance which then contains the old learning rate,
-                # overwriting here. TODO: make this better...
-                self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
+                # TODO(mdenkows): Test checkpoint loading
+                if os.path.exists(self.best_params_fname):
+                    self.model.load_parameters(filename=self.best_params_fname, device=self.device)
+                if os.path.exists(self.best_optimizer_state_fname):
+                    self._load_optimizer_state(self.best_optimizer_state_fname)
 
     def _write_and_log_metrics(self, train_metrics: Iterable[loss_pt.LossMetric], val_metrics: Iterable[loss_pt.LossMetric]):
         """
@@ -531,12 +524,11 @@ class PyTorchEarlyStoppingTrainer:
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
         """
         data = {"epoch": self.state.epoch,
-                "learning-rate": (self.trainer.learning_rate if self.trainer.optimizer.lr_scheduler is None
-                                  else self.trainer.optimizer.lr_scheduler.lr),
+                "learning-rate": (self.trainer.learning_rate if self.optimizer_config.lr_scheduler is None
+                                  else self.optimizer_config.lr_scheduler.lr),
                 "gradient-norm": self.state.gradient_norm,
                 "time-elapsed": self.state.time_elapsed}
-        gpu_memory_usage = utils.get_gpu_memory_usage(self.context)
-        data['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
+        data['max-gpu-memory'] = torch.cuda.max_memory_allocated(self.device)
         data['converged'] = self.state.converged
         data['diverged'] = self.state.diverged
 
@@ -567,33 +559,32 @@ class PyTorchEarlyStoppingTrainer:
         """
         Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
         """
-        # self.model.save_parameters(self.current_params_fname)
-        # cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
-        #                      self.state.best_checkpoint, self.config.keep_initializations,
-        #                      self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
-        pass
+        self.model.save_parameters(self.current_params_fname)
+        cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
+                             self.state.best_checkpoint, self.config.keep_initializations,
+                             self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
 
-    def _save_trainer_states(self, fname):
-        trainer_save_states_no_dump_optimizer(self.trainer, fname)
-        logger.info('Saved optimizer states to "%s"', fname)
+    def _save_optimizer_state(self, fname):
+        with open(fname, "wb") as fp:
+            pickle.dump(self.optimizer.state_dict(), fp)
+        logger.info('Saved optimizer state to "%s"', fname)
 
-    def _load_trainer_states(self, fname):
-        self.trainer.load_states(fname)
-        logger.info('Loaded optimizer states from "%s"', fname)
+    def _load_optimizer_state(self, fname):
+        with open(fname, "rb") as fp:
+            self.optimizer.load_state_dict(pickle.load(fp))
+        logger.info('Loaded optimizer state from "%s"', fname)
 
     def _save_lr_scheduler(self, fname):
-        if self.trainer.optimizer.lr_scheduler is not None:
+        if self.optimizer_config.lr_scheduler is not None:
             with open(fname, "wb") as fp:
-                pickle.dump(self.trainer.optimizer.lr_scheduler, fp)
-            logger.info("Saved '%s' to '%s'", self.trainer.optimizer.lr_scheduler, fname)
+                pickle.dump(self.optimizer_config.lr_scheduler, fp)
+            logger.info("Saved '%s' to '%s'", self.optimizer_config.lr_scheduler, fname)
 
     def _load_lr_scheduler(self, fname):
         if os.path.exists(fname):
             with open(fname, "rb") as fp:
-                self.trainer.optimizer.lr_scheduler = pickle.load(fp)
-            logger.info("Loaded '%s' from '%s'", self.trainer.optimizer.lr_scheduler, fname)
-        self.trainer.optimizer.begin_num_update = self.state.updates
-        self.trainer.optimizer.num_update = self.state.updates
+                self.optimizer_config.lr_scheduler = pickle.load(fp)
+            logger.info("Loaded '%s' from '%s'", self.optimizer_config.lr_scheduler, fname)
 
     def _save_training_state(self, train_iter: data_io_pt.BaseParallelSampleIter):
         """
@@ -611,20 +602,19 @@ class PyTorchEarlyStoppingTrainer:
             os.unlink(params_file)
         os.symlink(os.path.join("..", params_base_fname), params_file)
 
-        # (2) Optimizer states
-        opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATES_LAST)
-        self._save_trainer_states(opt_state_fname)
+        # (2) Optimizer state
+        opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATE_LAST)
+        self._save_optimizer_state(opt_state_fname)
 
         # (3) Data iterator
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
         # (4) Random generators
-        # RNG states: python's random and onp.random provide functions for
-        # storing the state, mxnet does not, but inside our code mxnet's RNG is
-        # not used AFAIK
+        # RNG states: python, numpy, torch
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
             pickle.dump(onp.random.get_state(), fp)
+            pickle.dump(torch.random.get_rng_state(), fp)
 
         # (5) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
@@ -633,6 +623,7 @@ class PyTorchEarlyStoppingTrainer:
         lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
         self._save_lr_scheduler(lr_scheduler_fname)
 
+        # TODO(mdenkows): Migrate to PyTorch mixed precision training
         # (6) AMP loss scaler state
         if self.using_amp:
             with open(os.path.join(training_state_dirname, C.AMP_LOSS_SCALER_STATE_NAME), "wb") as fp:
@@ -664,22 +655,21 @@ class PyTorchEarlyStoppingTrainer:
         """
         # (1) Parameters
         params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
-        self.model.load_parameters(params_fname, ctx=self.context, allow_missing=False, ignore_extra=False)
+        self.model.load_parameters(params_fname, device=self.device, allow_missing=False, ignore_extra=False)
 
         # (2) Optimizer states
-        opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATES_LAST)
-        self._load_trainer_states(opt_state_fname)
+        opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATE_LAST)
+        self._load_optimizer_state(opt_state_fname)
 
         # (3) Data Iterator
         train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
         # (4) Random generators
-        # RNG states: python's random and onp.random provide functions for
-        # storing the state, mxnet does not, but inside our code mxnet's RNG is
-        # not used AFAIK
+        # RNG states: python, numpy, torch
         with open(os.path.join(self.training_state_dirname, C.RNG_STATE_NAME), "rb") as fp:
             random.setstate(pickle.load(fp))
             onp.random.set_state(pickle.load(fp))
+            torch.random.set_rng_state(pickle.load(fp))
 
         # (5) Training state
         self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
@@ -688,6 +678,7 @@ class PyTorchEarlyStoppingTrainer:
         lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
         self._load_lr_scheduler(lr_scheduler_fname)
 
+        # TODO(mdenkows): Migrate to PyTorch mixed precision training
         # (6) AMP loss scaler state
         if self.using_amp:
             # Load loss scaler state
@@ -712,8 +703,8 @@ class PyTorchEarlyStoppingTrainer:
         if not keep_training_state:
             if os.path.exists(self.training_state_dirname):
                 shutil.rmtree(self.training_state_dirname)
-            if os.path.exists(self.best_optimizer_states_fname):
-                os.remove(self.best_optimizer_states_fname)
+            if os.path.exists(self.best_optimizer_state_fname):
+                os.remove(self.best_optimizer_state_fname)
             if os.path.exists(self.best_lr_scheduler_fname):
                 os.remove(self.best_lr_scheduler_fname)
 
@@ -727,15 +718,16 @@ class PyTorchEarlyStoppingTrainer:
 
     @property
     def best_params_fname(self) -> str:
-        return os.path.join(self.config.output_dir, C.PARAMS_BEST_NAME)
+        # TODO(mdenkows): Remove ".pt" when we move to 100% PyTorch
+        return os.path.join(self.config.output_dir, C.PARAMS_BEST_NAME + '.pt')
 
     @property
     def training_state_dirname(self) -> str:
         return os.path.join(self.config.output_dir, C.TRAINING_STATE_DIRNAME)
 
     @property
-    def best_optimizer_states_fname(self) -> str:
-        return os.path.join(self.config.output_dir, C.OPT_STATES_BEST)
+    def best_optimizer_state_fname(self) -> str:
+        return os.path.join(self.config.output_dir, C.OPT_STATE_BEST)
 
     @property
     def best_lr_scheduler_fname(self) -> str:
@@ -867,32 +859,6 @@ def safe_custom_metrics_logger(logging_function: Callable,
         logging_function(metrics, global_step)
     except Exception as e:
         logging.warning("Didn't use custom metrics logger, exception '{}' occurred".format(str(e)))
-
-
-def trainer_save_states_no_dump_optimizer(trainer: gluon.Trainer, fname: str):
-    """
-    Otherwise exact copy of `Trainer.save_states` that does not include a
-    pickled optimizer instance as part of the state.  This is compatible with
-    the standard `Trainer.load_states`, which will handle a state file with no
-    optimizer instance (any statements involving `self._optimizer` become
-    no-ops).  This is especially important when using AMP, which patches the
-    optimizer at runtime with references to a specific loss scaler instance.
-    Loading a stale optimizer instance causes errors.
-    """
-    assert trainer._optimizer is not None
-
-    if not trainer._kv_initialized:
-        trainer._init_kvstore()
-    if trainer._params_to_init:
-        trainer._init_params()
-
-    if trainer._update_on_kvstore:
-        assert not trainer._params_to_init, "Cannot save trainer states when some " \
-                                            "parameters are not yet initialized in kvstore."
-        trainer._kvstore.save_optimizer_states(fname, dump_optimizer=False)
-    else:
-        with open(fname, 'wb') as fout:
-            fout.write(trainer._updaters[0].get_states(dump_optimizer=False))
 
 
 def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int, keep_first: bool,
