@@ -399,7 +399,7 @@ def create_shards(source_fnames: List[str],
 
 class RawParallelDatasetLoader:
     """
-    Loads a data set of variable-length parallel source/target sequences into buckets of ndarrays.
+    Loads a data set of variable-length parallel source/target sequences into buckets of tensors.
 
     :param buckets: Bucket list.
     :param eos_id: End-of-sentence id.
@@ -493,6 +493,7 @@ class RawParallelDatasetLoader:
 
             bucket_sample_index[buck_index] += 1
 
+        # Convert to torch tensors
         for i in range(len(data_source)):
             data_source[i] = torch.from_numpy(data_source[i])
             data_target[i] = torch.from_numpy(data_target[i])
@@ -530,7 +531,7 @@ def save_shard(shard_idx: int,
                keep_tmp_shard_files: bool):
     """
     Load raw shard source and target data files, map to integers using the corresponding vocabularies,
-    convert data into ndarrays and save to disk.
+    convert data into tensors and save to disk.
     Optionally it can delete the source/target files.
 
     :param shard_idx: The index of the shard.
@@ -563,7 +564,7 @@ def save_shard(shard_idx: int,
 
     shard_stats = shard_stat_accumulator.statistics
 
-    # Convert to ndarray
+    # Convert to tensors
     dataset = data_loader.load(sources_sentences, targets_sentences, shard_stats.num_sents_per_bucket)
     shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
     shard_stats.log()
@@ -623,7 +624,7 @@ def prepare_data(source_fnames: List[str],
                                                                                                max_seq_len_target)]
     logger.info("Buckets: %s", buckets)
 
-    # Map sentences to ids, assign to buckets, compute shard statistics and convert each shard to serialized ndarrays
+    # Map sentences to ids, assign to buckets, compute shard statistics and convert each shard to serialized tensors
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
@@ -1918,8 +1919,9 @@ class Batch:
 
 def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Returns the target and label sequence from a joint array of varying-length sequences including both <bos> and <eos>.
-    Both tensors returned have input size of second dimension - 1.
+    Returns the target and label sequence from a joint tensor of varying-length
+    sequences including both <bos> and <eos>. Both tensors returned have input
+    size of second dimension - 1.
     """
     target = target_and_label[:, :-1, :]  # skip last column (for longest-possible sequence, this already removes <eos>)
     target = torch.where(target == C.EOS_ID, torch.zeros_like(target), target)  # replace other <eos>'s with <pad>
@@ -1931,9 +1933,9 @@ def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor
     """
     Creates a Batch instance from parallel data.
 
-    :param source: Source array. Shape: (batch, source_length, num_source_factors).
-    :param target: Target array. Shape: (batch, target_length, num_target_factors).
-    :param label: Time-shifted label array. Shape: (batch, target_length, num_target_factors).
+    :param source: Source tensor. Shape: (batch, source_length, num_source_factors).
+    :param target: Target tensor. Shape: (batch, target_length, num_target_factors).
+    :param label: Time-shifted label tensor. Shape: (batch, target_length, num_target_factors).
     """
     source_words = source[:, :, 0:1].squeeze(dim=2)
     source_length = torch.sum(source_words != C.PAD_ID, dim=1)

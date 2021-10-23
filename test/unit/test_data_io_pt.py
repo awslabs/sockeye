@@ -287,7 +287,8 @@ def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_
 def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
                               min_count: int,
                               max_count: int,
-                              bucket_counts: Optional[List[Optional[int]]] = None):
+                              bucket_counts: Optional[List[Optional[int]]] = None) -> Tuple[List[torch.Tensor],
+                                                                                            List[torch.Tensor]]:
     """
     Get random bucket data.
 
@@ -296,7 +297,7 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
     :param max_count: The maximum number of samples that will be sampled if no exact count is given.
     :param bucket_counts: For each bucket an optional exact example count can be given. If it is not given it will be
                          sampled.
-    :return: The random source, target and label arrays.
+    :return: The random source and target tensors.
     """
     if bucket_counts is None:
         bucket_counts = [None for _ in buckets]
@@ -310,12 +311,12 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
 
 
 def test_parallel_data_set():
-    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, True, 1.0)
     source, target = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
 
-    def check_equal(arrays1, arrays2):
-        assert len(arrays1) == len(arrays2)
-        for a1, a2 in zip(arrays1, arrays2):
+    def check_equal(tensors1, tensors2):
+        assert len(tensors1) == len(tensors2)
+        for a1, a2 in zip(tensors1, tensors2):
             assert torch.equal(a1, a2)
 
     with TemporaryDirectory() as work_dir:
@@ -609,7 +610,7 @@ def test_parallel_sample_iter():
 
 def test_sharded_parallel_sample_iter():
     batch_size = 2
-    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, True, 1.0)
     # The first bucket is going to be empty:
     bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
@@ -677,7 +678,7 @@ def test_sharded_parallel_sample_iter_num_batches():
     num_shards = 2
     batch_size = 2
     num_batches_per_bucket = 10
-    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
     num_batches_per_shard = num_batches_per_bucket * len(buckets)
     num_batches = num_shards * num_batches_per_shard
@@ -711,7 +712,7 @@ def test_sharded_and_parallel_iter_same_num_batches():
     using the same dataset. """
     batch_size = 2
     num_batches_per_bucket = 10
-    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, 1, 1.0)
+    buckets = data_io_pt.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
     num_batches = num_batches_per_bucket * len(buckets)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
