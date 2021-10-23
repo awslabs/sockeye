@@ -311,7 +311,7 @@ class PyTorchTransformerFeedForward(pt.nn.Module):
         if self.use_glu:
             self.linear = pt.nn.Linear(in_features=num_model, out_features=num_hidden)
         if self.dropout > 0.0:
-            self.drop = pt.nn.Dropout(p=self.dropout, inplace=True)
+            self.drop = pt.nn.Dropout(p=self.dropout, inplace=inference_only)
         self.ff2 = pt.nn.Linear(in_features=num_hidden, out_features=num_model)
 
     def forward(self, x):

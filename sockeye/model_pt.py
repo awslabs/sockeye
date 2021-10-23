@@ -159,7 +159,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         elif dtype == C.DTYPE_INT8:
             logger.info("Dynamic quantization to int8 for (fused) Linear layers")
             # TODO: explore quantization of OutputLayer
-            pt.quantization.quantize_dynamic(self, {pt.nn.Linear}, dtype=pt.qint8, inplace=True)
+            pt.quantization.quantize_dynamic(self, {pt.nn.Linear}, dtype=pt.qint8, inplace=self.inference_only)
         else:
             self.dtype = pt.float32
 
