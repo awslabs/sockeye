@@ -195,7 +195,6 @@ VOCAB_TRG_NAME = VOCAB_TRG_PREFIX + ".%d" + JSON_SUFFIX
 VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
-PARAMS_INIT_NAME = "params.init"
 PARAMS_BEST_NAME = "params.best"
 PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
 TORCH_SUFFIX = "pt"
@@ -218,7 +217,6 @@ OPT_STATES_INITIAL = "mx_optimizer_initial.pkl"
 # PyTorch
 OPT_STATE_LAST = "optimizer_last.pkl"
 OPT_STATE_BEST = "optimizer_best.pkl"
-OPT_STATE_INITIAL = "optimizer_initial.pkl"
 
 LR_SCHEDULER_LAST = "lr_scheduler_last.pkl"
 LR_SCHEDULER_BEST = "lr_scheduler_best.pkl"

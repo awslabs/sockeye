@@ -26,9 +26,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
 import torch
-import mxnet as mx
-import numpy as onp
-from mxnet import amp, np
+import numpy as np
 
 from . import average
 from . import constants as C
@@ -75,12 +73,9 @@ class TrainState:
     Stores the state an EarlyStoppingTrainer instance.
     """
 
-    _pickle_slots = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
-                     'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic', '_tic_last_time_elapsed',
-                     '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_metric_history',
-                     'best_checkpoint', 'converged', 'diverged']
-
-    __slots__ = _pickle_slots + ['gradients']
+    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches', 'updates', 'samples',
+                 'metrics', 'start_tic', '_tic_last_time_elapsed', '_time_elapsed', 'early_stopping_metric',
+                 'best_metric', 'best_metric_history', 'best_checkpoint', 'converged', 'diverged']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -90,8 +85,6 @@ class TrainState:
         self.batches = 0
         self.updates = 0
         self.samples = 0
-        self.gradient_norm = None  # type: Optional[float]
-        self.gradients = {}  # type: Dict[str, List[torch.Tensor]]
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
         self.start_tic = time.time()
@@ -135,12 +128,11 @@ class TrainState:
         return self._time_elapsed
 
     def __getstate__(self):
-        return {k: getattr(self, k) for k in self._pickle_slots}
+        return {k: getattr(self, k) for k in self.__slots__}
 
     def __setstate__(self, state):
         for k, v in state.items():
             setattr(self, k, v)
-        self.gradients = {}
 
 
 class PyTorchEarlyStoppingTrainer:
@@ -189,9 +181,7 @@ class PyTorchEarlyStoppingTrainer:
             self.state = TrainState(self.config.early_stopping_metric)
             self.model.save_config(self.config.output_dir)
             self.model.save_version(self.config.output_dir)
-            # TODO: Revisit this now that we're using PyTorch
-            # self._save_training_state(train_iter)
-            # self._save_trainer_states(self.best_optimizer_states_fname)  # not saving due to deferred initialization
+            self.model.save_parameters(self.current_params_fname)
             logger.info("Training started.")
 
         tic = time.time()
@@ -494,7 +484,7 @@ class PyTorchEarlyStoppingTrainer:
                 last_ppl = metric.get()
                 break
         # using a double of uniform distribution's value as a threshold
-        if not onp.isfinite(last_ppl) or last_ppl > 2 * self.model.config.vocab_target_size:
+        if not np.isfinite(last_ppl) or last_ppl > 2 * self.model.config.vocab_target_size:
             logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f", last_ppl)
             return True
         return False
@@ -526,7 +516,6 @@ class PyTorchEarlyStoppingTrainer:
         data = {"epoch": self.state.epoch,
                 "learning-rate": (self.trainer.learning_rate if self.optimizer_config.lr_scheduler is None
                                   else self.optimizer_config.lr_scheduler.lr),
-                "gradient-norm": self.state.gradient_norm,
                 "time-elapsed": self.state.time_elapsed}
         data['max-gpu-memory'] = torch.cuda.max_memory_allocated(self.device)
         data['converged'] = self.state.converged
@@ -613,7 +602,7 @@ class PyTorchEarlyStoppingTrainer:
         # RNG states: python, numpy, torch
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
-            pickle.dump(onp.random.get_state(), fp)
+            pickle.dump(np.random.get_state(), fp)
             pickle.dump(torch.random.get_rng_state(), fp)
 
         # (5) Training state
@@ -668,7 +657,7 @@ class PyTorchEarlyStoppingTrainer:
         # RNG states: python, numpy, torch
         with open(os.path.join(self.training_state_dirname, C.RNG_STATE_NAME), "rb") as fp:
             random.setstate(pickle.load(fp))
-            onp.random.set_state(pickle.load(fp))
+            np.random.set_state(pickle.load(fp))
             torch.random.set_rng_state(pickle.load(fp))
 
         # (5) Training state
@@ -736,7 +725,7 @@ class PyTorchEarlyStoppingTrainer:
 
 class TensorboardLogger:
     """
-    Thin wrapper for MXBoard API to log training events.
+    Thin wrapper for TensorBoard API to log training events.
     Flushes logging events to disk every 60 seconds.
 
     :param logdir: Directory to write Tensorboard event files to.
@@ -752,43 +741,44 @@ class TensorboardLogger:
         self.source_labels = vocab.get_ordered_tokens_from_vocab(source_vocab) if source_vocab is not None else None
         self.target_labels = vocab.get_ordered_tokens_from_vocab(target_vocab) if target_vocab is not None else None
         try:
-            import mxboard
+            import tensorboard
+            from torch.utils.tensorboard import SummaryWriter
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
-            self._writer = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
+            self._writer = SummaryWriter(log_dir=self.logdir, flush_secs=60)
         except ImportError:
-            logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
+            logger.info("tensorboard not found. Consider 'pip install tensorboard' to log events to Tensorboard.")
             self._writer = None
 
-    def log_metrics(self, metrics: Dict[str, Union[float, int, np.ndarray]], checkpoint: int):
+    def log_metrics(self, metrics: Dict[str, Union[float, int, torch.Tensor]], checkpoint: int):
         if self._writer is None:
             return
 
         for name, value in metrics.items():
-            if isinstance(value, np.ndarray):
-                if np.isfinite(value).sum().item() == value.size:
+            if isinstance(value, torch.Tensor):
+                if torch.isfinite(value).sum().item() == value.size:
                     self._writer.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                 else:
                     logger.warning("Histogram of %s not logged to tensorboard because of infinite data.")
             elif value is None:
                 continue
             else:
-                self._writer.add_scalar(tag=name, value=value, global_step=checkpoint)
+                self._writer.add_scalar(tag=name, scalar_value=value, global_step=checkpoint)
         self._writer.flush()
 
-    def log_source_embedding(self, embedding: np.ndarray, checkpoint: int):
+    def log_source_embedding(self, embedding: torch.Tensor, checkpoint: int):
         if self._writer is None or self.source_labels is None:
             return
-        self._writer.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
+        self._writer.add_embedding(mat=embedding, tag="source", label_img=self.source_labels, global_step=checkpoint)
 
-    def log_target_embedding(self, embedding: np.ndarray, checkpoint: int):
+    def log_target_embedding(self, embedding: torch.Tensor, checkpoint: int):
         if self._writer is None or self.target_labels is None:
             return
-        self._writer.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
+        self._writer.add_embedding(mat=embedding, tag="target", label_img=self.target_labels, global_step=checkpoint)
 
-    def log_output_embedding(self, embedding: np.ndarray, checkpoint: int):
+    def log_output_embedding(self, embedding: torch.Tensor, checkpoint: int):
         if self._writer is None or self.target_labels is None:
             return
-        self._writer.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
+        self._writer.add_embedding(mat=embedding, tag="output", label_img=self.target_labels, global_step=checkpoint)
 
 
 class Speedometer:

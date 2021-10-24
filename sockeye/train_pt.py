@@ -1038,7 +1038,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         training_model.to(device)
         training_model.apply(model_pt.initialize_parameters)
-        training_model.save_parameters(os.path.join(args.output, C.PARAMS_INIT_NAME))
 
         if args.params is not None:  # load existing parameters if present
             training_model.load_parameters(filename=args.params,
