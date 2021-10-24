@@ -29,6 +29,7 @@ import torch
 import numpy as np
 
 from . import average
+from . import checkpoint_decoder_pt
 from . import constants as C
 from . import data_io_pt
 from . import horovod_mpi
@@ -38,7 +39,6 @@ from . import model_pt
 from . import optimizers
 from . import utils
 from . import vocab
-from .checkpoint_decoder import CheckpointDecoder
 from .config import Config
 
 logger = logging.getLogger(__name__)
@@ -166,7 +166,7 @@ class PyTorchEarlyStoppingTrainer:
     def fit(self,
             train_iter: data_io_pt.BaseParallelSampleIter,
             validation_iter: data_io_pt.BaseParallelSampleIter,
-            checkpoint_decoder: Optional[CheckpointDecoder] = None):
+            checkpoint_decoder: Optional[checkpoint_decoder_pt.CheckpointDecoder] = None):
         logger.info("Early stopping by optimizing '%s'", self.config.early_stopping_metric)
 
         if self.config.early_stopping_metric in C.METRICS_REQUIRING_DECODER:
@@ -251,7 +251,7 @@ class PyTorchEarlyStoppingTrainer:
         self._cleanup(keep_training_state=True)
         return self.state
 
-    def _create_checkpoint(self, checkpoint_decoder: CheckpointDecoder, time_cost: float,
+    def _create_checkpoint(self, checkpoint_decoder: checkpoint_decoder_pt.CheckpointDecoder, time_cost: float,
                            train_iter: data_io_pt.BaseParallelSampleIter,
                            validation_iter: data_io_pt.BaseParallelSampleIter):
         """
@@ -346,7 +346,8 @@ class PyTorchEarlyStoppingTrainer:
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
         return did_grad_step
 
-    def _evaluate(self, checkpoint: int, data_iter, checkpoint_decoder: Optional[CheckpointDecoder]) -> List[loss_pt.LossMetric]:
+    def _evaluate(self, checkpoint: int, data_iter,
+                  checkpoint_decoder: Optional[checkpoint_decoder_pt.CheckpointDecoder]) -> List[loss_pt.LossMetric]:
         """
         Computes loss(es) on validation data and returns their metrics.
         :param data_iter: Validation data iterator.

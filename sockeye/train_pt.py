@@ -31,7 +31,7 @@ from typing import cast, Callable, Optional, Dict, List, Tuple
 import torch
 
 from . import arguments
-from . import checkpoint_decoder
+from . import checkpoint_decoder_pt
 from . import constants as C
 from . import data_io_pt
 from . import encoder_pt
@@ -186,7 +186,7 @@ def create_checkpoint_decoder(
         train_device: torch.device,
         sockeye_model: model_pt.PyTorchSockeyeModel,
         source_vocabs: List[vocab.Vocab],
-        target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
+        target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder_pt.CheckpointDecoder]:
     """
     Returns a checkpoint decoder or None.
 
@@ -223,15 +223,14 @@ def create_checkpoint_decoder(
         # default decode context is the last training device
         device = train_device
 
-    raise NotImplementedError('Checkpoint decoder is not yet implemented for PyTorch Sockeye')
     return checkpoint_decoder_pt.CheckpointDecoder(model_folder=args.output,
-                                                inputs=[args.validation_source] + args.validation_source_factors,
-                                                references=[args.validation_target] + args.validation_target_factors,
-                                                sample_size=sample_size,
-                                                model=sockeye_model,
-                                                source_vocabs=source_vocabs,
-                                                target_vocabs=target_vocabs,
-                                                device=device)
+                                                   inputs=[args.validation_source] + args.validation_source_factors,
+                                                   references=[args.validation_target] + args.validation_target_factors,
+                                                   sample_size=sample_size,
+                                                   model=sockeye_model,
+                                                   source_vocabs=source_vocabs,
+                                                   target_vocabs=target_vocabs,
+                                                   device=device)
 
 
 def use_shared_vocab(args: argparse.Namespace) -> bool:
@@ -1099,7 +1098,12 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             custom_metrics_logger=custom_metrics_logger,
             checkpoint_callback=checkpoint_callback)
 
-        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=None)
+        checkpoint_decoder = create_checkpoint_decoder(args, exit_stack, device, training_model, source_vocabs,
+                                                       target_vocabs)
+
+        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
+                                     checkpoint_decoder=checkpoint_decoder)
+
         return training_state
 
 
