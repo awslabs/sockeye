@@ -189,7 +189,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             steps = pt.zeros_like(encoder_valid_length).unsqueeze(1)
         else:  # Training: steps up to target length. Shape: (1, target_length)
             target_length = target_embed.size()[1]
-            steps = pt.arange(0, target_length).unsqueeze(0)
+            steps = pt.arange(0, target_length, device=target_embed.device).unsqueeze(0)
 
         # inverted source_length_mask for attention masking, (batch_size * heads, 1, source_max_len)
         source_max_len = encoder_outputs.size()[1]
