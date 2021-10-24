@@ -267,7 +267,13 @@ class PyTorchEarlyStoppingTrainer:
                     self.state.samples, time_cost, self.config.checkpoint_interval / time_cost)
         logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
                     "\t".join("Train-%s" % str(metric) for metric in train_metrics))
+
+        # Switch model to eval mode (disable dropout, etc.), score validation
+        # set and run checkpoint decoder, then switch model back to train mode.
+        self.model.eval()
         val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
+        self.model.train()
+
         has_improved = self._determine_improvement(val_metrics)
         self.state.converged = self._determine_convergence()
         self.state.diverged = self._determine_divergence(val_metrics)

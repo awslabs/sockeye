@@ -253,9 +253,8 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
             # https://github.com/huggingface/transformers/issues/9377
             self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
         self.dropout = dropout
-        self.dropout_layer = None  # type: Optional[pt.nn.Module]
         if dropout > 0.0:
-            self.dropout_layer = pt.nn.Dropout(p=dropout)
+            self.drop = pt.nn.Dropout(p=dropout)
 
     def forward(self, data: pt.Tensor, prev: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
@@ -280,8 +279,8 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
                 data = self.layer_norm(data)
 
             elif step == "d":
-                if self.dropout_layer is not None and self.dropout > 0.0:
-                    data = self.dropout_layer(data)
+                if self.dropout > 0.0:
+                    data = self.drop(data)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
