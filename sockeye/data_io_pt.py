@@ -1925,8 +1925,8 @@ def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) ->
     sequences including both <bos> and <eos>. Both tensors returned have input
     size of second dimension - 1.
     """
-    target = target_and_label[:, :-1, :]  # skip last column (for longest-possible sequence, this already removes <eos>)
-    target = torch.where(target == C.EOS_ID, torch.zeros_like(target), target)  # replace other <eos>'s with <pad>
+    target = target_and_label[:, :-1, :].clone()  # skip last column, copy data
+    target[target == C.EOS_ID] = 0  # replace <eos>'s with <pad>
     label = target_and_label[:, 1:, :]  # label skips <bos>
     return target, label
 
@@ -1940,14 +1940,13 @@ def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor
     :param label: Time-shifted label tensor. Shape: (batch, target_length, num_target_factors).
     """
     source_words = source[:, :, 0:1].squeeze(dim=2)
-    source_length = torch.sum(source_words != C.PAD_ID, dim=1)
+    source_length = (source_words != C.PAD_ID).sum(dim=1)
     target_words = target[:, :, 0:1].squeeze(dim=2)
-    target_length = torch.sum(target_words != C.PAD_ID, dim=1)
+    target_length = (target_words != C.PAD_ID).sum(dim=1)
     length_ratio = source_length / target_length
 
-    source_shape = source.shape
-    samples = source_shape[0]
-    tokens = source_shape[1] * samples
+    samples, tokens, _ = source.shape
+    tokens *= samples
 
     labels = {C.LENRATIO_LABEL_NAME: length_ratio}
 

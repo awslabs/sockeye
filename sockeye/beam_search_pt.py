@@ -118,7 +118,6 @@ class UpdateScores(pt.nn.Module):
         # pad_dist. Shape: (batch*beam, vocab_size)
         pad_dist = pt.cat((scores_accumulated, pad_dist), dim=1)
         scores = pt.where(pt.logical_or(finished, inactive).unsqueeze(1), pad_dist, scores)
-
         # Update lengths of all items, except those that were already finished. This updates
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
         lengths = lengths + ~finished

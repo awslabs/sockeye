@@ -93,6 +93,7 @@ class PyTorchLoss(pt.nn.Module):
 
 
 # TODO(fhieber): should be scriptable/traceable
+# TODO(fhieber): PyTorch 1.10 CrossEntropyLoss supports label smoothing.
 class PyTorchCrossEntropyLoss(PyTorchLoss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.

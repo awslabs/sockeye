@@ -517,12 +517,15 @@ class PyTorchEarlyStoppingTrainer:
                 if os.path.exists(self.best_optimizer_state_fname):
                     self._load_optimizer_state(self.best_optimizer_state_fname)
 
-    def _write_and_log_metrics(self, train_metrics: Iterable[loss_pt.LossMetric], val_metrics: Iterable[loss_pt.LossMetric]):
+    def _write_and_log_metrics(self,
+                               train_metrics: Iterable[loss_pt.LossMetric],
+                               val_metrics: Iterable[loss_pt.LossMetric]):
         """
         Updates metrics for current checkpoint.
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
         """
         data = {"epoch": self.state.epoch,
+                # TODO(fhieber): self.trainer undefined
                 "learning-rate": (self.trainer.learning_rate if self.optimizer_config.lr_scheduler is None
                                   else self.optimizer_config.lr_scheduler.lr),
                 "time-elapsed": self.state.time_elapsed}

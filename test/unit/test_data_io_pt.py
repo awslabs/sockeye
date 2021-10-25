@@ -757,8 +757,14 @@ def test_sharded_and_parallel_iter_same_num_batches():
 
 def test_create_target_and_shifted_label_sequences():
     target_and_label = torch.tensor([[C.BOS_ID, 4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
-                                  [C.BOS_ID, 15, 23, 23, 77, 55, 22, C.EOS_ID],
-                                  [C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]])
+                                     [C.BOS_ID, 15, 23, 23, 77, 55, 22, C.EOS_ID],
+                                     [C.BOS_ID, 4, C.EOS_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]])
+    expected_label = torch.tensor([[4, 17, 35, 12, C.EOS_ID, C.PAD_ID, C.PAD_ID],
+                                   [15, 23, 23, 77, 55, 22, C.EOS_ID],
+                                   [4, C.EOS_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]]).unsqueeze(2)
+    expected_target = torch.tensor([[C.BOS_ID, 4, 17, 35, 12, C.PAD_ID, C.PAD_ID],
+                                    [C.BOS_ID, 15, 23, 23, 77, 55, 22],
+                                    [C.BOS_ID, 4, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID]]).unsqueeze(2)
     target_and_label = torch.unsqueeze(target_and_label, dim=2)
     expected_lengths = torch.tensor([5, 7, 2])
 
@@ -766,6 +772,8 @@ def test_create_target_and_shifted_label_sequences():
 
     assert target.shape[0] == label.shape[0] == target_and_label.shape[0]
     assert target.shape[1] == label.shape[1] == target_and_label.shape[1] - 1
+    assert torch.allclose(target, expected_target)
+    assert torch.allclose(label, expected_label)
     lengths = (target != C.PAD_ID).sum(dim=1).squeeze()
     assert torch.allclose(lengths, expected_lengths)
 
