@@ -328,6 +328,7 @@ class PyTorchEarlyStoppingTrainer:
         did_grad_step = False
 
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
+            self.state.updates += 1
             # Rescale gradients for number of batches in this update
             if self.config.update_interval > 1:
                 for p in filter(lambda p: p.grad is not None, self.model.parameters()):
@@ -339,10 +340,11 @@ class PyTorchEarlyStoppingTrainer:
             elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
                 torch.nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(),
                                                          self.optimizer_config.gradient_clipping_threshold)
-            # Update weights / reset gradients
+            # Update learning rate, update weights, and reset gradients
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = self.optimizer_config.lr_scheduler(self.state.updates)
             self.optimizer.step()
             self.optimizer.zero_grad()
-            self.state.updates += 1
             did_grad_step = True
 
         self.state.samples += batch.samples
