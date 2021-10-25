@@ -157,6 +157,8 @@ class PyTorchEarlyStoppingTrainer:
         self.device = device
         self.dtype = dtype
         self.using_amp = using_amp
+        if using_amp:
+            self._scaler = torch.cuda.amp.GradScaler()
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
@@ -297,42 +299,46 @@ class PyTorchEarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
-        # Forward
         # TODO(mdenkows): Using a single traced model instance currently causes
         # errors for different sequence lengths. Use bucketing for now.
         seq_len = (batch.source.shape[1], batch.target.shape[1])
-        if seq_len not in self.traced_models:
-            logger.info(f'Tracing model for seq_len={seq_len}')
-            self.traced_models[seq_len] = torch.jit.trace(self.model, (batch.source, batch.source_length,
-                                                                       batch.target, batch.target_length), strict=False)
-        outputs = self.traced_models[seq_len](batch.source, batch.source_length, batch.target, batch.target_length)
-        # Loss
-        loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
-        loss_values = [v for v, _ in loss_outputs]
-        # Backward
-        sum_losses = torch.add(*loss_values) if len(loss_values) > 1 else loss_values[0]
+        # TODO(mdenkows): Right now this only works with PYTORCH_JIT=0 due to:
+        # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
+        # Consider making it a parameter or input, or detaching the gradient
+        with torch.cuda.amp.autocast() if self.using_amp else utils.no_context():
+            # Forward
+            if seq_len not in self.traced_models:
+                logger.info(f'Tracing model for seq_len={seq_len}')
+                self.traced_models[seq_len] = torch.jit.trace(self.model, (batch.source, batch.source_length,
+                                                              batch.target, batch.target_length), strict=False)
+            outputs = self.traced_models[seq_len](batch.source, batch.source_length, batch.target, batch.target_length)
+            # Loss (scaled by update interval)
+            loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
+            loss_values = [v / self.config.update_interval if self.config.update_interval > 1
+                           else v for v, _ in loss_outputs]
+            sum_losses = torch.add(*loss_values) if len(loss_values) > 1 else loss_values[0]
         if self.using_amp:
-            # TODO(mdenkows): Migrate to PyTorch mixed precision training
-            # AMP applies dynamic loss scaling to the losses (scale up) and
-            # the Trainer (scale down).
-            with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
-                mx.autograd.backward(scaled_loss)
-        else:
-            # backward on the sum of losses, weights are defined in the loss modules themselves.
-            sum_losses.backward()
+            sum_losses = self._scaler.scale(sum_losses)
+        # Backward
+        sum_losses.backward()
         return loss_values
 
     def _step(self, batch: data_io_pt.Batch) -> bool:
         self.state.batches += 1
-        loss_values = self._forward_backward(batch)
-        did_grad_step = False
+        self.state.samples += batch.samples
 
+        # Forward/loss/backward (compute gradients)
+        loss_values = self._forward_backward(batch)
+        for loss_func, loss_value in zip(self.loss_functions, loss_values):
+            loss_func.metric.update(loss_value.item(), 1 / self.config.update_interval)
+
+        # Update model weights if we've accumulated gradients over
+        # N=update_interval batches
+        did_grad_step = False
         if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
             self.state.updates += 1
-            # Rescale gradients for number of batches in this update
-            if self.config.update_interval > 1:
-                for p in filter(lambda p: p.grad is not None, self.model.parameters()):
-                    p.grad.data = p.grad.data / self.config.update_interval
+            if self.using_amp:
+                self._scaler.unscale_(self.optimizer)
             # Clip gradients
             if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
                 torch.nn.utils.clip_grad.clip_grad_value_(self.model.parameters(),
@@ -340,16 +346,18 @@ class PyTorchEarlyStoppingTrainer:
             elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
                 torch.nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(),
                                                          self.optimizer_config.gradient_clipping_threshold)
-            # Update learning rate, update weights, and reset gradients
+            # Set learning rate for current step
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = self.optimizer_config.lr_scheduler(self.state.updates)
-            self.optimizer.step()
+            # Update weights and reset gradients
+            if self.using_amp:
+                self._scaler.step(self.optimizer)
+                self._scaler.update()
+            else:
+                self.optimizer.step()
             self.optimizer.zero_grad()
             did_grad_step = True
 
-        self.state.samples += batch.samples
-        for loss_func, loss_value in zip(self.loss_functions, loss_values):
-            loss_func.metric.update(loss_value.item(), 1)
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
         return did_grad_step
@@ -370,7 +378,7 @@ class PyTorchEarlyStoppingTrainer:
             # Loss
             loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
             loss_values = [v for v, _ in loss_outputs]
-            # update validation metrics for batch
+            # Update validation metrics for batch
             for loss_metric, loss_value in zip(val_metrics, loss_values):
                 loss_metric.update(loss_value.item(), 1)
 
@@ -624,13 +632,10 @@ class PyTorchEarlyStoppingTrainer:
         lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
         self._save_lr_scheduler(lr_scheduler_fname)
 
-        # TODO(mdenkows): Migrate to PyTorch mixed precision training
-        # (6) AMP loss scaler state
+        # (6) AMP grad scaler state
         if self.using_amp:
-            with open(os.path.join(training_state_dirname, C.AMP_LOSS_SCALER_STATE_NAME), "wb") as fp:
-                pickle.dump([self.trainer._amp_loss_scaler._loss_scale,
-                             self.trainer._amp_loss_scaler._next_loss_scale,
-                             self.trainer._amp_loss_scaler._unskipped], fp)
+            with open(os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME), "wb") as fp:
+                pickle.dump(self._scaler.state_dict(), fp)
 
         # First we rename the existing directory to minimize the risk of state
         # loss if the process is aborted during deletion (which will be slower
@@ -679,14 +684,10 @@ class PyTorchEarlyStoppingTrainer:
         lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
         self._load_lr_scheduler(lr_scheduler_fname)
 
-        # TODO(mdenkows): Migrate to PyTorch mixed precision training
-        # (6) AMP loss scaler state
+        # (6) AMP grad scaler state
         if self.using_amp:
-            # Load loss scaler state
-            with open(os.path.join(self.training_state_dirname, C.AMP_LOSS_SCALER_STATE_NAME), "rb") as fp:
-                (self.trainer._amp_loss_scaler._loss_scale,
-                 self.trainer._amp_loss_scaler._next_loss_scale,
-                 self.trainer._amp_loss_scaler._unskipped) = pickle.load(fp)
+            with open(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME), "rb") as fp:
+                self._scaler.load_state_dict(pickle.load(fp))
 
         logger.info("Training State: epoch=%d, checkpoint=%d batches=%d updates=%d best_metric=%.2f, " \
                     "best_checkpoint=%d time_elapsed=%d" % (

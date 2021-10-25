@@ -902,13 +902,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         args.output = temp_dir.name
         args.max_updates = 0
 
-    # TODO(mdenkows): Migrate to PyTorch mixed precision training
-    # Automatic Mixed Precision training
-    using_amp = False
-    if args.amp:
-        using_amp = True
-        amp.init()
-
     # TODO(mdenkows): Migrate to PyTorch distributed training
     # When using Horovod, multiple workers (instances of sockeye.train) are
     # launched via MPI.  Each worker has a rank (unique among all workers in the
@@ -1074,13 +1067,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                optimizer_config.name,
                                                                optimizer_config.params)
 
-        # TODO(mdenkows): Migrate to PyTorch mixed precision training
-        if using_amp:
-            amp.init_trainer(gluon_trainer)
-            # AMP does not allow passing args when creating the loss scaler, so
-            # we set them immediately after calling init.
-            gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
-
         losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
         # TODO(mdenkows): Add a debug mode that enables anomaly detection
@@ -1094,7 +1080,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             loss_functions=losses,
             device=device,
             dtype=args.dtype,
-            using_amp=using_amp,
+            using_amp=args.amp,
             custom_metrics_logger=custom_metrics_logger,
             checkpoint_callback=checkpoint_callback)
 

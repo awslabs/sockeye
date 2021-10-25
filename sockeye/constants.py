@@ -226,6 +226,8 @@ BUCKET_ITER_STATE_NAME = "bucket.pkl"
 RNG_STATE_NAME = "rng.pkl"
 TRAINING_STATE_NAME = "training.pkl"
 AMP_LOSS_SCALER_STATE_NAME = "amp_loss_scaler.pkl"
+# PyTorch
+GRAD_SCALER_STATE_NAME = "grad_scaler.pkl"
 SCHEDULER_STATE_NAME = "scheduler.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.yaml"
