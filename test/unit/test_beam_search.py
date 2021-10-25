@@ -397,15 +397,11 @@ def test_update_scores():
 def test_pytorch_update_scores(use_unk_dist):
     vocab_size = 10
     batch_beam_size = 3
-    us = sockeye.beam_search_pt.UpdateScores()
-    pad_dist = onp.full((batch_beam_size, vocab_size - 1), fill_value=np.inf, dtype='float32')
+    us = sockeye.beam_search_pt.UpdateScores(prevent_unk=use_unk_dist)
+    pad_dist = onp.full((1, vocab_size), fill_value=np.inf, dtype='float32')
+    pad_dist[0, 0] = 0
     eos_dist = onp.full((batch_beam_size, vocab_size), fill_value=np.inf, dtype='float32')
     eos_dist[:, C.EOS_ID] = 0
-    if use_unk_dist:
-        unk_dist = onp.zeros_like(eos_dist)
-        unk_dist[:, C.UNK_ID] = np.inf  # pylint: disable=E1137
-    else:
-        unk_dist = None
 
     lengths = onp.array([0, 1, 0], dtype='int32')
     max_lengths = onp.array([1, 2, 3], dtype='int32')  # first on reaches max length
@@ -419,15 +415,16 @@ def test_pytorch_update_scores(use_unk_dist):
 
     scores, lengths = us(pt.tensor(target_dists), finished, inactive,
                          pt.tensor(scores_accumulated), pt.tensor(lengths), pt.tensor(max_lengths),
-                         pt.tensor(unk_dist) if unk_dist is not None else None, pt.tensor(pad_dist), pt.tensor(eos_dist))
+                         pt.tensor(pad_dist), pt.tensor(eos_dist))
     scores = scores.detach().numpy()
     lengths = lengths.detach().numpy()
     assert np.allclose(lengths, np.array([1, 1, 1]))  # all lengths but finished updated + 1
     assert (scores[0] == (1. + target_dists[0] + eos_dist)).all()  # 1 reached max length, force eos
-    assert (scores[1] == np.array([1.] + pad_dist[1].tolist())).all()  # 2 finished, force pad, keep score
+    assert (scores[1] == (1. + pad_dist[0]).tolist()).all()  # 2 finished, force pad, keep score
     if use_unk_dist:
         assert scores[2, C.UNK_ID] == np.inf  # 3 scores of <unk> should be np.inf
-        assert (scores[2] == (1. + target_dists[2] + unk_dist[2])).all()  # 3 scores + previous scores
+        target_dists[2, C.UNK_ID] = np.inf
+        assert (scores[2] == (1. + target_dists[2])).all()  # 3 scores + previous scores
     else:
         assert (scores[2] == (1. + target_dists[2])).all()  # 3 scores + previous scores
 

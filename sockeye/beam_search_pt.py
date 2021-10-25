@@ -96,16 +96,16 @@ class UpdateScores(pt.nn.Module):
     All other options are set to infinity.
     """
 
-    def __init__(self):
+    def __init__(self, prevent_unk: bool = False):
         super().__init__()
+        self.prevent_unk = prevent_unk
         assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
 
-    def forward(self, target_dists, finished, inactive,
-                      scores_accumulated, lengths, max_lengths,
-                      unk_dist, pad_dist, eos_dist):
-        # make sure to avoid generating <unk> if unk_dist is specified
-        if unk_dist is not None:
-            target_dists = target_dists + unk_dist
+    def forward(self, target_dists, finished, inactive, scores_accumulated, lengths, max_lengths, pad_dist, eos_dist):
+
+        if self.prevent_unk:  # make sure to avoid generating <unk>
+            target_dists[:, C.UNK_ID] = onp.inf
+
         # broadcast hypothesis score to each prediction.
         # scores_accumulated. Shape: (batch*beam, 1)
         # target_dists. Shape: (batch*beam, vocab_size)
@@ -115,15 +115,14 @@ class UpdateScores(pt.nn.Module):
         # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
         # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
-        # pad_dist. Shape: (batch*beam, vocab_size)
-        pad_dist = pt.cat((scores_accumulated, pad_dist), dim=1)
+        pad_dist = scores_accumulated + pad_dist  # (batch*beam, vocab_size)
         scores = pt.where(pt.logical_or(finished, inactive).unsqueeze(1), pad_dist, scores)
         # Update lengths of all items, except those that were already finished. This updates
         # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
         lengths = lengths + ~finished
         # Items that are at their maximum length and not finished now are forced to produce the <eos> symbol.
         # That is, we keep scores for hypotheses below max length or finished, and 'force-eos' the rest.
-        below_max_length = lengths < max_lengths
+        below_max_length = lengths < max_lengths  # type: pt.Tensor
         scores = pt.where(pt.logical_or(below_max_length, finished).unsqueeze(1), scores, eos_dist + scores)
 
         return scores, lengths
@@ -270,15 +269,6 @@ class SortNormalizeAndUpdateFinished(pt.nn.Module):
         return best_word_indices, finished, scores_accumulated, lengths, reference_lengths
 
 
-def unravel_index(indices: pt.LongTensor, shape: Tuple[int, ...]) -> pt.LongTensor:
-    coord = []
-    for dim in reversed(shape):
-        coord.append(indices % dim)
-        indices = indices // dim  # triggers UserWarning: floor_divide is deprecated, and will be removed in a future version of pytorch.
-    coord = pt.stack(coord[::-1], dim=0)
-    return coord
-
-
 class TopK(pt.nn.Module):
     """
     Batch-wise topk operation.
@@ -311,7 +301,6 @@ class TopK(pt.nn.Module):
         # Project indices back into original shape (which is different for t==1 and t>1)
         values, indices = values.view(-1, 1), indices.view(-1)
 
-        #best_hyp_indices, best_word_indices = unravel_index(indices, (batch_size * self.k, vocab_size))
         best_hyp_indices, best_word_indices = indices.div(vocab_size, rounding_mode='floor'), indices.fmod(vocab_size)
 
         if batch_size > 1:
@@ -610,7 +599,7 @@ class BeamSearch(pt.nn.Module):
         self._traced_repeat_states = None
         self._sort_states = SortStates(state_structure=self._inference.state_structure())
         self._traced_sort_states = None
-        self._update_scores = UpdateScores()  # not tracing UpdateScores for now because of optional None input
+        self._update_scores = UpdateScores(prevent_unk)  # tracing this module seems to incur a small slowdown on GPUs
         self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
             pad_id=C.PAD_ID,
             eos_id=eos_id,
@@ -645,7 +634,7 @@ class BeamSearch(pt.nn.Module):
                that must appear in each output.
         :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
                that must NOT appear in each output.
-        :param max_output_lengths: ndarray of maximum output lengths per input in source.
+        :param max_output_lengths: Tensor of maximum output lengths per input in source.
                 Shape: (batch_size,). Dtype: int32.
         :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
@@ -705,15 +694,11 @@ class BeamSearch(pt.nn.Module):
                                                                                            raw_constraint_list,
                                                                                            self.eos_id, beam_size=1)
 
-        pad_dist = pt.full((batch_size * self.beam_size, output_vocab_size - 1),
-                           fill_value=onp.inf, device=self.device, dtype=self.dtype)
-        eos_dist = pt.full((batch_size * self.beam_size, output_vocab_size),
+        pad_dist = pt.full((1, output_vocab_size), fill_value=onp.inf, device=self.device, dtype=self.dtype)
+        pad_dist[0, 0] = 0  # [0, inf, inf, ...]
+        eos_dist = pt.full((1, output_vocab_size),
                            fill_value=onp.inf, device=self.device, dtype=self.dtype)
         eos_dist[:, C.EOS_ID] = 0
-        unk_dist = None
-        if self.prevent_unk:
-            unk_dist = pt.zeros_like(eos_dist)
-            unk_dist[:, C.UNK_ID] = onp.inf  # pylint: disable=E1137
 
         # Initialize the beam to track constraint sets, where target-side lexical constraints are present
         constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.bos_id, self.eos_id)
@@ -748,15 +733,8 @@ class BeamSearch(pt.nn.Module):
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
             # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores, lengths = self._update_scores(target_dists,
-                                                  finished,
-                                                  inactive,
-                                                  scores_accumulated,
-                                                  lengths,
-                                                  max_output_lengths,
-                                                  unk_dist,
-                                                  pad_dist,
-                                                  eos_dist)
+            scores, lengths = self._update_scores(target_dists, finished, inactive, scores_accumulated,
+                                                  lengths, max_output_lengths, pad_dist, eos_dist)
 
             # Mark entries that should be blocked as having a score of np.inf
             if self.global_avoid_trie or any(raw_avoid_list):
