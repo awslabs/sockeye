@@ -299,10 +299,9 @@ class PyTorchEarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
-        # TODO(mdenkows): Right now this only works with PYTORCH_JIT=0 due to:
-        # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
-        # Consider making it a parameter or input, or detaching the gradient
-        with torch.cuda.amp.autocast() if self.using_amp else utils.no_context():
+        # Disable autocast weight cache to enable tracing the model
+        # See: https://github.com/pytorch/pytorch/pull/63552
+        with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():
             # Forward
             if self.traced_model is None:
                 logger.info(f'Tracing model')
