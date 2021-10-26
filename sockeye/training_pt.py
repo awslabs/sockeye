@@ -310,6 +310,9 @@ class PyTorchEarlyStoppingTrainer:
             outputs = self.traced_model(batch.source, batch.source_length, batch.target, batch.target_length)
             # Loss (scaled by update interval)
             loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
+            # TODO(mdenkows): We currently give 1/N weight to every batch in the
+            # update, but batches have subtly different sizes (different numbers
+            # of padding tokens). Consider normalizing by relative batch size.
             loss_values = [v / self.config.update_interval if self.config.update_interval > 1
                            else v for v, _ in loss_outputs]
             sum_losses = torch.add(*loss_values) if len(loss_values) > 1 else loss_values[0]
@@ -326,7 +329,7 @@ class PyTorchEarlyStoppingTrainer:
         # Forward/loss/backward (compute gradients)
         loss_outputs = self._forward_backward(batch)
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
-            loss_func.metric.update(loss_value.item(), num_samples.item() / self.config.update_interval)
+            loss_func.metric.update(loss_value.item(), num_samples.item())
 
         # Update model weights if we've accumulated gradients over
         # N=update_interval batches
