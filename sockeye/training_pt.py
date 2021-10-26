@@ -355,7 +355,8 @@ class PyTorchEarlyStoppingTrainer:
                 self._scaler.update()
             else:
                 self.optimizer.step()
-            self.optimizer.zero_grad()
+            # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
+            self.optimizer.zero_grad(set_to_none=True)
             did_grad_step = True
 
         self._speedometer(self.state.epoch, self.state.batches,
