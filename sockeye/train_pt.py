@@ -701,7 +701,7 @@ def create_model_config(args: argparse.Namespace,
     return model_config
 
 
-def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss_pt.PyTorchLoss]:
+def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss_pt.Loss]:
     softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
 
     # loss weights per factor
@@ -713,7 +713,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         factor_weights = args.target_factors_weight
     loss_weights = [softmax_output_grad_scale] + factor_weights
 
-    losses = []  # type: List[loss_pt.PyTorchLoss]
+    losses = []  # type: List[loss_pt.Loss]
 
     # Cross-Entropy losses for all target streams/factors
     for i, (num_classes, weight) in enumerate(zip(all_num_classes, loss_weights)):
@@ -734,21 +734,19 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
                                                           dtype=args.dtype,
                                                           output_name=output_name,
                                                           label_name=label_name,
-                                                          num_labels=num_classes,
                                                           metric_prefix=metric_prefix))
         else:
             raise ValueError('Unknown loss %s', args.loss)
 
     if args.length_task is not None:
-        raise NotImplementedError('Length tasks are not yet implemented for PyTorch Sockeye')
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:
-            length_loss = loss_pt.MSELoss(name=C.LENRATIO_NAME + "_" + C.LINK_NORMAL,
+            length_loss = loss_pt.MSELoss(name=f'{C.LENRATIO_NAME}_{C.LINK_NORMAL}',
                                           weight=weight,
                                           output_name=C.LENRATIO_NAME,
                                           label_name=C.LENRATIO_LABEL_NAME)
         else:
-            length_loss = loss_pt.PoissonLoss(name=C.LENRATIO_NAME + "_" + C.LINK_POISSON,
+            length_loss = loss_pt.PoissonLoss(name=f'{C.LENRATIO_NAME}_{C.LINK_POISSON}',
                                               weight=weight,
                                               output_name=C.LENRATIO_NAME,
                                               label_name=C.LENRATIO_LABEL_NAME)

@@ -138,8 +138,7 @@ def test_mx_pt_eq_cross_entropy_loss(logits_mx, labels_mx, weight, alpha):
     loss_mx = sockeye.loss.CrossEntropyLossWithoutSoftmaxOutput(ignore_label=C.PAD_ID, label_smoothing=alpha,
                                                                 num_labels=num_labels, weight=weight)
     loss_mx.initialize()
-    loss_pt = sockeye.loss_pt.PyTorchCrossEntropyLoss(ignore_label=C.PAD_ID, label_smoothing=alpha, num_labels=num_labels,
-                                                      weight=weight)
+    loss_pt = sockeye.loss_pt.PyTorchCrossEntropyLoss(ignore_label=C.PAD_ID, label_smoothing=alpha, weight=weight)
 
     with mx.autograd.record():
         loss_value_mx, loss_samples_mx = loss_mx({C.LOGITS_NAME: logits_mx, 'other_stuff': None},
@@ -162,3 +161,49 @@ def test_perplexity_metric():
         ppl.update(ce, 1)
     expected_ppl = math.exp(sum(ces) / len(ces))
     assert np.isclose(ppl.get(), expected_ppl)
+
+
+@pytest.mark.parametrize("length_predictions_mx, labels_mx, weight, loss",
+                         [(np.array([1, 1, 2, 2, 3, 6]),
+                           np.array([1, 2, 3, 4, 5, 6]),
+                           1.0, 'poisson'),
+                          (np.array([1, 1, 2, 2, 7, 6]),
+                           np.array([1, 2, 0, 4, 0, 6]),
+                           0.5, 'poisson'),
+                          (np.array([1, 1, 2, 2, 3, 6]),
+                           np.array([1, 2, 3, 4, 5, 6]),
+                           1.0, 'mse'),
+                          (np.array([1, 1, 2, 2, 7, 6]),
+                           np.array([1, 2, 0, 4, 0, 6]),
+                           0.5, 'mse'),
+                         ])
+def test_mx_pt_eq_length_task_losses(length_predictions_mx, labels_mx, weight, loss):
+    length_predictions_mx.attach_grad()
+    length_predictions_pt = pt.tensor(length_predictions_mx.asnumpy(), requires_grad=True)
+    labels_pt = pt.tensor(labels_mx.asnumpy())
+
+    if loss == 'poisson':
+        b_mx = sockeye.loss.PoissonLoss()
+        b_pt = sockeye.loss_pt.PoissonLoss()
+    elif loss == 'mse':
+        b_mx = sockeye.loss.MSELoss()
+        b_pt = sockeye.loss_pt.MSELoss()
+    else:
+        raise ValueError("unknown loss")
+
+    b_mx.initialize()
+    with mx.autograd.record():
+        loss_value_mx, loss_samples_mx = b_mx({C.LENRATIO_NAME: length_predictions_mx, 'other_stuff': None},
+                                              {C.LENRATIO_LABEL_NAME: labels_mx, 'other_stuff': None})
+    loss_value_mx.backward()
+
+    loss_value_pt, loss_samples_pt = b_pt({C.LENRATIO_NAME: length_predictions_pt, 'other_stuff': None},
+                                          {C.LENRATIO_LABEL_NAME: labels_pt, 'other_stuff': None})
+    loss_value_pt.backward()
+
+    assert np.allclose(loss_value_mx.asnumpy(), loss_value_pt.detach().numpy())
+    assert loss_samples_mx.item() == loss_samples_pt.detach().numpy()
+    assert np.allclose(length_predictions_mx.grad.asnumpy(), length_predictions_pt.grad.numpy())
+
+
+

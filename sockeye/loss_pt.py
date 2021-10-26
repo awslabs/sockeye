@@ -12,12 +12,12 @@
 # permissions and limitations under the License.
 
 import logging
-from abc import abstractmethod
 from typing import Any, Dict, Optional, Tuple
+from abc import ABC, abstractmethod
 
 import torch as pt
+import math
 
-from sockeye.loss import LossMetric, PerplexityMetric
 from . import constants as C
 # TODO: consider inheriting from 'from torch.nn.modules.loss import _Loss' ?
 from . import utils
@@ -25,7 +25,7 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-class PyTorchLoss(pt.nn.Module):
+class Loss(pt.nn.Module):
     """
     Generic Loss interface.
     A loss has a name, a configuration, and stores information about the output and label it requires from the model(s),
@@ -92,9 +92,43 @@ class PyTorchLoss(pt.nn.Module):
         return self._label_name
 
 
+class LossMetric(ABC):
+
+    def __init__(self, name: str, short_name: Optional[str] = None, prefix: str = '') -> None:
+        self._name = prefix + name
+        self._short_name = prefix + short_name if short_name else self._name
+        self._sum = 0.0
+        self._num_inst = 0.0
+
+    def __repr__(self):
+        return "%s(%.2f/%.2f=%.2f)" % (self.name, self._sum, self._num_inst, self.get())
+
+    def __str__(self):
+        return "%s=%f" % (self.short_name, self.get())
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def short_name(self) -> str:
+        return self._short_name
+
+    def update(self, loss, num_samples):
+        self._sum += loss
+        self._num_inst += num_samples
+
+    def get(self) -> float:
+        return self._sum / self._num_inst if self._num_inst else float('nan')
+
+    def reset(self):
+        self._sum = 0.0
+        self._num_inst = 0.0
+
+
 # TODO(fhieber): should be scriptable/traceable
 # TODO(fhieber): PyTorch 1.10 CrossEntropyLoss supports label smoothing.
-class PyTorchCrossEntropyLoss(PyTorchLoss):
+class PyTorchCrossEntropyLoss(Loss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
     Uses an efficient implementation for label smoothing and avoids the obscure SoftmaxOutput op.
@@ -108,7 +142,6 @@ class PyTorchCrossEntropyLoss(PyTorchLoss):
                  output_name: str = C.LOGITS_NAME,
                  label_name: str = C.TARGET_LABEL_NAME,
                  ignore_label: int = C.PAD_ID,
-                 num_labels: int = 0,
                  metric_prefix: str = '') -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name,
                          weight=weight, metric_prefix=metric_prefix)
@@ -185,3 +218,82 @@ class PyTorchCrossEntropyLoss(PyTorchLoss):
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
         return PerplexityMetric(prefix=self._metric_prefix)
+
+
+class PerplexityMetric(LossMetric):
+
+    def __init__(self, prefix: str = '', name: str = C.PERPLEXITY, short_name: str = C.PERPLEXITY_SHORT_NAME) -> None:
+        super().__init__(prefix=prefix, name=name, short_name=short_name)
+
+    def update(self, batch_cross_entropy: float, batch_num_valid: float):
+        self._sum += batch_cross_entropy
+        self._num_inst += batch_num_valid
+
+    def get(self):
+        return math.exp(super().get())
+
+
+class PoissonLoss(Loss):
+    """
+    Computes the Poisson regression loss.
+    MSEMetric for this loss will be reporting the mean
+    square error between lengths, not length ratios!
+    """
+
+    def __init__(self,
+                 name: str = f'{C.LENRATIO_NAME}_{C.LINK_POISSON}',
+                 weight: float = 1.0,
+                 output_name: str = C.LENRATIO_NAME,
+                 label_name: str = C.LENRATIO_LABEL_NAME) -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
+
+    def forward(self, length_predictions: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+        """
+        Returns Poisson loss and output given data and expected integers as labels.
+
+        :param length_predictions: Length predictions. Shape: (batch_size,).
+        :param labels: Targets. Shape: (batch_size,).
+        :return: Poisson loss of length predictions of the batch, and number of samples (batch size).
+        """
+        # (batch_size,)
+        loss = length_predictions - labels * pt.log(pt.clamp(length_predictions, min=1e-10))
+        # (1,)
+        loss = (loss * self.weight).sum()
+        num_samples = pt.ones_like(length_predictions).sum()
+        return loss, num_samples
+
+    def create_metric(self) -> 'LossMetric':
+        return LossMetric(name=C.LENRATIO_MSE)
+
+
+class MSELoss(Loss):
+    """
+    Computes the Mean Squared Error loss.
+    MSEMetric for this loss will be reporting the mean square error between length ratios.
+    """
+
+    def __init__(self,
+                 name: str = C.LENRATIO_NAME + "_" + C.LINK_NORMAL,
+                 weight: float = 1.0,
+                 output_name: str = C.LENRATIO_NAME,
+                 label_name: str = C.LENRATIO_LABEL_NAME) -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
+
+    def forward(self, length_predictions: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+        """
+        Returns MSE loss.
+
+        :param length_predictions: Length predictions. Shape: (batch_size,).
+        :param labels: Targets. Shape: (batch_size,).
+        :return: MSE loss of length predictions of the batch.
+        """
+        # (batch_size,)
+        loss = (self.weight / 2) * pt.square(length_predictions - labels)
+        # (1,)
+        loss = loss.sum()
+        num_samples = pt.ones_like(length_predictions).sum()
+        return loss, num_samples
+
+    def create_metric(self) -> 'LossMetric':
+        return LossMetric(name=C.LENRATIO_MSE)
+

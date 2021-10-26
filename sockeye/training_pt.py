@@ -142,7 +142,7 @@ class PyTorchEarlyStoppingTrainer:
                  optimizer_config: optimizers.PyTorchOptimizerConfig,
                  sockeye_model: model_pt.PyTorchSockeyeModel,
                  optimizer: torch.optim.Optimizer,
-                 loss_functions: List[loss_pt.PyTorchLoss],
+                 loss_functions: List[loss_pt.Loss],
                  device: torch.device,
                  dtype: str,
                  using_amp: bool = False,
