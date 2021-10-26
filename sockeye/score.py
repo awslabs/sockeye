@@ -114,7 +114,7 @@ def score(args: argparse.Namespace):
                                    score_type=args.score_type,
                                    constant_length_ratio=constant_length_ratio,
                                    softmax_temperature=args.softmax_temperature)
-        if args.use_pytorch and not args.no_hybridization:
+        if not args.use_pytorch and not args.no_hybridization:
             batch_scorer.hybridize(static_alloc=True)
 
         scorer = Scorer(model=model,

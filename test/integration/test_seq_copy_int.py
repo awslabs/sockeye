@@ -13,6 +13,7 @@
 import logging
 import os
 import sys
+from itertools import product
 from tempfile import TemporaryDirectory
 from typing import List
 from unittest.mock import patch
@@ -132,14 +133,16 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      False, 0, 0),
 ]
 
-ENCODER_DECODER_SETTINGS = [(train_params.format(decoder=decoder), *other_params)
-                            for decoder in C.DECODERS
-                            for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
+# expand test cases across transformer & ssru, as well as use_pytorch true/false
+TEST_CASES = [(use_pytorch, train_params.format(decoder=decoder), *other_params)
+              for decoder, use_pytorch in product(C.DECODERS, [False, True])
+              for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
 
 
-@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors",
-                         ENCODER_DECODER_SETTINGS)
-def test_seq_copy(train_params: str,
+@pytest.mark.parametrize("use_pytorch, train_params, translate_params, use_prepared_data,"
+                         "n_source_factors, n_target_factors", TEST_CASES)
+def test_seq_copy(use_pytorch: bool,
+                  train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
                   n_source_factors: int,
@@ -168,7 +171,8 @@ def test_seq_copy(train_params: str,
                               data=data,
                               use_prepared_data=use_prepared_data,
                               max_seq_len=_LINE_MAX_LENGTH,
-                              compare_output=False)
+                              compare_output=False,
+                              use_pytorch=use_pytorch)
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"

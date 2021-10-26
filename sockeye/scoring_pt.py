@@ -65,7 +65,7 @@ class BatchScorer(pt.nn.Module):
 
         # Sum, then apply length penalty. The call to `pt.where` masks out invalid values from scores.
         # zeros and sums: (batch_size,)
-        scores = token_scores.where(labels.not_equal(0), pt.zeros_like(token_scores)).sum(dim=1)
+        scores = token_scores.where(labels.not_equal(0), pt.zeros_like(token_scores)).sum(dim=1, keepdims=True)
 
         if self.constant_length_ratio is not None and self.constant_length_ratio > 0.0:
             predicted_output_length = source_length * self.constant_length_ratio
@@ -101,7 +101,7 @@ class Scorer:
         self.context = context
         self.exclude_list = {C.BOS_ID, C.EOS_ID, C.PAD_ID}
 
-    def score_batch(self, batch: data_io.Batch) -> pt.tensor:
+    def score_batch(self, batch: data_io.Batch):
         batch = batch.split_and_load(ctx=self.context)
         batch_scores = []  # type: List[pt.tensor]
         for inputs, labels in batch.shards():
@@ -120,7 +120,7 @@ class Scorer:
             batch_scores.append(scores)
 
         # shape: (batch_size,).
-        return pt.cat(batch_scores, dim=0)
+        return pt.cat(batch_scores, dim=0).squeeze(1).numpy()
 
     @pt.inference_mode(True)
     def score(self, score_iter: data_io.BaseParallelSampleIter, output_handler: OutputHandler):

@@ -37,7 +37,8 @@ def check_train_translate(train_params: str,
                           use_prepared_data: bool,
                           max_seq_len: int,
                           compare_output: bool = True,
-                          seed: int = 13) -> Dict[str, Any]:
+                          seed: int = 13,
+                          use_pytorch: bool = False) -> Dict[str, Any]:
     """
     Tests core features (training, inference).
     """
@@ -47,18 +48,25 @@ def check_train_translate(train_params: str,
                                data=data,
                                use_prepared_data=use_prepared_data,
                                max_seq_len=max_seq_len,
-                               seed=seed)
+                               seed=seed,
+                               use_pytorch=use_pytorch)
 
     # Test equivalence of batch decoding
     if 'greedy' not in translate_params:
         translate_params_batch = translate_params + " --batch-size 2"
-        test_translate_equivalence(data, translate_params_batch, compare_output=True, use_pytorch=False)
-        test_translate_equivalence(data, translate_params_batch, compare_output=True, use_pytorch=True)
+        test_translate_equivalence(data, translate_params_batch, compare_output=True, use_pytorch=use_pytorch)
+        if not use_pytorch:
+            # convert model to pytorch
+            convert_params = f"{sockeye.mx_to_pt.__file__} -m {data['model']}"
+            with patch.object(sys, "argv", convert_params.split()):
+                sockeye.mx_to_pt.main()
+            # check for equivalence with PyTorch decoding
+            test_translate_equivalence(data, translate_params_batch, compare_output=True, use_pytorch=True)
 
     # Run translate with restrict-lexicon
-    data = run_translate_restrict(data, translate_params)
+    data = run_translate_restrict(data, translate_params, use_pytorch=use_pytorch)
 
-    test_translate_equivalence(data, translate_params, compare_output=True, use_pytorch=True)
+    test_translate_equivalence(data, translate_params, compare_output=True, use_pytorch=use_pytorch)
 
     # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
     # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
@@ -69,7 +77,7 @@ def check_train_translate(train_params: str,
     # - scoring requires valid translation output to compare against
     if '--max-input-length' not in translate_params and _translate_output_is_valid(data['test_outputs']) \
             and 'greedy' not in translate_params:
-        test_scoring(data, translate_params, compare_output)
+        test_scoring(data, translate_params, compare_output, use_pytorch=use_pytorch)
 
     # Test correct prediction of target factors if enabled
     if compare_output and 'train_target_factors' in data:
@@ -86,11 +94,6 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     """
     out_path = os.path.join(data['work_dir'], "test.out.equiv")
     params_format_string = TRANSLATE_PARAMS_COMMON_PYTORCH if use_pytorch else TRANSLATE_PARAMS_COMMON
-    if use_pytorch:
-        # convert model to pytorch
-        convert_params = f"{sockeye.mx_to_pt.__file__} -m {data['model']}"
-        with patch.object(sys, "argv", convert_params.split()):
-            sockeye.mx_to_pt.main()
     params = "{} {} {}".format(sockeye.translate.__file__,
                                params_format_string.format(model=data['model'],
                                                            input=data['test_source'],
@@ -138,7 +141,7 @@ def test_constrained_decoding_against_ref(data: Dict[str, Any], translate_params
     return data
 
 
-def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_scores: bool):
+def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_scores: bool, use_pytorch: bool = False):
     """
     Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
     """
@@ -168,12 +171,13 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
                 factor = json_output['factor%d' % i]
                 print(factor, file=factor_out)
 
-    params = "{} {} {}".format(sockeye.score.__file__,
-                               SCORE_PARAMS_COMMON.format(model=data['model'],
-                                                          source=data['test_source'],
-                                                          target=target_path,
-                                                          output=out_path),
-                               score_params)
+    params = "{} {} {} {}".format(sockeye.score.__file__,
+                                  SCORE_PARAMS_COMMON.format(model=data['model'],
+                                                             source=data['test_source'],
+                                                             target=target_path,
+                                                             output=out_path),
+                                  score_params,
+                                  '--use-pytorch' if use_pytorch else '')
     if 'test_source_factors' in data:
         params += SCORE_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['test_source_factors']))
     if target_factor_paths:

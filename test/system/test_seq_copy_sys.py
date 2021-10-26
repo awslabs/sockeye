@@ -47,7 +47,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
                          " --optimized-metric perplexity --loss cross-entropy --weight-tying-type src_trg_softmax"
 
 
-@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
+TEST_CASES = [
     ("Copy:transformer:transformer",
      "--encoder transformer --decoder transformer"
      " --max-updates 4000"
@@ -92,8 +92,15 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
      False,
      1.02,
      0.94)
-])
-def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
+]
+
+# run each test with MXNet and PyTorch
+TEST_CASES = [(use_pytorch, *other_params) for use_pytorch in [True, False] for other_params in TEST_CASES]
+
+
+@pytest.mark.parametrize("use_pytorch, name, train_params, translate_params, use_prepared_data, "
+                         "perplexity_thresh, bleu_thresh", TEST_CASES)
+def test_seq_copy(use_pytorch, name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset(prefix="test_seq_copy",
                             train_line_count=_TRAIN_LINE_COUNT,
@@ -112,7 +119,8 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH,
                                      compare_output=True,
-                                     seed=seed)
+                                     seed=seed,
+                                     use_pytorch=use_pytorch)
 
         # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(os.path.join(data['model'], C.METRICS_NAME))
