@@ -666,21 +666,17 @@ def create_model_config(args: argparse.Namespace,
                                                                       args.target_factors_combine,
                                                                       args.target_factors_share_embedding)]
 
-    # TODO(mdenkows): Investigate SparseAdam
-    # Due to: Adam does not support sparse gradients, please consider SparseAdam instead
-    allow_sparse_grad = False
-
     config_embed_source = encoder_pt.EmbeddingConfig(vocab_size=source_vocab_size,
                                                      num_embed=num_embed_source,
                                                      dropout=embed_dropout_source,
                                                      factor_configs=source_factor_configs,
-                                                     allow_sparse_grad=allow_sparse_grad)
+                                                     allow_sparse_grad=False)
 
     config_embed_target = encoder_pt.EmbeddingConfig(vocab_size=target_vocab_size,
                                                      num_embed=num_embed_target,
                                                      dropout=embed_dropout_target,
                                                      factor_configs=target_factor_configs,
-                                                     allow_sparse_grad=allow_sparse_grad)
+                                                     allow_sparse_grad=False)
 
     config_length_task = None
     if args.length_task is not None:
