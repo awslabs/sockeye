@@ -317,16 +317,16 @@ class PyTorchEarlyStoppingTrainer:
             sum_losses = self._scaler.scale(sum_losses)
         # Backward
         sum_losses.backward()
-        return loss_values
+        return loss_outputs
 
     def _step(self, batch: data_io_pt.Batch) -> bool:
         self.state.batches += 1
         self.state.samples += batch.samples
 
         # Forward/loss/backward (compute gradients)
-        loss_values = self._forward_backward(batch)
-        for loss_func, loss_value in zip(self.loss_functions, loss_values):
-            loss_func.metric.update(loss_value.item(), 1 / self.config.update_interval)
+        loss_outputs = self._forward_backward(batch)
+        for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
+            loss_func.metric.update(loss_value.item(), num_samples.item() / self.config.update_interval)
 
         # Update model weights if we've accumulated gradients over
         # N=update_interval batches
@@ -374,10 +374,9 @@ class PyTorchEarlyStoppingTrainer:
             outputs = self.model(batch.source, batch.source_length, batch.target, batch.target_length)
             # Loss
             loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
-            loss_values = [v for v, _ in loss_outputs]
             # Update validation metrics for batch
-            for loss_metric, loss_value in zip(val_metrics, loss_values):
-                loss_metric.update(loss_value.item(), 1)
+            for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
+                loss_metric.update(loss_value.item(), num_samples.item())
 
         # Optionally run the checkpoint decoder
         if checkpoint_decoder is not None:
