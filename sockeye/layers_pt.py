@@ -653,6 +653,7 @@ class PyTorchSSRU(AutoregressiveLayer):
         return 1, batch_size, self.model_size
 
     @staticmethod
+    @pt.jit.script_if_tracing
     def _training_cell_state_transform(previous_cell_state, weighted_inputs, forget_rates) -> Tuple[pt.Tensor,
                                                                                                     pt.Tensor]:
         """Update SSRU cell at training time"""

@@ -151,7 +151,7 @@ class PyTorchEarlyStoppingTrainer:
         self.config = config
         self.optimizer_config = optimizer_config
         self.model = sockeye_model
-        self.traced_models = {}  # type: Dict[Tuple[int, int], model_pt.PyTorchSockeyeModel]
+        self.traced_model = None  # type: Optional[torch.jit.TracedModule]
         self.optimizer = optimizer
         self.loss_functions = loss_functions
         self.device = device
@@ -299,19 +299,16 @@ class PyTorchEarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
-        # TODO(mdenkows): Using a single traced model instance currently causes
-        # errors for different sequence lengths. Use bucketing for now.
-        seq_len = (batch.source.shape[1], batch.target.shape[1])
         # TODO(mdenkows): Right now this only works with PYTORCH_JIT=0 due to:
         # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
         # Consider making it a parameter or input, or detaching the gradient
         with torch.cuda.amp.autocast() if self.using_amp else utils.no_context():
             # Forward
-            if seq_len not in self.traced_models:
-                logger.info(f'Tracing model for seq_len={seq_len}')
-                self.traced_models[seq_len] = torch.jit.trace(self.model, (batch.source, batch.source_length,
-                                                              batch.target, batch.target_length), strict=False)
-            outputs = self.traced_models[seq_len](batch.source, batch.source_length, batch.target, batch.target_length)
+            if self.traced_model is None:
+                logger.info(f'Tracing model')
+                self.traced_model = torch.jit.trace(self.model, (batch.source, batch.source_length,
+                                                                 batch.target, batch.target_length), strict=False)
+            outputs = self.traced_model(batch.source, batch.source_length, batch.target, batch.target_length)
             # Loss (scaled by update interval)
             loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
             loss_values = [v / self.config.update_interval if self.config.update_interval > 1
