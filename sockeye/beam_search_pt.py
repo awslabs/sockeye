@@ -309,45 +309,46 @@ class TopK(pt.nn.Module):
         return best_hyp_indices, best_word_indices, values
 
 
-# class SampleK(pt.nn.Module):
-#     """
-#     A Module for selecting a random word from each hypothesis according to its distribution.
-#     """
-#     def __init__(self, n) -> None:
-#         super().__init__()
-#         self.n = n
-#
-#     def forward(self, scores, target_dists, finished, best_hyp_indices):
-#         """
-#         Choose an extension of each hypothesis from its softmax distribution.
-#
-#         :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-#         :param target_dists: The non-cumulative target distributions (ignored).
-#         :param finished: The list of finished hypotheses.
-#         :param best_hyp_indices: Best hypothesis indices constant.
-#         :return: The row indices, column indices, and values of the sampled words.
-#         """
-#         # Map the negative logprobs to probabilities so as to have a distribution
-#         target_dists = pt.exp(-target_dists)
-#
-#         # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
-#         if self.n != 0:
-#             # select the top n in each row, via a mask
-#             masked_items = pt.topk(target_dists, k=self.n, ret_typ='mask', dim=1, largest=False, sorted=True)
-#             # set unmasked items to 0
-#             masked_items = np.where(masked_items, target_dists, masked_items)
-#             # renormalize
-#             target_dists = masked_items / np.sum(masked_items, axis=1, keepdims=True)
-#
-#         # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
-#         best_word_indices = npx.random.categorical(target_dists, get_prob=False)
-#         # Zeroes for finished hypotheses.
-#         best_word_indices = np.where(finished, np.zeros_like(best_word_indices), best_word_indices)
-#         values = npx.pick(scores, best_word_indices, axis=1, keepdims=True)
-#
-#         best_hyp_indices = npx.slice_like(best_hyp_indices, best_word_indices, axes=(0,))
-#
-#         return best_hyp_indices, best_word_indices, values
+class SampleK(pt.nn.Module):
+    """
+    A Module for selecting a random word from each hypothesis according to its distribution.
+    """
+    def __init__(self, n: int) -> None:
+        super().__init__()
+        self.n = n
+
+    def forward(self, scores, target_dists, finished):
+        """
+        Choose an extension of each hypothesis from its softmax distribution.
+
+        :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
+        :param target_dists: The non-cumulative target distributions (ignored).
+        :param finished: The list of finished hypotheses.
+        :return: The row indices, column indices, and values of the sampled words.
+        """
+        # Map the negative logprobs to probabilities so as to have a distribution
+        target_dists = pt.exp(-target_dists)
+
+        # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
+        if self.n != 0:
+            # select the top n in each row, via a mask
+            _, indices = pt.topk(target_dists, k=self.n, dim=1, largest=True, sorted=True)
+            # set items not chosen by topk to 0
+            target_dists = pt.scatter(pt.zeros_like(target_dists), 1, indices, target_dists)
+            # renormalize
+            target_dists = target_dists / target_dists.sum(1, keepdim=True)
+
+        # Sample from the target distributions over words, then get the corresponding values from the cumulative scores
+        # shape: (batch,)
+        best_word_indices = pt.multinomial(target_dists, 1).squeeze(1)
+        # Zeroes for finished hypotheses.
+        best_word_indices = best_word_indices.masked_fill(finished, 0)
+        # (batch, 1)
+        values = scores.gather(dim=1, index=best_word_indices.long().unsqueeze(1))
+        # (batch,)
+        best_hyp_indices = pt.arange(0, best_word_indices.size()[0])
+
+        return best_hyp_indices, best_word_indices, values
 
 
 class RepeatStates(pt.nn.Module):
@@ -609,8 +610,7 @@ class BeamSearch(pt.nn.Module):
         self._sample = None  # type: Optional[pt.nn.Module]
         self._top = None  # type: Optional[pt.nn.Module]
         if sample is not None:
-            assert False, "not implemented yet"
-            #self._sample = SampleK(sample)
+            self._sample = SampleK(sample)
         else:
             self._top = TopK(self.beam_size)
         self._traced_top = None
@@ -647,11 +647,8 @@ class BeamSearch(pt.nn.Module):
         max_iterations = max_output_lengths.max().item()
         logger.debug("max beam search iterations: %d", max_iterations)
 
-        sample_best_hyp_indices = None
         if self._sample is not None:
-            utils.check_condition(restrict_lexicon is None,
-                                  "Sampling is not available when working with a restricted lexicon.")
-            sample_best_hyp_indices = pt.arange(0, batch_size * self.beam_size, dtype=pt.int32, device=self.device)
+            utils.check_condition(restrict_lexicon is None, "restriced lexicon not available when sampling.")
 
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
@@ -747,10 +744,7 @@ class BeamSearch(pt.nn.Module):
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
             if self._sample is not None:
-                best_hyp_indices, best_word_indices, scores_accumulated = self._sample(scores,
-                                                                                       target_dists,
-                                                                                       finished,
-                                                                                       sample_best_hyp_indices)
+                best_hyp_indices, best_word_indices, scores_accumulated = self._sample(scores, target_dists, finished)
             else:
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
                 # of the first row only by setting all other rows to inf

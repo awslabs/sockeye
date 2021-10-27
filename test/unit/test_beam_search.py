@@ -363,6 +363,36 @@ def test_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
         assert np.sum(np.where(finished, words, finished)).item() == 0
 
 
+@pytest.mark.parametrize("batch_size, beam_size, target_vocab_size, top_n",
+                        [(1, 5, 200, 0),
+                         (5, 5, 200, 0),
+                         (1, 100, 200, 5),
+                         (5, 100, 200, 5)])
+def test_pytorch_samplek_func(batch_size, beam_size, target_vocab_size, top_n):
+    # arrange scores increasing values from left to right, so the best item is always index 0, next-best 1, and so on
+    scores = pt.tensor([list(range(1, target_vocab_size + 1)) for _ in range(batch_size * beam_size)])
+
+    samplek = sockeye.beam_search_pt.SampleK(n=top_n)
+
+    # 0..(batch_size * beam_size)-1
+    expected_hyps = pt.tensor(range(batch_size * beam_size), dtype=pt.int32)
+    finished = pt.rand(batch_size * beam_size) > 0.5
+
+    for i in [1, 2]:
+        hyps, words, values = samplek(scores, scores, finished)
+        assert hyps.shape[0] == batch_size * beam_size
+
+        # The indices should always be the integers from 0 to batch*beam-1
+        assert (hyps == expected_hyps).sum().item() == (batch_size * beam_size)
+        if top_n != 0:
+            # Scores are increasing left-to-right, so best items are all the lowest word IDs.
+            # No word id greater than the cap (top_n) should be selected
+            assert (words >= top_n).sum().item() == 0
+
+        # word index should be zero for all finished hypotheses
+        assert pt.where(finished, words, finished.long()).sum().item() == 0
+
+
 def test_update_scores():
     vocab_size = 10
     batch_beam_size = 3
