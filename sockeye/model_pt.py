@@ -33,7 +33,6 @@ from . import vocab
 from .config import Config
 from .encoder import FactorConfig
 from .layers import LengthRatioConfig
-from .model import SockeyeModel
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -141,7 +140,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
             self.length_ratio = layers_pt.PyTorchLengthRatio(hidden_size=self.encoder.get_num_hidden(),
                                                              num_layers=self.config.config_length_task.num_layers)
 
-    def weights_from_mxnet_block(self, block_mx: SockeyeModel):
+    def weights_from_mxnet_block(self, block_mx: 'SockeyeModel'):
         self.embedding_source.weights_from_mxnet_block(block_mx.embedding_source)
         self.embedding_target.weights_from_mxnet_block(block_mx.embedding_target)
         self.encoder.weights_from_mxnet_block(block_mx.encoder)
@@ -528,7 +527,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         return cache_func
 
 
-def make_pytorch_model_from_mxnet_model(mx_model: SockeyeModel) -> PyTorchSockeyeModel:
+def make_pytorch_model_from_mxnet_model(mx_model: 'SockeyeModel') -> PyTorchSockeyeModel:
     """
     Constructs a PyTorchSockeyeModel from a given SockeyeModel and copies its parameters in-memory.
     """
