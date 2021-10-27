@@ -985,6 +985,12 @@ def add_training_args(params):
                                    '-np X python3 -m sockeye.train` where X is the number of processes. Increasing '
                                    'the number of processes multiplies the effective batch size (ex: batch_size 2560 '
                                    'with `-np 4` gives effective batch size 10240).')
+    train_params.add_argument('--dist',
+                              action='store_true',
+                              help='Run in distributed training mode. When using this option, launch training with '
+                                   '`torchrun --nproc_per_node N -m sockeye.train`. Increasing the number of processes '
+                                   'multiplies the effective batch size (ex: batch_size 2560 with `--nproc_per_node 4` '
+                                   'gives effective batch size 10240).')
 
     train_params.add_argument("--kvstore",
                               type=str,

@@ -382,18 +382,13 @@ def determine_device(device_id: int,
         device = pt.device('cpu')
     else:
         num_gpus = pt.cuda.device_count()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu ")
-        if horovod_mpi.using_horovod():
-            # Running with Horovod/MPI: GPU(s) are determined by local rank
-            device = pt.device(f'cuda:{horovod_mpi.hvd.local_rank()}')
+        check_condition(num_gpus >= 1, 'No GPUs found, consider running on the CPU with --use-cpu')
+        if disable_device_locking:
+            device = pt.device(f'cuda:{max(0, device_id)}')
         else:
-            if disable_device_locking:
-                device = pt.device(f'cuda:{device_id}')
-            else:
-                acquired_device_id = exit_stack.enter_context(acquire_gpus([-1], lock_dir=lock_dir,
-                                                                           num_gpus_available=num_gpus))[0]
-                device = pt.device(f'cuda:{acquired_device_id}')
+            acquired_device_id = exit_stack.enter_context(acquire_gpus([-1], lock_dir=lock_dir,
+                                                                       num_gpus_available=num_gpus))[0]
+            device = pt.device(f'cuda:{acquired_device_id}')
     return device
 
 

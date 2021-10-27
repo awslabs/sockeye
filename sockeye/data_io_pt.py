@@ -29,6 +29,7 @@ from itertools import chain
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple, Set
 
 import torch
+import torch.distributed
 import numpy as np
 
 from . import config
@@ -736,7 +737,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                              max_seq_len_source: int,
                              max_seq_len_target: int,
                              batch_size: int,
-                             permute: bool = True) -> 'ParallelSampleIter':
+                             permute: bool = False) -> 'ParallelSampleIter':
     """
     Returns a ParallelSampleIter for the validation data.
     """
@@ -850,6 +851,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                            eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
+    # Don't shuffle validation data. Different orders can cause different
+    # evaluation results.
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
                                                validation_targets=validation_targets,
@@ -860,7 +863,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
-                                               permute=permute)
+                                               permute=False)
 
     return train_iter, validation_iter, config_data, source_vocabs, target_vocabs
 
@@ -972,6 +975,8 @@ def get_training_data_iters(sources: List[str],
                                     num_target_factors=len(targets),
                                     permute=permute)
 
+    # Don't shuffle validation data. Different orders can cause different
+    # evaluation results.
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
                                                validation_targets=validation_targets,
@@ -982,7 +987,7 @@ def get_training_data_iters(sources: List[str],
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
-                                               permute=permute)
+                                               permute=False)
 
     return train_iter, validation_iter, config_data, data_info
 
@@ -1370,18 +1375,17 @@ class ParallelDataSet:
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
         """
-        Loads a dataset from a binary .npy file.  When running Horovod, the data
-        is sliced and each worker loads a different slice based on its rank.
-        Specifically, each of N workers loads 1/N of each bucket.
+        Loads a dataset from a binary .npy file. When running in distributed
+        mode, the data is sliced and each worker loads a different slice based
+        on its rank. Specifically, each of N workers loads 1/N of each bucket.
         """
         data = torch.load(fname)
         n = len(data) // 2
         source = data[:n]
         target = data[n:2 * n]
-        # TODO(mdenkows): Migrate to PyTorch distributed training
-        if horovod_mpi.using_horovod() and horovod_mpi.hvd.size() > 1:
-            split_index = horovod_mpi.hvd.rank()
-            total_splits = horovod_mpi.hvd.size()
+        if torch.distributed.is_initialized():
+            split_index = torch.distributed.get_rank()
+            total_splits = torch.distributed.get_world_size()
             i = split_index / total_splits
             j = (split_index + 1) / total_splits
             # For each bucket, check if there are more splits (workers) than

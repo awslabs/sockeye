@@ -203,6 +203,7 @@ def test_inference_args(test_params, expected_params):
               optimizer_eps=1e-08,
               optimizer_params=None,
               horovod=False,
+              dist=False,
               kvstore='device',
               min_samples=None,
               max_samples=None,

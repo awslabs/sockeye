@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
 import torch
+import torch.distributed
 import numpy as np
 
 from . import average
@@ -141,17 +142,20 @@ class PyTorchEarlyStoppingTrainer:
                  config: TrainerConfig,
                  optimizer_config: optimizers.PyTorchOptimizerConfig,
                  sockeye_model: model_pt.PyTorchSockeyeModel,
+                 traced_model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
                  loss_functions: List[loss_pt.Loss],
                  device: torch.device,
                  dtype: str,
                  using_amp: bool = False,
+                 is_distributed: bool = False,
+                 is_primary_worker: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
                  checkpoint_callback: Optional[Callable] = None) -> None:
         self.config = config
         self.optimizer_config = optimizer_config
-        self.model = sockeye_model
-        self.traced_model = None  # type: Optional[torch.jit.TracedModule]
+        self.sockeye_model = sockeye_model
+        self.traced_model = traced_model
         self.optimizer = optimizer
         self.loss_functions = loss_functions
         self.device = device
@@ -159,6 +163,8 @@ class PyTorchEarlyStoppingTrainer:
         self.using_amp = using_amp
         if using_amp:
             self._scaler = torch.cuda.amp.GradScaler()
+        self.distributed = is_distributed
+        self.is_primary_worker = is_primary_worker
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
@@ -181,9 +187,9 @@ class PyTorchEarlyStoppingTrainer:
             self._load_training_state(train_iter)
         else:
             self.state = TrainState(self.config.early_stopping_metric)
-            self.model.save_config(self.config.output_dir)
-            self.model.save_version(self.config.output_dir)
-            self.model.save_parameters(self.current_params_fname)
+            self.sockeye_model.save_config(self.config.output_dir)
+            self.sockeye_model.save_version(self.config.output_dir)
+            self.sockeye_model.save_parameters(self.current_params_fname)
             logger.info("Training started.")
 
         tic = time.time()
@@ -270,11 +276,7 @@ class PyTorchEarlyStoppingTrainer:
         logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
                     "\t".join("Train-%s" % str(metric) for metric in train_metrics))
 
-        # Switch model to eval mode (disable dropout, etc.), score validation
-        # set and run checkpoint decoder, then switch model back to train mode.
-        self.model.eval()
         val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
-        self.model.train()
 
         has_improved = self._determine_improvement(val_metrics)
         self.state.converged = self._determine_convergence()
@@ -303,10 +305,6 @@ class PyTorchEarlyStoppingTrainer:
         # See: https://github.com/pytorch/pytorch/pull/63552
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():
             # Forward
-            if self.traced_model is None:
-                logger.info(f'Tracing model')
-                self.traced_model = torch.jit.trace(self.model, (batch.source, batch.source_length,
-                                                                 batch.target, batch.target_length), strict=False)
             outputs = self.traced_model(batch.source, batch.source_length, batch.target, batch.target_length)
             # Loss (scaled by update interval)
             loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
@@ -340,10 +338,10 @@ class PyTorchEarlyStoppingTrainer:
                 self._scaler.unscale_(self.optimizer)
             # Clip gradients
             if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
-                torch.nn.utils.clip_grad.clip_grad_value_(self.model.parameters(),
+                torch.nn.utils.clip_grad.clip_grad_value_(self.traced_model.parameters(),
                                                           self.optimizer_config.gradient_clipping_threshold)
             elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-                torch.nn.utils.clip_grad.clip_grad_norm_(self.model.parameters(),
+                torch.nn.utils.clip_grad.clip_grad_norm_(self.traced_model.parameters(),
                                                          self.optimizer_config.gradient_clipping_threshold)
             # Set learning rate for current step
             for param_group in self.optimizer.param_groups:
@@ -369,12 +367,17 @@ class PyTorchEarlyStoppingTrainer:
         :param data_iter: Validation data iterator.
         :return: List of validation metrics, same order as self.loss_functions.
         """
+        # Switch model to eval mode (disable dropout, etc.) to score validation
+        # set and run checkpoint decoder.
+        self.sockeye_model.eval()
+
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
             batch = batch.load(device=self.device)
-            # Forward
-            outputs = self.model(batch.source, batch.source_length, batch.target, batch.target_length)
+            # Forward: use sockeye_model because traced_model doesn't support
+            # eval mode (still runs dropout, etc.)
+            outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
             # Loss
             loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
             # Update validation metrics for batch
@@ -394,6 +397,8 @@ class PyTorchEarlyStoppingTrainer:
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
 
+        # Switch model back to train mode to continue training
+        self.sockeye_model.train()
         return val_metrics
 
     def _determine_improvement(self, val_metrics: List[loss_pt.LossMetric]) -> bool:
@@ -500,7 +505,7 @@ class PyTorchEarlyStoppingTrainer:
                 last_ppl = metric.get()
                 break
         # using a double of uniform distribution's value as a threshold
-        if not np.isfinite(last_ppl) or last_ppl > 2 * self.model.config.vocab_target_size:
+        if not np.isfinite(last_ppl) or last_ppl > 2 * self.sockeye_model.config.vocab_target_size:
             logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f", last_ppl)
             return True
         return False
@@ -518,9 +523,8 @@ class PyTorchEarlyStoppingTrainer:
             if lr_adjusted and not has_improved:
                 logger.info("Loading model parameters and optimizer states from best checkpoint: %d",
                             self.state.best_checkpoint)
-                # TODO(mdenkows): Test checkpoint loading
                 if os.path.exists(self.best_params_fname):
-                    self.model.load_parameters(filename=self.best_params_fname, device=self.device)
+                    self.sockeye_model.load_parameters(filename=self.best_params_fname, device=self.device)
                 if os.path.exists(self.best_optimizer_state_fname):
                     self._load_optimizer_state(self.best_optimizer_state_fname)
 
@@ -567,7 +571,7 @@ class PyTorchEarlyStoppingTrainer:
         """
         Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
         """
-        self.model.save_parameters(self.current_params_fname)
+        self.sockeye_model.save_parameters(self.current_params_fname)
         cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
                              self.state.best_checkpoint, self.config.keep_initializations,
                              self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
@@ -660,7 +664,7 @@ class PyTorchEarlyStoppingTrainer:
         """
         # (1) Parameters
         params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
-        self.model.load_parameters(params_fname, device=self.device, allow_missing=False, ignore_extra=False)
+        self.sockeye_model.load_parameters(params_fname, device=self.device, allow_missing=False, ignore_extra=False)
 
         # (2) Optimizer states
         opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATE_LAST)

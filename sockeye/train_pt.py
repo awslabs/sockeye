@@ -29,13 +29,13 @@ from contextlib import ExitStack
 from typing import cast, Callable, Optional, Dict, List, Tuple
 
 import torch
+import torch.distributed
 
 from . import arguments
 from . import checkpoint_decoder_pt
 from . import constants as C
 from . import data_io_pt
 from . import encoder_pt
-from . import horovod_mpi
 from . import layers_pt
 from . import loss_pt
 from . import lr_scheduler
@@ -126,29 +126,25 @@ def check_arg_compatibility(args: argparse.Namespace):
         args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
 
 
-def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
+def check_resume(args: argparse.Namespace, output_folder: str, is_primary_worker: bool) -> bool:
     """
     Check if we should resume a broken training run.
 
     :param args: Arguments as returned by argparse.
     :param output_folder: Main output folder for the model.
+    :param is_primary_worker: Current process is primary worker.
 
     :return: Flag signaling if we are resuming training and the directory with
         the training status.
     """
     resume_training = False
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
-    # TODO(mdenkows): Migrate to PyTorch distributed training
-    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0:
-        # Horovod secondary workers: wait for primary worker to create the sub-
-        # directory where secondary workers create output directories.
-        primary_worker_dir_check = False
-        horovod_mpi.MPI.COMM_WORLD.bcast(primary_worker_dir_check, root=0)
     if os.path.exists(output_folder):
         if args.overwrite_output:
-            logger.info("Removing existing output folder %s.", output_folder)
-            shutil.rmtree(output_folder)
-            os.makedirs(output_folder)
+            if is_primary_worker:
+                logger.info("Removing existing output folder %s.", output_folder)
+                shutil.rmtree(output_folder)
+                os.makedirs(output_folder)
         elif os.path.exists(training_state_dir):
             old_args = vars(arguments.load_args(os.path.join(output_folder, C.ARGS_STATE_NAME)))
             arg_diffs = _dict_difference(vars(args), old_args) | _dict_difference(old_args, vars(args))
@@ -168,15 +164,14 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
             logger.info("The output folder %s already exists, but no training state or parameter file was found. "
                         "Will start training from scratch.", output_folder)
     else:
-        os.makedirs(output_folder)
-    # TODO(mdenkows): Migrate to PyTorch distributed training
-    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() == 0:
-        # Horovod primary worker: make sure sub-directory for secondary worker
-        # outputs exists and signal secondary workers.
-        os.makedirs(os.path.join(output_folder, C.HOROVOD_SECONDARY_WORKERS_DIRNAME), exist_ok=True)
-        primary_worker_dir_check = True
-        horovod_mpi.MPI.COMM_WORLD.bcast(primary_worker_dir_check, root=0)
-
+        if is_primary_worker:
+            os.makedirs(output_folder)
+    if args.dist:
+        if is_primary_worker:
+            os.makedirs(os.path.join(output_folder, C.DIST_SECONDARY_WORKERS_LOGDIR), exist_ok=True)
+        # Distributed sync point: output folder exists and we're ready to start
+        # training
+        torch.distributed.barrier()
     return resume_training
 
 
@@ -206,11 +201,6 @@ def create_checkpoint_decoder(
         sample_size = -1
 
     if sample_size == 0:
-        return None
-
-    # TODO(mdenkows): Migrate to PyTorch distributed training
-    if horovod_mpi.using_horovod() and horovod_mpi.hvd.rank() > 0 and args.optimized_metric not in C.METRICS_REQUIRING_DECODER:
-        logger.info("This is a secondary worker, not creating a checkpoint decoder for this training instance")
         return None
 
     if args.decode_and_evaluate_device_id is not None:
@@ -280,10 +270,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     validation_targets = [args.validation_target] + args.validation_target_factors
     validation_targets = [str(os.path.abspath(target)) for target in validation_targets]
 
-    if args.horovod:
-        horovod_data_error_msg = "Horovod training requires prepared training data.  Use `python -m " \
-                                 "sockeye.prepare_data` and specify with %s" % C.TRAINING_ARG_PREPARED_DATA
-        check_condition(args.prepared_data is not None, horovod_data_error_msg)
+    if args.dist:
+        error_msg = 'Distributed training requires prepared training data. Use `python -m sockeye.prepare_data` and ' \
+                    'specify with %s' % C.TRAINING_ARG_PREPARED_DATA
+        check_condition(args.prepared_data is not None, error_msg)
     either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
                                        "with %s." % (C.TRAINING_ARG_SOURCE,
                                                      C.TRAINING_ARG_TARGET,
@@ -790,8 +780,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
                                                gradient_clipping_threshold=gradient_clipping_threshold,
                                                lr_scheduler=lr_sched)
 
-    # TODO(mdenkows): Migrate to PyTorch distributed training
-    num_workers = 1 if not args.horovod else horovod_mpi.hvd.size()
+    num_workers = 1 if not args.dist else torch.distributed.get_world_size()
     effective_batch_size = args.batch_size * args.update_interval * num_workers
     logger.info(config)
     logger.info(f'Gradient accumulation over {args.update_interval} batch(es) by {num_workers} worker(s). Effective '
@@ -889,6 +878,11 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                 each time a checkpoint has been reached
     """
 
+    if args.dist:
+        # TODO(mdenkows): Investigate Gloo vs NCCL backends
+        torch.distributed.init_process_group('gloo')
+    is_primary_worker = not args.dist or torch.distributed.get_rank() == 0
+
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
         # perform 0 training iterations
@@ -896,47 +890,34 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         args.output = temp_dir.name
         args.max_updates = 0
 
-    # TODO(mdenkows): Migrate to PyTorch distributed training
-    # When using Horovod, multiple workers (instances of sockeye.train) are
-    # launched via MPI.  Each worker has a rank (unique among all workers in the
-    # training run) and a local rank (unique on the current host).  For example,
-    # running on 2 hosts with 4 slots each will assign ranks 0-7 and local ranks
-    # 0-3.
-    console_level = None
-    if args.horovod:
-        if horovod_mpi.hvd is None or horovod_mpi.MPI is None:
-            raise RuntimeError('Horovod training requires the following packages to be installed: horovod mpi4py')
-        # Unless explicitly set otherwise, use NCCL for same-host
-        # allreduce/allgather and MPI for cross-host allreduce/allgather.
-        if C.HOROVOD_HIERARCHICAL_ALLREDUCE not in os.environ:
-            os.environ[C.HOROVOD_HIERARCHICAL_ALLREDUCE] = '1'
-        if C.HOROVOD_HIERARCHICAL_ALLGATHER not in os.environ:
-            os.environ[C.HOROVOD_HIERARCHICAL_ALLGATHER] = '1'
-        horovod_mpi.hvd.init()
-        # Each worker uses a separate output directory.  The primary worker
-        # (rank 0) writes files to the root of the output directory (standard
-        # behavior).  Secondary workers write files to rank-named
-        # sub-directories.
-        if horovod_mpi.hvd.rank() > 0:
-            args.output = os.path.join(args.output, C.HOROVOD_SECONDARY_WORKERS_DIRNAME, str(horovod_mpi.hvd.rank()))
-            # Do not keep redundant copies of the checkpoint history
-            args.keep_last_params = 1
-            # If requested, suppress console output for secondary workers
-            if args.quiet_secondary_workers:
-                args.quiet = True
-            console_level = args.loglevel_secondary_workers
-
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
-    resume_training = check_resume(args, output_folder)
+    resume_training = check_resume(args, output_folder, is_primary_worker)
+
+    # In distributed mode, multiple workers (instances of sockeye.train) are
+    # launched via torchrun. Each worker has a unique rank. Worker 0 is the
+    # primary worker that writes files and makes authoritative training
+    # decisions (ex: whether a checkpoint improves). Workers 1+ are secondary
+    # workers that run parallel training steps and send gradients to the primary
+    # worker (but don't output anything other than log files).
+    logfile = os.path.join(output_folder, C.LOG_NAME)
+    console_level = None
+    if not is_primary_worker:
+        logfile = os.path.join(output_folder, C.DIST_SECONDARY_WORKERS_LOGDIR,
+                               f'{torch.distributed.get_rank()}.{C.LOG_NAME}')
+        # If requested, suppress console output for secondary workers
+        if args.quiet_secondary_workers:
+            args.quiet = True
+        console_level = args.loglevel_secondary_workers
 
     setup_main_logger(file_logging=not args.no_logfile,
                       console=not args.quiet,
-                      path=os.path.join(output_folder, C.LOG_NAME),
+                      path=logfile,
                       level=args.loglevel,
                       console_level=console_level)
     utils.log_basic_info(args)
-    arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
+    if is_primary_worker:
+        arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
     max_seq_len_source, max_seq_len_target = args.max_seq_len
     # The maximum length given by the user is the length before we add the BOS/EOS symbols
@@ -946,7 +927,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
-        device = utils.determine_device(device_id=args.device_ids,
+        # For distributed training, allocate GPUs to workers by local rank
+        device = utils.determine_device(device_id=int(os.environ[C.DIST_ENV_LOCAL_RANK]) if args.dist
+                                                  else args.device_ids,
                                         use_cpu=args.use_cpu,
                                         disable_device_locking=args.disable_device_locking,
                                         lock_dir=args.lock_dir,
@@ -972,7 +955,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             max_seq_len_target = config_data.max_seq_len_target
 
         # Dump the vocabularies if we're just starting up
-        if not resume_training:
+        if is_primary_worker and not resume_training:
             vocab.save_source_vocabs(source_vocabs, output_folder)
             vocab.save_target_vocabs(target_vocabs, output_folder)
 
@@ -1018,68 +1001,66 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         optimizer_config = create_optimizer_config(args)
 
-        training_model = model_pt.PyTorchSockeyeModel(
+        sockeye_model = model_pt.PyTorchSockeyeModel(
             model_config,
             train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
+        sockeye_model.to(device)
+        sockeye_model.apply(model_pt.initialize_parameters)
 
-        training_model.to(device)
-        training_model.apply(model_pt.initialize_parameters)
+        # Load starting parameters if specified
+        if args.params is not None:
+            sockeye_model.load_parameters(filename=args.params,
+                                          device=device,
+                                          allow_missing=args.allow_missing_params or model_config.lhuc,
+                                          ignore_extra=args.ignore_extra_params)
 
-        if args.params is not None:  # load existing parameters if present
-            training_model.load_parameters(filename=args.params,
-                                           device=device,
-                                           allow_missing=args.allow_missing_params or model_config.lhuc,
-                                           ignore_extra=args.ignore_extra_params)
-        params = dict(training_model.named_parameters())
-        # set grad_req for fixed params
+        params = dict(sockeye_model.named_parameters())
+
+        # Turn off requires_grad for fixed parameters
         params = set_grad_req_for_fixed_params(config=model_config,
                                                params=params,
                                                fixed_param_names=args.fixed_param_names,
                                                fixed_param_strategy=args.fixed_param_strategy)
 
-        # TODO(mdenkows): Migrate to PyTorch distributed training
-        # When using Horovod, synchronize the parameter initialization point
-        # across all workers by broadcasting worker 0's values.  This is not
-        # required when resuming training as synchronized training states
-        # already exist.
-        if horovod_mpi.using_horovod() and not resume_training:
-            for ctx in context:
-                with mx.Context(ctx):
-                    horovod_mpi.hvd.broadcast_parameters(params, root_rank=0)
-
         if args.dtype == C.DTYPE_FP16:
-            training_model.cast(C.DTYPE_FP16)
-        utils.log_parameters_pt(training_model)
+            sockeye_model.cast(C.DTYPE_FP16)
+        utils.log_parameters_pt(sockeye_model)
 
-        optimizer = optimizers.get_optimizer(training_model, optimizer_config)
+        logger.info('Tracing model on validation batch')
+        batch = eval_iter.next()
+        traced_model = torch.jit.trace(sockeye_model, (batch.source, batch.source_length,
+                                                       batch.target, batch.target_length), strict=False)
+        eval_iter.reset()
 
-        if horovod_mpi.using_horovod():
-            # Horovod provides a trainer that subclasses gluon.Trainer and uses
-            # allreduce to collect averaged gradients across all workers for
-            # each update.
-            gluon_trainer = horovod_mpi.hvd.DistributedTrainer(params,
-                                                               optimizer_config.name,
-                                                               optimizer_config.params)
+        if args.dist:
+            # In distributed mode, wrap the traced model with a distributed
+            # data-parallel model that shares (averages) gradients with models
+            # in other worker processes.
+            traced_model = torch.nn.parallel.DistributedDataParallel(traced_model,
+                                                                     device_ids=None if args.use_cpu else [device])
+
+        optimizer = optimizers.get_optimizer(traced_model, optimizer_config)
 
         losses = create_losses(args, all_num_classes=target_vocab_sizes)
-
-        # TODO(mdenkows): Add a debug mode that enables anomaly detection
-        #with torch.autograd.set_detect_anomaly(True):
 
         trainer = training_pt.PyTorchEarlyStoppingTrainer(
             config=trainer_config,
             optimizer_config=optimizer_config,
-            sockeye_model=training_model,
+            sockeye_model=sockeye_model,
+            traced_model=traced_model,
             optimizer=optimizer,
             loss_functions=losses,
             device=device,
             dtype=args.dtype,
             using_amp=args.amp,
+            is_distributed=args.dist,
+            is_primary_worker=is_primary_worker,
             custom_metrics_logger=custom_metrics_logger,
             checkpoint_callback=checkpoint_callback)
 
-        checkpoint_decoder = create_checkpoint_decoder(args, exit_stack, device, training_model, source_vocabs,
-                                                       target_vocabs)
+        # Only primary worker runs checkpoint decoder
+        checkpoint_decoder = create_checkpoint_decoder(args, exit_stack, device, sockeye_model, source_vocabs,
+                                                       target_vocabs) if is_primary_worker else None
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
                                      checkpoint_decoder=checkpoint_decoder)
