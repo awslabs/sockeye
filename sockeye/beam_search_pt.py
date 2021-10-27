@@ -500,7 +500,7 @@ class GreedySearch(pt.nn.Module):
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         if restrict_lexicon:
-            source_words = pt.split(source, self.num_source_factors, dim=2)[0].squeeze(2)
+            source_words = pt.split(source, 1, dim=2)[0].squeeze(2)
             vocab_slice_ids, _, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon, source_words,
                                                                            raw_constraint_list,
                                                                            self.eos_id, beam_size=1)
@@ -688,7 +688,7 @@ class BeamSearch(pt.nn.Module):
         # target vocab for this sentence.
         vocab_slice_ids = None  # type: Optional[pt.tensor]
         if restrict_lexicon:
-            source_words = pt.split(source, self.num_source_factors, dim=2)[0].squeeze(2)
+            source_words = pt.split(source, 1, dim=2)[0].squeeze(2)
             vocab_slice_ids, output_vocab_size, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon,
                                                                                            source_words,
                                                                                            raw_constraint_list,

@@ -564,3 +564,11 @@ def test_beam_search():
 
     print(best_hyp_indices)
     print(best_word_indices)
+
+
+def test_mx_pt_eq_get_vocab_slice_ids():
+    k = 1
+    beam_size = 5
+    source_words =
+    lexicon = sockeye.lexicon.TopKLexicon.load('~/workspace/sockeye-github/lexicon.enus_dede_block_profanity', k=1)
+    sockeye.beam_search._get_vocab_slice_ids(lexicon, source_words, [], C.EOS_ID, beam_size=beam_size)

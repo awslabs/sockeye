@@ -131,12 +131,13 @@ class PyTorchOutputLayer(pt.nn.Module):
 
     def forward(self, data: pt.Tensor, vocab_slice_ids: Optional[pt.Tensor] = None) -> pt.Tensor:
         if vocab_slice_ids is not None:
-            # imperative, reduced matrix multiplication for vocabulary selection
-            if self._is_new_vocab_slices(vocab_slice_ids):
-                weight, bias = self._take_slice(vocab_slice_ids)
-                self._weight_slice_cache, self._bias_slice_cache = weight, bias
-            else:
-                weight, bias = self._weight_slice_cache, self._bias_slice_cache
+            weight, bias = self._take_slice(vocab_slice_ids)
+            # # imperative, reduced matrix multiplication for vocabulary selection
+            # if self._is_new_vocab_slices(vocab_slice_ids):
+            #     weight, bias = self._take_slice(vocab_slice_ids)
+            #     self._weight_slice_cache, self._bias_slice_cache = weight, bias
+            # else:
+            #     weight, bias = self._weight_slice_cache, self._bias_slice_cache
         else:
             weight, bias = self.weight, self.bias
 
