@@ -169,7 +169,7 @@ class Translator:
                  prevent_unk: bool = False,
                  greedy: bool = False) -> None:
         self.device = device
-        self.dtype = pt.float32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype
+        self.dtype = models[0].dtype
         self._scorer = scorer
         self.batch_size = batch_size
         self.beam_size = beam_size

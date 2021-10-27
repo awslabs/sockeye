@@ -205,15 +205,11 @@ class CandidateScorer(pt.nn.Module):
         if self._bp is not None:
             bp = self._bp(lengths, reference_lengths)
         else:
-            if isinstance(scores, (int, float)):
-                bp = 0.0
-            else:
-                # avoid warning for unused input
-                bp = pt.zeros_like(reference_lengths, dtype=scores.dtype) if reference_lengths is not None else 0.0
+            bp = 0.0
         if isinstance(scores, (int, float)):
             return scores / lp - bp
         else:
-            return (scores.squeeze(1) / lp - bp).unsqueeze(1)
+            return (scores.squeeze(1) / lp.to(scores.dtype) - bp).unsqueeze(1)
 
     def unnormalize(self, scores, lengths, reference_lengths):
         bp = 0.0 if self._bp is None else self._bp(lengths, reference_lengths)
@@ -249,7 +245,6 @@ class SortNormalizeAndUpdateFinished(pt.nn.Module):
         # Normalize hypotheses that JUST finished
         all_finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
         newly_finished = pt.logical_xor(all_finished, finished).unsqueeze(1)
-
         scores_accumulated = pt.where(newly_finished,
                                       self._scorer(scores_accumulated,
                                                    lengths,
@@ -886,9 +881,7 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
         global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
         search = BeamSearch(
             beam_size=beam_size,
-            # dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
-            # TODO
-            dtype=pt.float32,
+            dtype=models[0].dtype,
             bos_id=C.BOS_ID,
             eos_id=C.EOS_ID,
             device=device,

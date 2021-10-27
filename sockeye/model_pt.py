@@ -97,7 +97,6 @@ class PyTorchSockeyeModel(pt.nn.Module):
         self.config = copy.deepcopy(config)
         self.inference_only = inference_only
         logger.info("%s", self.config)
-        self.dtype = config.dtype
         self.train_decoder_only = train_decoder_only
         self.mc_dropout = mc_dropout
         self._output_layer_factor_format_string = 'output_layer_factor%i'
@@ -139,6 +138,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
                                   'Auxiliary length task requested, but its loss weight is zero')
             self.length_ratio = layers_pt.PyTorchLengthRatio(hidden_size=self.encoder.get_num_hidden(),
                                                              num_layers=self.config.config_length_task.num_layers)
+        self.dtype = pt.float32
+        self.cast(config.dtype)
 
     def weights_from_mxnet_block(self, block_mx: 'SockeyeModel'):
         self.embedding_source.weights_from_mxnet_block(block_mx.embedding_source)
@@ -151,7 +152,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         if self.config.config_length_task is not None:
             self.length_ratio.weights_from_mxnet_block(block_mx.length_ratio)
 
-    def cast(self, dtype):
+    def cast(self, dtype: str):
         if dtype == C.DTYPE_FP16:
             self.half()
             self.dtype = pt.float16
@@ -648,10 +649,10 @@ def load_model(model_folder: str,
         model.eval()
 
     if dtype is None or dtype == model_config.dtype:
-        logger.info("Model dtype: %s" % model_config.dtype)
+        logger.info("Model dtype: %s" % model.dtype)
     else:
-        logger.info("Model dtype: overridden to %s" % dtype)
         model.cast(dtype)
+        logger.info("Model dtype: overridden to %s" % dtype)
 
     # if for_disk_saving is not None:
     #     # Saving scaling factors and possibly int8 values to disk.

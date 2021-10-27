@@ -143,6 +143,7 @@ def run_translate(args: argparse.Namespace):
                 length_penalty_alpha=args.length_penalty_alpha,
                 length_penalty_beta=args.length_penalty_beta,
                 brevity_penalty_weight=brevity_penalty_weight)
+            scorer.to(models[0].dtype)
 
             translator = inference_pt.Translator(device=device,
                                                  ensemble_mode=args.ensemble_mode,
