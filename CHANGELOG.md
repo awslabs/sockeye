@@ -13,9 +13,17 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 
 ## [2.3.99]
+
+### Sockeye 3: Fast Neural Machine Translation in PyTorch
+
 ### Changed
 
-- Updated to MXnet 2.0 with Gluon 2.0 and full numpy support.
+- `sockeye.train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --nproc_per_node N -m sockeye.train --dist ...`
+- Removed `--horovod` argument used with `horovodrun` (use `--dist` with `torchrun`).
+- Removed `--optimizer-params` argument (use `--optimizer-betas`, `--optimizer-eps`).
+- Removed `--no-hybridization` argument (use `PYTORCH_JIT=0`, see [Disable JIT for Debugging](https://pytorch.org/docs/stable/jit.html#disable-jit-for-debugging)).
+- TODO
+- ...
 
 ## [2.3.22]
 ### Fixed
