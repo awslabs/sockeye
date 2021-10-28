@@ -1025,9 +1025,14 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         utils.log_parameters_pt(sockeye_model)
 
         logger.info('Tracing model on validation batch')
-        batch = eval_iter.next()
-        traced_model = torch.jit.trace(sockeye_model, (batch.source, batch.source_length,
-                                                       batch.target, batch.target_length), strict=False)
+        batch = eval_iter.next().load(device=device)
+        # When using AMP, turn on autocasting when tracing the model so that
+        # dtypes will match during AMP training. Disable the weight cache for
+        # compatibility with tracing. See:
+        # https://github.com/pytorch/pytorch/pull/63552
+        with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():
+            traced_model = torch.jit.trace(sockeye_model, (batch.source, batch.source_length,
+                                                           batch.target, batch.target_length), strict=False)
         eval_iter.reset()
 
         if utils.is_distributed():

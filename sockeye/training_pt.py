@@ -301,9 +301,6 @@ class PyTorchEarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
-        # TODO(mdenkows): Order of tracing/casting
-        # Disable autocast weight cache to enable tracing the model
-        # See: https://github.com/pytorch/pytorch/pull/63552
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():
             # Forward
             outputs = self.traced_model(batch.source, batch.source_length, batch.target, batch.target_length)
