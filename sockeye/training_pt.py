@@ -33,7 +33,6 @@ from . import average
 from . import checkpoint_decoder_pt
 from . import constants as C
 from . import data_io_pt
-from . import horovod_mpi
 from . import loss_pt
 from . import lr_scheduler
 from . import model_pt
@@ -148,8 +147,6 @@ class PyTorchEarlyStoppingTrainer:
                  device: torch.device,
                  dtype: str,
                  using_amp: bool = False,
-                 is_distributed: bool = False,
-                 is_primary_worker: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
                  checkpoint_callback: Optional[Callable] = None) -> None:
         self.config = config
@@ -163,8 +160,6 @@ class PyTorchEarlyStoppingTrainer:
         self.using_amp = using_amp
         if using_amp:
             self._scaler = torch.cuda.amp.GradScaler()
-        self.distributed = is_distributed
-        self.is_primary_worker = is_primary_worker
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
@@ -187,9 +182,10 @@ class PyTorchEarlyStoppingTrainer:
             self._load_training_state(train_iter)
         else:
             self.state = TrainState(self.config.early_stopping_metric)
-            self.sockeye_model.save_config(self.config.output_dir)
-            self.sockeye_model.save_version(self.config.output_dir)
-            self.sockeye_model.save_parameters(self.current_params_fname)
+            if utils.is_primary_worker():
+                self.sockeye_model.save_config(self.config.output_dir)
+                self.sockeye_model.save_version(self.config.output_dir)
+                self.sockeye_model.save_parameters(self.current_params_fname)
             logger.info("Training started.")
 
         tic = time.time()
@@ -256,7 +252,9 @@ class PyTorchEarlyStoppingTrainer:
 
         # Always keep the training state to allow continuing training with
         # different stopping criteria
-        self._cleanup(keep_training_state=True)
+        if utils.is_primary_worker():
+            self._cleanup(keep_training_state=True)
+
         return self.state
 
     def _create_checkpoint(self, checkpoint_decoder: checkpoint_decoder_pt.CheckpointDecoder, time_cost: float,
@@ -268,7 +266,8 @@ class PyTorchEarlyStoppingTrainer:
         """
         self.state.checkpoint += 1
         # save parameters and evaluate on validation data
-        self._save_params()
+        if utils.is_primary_worker():
+            self._save_params()
         train_metrics = [lf.metric for lf in self.loss_functions]
         logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                     self.state.checkpoint, self.state.updates, self.state.epoch,
@@ -282,14 +281,15 @@ class PyTorchEarlyStoppingTrainer:
         self.state.converged = self._determine_convergence()
         self.state.diverged = self._determine_divergence(val_metrics)
         self._adjust_learning_rate(has_improved)
-        if has_improved:
-            self._update_best_params()
-            self._save_optimizer_state(self.best_optimizer_state_fname)
-            self._save_lr_scheduler(self.best_lr_scheduler_fname)
-        self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+        if utils.is_primary_worker():
+            if has_improved:
+                self._update_best_params()
+                self._save_optimizer_state(self.best_optimizer_state_fname)
+                self._save_lr_scheduler(self.best_lr_scheduler_fname)
+            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+            self._save_training_state(train_iter)
         for metric in train_metrics:
             metric.reset()
-        self._save_training_state(train_iter)
         if self.checkpoint_callback:
             self.checkpoint_callback(self.state.checkpoint)
 
@@ -301,6 +301,7 @@ class PyTorchEarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
+        # TODO(mdenkows): Order of tracing/casting
         # Disable autocast weight cache to enable tracing the model
         # See: https://github.com/pytorch/pytorch/pull/63552
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():
@@ -323,16 +324,23 @@ class PyTorchEarlyStoppingTrainer:
     def _step(self, batch: data_io_pt.Batch) -> bool:
         self.state.batches += 1
         self.state.samples += batch.samples
+        # We accumulate gradients over N=update_interval batches before running
+        # the optimizer to update model weights. Every Nth batch is an update
+        # batch.
+        is_update_batch = self.state.batches % self.config.update_interval == 0
 
-        # Forward/loss/backward (compute gradients)
-        loss_outputs = self._forward_backward(batch)
+        # Forward/loss/backward (compute gradients). In distributed mode,
+        # workers accumulate gradients locally for N-1 batches (no_sync), then
+        # average the accumulated gradients across workers during the update
+        # batch.
+        with self.traced_model.no_sync() if utils.is_distributed() and not is_update_batch else utils.no_context():
+            loss_outputs = self._forward_backward(batch)
+
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
-        # Update model weights if we've accumulated gradients over
-        # N=update_interval batches
         did_grad_step = False
-        if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
+        if is_update_batch:
             self.state.updates += 1
             if self.using_amp:
                 self._scaler.unscale_(self.optimizer)
@@ -413,23 +421,21 @@ class PyTorchEarlyStoppingTrainer:
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
-                # TODO(mdenkows): Migrate to PyTorch distributed training
-                # When using Horovod, the primary worker makes an authoritative
-                # check of whether metric value has improved and broadcasts the
-                # result to secondary workers.  Non-determinism in the order of
-                # GPU operations can lead to slight numeric variation across
+                # In distributed mode, the primary worker makes an authoritative
+                # check of whether the metric value has improved and broadcasts
+                # the result to secondary workers. Non-determinism in the order
+                # of GPU operations can lead to slight numeric variations across
                 # workers, causing potential desync if each worker makes its own
                 # check for key training decisions (reducing learning rate,
                 # early stopping, etc.).
-                if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
-                    # Horovod primary worker or not using Horovod: make
-                    # authoritative metric check.
+                if utils.is_primary_worker():
+                    # Authoritative check
                     value_is_better = utils.metric_value_is_better(value,
                                                                    self.state.best_metric,
                                                                    self.config.early_stopping_metric)
-                if horovod_mpi.using_horovod():
-                    # Broadcast result across workers.
-                    value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
+                if utils.is_distributed():
+                    # Broadcast result
+                    value_is_better = utils.broadcast_object(value_is_better)
                 if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
@@ -473,14 +479,13 @@ class PyTorchEarlyStoppingTrainer:
         if (self.config.max_num_checkpoint_not_improved is not None
                 and 0 <= self.config.max_num_checkpoint_not_improved
                 and self.state.checkpoint >= self.config.max_num_checkpoint_not_improved):
-            # TODO(mdenkows): Migrate to PyTorch distributed training
-            # When using Horovod, the primary worker makes the authoritative
+            # In distrubted mode, the primary worker makes the authoritative
             # calculation of improvement over the window for evaluating stopping
             window_improvement = 0.
-            if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
+            if utils.is_primary_worker():
                 window_improvement = abs(self.state.best_metric - self.state.best_metric_history[0])
-            if horovod_mpi.using_horovod():
-                window_improvement = horovod_mpi.MPI.COMM_WORLD.bcast(window_improvement, root=0)
+            if utils.is_distributed():
+                window_improvement = utils.broadcast_object(window_improvement)
 
             # <= to correctly handle threshold == 0
             if window_improvement <= self.config.checkpoint_improvement_threshold:

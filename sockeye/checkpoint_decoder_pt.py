@@ -201,6 +201,11 @@ class CheckpointDecoder:
                 )
         return metrics
 
+    def warmup(self):
+        """Translate a single sentence to warm up the model"""
+        one_sentence = [inference.make_input_from_multiple_strings(0, self.inputs_sentences[0])]
+        _ = self.translator.translate(one_sentence)
+
 
 def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:
     # custom random number generator to guarantee the same samples across runs in order to be able to

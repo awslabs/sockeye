@@ -33,6 +33,7 @@ from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Un
 from itertools import starmap
 
 import torch as pt
+import torch.distributed
 
 import mxnet as mx
 import numpy as onp
@@ -793,3 +794,39 @@ def create_pool(max_processes):
         return SingleProcessPool()
     else:
         return multiprocessing.pool.Pool(processes=max_processes)
+
+
+def is_distributed() -> bool:
+    return torch.distributed.is_initialized()
+
+
+def is_primary_worker() -> bool:
+    """
+    True when current process is the primary worker (rank 0) or the only worker
+    (not running in distributed mode)
+    """
+    return not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+
+
+def get_local_rank() -> int:
+    return int(os.environ[C.DIST_ENV_LOCAL_RANK])
+
+
+T = TypeVar('T')
+
+
+def broadcast_object(obj: T, src: int = 0) -> T:
+    """
+    Broadcast a single Python object across workers (default source is primary
+    worker with rank 0)
+    """
+    obj_list = [obj]
+    torch.distributed.broadcast_object_list(obj_list, src=src)
+    return obj_list[0]
+
+
+def all_gather_object(obj: T) -> List[T]:
+    """Gather each worker's instance of an object, returned as a list"""
+    obj_list = [None] * torch.distributed.get_world_size()
+    torch.distributed.all_gather_object(obj_list, obj)
+    return obj_list

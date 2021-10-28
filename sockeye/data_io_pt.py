@@ -21,7 +21,7 @@ import multiprocessing
 import os
 import pickle
 import random
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import OrderedDict
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -34,7 +34,7 @@ import numpy as np
 
 from . import config
 from . import constants as C
-from . import horovod_mpi
+from . import utils
 from . import vocab
 from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance, combine_means, combine_stds
 
@@ -1383,7 +1383,7 @@ class ParallelDataSet:
         n = len(data) // 2
         source = data[:n]
         target = data[n:2 * n]
-        if torch.distributed.is_initialized():
+        if utils.is_distributed():
             split_index = torch.distributed.get_rank()
             total_splits = torch.distributed.get_world_size()
             i = split_index / total_splits
@@ -1441,14 +1441,13 @@ class ParallelDataSet:
             if num_samples % bucket_batch_size != 0:
                 target_num_samples = num_samples + (bucket_batch_size - (num_samples % bucket_batch_size))
 
-            # TODO(mdenkows): Migrate to PyTorch distributed training
-            if horovod_mpi.using_horovod():
+            if utils.is_distributed():
                 # Workers load different slices of the data.  When the total
                 # number of samples is not evenly divisible by the number of
                 # workers, each worker may have +/- 1 sample.  Use the largest
                 # target number of samples across all workers to keep the number
                 # of batches in sync and guarantee that all samples are used.
-                target_num_samples = max(horovod_mpi.MPI.COMM_WORLD.allgather(target_num_samples))
+                target_num_samples = max(utils.all_gather_object(target_num_samples))
 
             # Fill up the last batch by randomly sampling from the extant items.
             rest = target_num_samples - num_samples
@@ -1740,10 +1739,9 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
 
             self.shards_fnames = [next_shard_fname] + remaining_shards
 
-            # TODO(mdenkows): Migrate to PyTorch distributed training
-            if horovod_mpi.using_horovod():
+            if utils.is_distributed():
                 # Synchronize shard order across workers
-                self.shards_fnames = horovod_mpi.MPI.COMM_WORLD.bcast(self.shards_fnames, root=0)
+                self.shards_fnames = utils.broadcast_object(self.shards_fnames)
 
             self.shard_index = 0
             self._load_shard()
@@ -1821,14 +1819,13 @@ class ParallelSampleIter(BaseParallelSampleIter):
         """
         self.curr_batch_index = 0
         if self.permute:
-            # TODO(mdenkows): Migrate to PyTorch distributed training
-            # Primary worker or not using Horovod: shuffle batch start indices.
-            if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
+            # Primary worker: shuffle batch start indices.
+            if utils.is_primary_worker():
                 random.shuffle(self.batch_indices)
-            if horovod_mpi.using_horovod():
+            if utils.is_distributed():
                 # Synchronize order across workers.  This guarantees that each
                 # worker processes a batch from the same bucket at each step.
-                self.batch_indices = horovod_mpi.MPI.COMM_WORLD.bcast(self.batch_indices, root=0)
+                self.batch_indices = utils.broadcast_object(self.batch_indices)
 
             # restore the data permutation
             self.data = self.data.permute(self.inverse_data_permutations)

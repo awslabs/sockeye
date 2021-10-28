@@ -126,7 +126,7 @@ def check_arg_compatibility(args: argparse.Namespace):
         args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
 
 
-def check_resume(args: argparse.Namespace, output_folder: str, is_primary_worker: bool) -> bool:
+def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
     Check if we should resume a broken training run.
 
@@ -141,7 +141,7 @@ def check_resume(args: argparse.Namespace, output_folder: str, is_primary_worker
     training_state_dir = os.path.join(output_folder, C.TRAINING_STATE_DIRNAME)
     if os.path.exists(output_folder):
         if args.overwrite_output:
-            if is_primary_worker:
+            if utils.is_primary_worker():
                 logger.info("Removing existing output folder %s.", output_folder)
                 shutil.rmtree(output_folder)
                 os.makedirs(output_folder)
@@ -164,10 +164,10 @@ def check_resume(args: argparse.Namespace, output_folder: str, is_primary_worker
             logger.info("The output folder %s already exists, but no training state or parameter file was found. "
                         "Will start training from scratch.", output_folder)
     else:
-        if is_primary_worker:
+        if utils.is_primary_worker():
             os.makedirs(output_folder)
-    if args.dist:
-        if is_primary_worker:
+    if utils.is_distributed():
+        if utils.is_primary_worker():
             os.makedirs(os.path.join(output_folder, C.DIST_SECONDARY_WORKERS_LOGDIR), exist_ok=True)
         # Distributed sync point: output folder exists and we're ready to start
         # training
@@ -270,7 +270,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
     validation_targets = [args.validation_target] + args.validation_target_factors
     validation_targets = [str(os.path.abspath(target)) for target in validation_targets]
 
-    if args.dist:
+    if utils.is_distributed():
         error_msg = 'Distributed training requires prepared training data. Use `python -m sockeye.prepare_data` and ' \
                     'specify with %s' % C.TRAINING_ARG_PREPARED_DATA
         check_condition(args.prepared_data is not None, error_msg)
@@ -780,7 +780,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
                                                gradient_clipping_threshold=gradient_clipping_threshold,
                                                lr_scheduler=lr_sched)
 
-    num_workers = 1 if not args.dist else torch.distributed.get_world_size()
+    num_workers = 1 if not utils.is_distributed() else torch.distributed.get_world_size()
     effective_batch_size = args.batch_size * args.update_interval * num_workers
     logger.info(config)
     logger.info(f'Gradient accumulation over {args.update_interval} batch(es) by {num_workers} worker(s). Effective '
@@ -879,9 +879,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     """
 
     if args.dist:
-        # TODO(mdenkows): Investigate Gloo vs NCCL backends
-        torch.distributed.init_process_group('gloo')
-    is_primary_worker = not args.dist or torch.distributed.get_rank() == 0
+        torch.distributed.init_process_group(torch.distributed.Backend.GLOO if args.use_cpu
+                                             else torch.distributed.Backend.NCCL)
 
     if args.dry_run:
         # Modify arguments so that we write to a temporary directory and
@@ -892,7 +891,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     check_arg_compatibility(args)
     output_folder = os.path.abspath(args.output)
-    resume_training = check_resume(args, output_folder, is_primary_worker)
+    resume_training = check_resume(args, output_folder)
 
     # In distributed mode, multiple workers (instances of sockeye.train) are
     # launched via torchrun. Each worker has a unique rank. Worker 0 is the
@@ -902,7 +901,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # worker (but don't output anything other than log files).
     logfile = os.path.join(output_folder, C.LOG_NAME)
     console_level = None
-    if not is_primary_worker:
+    if not utils.is_primary_worker():
         logfile = os.path.join(output_folder, C.DIST_SECONDARY_WORKERS_LOGDIR,
                                f'{torch.distributed.get_rank()}.{C.LOG_NAME}')
         # If requested, suppress console output for secondary workers
@@ -916,7 +915,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                       level=args.loglevel,
                       console_level=console_level)
     utils.log_basic_info(args)
-    if is_primary_worker:
+    if utils.is_primary_worker():
         arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
 
     max_seq_len_source, max_seq_len_target = args.max_seq_len
@@ -928,8 +927,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     with ExitStack() as exit_stack:
         # For distributed training, allocate GPUs to workers by local rank
-        device = utils.determine_device(device_id=int(os.environ[C.DIST_ENV_LOCAL_RANK]) if args.dist
-                                                  else args.device_ids,
+        device = utils.determine_device(device_id=utils.get_local_rank() if utils.is_distributed() else args.device_ids,
                                         use_cpu=args.use_cpu,
                                         disable_device_locking=args.disable_device_locking,
                                         lock_dir=args.lock_dir,
@@ -955,7 +953,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             max_seq_len_target = config_data.max_seq_len_target
 
         # Dump the vocabularies if we're just starting up
-        if is_primary_worker and not resume_training:
+        if utils.is_primary_worker() and not resume_training:
             vocab.save_source_vocabs(source_vocabs, output_folder)
             vocab.save_target_vocabs(target_vocabs, output_folder)
 
@@ -1032,7 +1030,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                        batch.target, batch.target_length), strict=False)
         eval_iter.reset()
 
-        if args.dist:
+        if utils.is_distributed():
             # In distributed mode, wrap the traced model with a distributed
             # data-parallel model that shares (averages) gradients with models
             # in other worker processes.
@@ -1053,14 +1051,15 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             device=device,
             dtype=args.dtype,
             using_amp=args.amp,
-            is_distributed=args.dist,
-            is_primary_worker=is_primary_worker,
             custom_metrics_logger=custom_metrics_logger,
             checkpoint_callback=checkpoint_callback)
 
         # Only primary worker runs checkpoint decoder
-        checkpoint_decoder = create_checkpoint_decoder(args, exit_stack, device, sockeye_model, source_vocabs,
-                                                       target_vocabs) if is_primary_worker else None
+        checkpoint_decoder = None
+        if utils.is_primary_worker():
+            checkpoint_decoder = create_checkpoint_decoder(args, exit_stack, device, sockeye_model,
+                                                           source_vocabs, target_vocabs)
+            checkpoint_decoder.warmup()
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
                                      checkpoint_decoder=checkpoint_decoder)
