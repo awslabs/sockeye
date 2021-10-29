@@ -116,7 +116,7 @@ args = dict(
     tests_require=['pytest', 'pytest-cov', 'pillow'],
 
     extras_require={
-        'optional': ['mxboard', 'matplotlib'],
+        'optional': ['tensorboard', 'matplotlib'],
         'dev': get_requirements(os.path.join('requirements', 'requirements.dev.txt'))
     },
 
