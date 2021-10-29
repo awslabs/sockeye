@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 from dataclasses import dataclass
+import logging
 from typing import Any, Dict, Optional, Tuple
 
 import mxnet as mx
@@ -20,6 +21,9 @@ import torch
 from . import config
 from . import constants as C
 from .lr_scheduler import LearningRateScheduler
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class OptimizerConfig(config.Config):
@@ -43,6 +47,7 @@ class OptimizerConfig(config.Config):
 class PyTorchOptimizerConfig(config.Config):
     # Optimizer
     name: str
+    running_on_gpu: bool = False
 
     # Adam default values
     lr: float = 0.001
@@ -66,10 +71,22 @@ def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> tor
     """
     Create an optimizer for a Sockeye model using the specified config settings.
     """
+    adam_impl = torch.optim.Adam
+    sgd_impl = torch.optim.SGD
+
+    if config.running_on_gpu:
+        try:
+            from apex.optimizers import FusedAdam, FusedSGD
+            adam_impl = FusedAdam
+            sgd_impl = FusedSGD
+            logging.info('Using NVIDIA Apex fused optimizers')
+        except ImportError:
+            logger.warning('Cannot import NVIDIA Apex optimizers (FusedAdam, FusedSGD). Consider installing Apex for '
+                           'faster GPU training: https://github.com/NVIDIA/apex')
+
     if config.name == C.OPTIMIZER_ADAM:
-        return torch.optim.Adam(model.parameters(), lr=config.lr, betas=config.betas, eps=config.eps,
-                                weight_decay=config.weight_decay)
+        return adam_impl(model.parameters(), lr=config.lr, betas=config.betas, eps=config.eps,
+                         weight_decay=config.weight_decay)
     elif config.name == C.OPTIMIZER_SGD:
-        return torch.optim.SGD(model.parameters(), lr=config.lr, momentum=config.momentum,
-                               weight_decay=config.weight_decay)
+        return sgd_impl(model.parameters(), lr=config.lr, momentum=config.momentum, weight_decay=config.weight_decay)
     raise ValueError(f'Unknown optimizer: {config.name}')

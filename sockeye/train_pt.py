@@ -773,6 +773,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
         lr_sched.base_lr = args.initial_learning_rate
 
     config = optimizers.PyTorchOptimizerConfig(name=args.optimizer,
+                                               running_on_gpu=not args.use_cpu,
                                                lr=args.initial_learning_rate,
                                                betas=args.optimizer_betas,
                                                eps=args.optimizer_eps,

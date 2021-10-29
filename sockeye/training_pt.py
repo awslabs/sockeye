@@ -154,6 +154,12 @@ class PyTorchEarlyStoppingTrainer:
         self.sockeye_model = sockeye_model
         self.traced_model = traced_model
         self.optimizer = optimizer
+        # Built-in optimizers take the "set_to_none" argument. Apex optimizers
+        # automatically set gradients to none instead of zeroing. See:
+        # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
+        # https://nvidia.github.io/apex/optimizers.html
+        self.zero_grad_args = {'set_to_none': True} if (isinstance(self.optimizer, torch.optim.Adam) or
+                                                        isinstance(self.optimizer, torch.optim.SGD)) else {}
         self.loss_functions = loss_functions
         self.device = device
         self.dtype = dtype
@@ -357,8 +363,7 @@ class PyTorchEarlyStoppingTrainer:
                 self._scaler.update()
             else:
                 self.optimizer.step()
-            # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
-            self.optimizer.zero_grad(set_to_none=True)
+            self.optimizer.zero_grad(**self.zero_grad_args)
             did_grad_step = True
 
         self._speedometer(self.state.epoch, self.state.batches,
