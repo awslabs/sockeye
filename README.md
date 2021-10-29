@@ -25,7 +25,7 @@ For faster training, install [NVIDIA Apex](https://github.com/NVIDIA/apex) or us
 
 ## Documentation
 
-TODO(mdenkows): Update for Sockeye 3
+TODO(migration): Update for Sockeye 3
 
 For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
 

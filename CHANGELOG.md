@@ -19,11 +19,18 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 ### Changed
 
 - `sockeye.train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --nproc_per_node N -m sockeye.train --dist ...`
+- Updated default value: `--pad-vocab-to-multiple-of 8`
 - Removed `--horovod` argument used with `horovodrun` (use `--dist` with `torchrun`).
 - Removed `--optimizer-params` argument (use `--optimizer-betas`, `--optimizer-eps`).
 - Removed `--no-hybridization` argument (use `PYTORCH_JIT=0`, see [Disable JIT for Debugging](https://pytorch.org/docs/stable/jit.html#disable-jit-for-debugging)).
 - TODO
 - ...
+
+### Removed
+
+- Removed `--amp-scale-interval` argument.
+- Removed `--kvstore` argument.
+- Removed arguments: `--weight-init`, `--weight-init-scale` `--weight-init-xavier-factor-type`, `--weight-init-xavier-rand-type`
 
 ## [2.3.22]
 ### Fixed

@@ -17,8 +17,6 @@ import os
 import sys
 
 
-OMP_NUM_THREADS = 'OMP_NUM_THREADS'
-OMP_NUM_THREADS_ARG = '--omp-num-threads'
 ENV_ARG = '--env'
 
 
@@ -26,16 +24,9 @@ logger = logging.getLogger(__name__)
 initialized = False
 
 
-def handle_omp_num_threads():
+def handle_env():
     for i, arg in enumerate(sys.argv):
-        if arg.startswith(OMP_NUM_THREADS_ARG):
-            if '=' in arg:
-                val = arg.split('=')[1]
-            else:
-                val = sys.argv[i + 1]
-            logger.warning('Setting %s=%s', OMP_NUM_THREADS, val)
-            os.environ[OMP_NUM_THREADS] = val
-        elif arg.startswith(ENV_ARG):
+        if arg.startswith(ENV_ARG):
             if arg.startswith(ENV_ARG + '='):
                 argval = arg.split("=", 1)[1]
             else:
@@ -50,5 +41,5 @@ def init():
     '''Call before importing mxnet module'''
     global initialized
     if not initialized:
-        handle_omp_num_threads()
+        handle_env()
         initialized = True

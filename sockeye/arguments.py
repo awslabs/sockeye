@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -382,7 +382,7 @@ def add_logging_args(params):
     logging_params.add_argument('--quiet-secondary-workers', '-qsw',
                                 default=False,
                                 action="store_true",
-                                help='Suppress console logging for secondary workers when training with Horovod/MPI.')
+                                help='Suppress console logging for secondary workers in distributed training.')
     logging_params.add_argument('--no-logfile',
                                 default=False,
                                 action="store_true",
@@ -517,11 +517,6 @@ def add_bucketing_args(params):
                         action='store_true',
                         help='Scale source/target buckets based on length ratio to reduce padding. Default: '
                              '%(default)s.')
-    params.add_argument('--no-bucket-scaling',
-                        action=Removed,
-                        nargs=0,
-                        help='Removed: The argument "--no-bucket-scaling" has been removed because this is now the '
-                             'default behavior. To activate bucket scaling, use the argument "--bucket-scaling".')
 
     params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
@@ -562,6 +557,7 @@ def add_prepare_data_cli_args(params):
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
 
+    # TODO(migration): Remove after removing MXNet code
     params.add_argument('--use-pytorch', action="store_true", help='Use PyTorch to prepare data.')
 
     add_logging_args(params)
@@ -571,6 +567,7 @@ def add_prepare_data_cli_args(params):
 def add_device_args(params):
     device_params = params.add_argument_group("Device parameters")
 
+    # TODO(migration): Change to --device-id after removing MXNet code
     device_params.add_argument('--device-ids', default=[-1],
                                help='List or number of GPUs ids to use. Default: %(default)s. '
                                     'Use negative numbers to automatically acquire a certain number of GPUs, e.g. -5 '
@@ -582,14 +579,9 @@ def add_device_args(params):
     device_params.add_argument('--use-cpu',
                                action='store_true',
                                help='Use CPU device instead of GPU.')
-    device_params.add_argument('--omp-num-threads',
-                               type=int,
-                               help='Set the OMP_NUM_THREADS environment variable (CPU threads). Recommended: set to '
-                                    'number of GPUs for training, number of physical CPU cores for inference. Default: '
-                                    '%(default)s.')
     device_params.add_argument('--env',
-                               help='List of environment variables to be set before importing MXNet. Separated by ",", '
-                                    'e.g. --env=OMP_NUM_THREADS=4,MXNET_GPU_WORKER_NTHREADS=3 etc.')
+                               help='List of environment variables to be set before importing PyTorch. Separated by '
+                                    '",", e.g. --env=OMP_NUM_THREADS=1,PYTORCH_JIT=0 etc.')
     device_params.add_argument('--disable-device-locking',
                                action='store_true',
                                help='Just use the specified device ids without locking.')
@@ -641,7 +633,7 @@ def add_vocab_args(params):
                         help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
     params.add_argument('--pad-vocab-to-multiple-of',
                         type=int,
-                        default=None,
+                        default=8,
                         help='Pad vocabulary to a multiple of this integer. Default: %(default)s.')
 
 
@@ -799,10 +791,10 @@ def add_model_parameters(params):
     model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
                               help="Data type.")
 
-    model_params.add_argument('--amp', action='store_true', help='Use MXNet\'s automatic mixed precision (AMP).')
-    model_params.add_argument('--amp-scale-interval', type=int, default=2000,
-                              help='Attempt to increase loss scale after this many updates without overflow. '
-                                   'Default: %(default)s.')
+    model_params.add_argument('--amp',
+                              action='store_true',
+                              help='Use PyTorch\'s automatic mixed precision (AMP) mode to run as many operations as '
+                                   'possible with float16 vs float32 without loss of quality.')
 
 def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',
@@ -825,10 +817,6 @@ def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_T
                         help='For word and max-word batching, guarantee that each batch contains a multiple of X '
                              'sentences. For word batching, round up or down to nearest multiple. For max-word '
                              'batching, always round down. Default: %(default)s.')
-    params.add_argument('--round-batch-sizes-to-multiple-of',
-                        action=Removed,
-                        help='Removed: The argument "--round-batch-sizes-to-multiple-of" has been renamed to '
-                             '"--batch-sentences-multiple-of".')
     params.add_argument('--update-interval',
                         type=int,
                         default=1,
@@ -836,6 +824,7 @@ def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_T
                              'simulate large batches (ex: batch_size 2560 with update_interval 4 gives effective batch '
                              'size 10240). Default: %(default)s.')
 
+# TODO(migration): Remove after removing MXNet code
 def add_hybridization_arg(params):
     params.add_argument('--no-hybridization',
                         action='store_true',
@@ -848,6 +837,7 @@ def add_training_args(params):
 
     add_batch_args(train_params)
 
+    # TODO(migration): Update after removing MXNet code
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT,
                               choices=[C.CROSS_ENTROPY, C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT],
@@ -965,6 +955,7 @@ def add_training_args(params):
                               default=C.OPTIMIZER_ADAM,
                               choices=C.OPTIMIZERS,
                               help='SGD update rule. Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--optimizer-params',
                               type=simple_dict(),
                               default=None,
@@ -978,6 +969,7 @@ def add_training_args(params):
                               default=1e-08,
                               help='Optimizer epsilon. Default: %(default)s.')
 
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--horovod',
                               action='store_true',
                               help='Use Horovod/MPI for distributed training (Sergeev and Del Balso 2018, '
@@ -992,6 +984,7 @@ def add_training_args(params):
                                    'multiplies the effective batch size (ex: batch_size 2560 with `--nproc_per_node 4` '
                                    'gives effective batch size 10240).')
 
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument("--kvstore",
                               type=str,
                               default=C.KVSTORE_DEVICE,
@@ -1000,21 +993,25 @@ def add_training_args(params):
                                    "Use any of 'dist_sync', 'dist_device_sync' and 'dist_async' for distributed "
                                    "training. Default: %(default)s.")
 
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--weight-init',
                               type=str,
                               default=C.INIT_XAVIER,
                               choices=C.INIT_TYPES,
                               help='Type of base weight initialization. Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--weight-init-scale',
                               type=float,
                               default=3.0,
                               help='Weight initialization scale. Applies to uniform (scale) and xavier (magnitude). '
                                    'Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--weight-init-xavier-factor-type',
                               type=str,
                               default=C.INIT_XAVIER_FACTOR_TYPE_AVG,
                               choices=C.INIT_XAVIER_FACTOR_TYPES,
                               help='Xavier factor type. Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--weight-init-xavier-rand-type',
                               type=str,
                               default=C.RAND_TYPE_UNIFORM,
@@ -1198,6 +1195,7 @@ def add_score_cli_args(params):
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                         help="Data type. Default: %(default)s infers from saved model.")
 
+    # TODO(migration): Remove after removing MXNet code
     params.add_argument('--use-pytorch', action="store_true", help='Use PyTorch to score')
 
     add_logging_args(params)
@@ -1359,6 +1357,7 @@ def add_inference_args(params):
                                choices=C.OUTPUT_HANDLERS,
                                help='Output type. Default: %(default)s.')
 
+    # TODO(migration): Remove after removing MXNet code
     decode_params.add_argument('--use-pytorch', action="store_true", help='Use PyTorch to score')
 
     # common params with score CLI
