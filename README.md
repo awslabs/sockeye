@@ -5,26 +5,27 @@
 [![GitHub issues](https://img.shields.io/github/issues/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/issues)
 [![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest)
 
-Sockeye is an open-source sequence-to-sequence framework for Neural Machine Translation built on [PyTorch](https://pytorch.org/). Sockeye powers several Machine Translation use cases, including [Amazon Translate](https://aws.amazon.com/translate/). The framework implements distributed training and optimized inference for state-of-the-art translation models. Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
+Sockeye is an open-source sequence-to-sequence framework for Neural Machine Translation built on [PyTorch](https://pytorch.org/). It implements distributed training and optimized inference for state-of-the-art models, powering [Amazon Translate](https://aws.amazon.com/translate/) and other MT applications.  Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
 
 If you have any questions or discover problems, please [file an issue](https://github.com/awslabs/sockeye/issues/new). You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 
-#### Version 3.0
-
-TODO(mdenkows)
-
 ## Installation
 
-The easiest way to run Sockeye is with [Docker](https://www.docker.com) or [nvidia-docker](https://github.com/NVIDIA/nvidia-docker).
-To build a Sockeye image with all features enabled, run the build script:
-
+Download the current version of Sockeye:
 ```bash
-python3 sockeye_contrib/docker/build.py
+git clone https://github.com/awslabs/sockeye.git
 ```
 
-See the [Dockerfile documentation](sockeye_contrib/docker) for more information.
+Install the sockeye module and its dependencies:
+```bash
+cd sockeye && pip install --editable .
+```
+
+For faster training, install [NVIDIA Apex](https://github.com/NVIDIA/apex) or use the [NVIDIA PyTorch container](https://ngc.nvidia.com/catalog/containers/nvidia:pytorch) that includes Apex.
 
 ## Documentation
+
+TODO(mdenkows): Update for Sockeye 3
 
 For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
 
