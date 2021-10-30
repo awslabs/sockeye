@@ -385,12 +385,13 @@ class PyTorchEarlyStoppingTrainer:
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
             batch = batch.load(device=self.device)
-            # Forward: use sockeye_model because traced_model doesn't support
-            # eval mode (still runs dropout, etc.)
-            outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
-            # Loss
-            loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
-            # Update validation metrics for batch
+            with torch.inference_mode():
+                # Forward: use sockeye_model because traced_model doesn't
+                # support eval mode (still runs dropout, etc.)
+                outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
+                # Loss
+                loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
+                # Update validation metrics for batch
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
                 loss_metric.update(loss_value.item(), num_samples.item())
 

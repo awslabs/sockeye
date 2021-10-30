@@ -363,36 +363,6 @@ def determine_context(device_ids: List[int],
     return context
 
 
-def determine_device(device_id: int,
-                     use_cpu: bool,
-                     disable_device_locking: bool,
-                     lock_dir: str,
-                     exit_stack: ExitStack) -> pt.device:
-    """
-    Determine the PyTorch device to run on (CPU or GPU).
-
-    :param device_id: Device as defined from the CLI.
-    :param use_cpu: Whether to use the CPU instead of GPU(s).
-    :param disable_device_locking: Disable Sockeye's device locking feature.
-    :param lock_dir: Directory to place device lock files in.
-    :param exit_stack: An ExitStack from contextlib.
-
-    :return: The PyTorch device to run on.
-    """
-    if use_cpu:
-        device = pt.device('cpu')
-    else:
-        num_gpus = pt.cuda.device_count()
-        check_condition(num_gpus >= 1, 'No GPUs found, consider running on the CPU with --use-cpu')
-        if disable_device_locking:
-            device = pt.device(f'cuda:{max(0, device_id)}')
-        else:
-            acquired_device_id = exit_stack.enter_context(acquire_gpus([-1], lock_dir=lock_dir,
-                                                                       num_gpus_available=num_gpus))[0]
-            device = pt.device(f'cuda:{acquired_device_id}')
-    return device
-
-
 def expand_requested_device_ids(requested_device_ids: List[int]) -> List[int]:
     """
     Transform a list of device id requests to concrete device ids. For example on a host with 8 GPUs when requesting

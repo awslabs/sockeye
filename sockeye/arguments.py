@@ -1081,6 +1081,7 @@ def add_training_args(params):
                               help='x>0: decode x sampled sentences from validation data and '
                                    'compute evaluation metrics. x==-1: use full validation data. Default: %(default)s.')
 
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--decode-and-evaluate-device-id',
                               default=None,
                               type=int,

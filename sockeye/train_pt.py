@@ -30,6 +30,7 @@ from typing import cast, Callable, Optional, Dict, List, Tuple
 
 import torch
 import torch.distributed
+import torch.distributed.elastic.multiprocessing.errors
 
 from . import arguments
 from . import checkpoint_decoder_pt
@@ -177,8 +178,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
 
 def create_checkpoint_decoder(
         args: argparse.Namespace,
-        exit_stack: ExitStack,
-        train_device: torch.device,
+        device: torch.device,
         sockeye_model: model_pt.PyTorchSockeyeModel,
         source_vocabs: List[vocab.Vocab],
         target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder_pt.CheckpointDecoder]:
@@ -186,8 +186,7 @@ def create_checkpoint_decoder(
     Returns a checkpoint decoder or None.
 
     :param args: Arguments as returned by argparse.
-    :param exit_stack: The exit stack potentially used to aquire GPUs with.
-    :param train_context: The training contexts.
+    :param device: Torch device for checkpoint decoder.
     :param sockeye_model: The Sockeye model instance.
     :param source_vocabs: The source vocabs.
     :param target_vocabs: The target vocabs.
@@ -202,16 +201,6 @@ def create_checkpoint_decoder(
 
     if sample_size == 0:
         return None
-
-    if args.decode_and_evaluate_device_id is not None:
-        device = utils.determine_device(device_id=args.decode_and_evaluate_device_id,
-                                        use_cpu=False,
-                                        disable_device_locking=args.disable_device_locking,
-                                        lock_dir=args.lock_dir,
-                                        exit_stack=exit_stack)
-    else:
-        # default decode context is the last training device
-        device = train_device
 
     checkpoint_decoder = checkpoint_decoder_pt.CheckpointDecoder(
         model_folder=args.output,
@@ -871,6 +860,7 @@ def main():
     train(args)
 
 
+@torch.distributed.elastic.multiprocessing.errors.record
 def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None,
           checkpoint_callback: Optional[Callable] = None) -> training_pt.TrainState:
     """
@@ -929,12 +919,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 max_seq_len_source, max_seq_len_target)
 
     with ExitStack() as exit_stack:
-        # For distributed training, allocate GPUs to workers by local rank
-        device = utils.determine_device(device_id=utils.get_local_rank() if utils.is_distributed() else args.device_ids,
-                                        use_cpu=args.use_cpu,
-                                        disable_device_locking=args.disable_device_locking,
-                                        lock_dir=args.lock_dir,
-                                        exit_stack=exit_stack)
+        # TODO(mdenkows): Update to device_id after removing MXNet code
+        device = torch.device('cpu') if args.use_cpu \
+                 else torch.device('cuda', utils.get_local_rank()) if utils.is_distributed() \
+                 else torch.device('cuda', max(0, args.device_ids[0]))
+        if not args.use_cpu:
+            # Ensure that GPU operations use the correct device by default
+            torch.cuda.set_device(device)
         logger.info(f'Training Device: {device}')
         utils.seed_rngs(args.seed)
 
@@ -1043,7 +1034,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # data-parallel model that shares (averages) gradients with models
             # in other worker processes.
             traced_model = torch.nn.parallel.DistributedDataParallel(traced_model,
-                                                                     device_ids=None if args.use_cpu else [device])
+                                                                     device_ids=None if args.use_cpu else [device],
+                                                                     output_device=None if args.use_cpu else device)
+
 
         optimizer = optimizers.get_optimizer(traced_model, optimizer_config)
 
@@ -1065,8 +1058,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # Only primary worker runs checkpoint decoder
         checkpoint_decoder = None
         if utils.is_primary_worker():
-            checkpoint_decoder = create_checkpoint_decoder(args, exit_stack, device, sockeye_model,
-                                                           source_vocabs, target_vocabs)
+            checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
                                      checkpoint_decoder=checkpoint_decoder)
