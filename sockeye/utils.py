@@ -279,6 +279,21 @@ def average_arrays(arrays: List[np.ndarray]) -> np.ndarray:
     return npx.add_n(*arrays) / len(arrays)
 
 
+def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
+    """
+    Compute the element-wise average of a list of tensors of the same shape.
+
+    :param tensors: A list of input tensors with the same shape.
+    :return: The average of the tensors on the same device as tensors[0].
+    """
+    if not tensors:
+        raise ValueError("tensors is empty.")
+    if len(tensors) == 1:
+        return tensors[0]
+    check_condition(all(tensors[0].shape == t.shape for t in tensors), "tensor shapes do not match")
+    return sum(tensors) / len(tensors)
+
+
 def get_num_gpus() -> int:
     """
     Gets the number of GPUs available on the host.

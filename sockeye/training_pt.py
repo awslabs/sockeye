@@ -317,7 +317,7 @@ class PyTorchEarlyStoppingTrainer:
             # of padding tokens). Consider normalizing by relative batch size.
             loss_values = [v / self.config.update_interval if self.config.update_interval > 1
                            else v for v, _ in loss_outputs]
-            sum_losses = torch.add(*loss_values) if len(loss_values) > 1 else loss_values[0]
+            sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
         if self.using_amp:
             sum_losses = self._scaler.scale(sum_losses)
         # Backward
