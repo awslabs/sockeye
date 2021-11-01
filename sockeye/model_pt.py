@@ -127,9 +127,9 @@ class PyTorchSockeyeModel(pt.nn.Module):
         for i, factor_config in enumerate(self.target_factor_configs, 1):
             # Each target stream has its own, independent output layer
             # TODO also consider weight tying with target factor input embeddings
-            output_layer = layers_pt.PyTorchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                        vocab_size=factor_config.vocab_size,
-                                                        weight=None)
+            output_layer = pt.nn.Linear(in_features=self.decoder.get_num_hidden(),
+                                        out_features=factor_config.vocab_size,
+                                        bias=True)
             self.factor_output_layers.append(output_layer)
 
         self.length_ratio = None  # type: Optional[layers_pt.PyTorchLengthRatio]
@@ -148,7 +148,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         self.decoder.weights_from_mxnet_block(block_mx.decoder)
         self.output_layer.weights_from_mxnet_block(block_mx.output_layer)
         for i, factor_output_layer in enumerate(self.factor_output_layers):
-            factor_output_layer.weights_from_mxnet_block(block_mx.factor_output_layers[0])
+            factor_output_layer.weight.data[:] = pt.as_tensor(block_mx.factor_output_layers[i].weight.data().asnumpy())
+            factor_output_layer.bias.data[:] = pt.as_tensor(block_mx.factor_output_layers[i].bias.data().asnumpy())
         if self.config.config_length_task is not None:
             self.length_ratio.weights_from_mxnet_block(block_mx.length_ratio)
 
@@ -182,11 +183,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         source_embed, source_embed_length = self.embedding_source(inputs, valid_length)
         if self.inference_only:
             if self.traced_encoder is None:
-                logger.info("Tracing encoder")
-                if not source_embed.is_cuda:
-                    logger.warning("check_trace=False to not fail on CPU-based batch decoding")
-                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, source_embed_length),
-                                                   check_trace=source_embed.is_cuda)
+                logger.debug("Tracing encoder")
+                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, source_embed_length))
             source_encoded, source_encoded_length = self.traced_encoder(source_embed, source_embed_length)
         else:
             source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
@@ -214,7 +212,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         if self.mc_dropout:
             raise NotImplementedError('mc dropout not implemented yet')
             # Turn on training mode so mxnet knows to add dropout
-            _ = mx.autograd.set_training(True)
+            # _ = mx.autograd.set_training(True)
 
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
@@ -272,13 +270,13 @@ class PyTorchSockeyeModel(pt.nn.Module):
         if self.mc_dropout:
             raise NotImplementedError('mc dropout not implented yet')
             # Turn on training mode so mxnet knows to add dropout
-            _ = mx.autograd.set_training(True)
+            # _ = mx.autograd.set_training(True)
 
         valid_length = pt.ones(step_input.size()[0], device=step_input.device)
         target_embed, _ = self.embedding_target(step_input.unsqueeze(1), valid_length=valid_length)
         if self.inference_only:
             if self.traced_decoder is None:
-                logger.info("Tracing decoder step")
+                logger.debug("Tracing decoder step")
                 self.traced_decoder = pt.jit.trace(self.decoder, (target_embed, states))
             decoder_out, new_states = self.traced_decoder(target_embed, states)
         else:
@@ -291,7 +289,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         target_factor_outputs = []  # type: List[pt.Tensor]
         # TODO: consider a dictionary mapping as return value
         for factor_output_layer in self.factor_output_layers:
-            target_factor_outputs.append(factor_output_layer(decoder_out, None))
+            target_factor_outputs.append(factor_output_layer(decoder_out))
 
         return step_output, new_states, target_factor_outputs
 
@@ -310,7 +308,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         forward_output[C.LOGITS_NAME] = self.output_layer(target, None)
 
         for i, factor_output_layer in enumerate(self.factor_output_layers, 1):
-            forward_output[C.FACTOR_LOGITS_NAME % i] = factor_output_layer(target, None)
+            forward_output[C.FACTOR_LOGITS_NAME % i] = factor_output_layer(target)
 
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)

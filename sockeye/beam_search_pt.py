@@ -269,6 +269,8 @@ class TopK(pt.nn.Module):
     Batch-wise topk operation.
     Forward method uses imperative shape inference, since both batch_size and vocab_size are dynamic
     during translation (due to variable batch size and potential vocabulary selection).
+
+    NOTE: This module wouldn't support dynamic batch sizes when traced!
     """
 
     def __init__(self, k: int) -> None:
@@ -287,7 +289,7 @@ class TopK(pt.nn.Module):
         :return: The row indices, column indices and values of the k smallest items in matrix.
         """
         batch_times_beam, vocab_size = scores.size()
-        batch_size = batch_times_beam // self.k
+        batch_size = pt.div(batch_times_beam, self.k, rounding_mode='trunc')
         # Shape: (batch size, beam_size * vocab_size)
         scores = scores.view(batch_size, self.k * vocab_size)
 
@@ -705,8 +707,8 @@ class BeamSearch(pt.nn.Module):
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
         # repeat states to beam_size
         if self._traced_repeat_states is None:
-            logger.info("Tracing repeat_states")
-            self._traced_repeat_states = pt.jit.trace(self._repeat_states, model_states)
+            logger.debug("Tracing repeat_states")
+            self._traced_repeat_states = pt.jit.trace(self._repeat_states, model_states, strict=False)
         model_states = self._traced_repeat_states(*model_states)
         # repeat estimated_reference_lengths to shape (batch_size * beam_size)
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
@@ -747,7 +749,7 @@ class BeamSearch(pt.nn.Module):
                     scores += first_step_mask
 
                 if self._traced_top is None:
-                    logger.info("Tracing _top")
+                    logger.debug("Tracing _top")
                     self._traced_top = pt.jit.trace(self._top, (scores, offset))
                 best_hyp_indices, best_word_indices, scores_accumulated = self._traced_top(scores, offset)
 
@@ -789,7 +791,7 @@ class BeamSearch(pt.nn.Module):
 
             # (5) update models' state with winning hypotheses (ascending)
             if self._traced_sort_states is None:
-                logger.info("Tracing sort_states")
+                logger.debug("Tracing sort_states")
                 self._traced_sort_states = pt.jit.trace(self._sort_states, (best_hyp_indices, *model_states))
             model_states = self._traced_sort_states(best_hyp_indices, *model_states)
 

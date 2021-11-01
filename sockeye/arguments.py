@@ -388,7 +388,7 @@ def add_logging_args(params):
                                 action="store_true",
                                 help='Suppress file logging')
     log_levels = ['INFO', 'DEBUG', 'ERROR']
-    logging_params.add_argument('--loglevel',
+    logging_params.add_argument('--loglevel', '--log-level',
                                 default='INFO',
                                 choices=log_levels,
                                 help='Log level. Default: %(default)s.')

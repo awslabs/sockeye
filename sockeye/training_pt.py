@@ -547,10 +547,10 @@ class PyTorchEarlyStoppingTrainer:
                 # TODO(fhieber): self.trainer undefined
                 "learning-rate": (self.trainer.learning_rate if self.optimizer_config.lr_scheduler is None
                                   else self.optimizer_config.lr_scheduler.lr),
-                "time-elapsed": self.state.time_elapsed}
-        data['max-gpu-memory'] = torch.cuda.max_memory_allocated(self.device)
-        data['converged'] = self.state.converged
-        data['diverged'] = self.state.diverged
+                "time-elapsed": self.state.time_elapsed,
+                "max-gpu-memory": torch.cuda.max_memory_allocated(self.device),
+                "converged": self.state.converged,
+                "diverged": self.state.diverged}
 
         for metric in train_metrics:
             data["%s-train" % metric.name] = metric.get()
