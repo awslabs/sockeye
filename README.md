@@ -5,9 +5,11 @@
 [![GitHub issues](https://img.shields.io/github/issues/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/issues)
 [![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest)
 
-Sockeye is an open-source sequence-to-sequence framework for Neural Machine Translation built on [PyTorch](https://pytorch.org/). It implements distributed training and optimized inference for state-of-the-art models, powering [Amazon Translate](https://aws.amazon.com/translate/) and other MT applications.  Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
+Sockeye is an open-source sequence-to-sequence framework for Neural Machine Translation built on [PyTorch](https://pytorch.org/). It implements distributed training and optimized inference for state-of-the-art models, powering [Amazon Translate](https://aws.amazon.com/translate/) and other MT applications. Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
 
-If you have any questions or discover problems, please [file an issue](https://github.com/awslabs/sockeye/issues/new). You can also send questions to *sockeye-dev-at-amazon-dot-com*.
+For a quickstart guide to training a standard NMT model on any size of data, see the [WMT 2014 English-German tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html).
+
+For questions and issue reports, please [file an issue](https://github.com/awslabs/sockeye/issues/new) on GitHub.
 
 ## Installation
 
@@ -18,18 +20,14 @@ git clone https://github.com/awslabs/sockeye.git
 
 Install the sockeye module and its dependencies:
 ```bash
-cd sockeye && pip install --editable .
+cd sockeye && pip3 install --editable .
 ```
 
-For faster training, install [NVIDIA Apex](https://github.com/NVIDIA/apex) or use the [NVIDIA PyTorch container](https://ngc.nvidia.com/catalog/containers/nvidia:pytorch) that includes Apex.
+For faster GPU training, install [NVIDIA Apex](https://github.com/NVIDIA/apex). NVIDIA also provides [PyTorch Docker containers](https://ngc.nvidia.com/catalog/containers/nvidia:pytorch) that include Apex.
 
 ## Documentation
 
-TODO(migration): Update for Sockeye 3
-
-For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
-
-- For a quickstart guide to training a large data WMT model, see the [WMT 2018 German-English tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html).
+- For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
 - Developers may be interested in our [developer guidelines](https://awslabs.github.io/sockeye/development.html).
 
 ## Citation
