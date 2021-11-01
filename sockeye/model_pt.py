@@ -99,7 +99,6 @@ class PyTorchSockeyeModel(pt.nn.Module):
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
         self.mc_dropout = mc_dropout
-        self._output_layer_factor_format_string = 'output_layer_factor%i'
         self.forward_pass_cache_size = forward_pass_cache_size
         self.embed_and_encode = self._embed_and_encode
         if self.forward_pass_cache_size > 0:
@@ -159,8 +158,10 @@ class PyTorchSockeyeModel(pt.nn.Module):
             self.dtype = pt.float16
         elif dtype == C.DTYPE_INT8:
             logger.info("Dynamic quantization to int8 for (fused) Linear layers")
-            # TODO: explore quantization of OutputLayer
-            pt.quantization.quantize_dynamic(self, {pt.nn.Linear}, dtype=pt.qint8, inplace=self.inference_only)
+            # TODO: figure out int8 quantization of OutputLayer, supporting weight tying & vocabulary selection
+            quant_mapping = {pt.nn.Linear: pt.nn.quantized.dynamic.Linear}
+            pt.quantization.quantize_dynamic(self, {pt.nn.Linear}, dtype=pt.qint8, inplace=self.inference_only,
+                                             mapping=quant_mapping)
         else:
             self.dtype = pt.float32
 
