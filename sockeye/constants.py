@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -82,8 +82,6 @@ FIXED_POSITIONAL_EMBEDDING = "fixed"
 LEARNED_POSITIONAL_EMBEDDING = "learned"
 POSITIONAL_EMBEDDING_TYPES = [NO_POSITIONAL_EMBEDDING, FIXED_POSITIONAL_EMBEDDING, LEARNED_POSITIONAL_EMBEDDING]
 
-DEFAULT_INIT_PATTERN = ".*"
-
 # init types
 INIT_XAVIER = 'xavier'
 INIT_UNIFORM = 'uniform'
@@ -109,10 +107,6 @@ WEIGHT_TYING_TRG_SOFTMAX = 'trg_softmax'
 WEIGHT_TYING_SRC_TRG = 'src_trg'
 WEIGHT_TYING_SRC_TRG_SOFTMAX = 'src_trg_softmax'
 WEIGHT_TYING_TYPES = [WEIGHT_TYING_NONE, WEIGHT_TYING_SRC_TRG_SOFTMAX, WEIGHT_TYING_SRC_TRG, WEIGHT_TYING_TRG_SOFTMAX]
-
-# default decoder prefixes
-TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
-TRANSFORMER_SSRU_DECODER_PREFIX = DECODER_PREFIX + SSRU_TRANSFORMER
 
 # Activation types
 RELU = "relu"
@@ -140,22 +134,10 @@ TARGET_PREVIOUS_NAME = "prev_target_word_id"
 HIDDEN_PREVIOUS_NAME = "prev_hidden"
 SOURCE_DYNAMIC_PREVIOUS_NAME = "prev_dynamic_source"
 
-LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
 FACTOR_LOGITS_NAME = "factor%d_logits"
-SOFTMAX_NAME = "softmax"
-SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
 
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
-
-# Monitor constants
-STAT_FUNC_DEFAULT = "mx_default"  # default MXNet monitor stat func: np.norm(x)/np.sqrt(x.size)
-STAT_FUNC_MAX = 'max'
-STAT_FUNC_MIN = 'min'
-STAT_FUNC_MEAN = 'mean'
-MONITOR_STAT_FUNCS = {STAT_FUNC_DEFAULT: None,
-                      STAT_FUNC_MAX: lambda x: np.max(x),
-                      STAT_FUNC_MEAN: lambda x: np.mean(x)}
 
 # Inference constants
 DEFAULT_BEAM_SIZE = 5
@@ -178,9 +160,6 @@ JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
 JSON_ENCODING = "utf-8"
-
-# Lexical constraints
-BANK_ADJUSTMENT = 'even'
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
@@ -295,10 +274,6 @@ GRADIENT_CLIPPING_TYPE_NORM = 'norm'
 GRADIENT_CLIPPING_TYPE_NONE = 'none'
 GRADIENT_CLIPPING_TYPES = [GRADIENT_CLIPPING_TYPE_ABS, GRADIENT_CLIPPING_TYPE_NORM, GRADIENT_CLIPPING_TYPE_NONE]
 
-GRADIENT_COMPRESSION_NONE = None
-GRADIENT_COMPRESSION_2BIT = "2bit"
-GRADIENT_COMPRESSION_TYPES = [GRADIENT_CLIPPING_TYPE_NONE, GRADIENT_COMPRESSION_2BIT]
-
 HOROVOD_SECONDARY_WORKERS_DIRNAME = 'secondary_workers'
 # PyTorch
 DIST_ENV_LOCAL_RANK = 'LOCAL_RANK'
@@ -351,9 +326,6 @@ LINK_NORMAL = 'normal'
 LINK_POISSON = 'poisson'
 LENGTH_TASK_RATIO = 'ratio'
 LENGTH_TASK_LENGTH = 'length'
-
-LOSS_NORM_BATCH = 'batch'
-LOSS_NORM_VALID = "valid"
 
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2

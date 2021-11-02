@@ -20,17 +20,16 @@ works well in practice.
 
 import argparse
 import itertools
-import os
 import logging
+import os
 from typing import Dict, Iterable, List
 
 import torch
-from mxnet import npx
 
-from .log import setup_main_logger, log_sockeye_version
 from . import arguments
 from . import constants as C
 from . import utils
+from .log import setup_main_logger, log_sockeye_version
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,7 @@ def average(param_paths: Iterable[str]) -> Dict[str, torch.Tensor]:
             params = torch.load(path)
         except:
             logger.info('Converting from MXNet')
+            from mxnet import npx
             params = npx.load(path)
             params = {k: torch.from_numpy(v.asnumpy()) for k, v in params.items()}
         all_params.append(params)

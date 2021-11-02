@@ -466,20 +466,6 @@ def add_prepared_data_args(params):
                         help='Prepared training data directory created through python -m sockeye.prepare_data.')
 
 
-def add_monitoring_args(params):
-    params.add_argument('--monitor-pattern',
-                        default=None,
-                        type=str,
-                        help="Pattern to match outputs/weights/gradients to monitor. '.*' monitors everything. "
-                             "Default: %(default)s.")
-
-    params.add_argument('--monitor-stat-func',
-                        default=C.STAT_FUNC_DEFAULT,
-                        choices=list(C.MONITOR_STAT_FUNCS.keys()),
-                        help="Statistics function to run on monitored outputs/weights/gradients. "
-                             "Default: %(default)s.")
-
-
 def add_training_output_args(params):
     params.add_argument('--output', '-o',
                         required=True,
@@ -500,7 +486,6 @@ def add_training_io_args(params):
     add_bucketing_args(params)
     add_vocab_args(params)
     add_training_output_args(params)
-    add_monitoring_args(params)
 
 
 def add_bucketing_args(params):

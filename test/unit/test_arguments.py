@@ -49,8 +49,7 @@ def test_simple_dict():
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], target_factor_vocabs=[],
           shared_vocab=False, num_words=(0, 0),
           word_min_count=(1, 1), pad_vocab_to_multiple_of=8,
-          no_bucketing=False, bucket_width=8, bucket_scaling=False, max_seq_len=(95, 95),
-          monitor_pattern=None, monitor_stat_func='mx_default')),
+          no_bucketing=False, bucket_width=8, bucket_scaling=False, max_seq_len=(95, 95))),
 
     # short parameters
     ('-s test_src -t test_tgt -d prep_data '
@@ -69,8 +68,7 @@ def test_simple_dict():
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], target_factor_vocabs=[],
           shared_vocab=False, num_words=(0, 0),
           word_min_count=(1, 1), pad_vocab_to_multiple_of=8,
-          no_bucketing=False, bucket_width=8, bucket_scaling=False, max_seq_len=(95, 95),
-          monitor_pattern=None, monitor_stat_func='mx_default'))
+          no_bucketing=False, bucket_width=8, bucket_scaling=False, max_seq_len=(95, 95)))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_io_args)
