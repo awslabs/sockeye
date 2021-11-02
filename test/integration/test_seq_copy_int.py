@@ -18,15 +18,12 @@ from tempfile import TemporaryDirectory
 from typing import List
 from unittest.mock import patch
 
-import mxnet as mx
-import numpy as np
 import pytest
 import torch as pt
 
 import sockeye.average
 import sockeye.checkpoint_decoder_pt
 import sockeye.evaluate
-import sockeye.extract_parameters
 from sockeye import constants as C
 from sockeye.config import Config
 from sockeye.model_pt import load_model
@@ -206,7 +203,6 @@ def test_other_clis(train_params: str, translate_params: str):
         _test_checkpoint_decoder(data['dev_source'], data['dev_target'], data['model'])
         _test_mc_dropout(data['model'])
         _test_parameter_averaging(data['model'])
-        #_test_extract_parameters_cli(data['model'])
         _test_evaluate_cli(data['test_outputs'], data['test_target'])
 
 
@@ -228,18 +224,6 @@ def _test_evaluate_cli(test_outputs: List[str], test_target_path: str):
             metrics="bleu chrf rouge1")
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
-
-
-def _test_extract_parameters_cli(model_path: str):
-    """
-    Runs parameter extraction CLI and asserts that the resulting numpy serialization contains a parameter key.
-    """
-    extract_params = "--input {input} --names output_layer.bias --list-all --output {output}".format(
-        output=os.path.join(model_path, "params.extracted"), input=model_path)
-    with patch.object(sys, "argv", extract_params.split()):
-        sockeye.extract_parameters.main()
-    with np.load(os.path.join(model_path, "params.extracted")) as data:
-        assert "output_layer.bias" in data
 
 
 def _test_parameter_averaging(model_path: str):

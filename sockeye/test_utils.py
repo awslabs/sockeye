@@ -25,7 +25,6 @@ import sockeye.average
 import sockeye.checkpoint_decoder
 import sockeye.constants as C
 import sockeye.evaluate
-import sockeye.extract_parameters
 import sockeye.lexicon
 import sockeye.mx_to_pt
 import sockeye.prepare_data
