@@ -24,7 +24,6 @@ import torch as pt
 from . import constants as C
 from . import layers_pt
 from . import transformer_pt
-from .decoder import TransformerDecoder
 from .transformer_pt import TransformerConfig
 
 logger = logging.getLogger(__name__)
@@ -289,7 +288,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
     def get_num_hidden(self):
         return self.config.model_size
 
-    def weights_from_mxnet_block(self, block_mx: TransformerDecoder):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerDecoder'):
         self.pos_embedding.weights_from_mxnet_block(block_mx.pos_embedding)
         for i, l in enumerate(self.layers):
             l.weights_from_mxnet_block(block_mx.layers[i])

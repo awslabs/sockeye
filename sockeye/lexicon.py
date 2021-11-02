@@ -25,7 +25,7 @@ import numpy as np
 from . import arguments
 from . import constants as C
 from . import vocab
-from .data_io import smart_open, get_tokens, tokens2ids
+from .utils import smart_open, get_tokens
 from .log import setup_main_logger, log_sockeye_version
 
 logger = logging.getLogger(__name__)
@@ -194,6 +194,7 @@ def create(args):
 
 
 def inspect(args):
+    from .data_io import tokens2ids
     setup_main_logger(console=True, file_logging=False)
     global logger
     logger = logging.getLogger('inspect')

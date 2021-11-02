@@ -14,24 +14,25 @@
 """
 Code for inference/translation
 """
+
+import copy
 import itertools
+import json
 import logging
+from dataclasses import dataclass
 from functools import partial
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 
 import numpy as onp
 import torch as pt
 
 from . import constants as C
-from . import data_io
 from . import lexical_constraints as constrained
 from . import lexicon
 from . import utils
 from . import vocab
-from .beam_search_pt import get_search_algorithm, CandidateScorer, GreedySearch
-from .inference import _concat_translations, _concat_nbest_translations, TranslatorInput, TranslatorOutput, Translation, \
-    BadTranslatorInput, IndexedTranslation, IndexedTranslatorInput, empty_translation, BeamHistory, \
-    _reduce_nbest_translations
+from .beam_search_pt import CandidateScorer, get_search_algorithm, GreedySearch
+from .data_io_pt import tokens2ids
 from .model_pt import PyTorchSockeyeModel
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,485 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
         return int(onp.ceil(factor * input_length))
 
     return max_input_len, get_max_output_length
+
+
+BeamHistory = Dict[str, List]
+Tokens = List[str]
+TokenIds = List[List[int]]  # each token id may contain multiple factors
+SentenceId = Union[int, str]
+
+
+@dataclass
+class TranslatorInput:
+    """
+    Object required by Translator.translate().
+    If not None, `pass_through_dict` is an arbitrary dictionary instantiated from a JSON object
+    via `make_input_from_dict()`, and it contains extra fields found in an input JSON object.
+    If `--output-type json` is selected, all such fields that are not fields used or changed by
+    Sockeye will be included in the output JSON object. This provides a mechanism for passing
+    fields through the call to Sockeye.
+    """
+
+    sentence_id: SentenceId
+    tokens: Tokens
+    factors: Optional[List[Tokens]] = None
+    restrict_lexicon: Optional[lexicon.TopKLexicon] = None
+    constraints: Optional[List[Tokens]] = None
+    avoid_list: Optional[List[Tokens]] = None
+    pass_through_dict: Optional[Dict] = None
+
+    def __str__(self):
+        return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
+            % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list)
+
+    def __len__(self):
+        return len(self.tokens)
+
+    @property
+    def num_factors(self) -> int:
+        """
+        Returns the number of factors of this instance.
+        """
+        return 1 + (0 if not self.factors else len(self.factors))
+
+    def chunks(self, chunk_size: int) -> Generator['TranslatorInput', None, None]:
+        """
+        Takes a TranslatorInput (itself) and yields TranslatorInputs for chunks of size chunk_size.
+
+        :param chunk_size: The maximum size of a chunk.
+        :return: A generator of TranslatorInputs, one for each chunk created.
+        """
+
+        if len(self.tokens) > chunk_size and self.constraints is not None:
+            logger.warning(
+                'Input %s has length (%d) that exceeds max input length (%d), '
+                'triggering internal splitting. Placing all target-side constraints '
+                'with the first chunk, which is probably wrong.',
+                self.sentence_id, len(self.tokens), chunk_size)
+
+        for chunk_id, i in enumerate(range(0, len(self), chunk_size)):
+            factors = [factor[i:i + chunk_size] for factor in self.factors] if self.factors is not None else None
+            # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
+            # assigned to the first chunk
+            constraints = self.constraints if chunk_id == 0 else None
+            pass_through_dict = copy.deepcopy(self.pass_through_dict) \
+                if (chunk_id == 0 and self.pass_through_dict is not None) else None
+            yield TranslatorInput(sentence_id=self.sentence_id,
+                                  tokens=self.tokens[i:i + chunk_size],
+                                  factors=factors,
+                                  restrict_lexicon=self.restrict_lexicon,
+                                  constraints=constraints,
+                                  avoid_list=self.avoid_list,
+                                  pass_through_dict=pass_through_dict)
+
+    def with_eos(self) -> 'TranslatorInput':
+        """
+        :return: A new translator input with EOS appended to the tokens and factors.
+        """
+        return TranslatorInput(sentence_id=self.sentence_id,
+                               tokens=self.tokens + [C.EOS_SYMBOL],
+                               factors=[factor + [C.EOS_SYMBOL] for factor in
+                                        self.factors] if self.factors is not None else None,
+                               restrict_lexicon=self.restrict_lexicon,
+                               constraints=self.constraints,
+                               avoid_list=self.avoid_list,
+                               pass_through_dict=self.pass_through_dict)
+
+
+class BadTranslatorInput(TranslatorInput):
+
+    def __init__(self, sentence_id: SentenceId, tokens: Tokens) -> None:
+        super().__init__(sentence_id=sentence_id, tokens=tokens, factors=None)
+
+
+def _bad_input(sentence_id: SentenceId, reason: str = '') -> BadTranslatorInput:
+    logger.warning("Bad input (%s): '%s'. Will return empty output.", sentence_id, reason.strip())
+    return BadTranslatorInput(sentence_id=sentence_id, tokens=[])
+
+
+def make_input_from_plain_string(sentence_id: SentenceId, string: str) -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a plain string.
+
+    :param sentence_id: Sentence id.
+    :param string: An input string.
+    :return: A TranslatorInput.
+    """
+    return TranslatorInput(sentence_id, tokens=list(utils.get_tokens(string)), factors=None)
+
+
+def make_input_from_json_string(sentence_id: SentenceId,
+                                json_string: str,
+                                translator: 'Translator') -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a JSON object, serialized as a string.
+
+    :param sentence_id: Sentence id.
+    :param json_string: A JSON object serialized as a string that must contain a key "text", mapping to the input text,
+           and optionally a key "factors" that maps to a list of strings, each of which representing a factor sequence
+           for the input text. Constraints and an avoid list can also be added through the "constraints" and "avoid"
+           keys.
+    :param translator: A translator object.
+    :return: A TranslatorInput.
+    """
+    try:
+        jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
+        return make_input_from_dict(sentence_id, jobj, translator)
+
+    except Exception as e:
+        logger.exception(e, exc_info=True)  # type: ignore
+        return _bad_input(sentence_id, reason=json_string)
+
+
+def make_input_from_dict(sentence_id: SentenceId,
+                         input_dict: Dict,
+                         translator: 'Translator') -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a JSON object, serialized as a string.
+
+    :param sentence_id: Sentence id.
+    :param input_dict: A dict that must contain a key "text", mapping to the input text, and optionally a key "factors"
+           that maps to a list of strings, each of which representing a factor sequence for the input text.
+           Constraints and an avoid list can also be added through the "constraints" and "avoid" keys.
+    :param translator: A translator object.
+    :return: A TranslatorInput.
+    """
+    try:
+        tokens = input_dict[C.JSON_TEXT_KEY]
+        tokens = list(utils.get_tokens(tokens))
+        factors = input_dict.get(C.JSON_FACTORS_KEY)
+        if isinstance(factors, list):
+            factors = [list(utils.get_tokens(factor)) for factor in factors]
+            lengths = [len(f) for f in factors]
+            if not all(length == len(tokens) for length in lengths):
+                logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
+                return _bad_input(sentence_id, reason=str(input_dict))
+
+        # Lexicon for vocabulary selection/restriction:
+        # This is only populated when using multiple lexicons, in which case the
+        # restrict_lexicon key must exist and the value (name) must map to one
+        # of the translator's known lexicons.
+        restrict_lexicon = None
+        restrict_lexicon_name = input_dict.get(C.JSON_RESTRICT_LEXICON_KEY)
+        if isinstance(translator.restrict_lexicon, dict):
+            if restrict_lexicon_name is None:
+                logger.error("Must specify restrict_lexicon when using multiple lexicons. Choices: %s"
+                             % ' '.join(sorted(translator.restrict_lexicon)))
+                return _bad_input(sentence_id, reason=str(input_dict))
+            restrict_lexicon = translator.restrict_lexicon.get(restrict_lexicon_name, None)
+            if restrict_lexicon is None:
+                logger.error("Unknown restrict_lexicon '%s'. Choices: %s"
+                             % (restrict_lexicon_name, ' '.join(sorted(translator.restrict_lexicon))))
+                return _bad_input(sentence_id, reason=str(input_dict))
+
+        # List of phrases to prevent from occuring in the output
+        avoid_list = input_dict.get(C.JSON_AVOID_KEY)
+
+        # List of phrases that must appear in the output
+        constraints = input_dict.get(C.JSON_CONSTRAINTS_KEY)
+
+        # If there is overlap between positive and negative constraints, assume the user wanted
+        # the words, and so remove them from the avoid_list (negative constraints)
+        if constraints is not None and avoid_list is not None:
+            avoid_set = set(avoid_list)
+            overlap = set(constraints).intersection(avoid_set)
+            if len(overlap) > 0:
+                logger.warning("Overlap between constraints and avoid set, dropping the overlapping avoids")
+                avoid_list = list(avoid_set.difference(overlap))
+
+        # Convert to a list of tokens
+        if isinstance(avoid_list, list):
+            avoid_list = [list(utils.get_tokens(phrase)) for phrase in avoid_list]
+        if isinstance(constraints, list):
+            constraints = [list(utils.get_tokens(constraint)) for constraint in constraints]
+
+        return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
+                               restrict_lexicon=restrict_lexicon, constraints=constraints,
+                               avoid_list=avoid_list, pass_through_dict=input_dict)
+
+    except Exception as e:
+        logger.exception(e, exc_info=True)  # type: ignore
+        return _bad_input(sentence_id, reason=str(input_dict))
+
+
+def make_input_from_factored_string(sentence_id: SentenceId,
+                                    factored_string: str,
+                                    translator: 'Translator',
+                                    delimiter: str = C.DEFAULT_FACTOR_DELIMITER) -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from a string with factor annotations on a token level, separated by delimiter.
+    If translator does not require any source factors, the string is parsed as a plain token string.
+
+    :param sentence_id: Sentence id.
+    :param factored_string: An input string with additional factors per token, separated by delimiter.
+    :param translator: A translator object.
+    :param delimiter: A factor delimiter. Default: '|'.
+    :return: A TranslatorInput.
+    """
+    utils.check_condition(bool(delimiter) and not delimiter.isspace(),
+                          "Factor delimiter can not be whitespace or empty.")
+
+    model_num_source_factors = translator.num_source_factors
+
+    if model_num_source_factors == 1:
+        return make_input_from_plain_string(sentence_id=sentence_id, string=factored_string)
+
+    tokens = []  # type: Tokens
+    factors = [[] for _ in range(model_num_source_factors - 1)]  # type: List[Tokens]
+    for token_id, token in enumerate(utils.get_tokens(factored_string)):
+        pieces = token.split(delimiter)
+
+        if not all(pieces) or len(pieces) != model_num_source_factors:
+            logger.error("Failed to parse %d factors at position %d ('%s') in '%s'" % (model_num_source_factors,
+                                                                                       token_id, token,
+                                                                                       factored_string.strip()))
+            return _bad_input(sentence_id, reason=factored_string)
+
+        tokens.append(pieces[0])
+        for i, factor in enumerate(factors):
+            factors[i].append(pieces[i + 1])
+
+    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+
+
+def make_input_from_multiple_strings(sentence_id: SentenceId, strings: List[str]) -> TranslatorInput:
+    """
+    Returns a TranslatorInput object from multiple strings, where the first element corresponds to the surface tokens
+    and the remaining elements to additional factors. All strings must parse into token sequences of the same length.
+
+    :param sentence_id: Sentence id.
+    :param strings: A list of strings representing a factored input sequence.
+    :return: A TranslatorInput.
+    """
+    if not bool(strings):
+        return TranslatorInput(sentence_id=sentence_id, tokens=[], factors=None)
+
+    tokens = list(utils.get_tokens(strings[0]))
+    factors = [list(utils.get_tokens(factor)) for factor in strings[1:]]
+    if not all(len(factor) == len(tokens) for factor in factors):
+        logger.error("Length of string sequences do not match: '%s'", strings)
+        return _bad_input(sentence_id, reason=str(strings))
+    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+
+
+@dataclass
+class TranslatorOutput:
+    """
+    Output structure from Translator.
+
+    sentence_id: Sentence id.
+    translation: Translation string without sentence boundary tokens.
+    tokens: List of translated tokens.
+    score: Negative log probability of generated translation.
+    pass_through_dict: Dictionary of key/value pairs to pass through when working with JSON.
+    beam_histories: List of beam histories. The list will contain more than one
+        history if it was split due to exceeding max_length.
+    nbest_translations: List of nbest translations as strings.
+    nbest_tokens: List of nbest translations as lists of tokens.
+    nbest_scores: List of nbest scores, one for each nbest translation.
+    factor_translations: List of factor outputs.
+    factor_tokens: List of list of secondary factor tokens.
+    """
+    sentence_id: SentenceId
+    translation: str
+    tokens: Tokens
+    score: float
+    pass_through_dict: Optional[Dict[str, Any]] = None
+    beam_histories: Optional[List[BeamHistory]] = None
+    nbest_translations: Optional[List[str]] = None
+    nbest_tokens: Optional[List[Tokens]] = None
+    nbest_scores: Optional[List[float]] = None
+    factor_translations: Optional[List[str]] = None
+    factor_tokens: Optional[List[Tokens]] = None
+    nbest_factor_translations: Optional[List[List[str]]] = None
+    nbest_factor_tokens: Optional[List[List[Tokens]]] = None
+
+    def json(self) -> Dict:
+        """
+        Returns a dictionary suitable for json.dumps() representing all
+        the information in the class. It is initialized with any keys
+        present in the corresponding `TranslatorInput` object's pass_through_dict.
+        Keys from here that are not overwritten by Sockeye will thus be passed
+        through to the output.
+
+        :return: A dictionary.
+        """
+        _d = copy.deepcopy(self.pass_through_dict) if self.pass_through_dict is not None else {}  # type: Dict[str, Any]
+        _d['sentence_id'] = self.sentence_id
+        _d['translation'] = self.translation
+        _d['score'] = self.score
+
+        if self.nbest_translations is not None and len(self.nbest_translations) > 1:
+            _d['translations'] = self.nbest_translations
+            _d['scores'] = self.nbest_scores
+
+        if self.factor_translations is not None:
+            for i, factor in enumerate(self.factor_translations, 1):
+                _d[f'factor{i}'] = factor
+
+        if self.nbest_factor_translations is not None and len(self.nbest_factor_translations) > 1:
+            _d['translations_factors'] = []
+            for factor_translations in self.nbest_factor_translations:
+                _d['translations_factors'].append(
+                    {f'factor{i}': factor_translation for i, factor_translation in enumerate(factor_translations, 1)})
+
+        return _d
+
+
+@dataclass
+class NBestTranslations:
+    target_ids_list: List[TokenIds]
+    scores: List[float]
+
+
+@dataclass
+class Translation:
+    target_ids: TokenIds
+    score: float
+    beam_histories: List[BeamHistory] = None
+    nbest_translations: NBestTranslations = None
+    estimated_reference_length: Optional[float] = None
+
+
+def empty_translation(add_nbest: bool = False) -> Translation:
+    """
+    Return an empty translation.
+
+    :param add_nbest: Include (empty) nbest_translations in the translation object.
+    """
+    return Translation(target_ids=[],
+                       score=-onp.inf,
+                       nbest_translations=NBestTranslations([], []) if add_nbest else None)
+
+
+@dataclass
+class IndexedTranslatorInput:
+    """
+    Translation of a chunk of a sentence.
+
+    input_idx: Internal index of translation requests to keep track of the correct order of translations.
+    chunk_idx: The index of the chunk. Used when TranslatorInputs get split across multiple chunks.
+    input: The translator input.
+    """
+    input_idx: int
+    chunk_idx: int
+    translator_input: TranslatorInput
+
+
+@dataclass(order=True)
+class IndexedTranslation:
+    """
+    Translation of a chunk of a sentence.
+
+    input_idx: Internal index of translation requests to keep track of the correct order of translations.
+    chunk_idx: The index of the chunk. Used when TranslatorInputs get split across multiple chunks.
+    translation: The translation of the input chunk.
+    """
+    input_idx: int
+    chunk_idx: int
+    translation: Translation
+
+
+def _concat_nbest_translations(translations: List[Translation],
+                               stop_ids: Set[int],
+                               scorer: CandidateScorer) -> Translation:
+    """
+    Combines nbest translations through concatenation.
+
+    :param translations: A list of translations (sequence starting with BOS symbol), score and length.
+    :param stop_ids: The EOS symbols.
+    :param scorer: Candidate scorer for recomputing score of concatenated translations.
+    :return: A concatenation of the translations with a score.
+    """
+    expanded_translations = (_expand_nbest_translation(translation) for translation in translations)
+
+    concatenated_translations = []  # type: List[Translation]
+
+    for translations_to_concat in zip(*expanded_translations):
+        concatenated_translations.append(_concat_translations(translations=list(translations_to_concat),
+                                                              stop_ids=stop_ids,
+                                                              scorer=scorer))
+
+    return _reduce_nbest_translations(concatenated_translations)
+
+
+def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Translation:
+    """
+    Combines Translation objects that are nbest translations of the same sentence.
+
+    :param nbest_translations_list: A list of Translation objects, all of them translations of
+        the same source sentence.
+    :return: A single Translation object where nbest lists are collapsed.
+    """
+    best_translation = nbest_translations_list[0]
+
+    sequences = [translation.target_ids for translation in nbest_translations_list]
+    scores = [translation.score for translation in nbest_translations_list]
+
+    nbest_translations = NBestTranslations(sequences, scores)
+
+    return Translation(best_translation.target_ids,
+                       best_translation.score,
+                       best_translation.beam_histories,
+                       nbest_translations,
+                       best_translation.estimated_reference_length)
+
+
+def _expand_nbest_translation(translation: Translation) -> List[Translation]:
+    """
+    Expand nbest translations in a single Translation object to one Translation
+        object per nbest translation.
+
+    :param translation: A Translation object.
+    :return: A list of Translation objects.
+    """
+    nbest_list = []  # type = List[Translation]
+    for target_ids, score in zip(translation.nbest_translations.target_ids_list, translation.nbest_translations.scores):
+        nbest_list.append(Translation(target_ids, score, translation.beam_histories,
+                                      estimated_reference_length=translation.estimated_reference_length))
+
+    return nbest_list
+
+
+def _concat_translations(translations: List[Translation],
+                         stop_ids: Set[int],
+                         scorer: CandidateScorer) -> Translation:
+    """
+    Combines translations through concatenation.
+
+    :param translations: A list of translations (sequence starting with BOS symbol), score and length.
+    :param stop_ids: The EOS symbols.
+    :param scorer: Candidate scorer for recomputing score of concatenated translations.
+    :return: A concatenation of the translations with a score.
+    """
+    if len(translations) == 1:
+        return translations[0]
+
+    # Concatenation of all target ids without BOS and EOS
+    target_ids = []
+    beam_histories = []  # type: List[BeamHistory]
+    estimated_reference_length = None  # type: Optional[float]
+
+    for idx, translation in enumerate(translations):
+        if idx == len(translations) - 1:
+            target_ids.extend(translation.target_ids)
+        else:
+            if translation.target_ids[-1][0] in stop_ids:
+                target_ids.extend(translation.target_ids[:-1])
+            else:
+                target_ids.extend(translation.target_ids)
+        beam_histories.extend(translation.beam_histories)
+        if translation.estimated_reference_length is not None:
+            if estimated_reference_length is None:
+                estimated_reference_length = translation.estimated_reference_length
+            else:
+                estimated_reference_length += translation.estimated_reference_length
+
+    # Unnormalize + sum and renormalize the score:
+    raw_score = sum(scorer.unnormalize(t.score, len(t.target_ids), t.estimated_reference_length) for t in translations)
+    score = scorer(raw_score, len(target_ids), estimated_reference_length)
+    return Translation(target_ids, score, beam_histories,
+                       estimated_reference_length=estimated_reference_length)
 
 
 class Translator:
@@ -395,7 +875,7 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
             max_output_lengths.append(self._get_max_output_length(num_tokens))
-            source[j, :num_tokens, 0] = data_io.tokens2ids(trans_input.tokens, self.source_vocabs[0])
+            source[j, :num_tokens, 0] = tokens2ids(trans_input.tokens, self.source_vocabs[0])
 
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
@@ -405,7 +885,7 @@ class Translator:
             for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                 # fill in as many factors as there are tokens
 
-                source[j, :num_tokens, i] = data_io.tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+                source[j, :num_tokens, i] = tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
 
             # Check if vocabulary selection/restriction is enabled:
             # - First, see if the translator input provides a lexicon (used for multiple lexicons)
@@ -428,11 +908,11 @@ class Translator:
                     restrict_lexicon = self.restrict_lexicon
 
             if trans_input.constraints is not None:
-                raw_constraints[j] = [data_io.tokens2ids(phrase, self.vocab_targets[0]) for phrase in
+                raw_constraints[j] = [tokens2ids(phrase, self.vocab_targets[0]) for phrase in
                                       trans_input.constraints]
 
             if trans_input.avoid_list is not None:
-                raw_avoid_list[j] = [data_io.tokens2ids(phrase, self.vocab_targets[0]) for phrase in
+                raw_avoid_list[j] = [tokens2ids(phrase, self.vocab_targets[0]) for phrase in
                                      trans_input.avoid_list]
                 if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "

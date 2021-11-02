@@ -15,12 +15,11 @@ import copy
 import logging
 import os
 import time
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import cast, Dict, Optional, Tuple, List
 
-import mxnet as mx
 import torch as pt
-from mxnet import gluon
 
 from sockeye import __version__, transformer_pt
 from . import constants as C
@@ -31,9 +30,8 @@ from . import layers_pt
 from . import utils
 from . import vocab
 from .config import Config
-from .encoder import FactorConfig
-from .layers import LengthRatioConfig
-from dataclasses import dataclass
+from .encoder_pt import FactorConfig
+from .layers_pt import LengthRatioConfig
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +399,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
     def set_parameters(self,  # TODO
-                       new_params: Dict[str, gluon.Parameter],
+                       new_params: Dict[str, 'gluon.Parameter'],
                        allow_missing: bool = True,
                        ignore_extra: bool = False):
         """

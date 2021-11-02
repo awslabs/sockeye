@@ -22,8 +22,8 @@ from typing import Any, Callable, Dict, List, Tuple, Optional
 
 import yaml
 
+from sockeye.utils import smart_open
 from . import constants as C
-from . import data_io
 
 
 class ConfigArgumentParser(argparse.ArgumentParser):
@@ -271,7 +271,7 @@ def file_or_stdin() -> Callable:
         if path is None or path == "-":
             return sys.stdin
         else:
-            return data_io.smart_open(path)
+            return smart_open(path)
 
     return parse
 

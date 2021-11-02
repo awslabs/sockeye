@@ -35,10 +35,8 @@ from itertools import starmap
 import torch as pt
 import torch.distributed
 
-import mxnet as mx
-import numpy as onp
+import numpy as np
 import portalocker
-from mxnet import np, npx
 
 from . import __version__, constants as C
 from . import horovod_mpi
@@ -104,7 +102,7 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = None) -> None:
+def seed_rngs(seed: int, ctx: Optional[Union['mx.Context', List['mx.Context']]] = None) -> None:
     """
     Seed the random number generators (Python, Numpy and MXNet).
 
@@ -116,7 +114,7 @@ def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = No
            14 for gpu(1). See https://beta.mxnet.io/api/gluon-related/_autogen/mxnet.random.seed.html.
     """
     logger.info(f"Random seed: {seed}")
-    onp.random.seed(seed)
+    np.random.seed(seed)
     random.seed(seed)
     try:
         import torch
@@ -124,13 +122,17 @@ def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = No
         logger.info(f"PyTorch seed: {seed}")
     except ImportError:
         pass
-    if ctx is None:
-        mx.random.seed(seed, ctx='all')
-    else:
-        if isinstance(ctx, mx.Context):
-            ctx = [ctx]
-        for i, c in enumerate(ctx):
-            mx.random.seed(seed + i, ctx=c)
+    try:
+        import mxnet as mx
+        if ctx is None:
+            mx.random.seed(seed, ctx='all')
+        else:
+            if isinstance(ctx, mx.Context):
+                ctx = [ctx]
+            for i, c in enumerate(ctx):
+                mx.random.seed(seed + i, ctx=c)
+    except:
+        pass
 
 
 def check_condition(condition: bool, error_message: str):
@@ -265,13 +267,14 @@ def combine_stds(stds: List[Optional[float]], means: List[Optional[float]], num_
                          if std is not None and mean is not None) / sum(num_sents))
 
 
-def average_arrays(arrays: List[np.ndarray]) -> np.ndarray:
+def average_arrays(arrays: List['np.ndarray']) -> 'np.ndarray':
     """
     Take a list of arrays of the same shape and take the element wise average.
 
     :param arrays: A list of ndarrays with the same shape that will be averaged.
     :return: The average of the ndarrays in the same context as arrays[0].
     """
+    from mxnet import npx
     if not arrays:
         raise ValueError("arrays is empty.")
     if len(arrays) == 1:
@@ -302,6 +305,7 @@ def get_num_gpus() -> int:
     :return: The number of GPUs on the system.
     """
     try:
+        import mxnet as mx
         return mx.context.num_gpus()
     except mx.MXNetError:
         # Some builds of MXNet will raise a CUDA error when CUDA is not
@@ -309,13 +313,17 @@ def get_num_gpus() -> int:
         return 0
 
 
-def get_gpu_memory_usage(ctx: Union[mx.context.Context, List[mx.context.Context]]) -> Dict[int, Tuple[int, int]]:
+def get_gpu_memory_usage(ctx: Union['mx.context.Context', List['mx.context.Context']]) -> Dict[int, Tuple[int, int]]:
     """
     Returns used and total memory for GPUs identified by the given context list.
 
     :param ctx: List of MXNet context devices.
     :return: Dictionary of device id mapping to a tuple of (memory used, memory total).
     """
+    try:
+        import mxnet as mx
+    except ImportError:
+        return {}
     if isinstance(ctx, mx.context.Context):
         ctx = [ctx]
     ctx = [c for c in ctx if c.device_type == 'gpu']
@@ -345,7 +353,7 @@ def determine_context(device_ids: List[int],
                       use_cpu: bool,
                       disable_device_locking: bool,
                       lock_dir: str,
-                      exit_stack: ExitStack) -> List[mx.Context]:
+                      exit_stack: ExitStack) -> List['mx.Context']:
     """
     Determine the MXNet context to run on (CPU or GPU).
 
@@ -357,6 +365,10 @@ def determine_context(device_ids: List[int],
 
     :return: A list with the context(s) to run on.
     """
+    try:
+        import mxnet as mx
+    except ImportError:
+        return []
     if use_cpu:
         context = [mx.cpu()]
     else:
@@ -665,10 +677,10 @@ def metric_value_is_better(new: float, old: float, metric: str) -> bool:
 
 
 _DTYPE_TO_STRING = {
-    onp.float32: 'float32',
-    onp.float16: 'float16',
-    onp.int8: 'int8',
-    onp.int32: 'int32',
+    np.float32: 'float32',
+    np.float16: 'float16',
+    np.int8: 'int8',
+    np.int32: 'int32',
     pt.float32: 'float32',
     pt.float16: 'float16',
     pt.int32: 'int32',

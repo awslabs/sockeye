@@ -17,8 +17,7 @@ Defines various constants used throughout the project
 import sys
 from typing import Dict
 import torch as pt
-
-from mxnet import gluon, np
+import numpy as np
 
 # MXNet environment variables
 MXNET_SAFE_ACCUMULATION = 'MXNET_SAFE_ACCUMULATION'
@@ -437,4 +436,4 @@ BREVITY_PENALTY_CONSTANT = 'constant'
 BREVITY_PENALTY_LEARNED = 'learned'
 BREVITY_PENALTY_NONE = 'none'
 
-ParameterDict = Dict[str, gluon.Parameter]
+ParameterDict = Dict[str, 'gluon.Parameter']

@@ -594,7 +594,7 @@ def prepare_data(source_fnames: List[str],
                  output_prefix: str,
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
-                 pool: multiprocessing.pool.Pool = None,
+                 pool: multiprocessing.Pool = None,
                  shards: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None):
     """
     :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.

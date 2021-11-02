@@ -19,19 +19,19 @@ import argparse
 import logging
 import sys
 import time
-from . import inference
 from contextlib import ExitStack
 from typing import Dict, Generator, List, Optional, Union
 
+import torch as pt
+
 from sockeye.lexicon import TopKLexicon
 from sockeye.log import setup_main_logger
+from sockeye.model_pt import load_models
 from sockeye.output_handler import get_output_handler, OutputHandler
-from sockeye.utils import determine_context, log_basic_info, check_condition, grouper
+from sockeye.utils import log_basic_info, check_condition, grouper, smart_open, seed_rngs
 from . import arguments
 from . import constants as C
-from . import data_io
-
-from . import utils
+from . import inference_pt
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def main():
 def run_translate(args: argparse.Namespace):
 
     # Seed randomly unless a seed has been passed
-    utils.seed_rngs(args.seed if args.seed is not None else int(time.time()))
+    seed_rngs(args.seed if args.seed is not None else int(time.time()))
 
     if args.output is not None:
         setup_main_logger(console=not args.quiet,
@@ -69,16 +69,9 @@ def run_translate(args: argparse.Namespace):
 
     with ExitStack() as exit_stack:
         check_condition(len(args.device_ids) == 1, "translate only supports single device for now")
-        context = determine_context(device_ids=args.device_ids,
-                                    use_cpu=args.use_cpu,
-                                    disable_device_locking=args.disable_device_locking,
-                                    lock_dir=args.lock_dir,
-                                    exit_stack=exit_stack)[0]
-        logger.info("Translate Device: %s", context)
-        import torch as pt
-        from sockeye.model_pt import load_models
         # TODO: placeholder
         device = pt.device('cpu' if args.use_cpu else f'cuda:0')
+        logger.info(f"Translate Device: {device}")
         models, source_vocabs, target_vocabs = load_models(device=device,
                                                            model_folders=args.models,
                                                            checkpoints=args.checkpoints,
@@ -120,7 +113,6 @@ def run_translate(args: argparse.Namespace):
         else:
             raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
-        from . import inference_pt
         for model in models:
             model.eval()
 
@@ -163,9 +155,9 @@ def run_translate(args: argparse.Namespace):
 
 
 def make_inputs(input_file: Optional[str],
-                translator: inference.Translator,
+                translator: inference_pt.Translator,
                 input_is_json: bool,
-                input_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
+                input_factors: Optional[List[str]] = None) -> Generator[inference_pt.TranslatorInput, None, None]:
     """
     Generates TranslatorInput instances from input. If input is None, reads from stdin. If num_input_factors > 1,
     the function will look for factors attached to each token, separated by '|'.
@@ -182,13 +174,13 @@ def make_inputs(input_file: Optional[str],
         check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if input_is_json:
-                yield inference.make_input_from_json_string(sentence_id=sentence_id,
-                                                            json_string=line,
-                                                            translator=translator)
+                yield inference_pt.make_input_from_json_string(sentence_id=sentence_id,
+                                                               json_string=line,
+                                                               translator=translator)
             else:
-                yield inference.make_input_from_factored_string(sentence_id=sentence_id,
-                                                                factored_string=line,
-                                                                translator=translator)
+                yield inference_pt.make_input_from_factored_string(sentence_id=sentence_id,
+                                                                   factored_string=line,
+                                                                   translator=translator)
     else:
         input_factors = [] if input_factors is None else input_factors
         inputs = [input_file] + input_factors
@@ -197,17 +189,17 @@ def make_inputs(input_file: Optional[str],
                             "Model(s) require %d factors, but %d given (through --input and --input-factors)." % (
                                 translator.num_source_factors, len(inputs)))
         with ExitStack() as exit_stack:
-            streams = [exit_stack.enter_context(data_io.smart_open(i)) for i in inputs]
+            streams = [exit_stack.enter_context(smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
                 if input_is_json:
-                    yield inference.make_input_from_json_string(sentence_id=sentence_id,
-                                                                json_string=inputs[0],
-                                                                translator=translator)
+                    yield inference_pt.make_input_from_json_string(sentence_id=sentence_id,
+                                                                   json_string=inputs[0],
+                                                                   translator=translator)
                 else:
-                    yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
+                    yield inference_pt.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
 
 
-def read_and_translate(translator: inference.Translator,
+def read_and_translate(translator: inference_pt.Translator,
                        output_handler: OutputHandler,
                        chunk_size: Optional[int],
                        input_file: Optional[str] = None,
@@ -253,8 +245,8 @@ def read_and_translate(translator: inference.Translator,
 
 
 def translate(output_handler: OutputHandler,
-              trans_inputs: List[inference.TranslatorInput],
-              translator: inference.Translator) -> float:
+              trans_inputs: List[inference_pt.TranslatorInput],
+              translator: inference_pt.Translator) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.
 
