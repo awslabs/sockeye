@@ -147,26 +147,22 @@ def log_sockeye_version(logger):
         from sockeye.git_version import git_hash
     except ImportError:
         git_hash = "unknown"
-    logger.info("Sockeye version %s, commit %s, path %s", __version__, git_hash, __file__)
+    logger.info(f"Sockeye: {__version__}, commit {git_hash}, path {__file__}")
 
 
 def log_mxnet_version(logger):
     try:
         from mxnet import __version__, __file__
-        mx_version = __version__
-        mx_file = __file__
+        info = f'MXNet: {__version__} ({__file__})'
     except ImportError:
-        mx_version = 'unknown'
-        mx_file = ''
-    logger.info("MXNet version %s, path %s", mx_version, mx_file)
+        info = 'MXNet unavailable'
+    logger.info(info)
 
 
 def log_torch_version(logger):
     try:
         from torch import __version__, __file__
-        torch_version = __version__
-        torch_file = __file__
+        info = f'PyTorch: {__version__} ({__file__})'
     except ImportError:
-        torch_version = 'unknown'
-        torch_file = ''
-    logger.info("PyTorch version %s, path %s", torch_version, torch_file)
+        info = 'PyTorch unavailable'
+    logger.info(info)

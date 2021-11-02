@@ -27,11 +27,14 @@ from . import transformer_pt
 from .transformer_pt import TransformerConfig
 
 logger = logging.getLogger(__name__)
-DecoderConfig = Union[TransformerConfig]
+DecoderConfig = Union[TransformerConfig, 'sockeye.transformer.TransformerConfig']
 
 
 def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'PyTorchDecoder':
-    return PyTorchDecoder.get_decoder(config, inference_only)
+    # TODO: while we still have both transformer.TransformerConfig and transformer_pt.TransformerConfig,
+    # this leads to unexpected behaviors when loading models. We can re-introduce once MXNet is removed
+    #return PyTorchDecoder.get_decoder(config, inference_only)
+    return PyTorchTransformerDecoder(config, inference_only=inference_only)
 
 
 class PyTorchDecoder(pt.nn.Module):
@@ -68,11 +71,12 @@ class PyTorchDecoder(pt.nn.Module):
 
         :param config: Decoder config.
         :param inference_only: Create a decoder that is only used for inference.
-        :param dtype: Data type for weights.
 
         :return: Decoder instance.
         """
         config_type = type(config)
+        print(config_type)
+        print(cls.__registry)
         if config_type not in cls.__registry:
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls = cls.__registry[config_type]

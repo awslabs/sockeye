@@ -1,4 +1,4 @@
-# Copyright 2018--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -19,15 +19,17 @@ import logging
 import os
 from contextlib import ExitStack
 
+import torch as pt
+
 from . import arguments
 from . import constants as C
-from . import data_io
+from . import data_io_pt
 from . import utils
-from .beam_search import CandidateScorer
+from .beam_search_pt import CandidateScorer
 from .log import setup_main_logger
-from .model import load_model
+from .model_pt import load_model
 from .output_handler import get_output_handler
-from .scoring import BatchScorer, Scorer
+from .scoring_pt import BatchScorer, Scorer
 from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
@@ -50,19 +52,16 @@ def score(args: argparse.Namespace):
     utils.log_basic_info(args)
 
     with ExitStack() as exit_stack:
-        context = utils.determine_context(device_ids=args.device_ids,
-                                          use_cpu=args.use_cpu,
-                                          disable_device_locking=args.disable_device_locking,
-                                          lock_dir=args.lock_dir,
-                                          exit_stack=exit_stack)
-        if args.batch_type == C.BATCH_TYPE_SENTENCE:
-            check_condition(args.batch_size % len(context) == 0, "When using multiple devices the batch size must be "
-                                                                 "divisible by the number of devices. Choose a batch "
-                                                                 "size that is a multiple of %d." % len(context))
-        logger.info("Scoring Device(s): %s", ", ".join(str(c) for c in context))
+        # TODO: placeholder, support multiple devices for scoring?
+        device = pt.device('cpu' if args.use_cpu else f'cuda:0')
+        # if args.batch_type == C.BATCH_TYPE_SENTENCE:
+        #     check_condition(args.batch_size % len(device) == 0, "When using multiple devices the batch size must be "
+        #                                                          "divisible by the number of devices. Choose a batch "
+        #                                                          "size that is a multiple of %d." % len(device))
+        logger.info("Scoring device: {device}")
 
-
-        model, source_vocabs, target_vocabs = load_model(args.model, context=context, dtype=args.dtype)
+        model, source_vocabs, target_vocabs = load_model(args.model, device=device, dtype=args.dtype)
+        model.eval()
 
         max_seq_len_source = model.max_supported_len_source
         max_seq_len_target = model.max_supported_len_target
@@ -79,7 +78,7 @@ def score(args: argparse.Namespace):
                         "Number of target inputs/factors provided (%d) does not match number of target factors "
                         "required by the model (%d)" % (len(targets), model.num_target_factors))
 
-        score_iter = data_io.get_scoring_data_iters(
+        score_iter = data_io_pt.get_scoring_data_iters(
             sources=sources,
             targets=targets,
             source_vocabs=source_vocabs,
@@ -102,14 +101,13 @@ def score(args: argparse.Namespace):
                                    score_type=args.score_type,
                                    constant_length_ratio=constant_length_ratio,
                                    softmax_temperature=args.softmax_temperature)
-        if not args.no_hybridization:
-            batch_scorer.hybridize(static_alloc=True)
+        batch_scorer.to(device)
 
         scorer = Scorer(model=model,
                         batch_scorer=batch_scorer,
                         source_vocabs=source_vocabs,
                         target_vocabs=target_vocabs,
-                        context=context)
+                        device=device)
 
         scorer.score(score_iter=score_iter,
                      output_handler=get_output_handler(output_type=args.output_type,

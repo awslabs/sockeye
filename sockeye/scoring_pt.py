@@ -17,18 +17,18 @@ Code for scoring.
 import logging
 import math
 import time
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
-from mxnet import context, gluon, np, npx
+import numpy as np
+import torch as pt
 
 from . import constants as C
-from . import data_io
-from . import inference
+from . import data_io_pt
+from . import inference_pt
 from . import vocab
-from .model_pt import PyTorchSockeyeModel
 from .beam_search_pt import CandidateScorer
+from .model_pt import PyTorchSockeyeModel
 from .output_handler import OutputHandler
-import torch as pt
 
 logger = logging.getLogger(__name__)
 
@@ -86,44 +86,45 @@ class Scorer:
     :param batch_scorer: BatchScorer block to score each batch.
     :param source_vocabs: The source vocabularies.
     :param target_vocabs: The target vocabularies.
-    :param context: Context.
+    :param device: Torch device to load batches to (should be set to model device).
     """
     def __init__(self,
                  model: PyTorchSockeyeModel,
                  batch_scorer: BatchScorer,
                  source_vocabs: List[vocab.Vocab],
                  target_vocabs: List[vocab.Vocab],
-                 context: Union[List[context.Context], context.Context]) -> None:
+                 device: pt.device) -> None:
         self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
         self.target_vocab_inv = vocab.reverse_vocab(target_vocabs[0])
         self.model = model
+        self.traced_model = None
         self.batch_scorer = batch_scorer
-        self.context = context
+        self.traced_batch_scorer = None
+        self.device = device
         self.exclude_list = {C.BOS_ID, C.EOS_ID, C.PAD_ID}
 
-    def score_batch(self, batch: data_io.Batch):
-        batch = batch.split_and_load(ctx=self.context)
-        batch_scores = []  # type: List[pt.tensor]
-        for inputs, labels in batch.shards():
-            source, source_length, target, target_length = inputs
-            source = pt.tensor(source.asnumpy())
-            source_length = pt.tensor(source_length.asnumpy())
-            target = pt.tensor(target.asnumpy())
-            target_length = pt.tensor(target_length.asnumpy())
-            inputs = (source.int(), source_length, target.int(), target_length)
-            outputs = self.model(*inputs)  # type: Dict[str, pt.tensor]
-            logits = outputs[C.LOGITS_NAME]  # type: pt.tensor
-            label = labels[C.TARGET_LABEL_NAME]
-            label = pt.tensor(label.asnumpy())
-            length_ratio = outputs.get(C.LENRATIO_NAME, pt.zeros_like(source_length))
-            scores = self.batch_scorer(logits, label.long(), length_ratio, source_length, target_length)
-            batch_scores.append(scores)
+    def score_batch(self, batch: data_io_pt.Batch):
+        # TODO: scoring should support multiple devices
+        batch = batch.load(self.device)
 
-        # shape: (batch_size,).
-        return pt.cat(batch_scores, dim=0).squeeze(1).numpy()
+        model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
+        if self.traced_model is None:
+            self.traced_model = pt.jit.trace(self.model, model_inputs, strict=False)
+        outputs = self.traced_model(*model_inputs)  # type: Dict[str, pt.tensor]
+
+        scorer_inputs = (outputs[C.LOGITS_NAME],
+                         batch.labels[C.TARGET_LABEL_NAME].long(),
+                         outputs.get(C.LENRATIO_NAME, pt.zeros_like(batch.source_length)),
+                         batch.source_length,
+                         batch.target_length)
+        if self.traced_batch_scorer is None:
+            self.traced_batch_scorer = pt.jit.trace(self.batch_scorer, scorer_inputs, strict=True)
+        scores = self.traced_batch_scorer(*scorer_inputs)
+
+        return scores.squeeze(1).numpy()
 
     @pt.inference_mode(True)
-    def score(self, score_iter: data_io.BaseParallelSampleIter, output_handler: OutputHandler):
+    def score(self, score_iter: data_io_pt.BaseParallelSampleIter, output_handler: OutputHandler):
         total_time = 0.
         sentence_no = 0
         batch_no = 0
@@ -132,17 +133,16 @@ class Scorer:
             scores = self.score_batch(batch)
             batch_time = time.time() - batch_tic
             total_time += batch_time
-
-            for sentno, (source, target, score) in enumerate(zip(batch.source.astype('int32', copy=False)[:, :, 0],
-                                                                 batch.target.astype('int32', copy=False)[:, :, 0],
+            for sentno, (source, target, score) in enumerate(zip(batch.source[:, :, 0],
+                                                                 batch.target[:, :, 0],
                                                                  scores), 1):
                 sentence_no += 1
 
                 # Transform arguments in preparation for printing
                 source_ids = source.tolist()
-                source_tokens = list(data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
+                source_tokens = list(data_io_pt.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
                 target_ids = target.tolist()
-                target_tokens = list(data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
+                target_tokens = list(data_io_pt.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
                 target_string = C.TOKEN_SEPARATOR.join(target_tokens)
 
                 # Report a score of -inf for invalid sentence pairs (empty source and/or target)
@@ -150,9 +150,9 @@ class Scorer:
                     score = -np.inf
 
                 # Output handling routines require us to make use of inference classes.
-                output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),
-                                      inference.TranslatorOutput(sentence_no, target_string,
-                                                                 target_tokens, score),
+                output_handler.handle(inference_pt.TranslatorInput(sentence_no, source_tokens),
+                                      inference_pt.TranslatorOutput(sentence_no, target_string,
+                                                                    target_tokens, score),
                                       batch_time)
 
         if sentence_no != 0:

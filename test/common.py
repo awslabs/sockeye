@@ -20,6 +20,7 @@ from unittest.mock import patch
 import numpy as np
 
 import sockeye.score
+import sockeye.score_pt
 import sockeye.translate
 import sockeye.translate_pt
 import sockeye.mx_to_pt
@@ -171,13 +172,12 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
                 factor = json_output['factor%d' % i]
                 print(factor, file=factor_out)
 
-    params = "{} {} {} {}".format(sockeye.score.__file__,
-                                  SCORE_PARAMS_COMMON.format(model=data['model'],
-                                                             source=data['test_source'],
-                                                             target=target_path,
-                                                             output=out_path),
-                                  score_params,
-                                  '--use-pytorch' if use_pytorch else '')
+    params = "{} {} {}".format(sockeye.score_pt.__file__ if use_pytorch else sockeye.score.__file__,
+                               SCORE_PARAMS_COMMON.format(model=data['model'],
+                                                          source=data['test_source'],
+                                                          target=target_path,
+                                                          output=out_path),
+                               score_params)
     if 'test_source_factors' in data:
         params += SCORE_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['test_source_factors']))
     if target_factor_paths:
@@ -185,7 +185,7 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
 
     logger.info("Scoring with params %s", params)
     with patch.object(sys, "argv", params.split()):
-        sockeye.score.main()
+        sockeye.score_pt.main() if use_pytorch else sockeye.score.main()
 
     # Collect scores from output file
     with open(out_path) as score_out:
