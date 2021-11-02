@@ -72,15 +72,14 @@ if args.requirement is None:
 else:
     install_requires = get_requirements(args.requirement)
 
-entry_points={
+
+entry_points = {
+    # TODO: add Torch entry points
     'console_scripts': [
-        'sockeye-autopilot = sockeye_contrib.autopilot.autopilot:main',
         'sockeye-average = sockeye.average:main',
         'sockeye-embeddings = sockeye.embeddings:main',
         'sockeye-evaluate = sockeye.evaluate:main',
-        'sockeye-extract-parameters = sockeye.extract_parameters:main',
         'sockeye-lexicon = sockeye.lexicon:main',
-        'sockeye-init-embed = sockeye.init_embedding:main',
         'sockeye-prepare-data = sockeye.prepare_data:main',
         'sockeye-quantize = sockeye.quantize:main',
         'sockeye-score = sockeye.score:main',
@@ -90,7 +89,6 @@ entry_points={
         'sockeye-rerank = sockeye.rerank:main',
     ],
 }
-
 args = dict(
     name='sockeye',
 
