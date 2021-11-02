@@ -42,7 +42,7 @@ from mxnet import np, npx
 
 from . import __version__, constants as C
 from . import horovod_mpi
-from .log import log_sockeye_version, log_mxnet_version
+from .log import log_sockeye_version, log_mxnet_version, log_torch_version
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,7 @@ def log_basic_info(args) -> None:
     """
     log_sockeye_version(logger)
     log_mxnet_version(logger)
+    log_torch_version(logger)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
 

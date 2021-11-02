@@ -168,8 +168,7 @@ def test_model_parameters(test_params, expected_params):
                       softmax_temperature=None,
                       prevent_unk=False,
                       sample=None,
-                      seed=None,
-                      use_pytorch=False)),
+                      seed=None)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)

@@ -151,10 +151,22 @@ def log_sockeye_version(logger):
 
 
 def log_mxnet_version(logger):
-    from mxnet import __version__, __file__
-    logger.info("MXNet version %s, path %s", __version__, __file__)
+    try:
+        from mxnet import __version__, __file__
+        mx_version = __version__
+        mx_file = __file__
+    except ImportError:
+        mx_version = 'unknown'
+        mx_file = ''
+    logger.info("MXNet version %s, path %s", mx_version, mx_file)
 
 
 def log_torch_version(logger):
-    from torch import __version__, __file__
-    logger.info("PyTorch version %s, path %s", __version__, __file__)
+    try:
+        from torch import __version__, __file__
+        torch_version = __version__
+        torch_file = __file__
+    except ImportError:
+        torch_version = 'unknown'
+        torch_file = ''
+    logger.info("PyTorch version %s, path %s", torch_version, torch_file)

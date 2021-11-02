@@ -21,10 +21,11 @@ import numpy as np
 
 import sockeye.score
 import sockeye.translate
+import sockeye.translate_pt
 import sockeye.mx_to_pt
 from sockeye import constants as C
 from sockeye.test_utils import run_train_translate, run_translate_restrict, \
-    TRANSLATE_PARAMS_COMMON, TRANSLATE_PARAMS_COMMON_PYTORCH, TRANSLATE_WITH_FACTORS_COMMON, \
+    TRANSLATE_PARAMS_COMMON, TRANSLATE_WITH_FACTORS_COMMON, \
     collect_translate_output_and_scores, create_reference_constraints, SCORE_PARAMS_COMMON, \
     SCORE_WITH_SOURCE_FACTORS_COMMON, SCORE_WITH_TARGET_FACTORS_COMMON
 
@@ -93,16 +94,15 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     the previously generated outputs, referenced in the data dictionary.
     """
     out_path = os.path.join(data['work_dir'], "test.out.equiv")
-    params_format_string = TRANSLATE_PARAMS_COMMON_PYTORCH if use_pytorch else TRANSLATE_PARAMS_COMMON
-    params = "{} {} {}".format(sockeye.translate.__file__,
-                               params_format_string.format(model=data['model'],
-                                                           input=data['test_source'],
-                                                           output=out_path),
+    params = "{} {} {}".format(sockeye.translate_pt.__file__ if use_pytorch else sockeye.translate.__file__,
+                               TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                              input=data['test_source'],
+                                                              output=out_path),
                                translate_params_equiv)
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
     with patch.object(sys, "argv", params.split()):
-        sockeye.translate.main()
+        sockeye.translate_pt.main() if use_pytorch else sockeye.translate.main()
     # Collect translate outputs and scores
     translate_outputs_equiv = collect_translate_output_and_scores(out_path)
 

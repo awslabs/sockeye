@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,9 +14,6 @@
 """
 Translation CLI.
 """
-from . import pre_mxnet
-# Called before importing mxnet or any module that imports mxnet
-pre_mxnet.init()
 
 import argparse
 import logging
@@ -78,12 +75,14 @@ def run_translate(args: argparse.Namespace):
                                     lock_dir=args.lock_dir,
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
-        from sockeye.model import load_models
-        models, source_vocabs, target_vocabs = load_models(context=context,
+        import torch as pt
+        from sockeye.model_pt import load_models
+        # TODO: placeholder
+        device = pt.device('cpu' if args.use_cpu else f'cuda:0')
+        models, source_vocabs, target_vocabs = load_models(device=device,
                                                            model_folders=args.models,
                                                            checkpoints=args.checkpoints,
                                                            dtype=args.dtype,
-                                                           hybridize=hybridize,
                                                            inference_only=True,
                                                            mc_dropout=args.mc_dropout)
 
@@ -121,35 +120,40 @@ def run_translate(args: argparse.Namespace):
         else:
             raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
+        from . import inference_pt
+        for model in models:
+            model.eval()
 
-        scorer = inference.CandidateScorer(
+        scorer = inference_pt.CandidateScorer(
             length_penalty_alpha=args.length_penalty_alpha,
             length_penalty_beta=args.length_penalty_beta,
             brevity_penalty_weight=brevity_penalty_weight)
+        scorer.to(models[0].dtype)
 
-        translator = inference.Translator(context=context,
-                                          ensemble_mode=args.ensemble_mode,
-                                          scorer=scorer,
-                                          batch_size=args.batch_size,
-                                          beam_size=args.beam_size,
-                                          beam_search_stop=args.beam_search_stop,
-                                          nbest_size=args.nbest_size,
-                                          models=models,
-                                          source_vocabs=source_vocabs,
-                                          target_vocabs=target_vocabs,
-                                          restrict_lexicon=restrict_lexicon,
-                                          avoid_list=args.avoid_list,
-                                          strip_unknown_words=args.strip_unknown_words,
-                                          sample=args.sample,
-                                          output_scores=output_handler.reports_score(),
-                                          constant_length_ratio=constant_length_ratio,
-                                          max_output_length_num_stds=args.max_output_length_num_stds,
-                                          max_input_length=args.max_input_length,
-                                          max_output_length=args.max_output_length,
-                                          hybridize=hybridize,
-                                          softmax_temperature=args.softmax_temperature,
-                                          prevent_unk=args.prevent_unk,
-                                          greedy=args.greedy)
+        translator = inference_pt.Translator(device=device,
+                                             ensemble_mode=args.ensemble_mode,
+                                             scorer=scorer,
+                                             batch_size=args.batch_size,
+                                             beam_size=args.beam_size,
+                                             beam_search_stop=args.beam_search_stop,
+                                             nbest_size=args.nbest_size,
+                                             models=models,
+                                             source_vocabs=source_vocabs,
+                                             target_vocabs=target_vocabs,
+                                             restrict_lexicon=restrict_lexicon,
+                                             avoid_list=args.avoid_list,
+                                             strip_unknown_words=args.strip_unknown_words,
+                                             sample=args.sample,
+                                             output_scores=output_handler.reports_score(),
+                                             constant_length_ratio=constant_length_ratio,
+                                             max_output_length_num_stds=args.max_output_length_num_stds,
+                                             max_input_length=args.max_input_length,
+                                             max_output_length=args.max_output_length,
+                                             hybridize=hybridize,
+                                             softmax_temperature=args.softmax_temperature,
+                                             prevent_unk=args.prevent_unk,
+                                             greedy=args.greedy)
+
         read_and_translate(translator=translator,
                            output_handler=output_handler,
                            chunk_size=args.chunk_size,

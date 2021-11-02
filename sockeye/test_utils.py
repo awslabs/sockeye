@@ -34,6 +34,7 @@ import sockeye.score
 import sockeye.train
 import sockeye.train_pt
 import sockeye.translate
+import sockeye.translate_pt
 import sockeye.utils
 
 logger = logging.getLogger(__name__)
@@ -190,8 +191,6 @@ TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepare
 TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {output} " \
                            "--output-type json"
 
-TRANSLATE_PARAMS_COMMON_PYTORCH = TRANSLATE_PARAMS_COMMON + " --use-pytorch"
-
 TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
 TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
@@ -307,19 +306,18 @@ def run_train_translate(train_params: str,
 
     # Translate corpus with the 1st params and scoring output handler to obtain scores
     data['test_output'] = os.path.join(work_dir, "test.out")
-    params = "{} {} {} {}".format(sockeye.translate.__file__,
-                                 TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+    params = "{} {} {}".format(sockeye.translate_pt.__file__ if use_pytorch else sockeye.translate.__file__,
+                               TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                               input=data['test_source'],
                                                               output=data['test_output']),
-                                 translate_params,
-                                 '--use-pytorch' if use_pytorch else '')
+                               translate_params)
 
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
 
     logger.info("Translating with params %s", params)
     with patch.object(sys, "argv", params.split()):
-        sockeye.translate.main()
+        sockeye.translate_pt.main() if use_pytorch else sockeye.translate.main()
 
     # Collect test inputs
     with open(data['test_source']) as inputs:
@@ -342,17 +340,16 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str, use_pyto
     """
     out_path = os.path.join(data['work_dir'], "out-restrict.txt")
     # Translate corpus with restrict-lexicon
-    params = "{} {} {} {} {}".format(sockeye.translate.__file__,
-                                     TRANSLATE_PARAMS_COMMON.format(model=data['model'],
-                                                                    input=data['test_source'],
-                                                                    output=out_path),
-                                     translate_params,
-                                     TRANSLATE_PARAMS_RESTRICT.format(lexicon=data['lexicon'], topk=1),
-                                     '--use-pytorch' if use_pytorch else '')
+    params = "{} {} {} {}".format(sockeye.translate_pt.__file__ if use_pytorch else sockeye.translate.__file__,
+                                  TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                                 input=data['test_source'],
+                                                                 output=out_path),
+                                  translate_params,
+                                  TRANSLATE_PARAMS_RESTRICT.format(lexicon=data['lexicon'], topk=1))
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
     with patch.object(sys, "argv", params.split()):
-        sockeye.translate.main()
+        sockeye.translate_pt.main() if use_pytorch else sockeye.translate.main()
 
     # Collect test translate outputs and scores
     data['test_outputs_restricted'] = collect_translate_output_and_scores(out_path)
