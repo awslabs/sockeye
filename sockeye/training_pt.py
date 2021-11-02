@@ -25,9 +25,9 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
+import numpy as np
 import torch
 import torch.distributed
-import numpy as np
 
 from . import average
 from . import checkpoint_decoder_pt

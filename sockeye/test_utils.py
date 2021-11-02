@@ -27,9 +27,9 @@ import sockeye.constants as C
 import sockeye.evaluate
 import sockeye.extract_parameters
 import sockeye.lexicon
-import sockeye.model
 import sockeye.mx_to_pt
 import sockeye.prepare_data
+import sockeye.prepare_data_pt
 import sockeye.score
 import sockeye.train
 import sockeye.train_pt
@@ -226,23 +226,25 @@ def run_train_translate(train_params: str,
     # Optionally create prepared data directory
     if use_prepared_data:
         data['train_prepared'] = os.path.join(work_dir, "prepared_data")
-        prepare_params = "{} {} {}".format(sockeye.prepare_data.__file__,
-                                           PREPARE_DATA_COMMON.format(train_source=data['train_source'],
-                                                                   train_target=data['train_target'],
-                                                                   output=data['train_prepared'],
-                                                                   max_len=max_seq_len),
-                                          '--use-pytorch' if use_pytorch else '')
+        prepare_params = "{} {}".format(
+            sockeye.prepare_data_pt.__file__ if use_pytorch else sockeye.prepare_data.__file__,
+            PREPARE_DATA_COMMON.format(train_source=data['train_source'],
+                                       train_target=data['train_target'],
+                                       output=data['train_prepared'],
+                                       max_len=max_seq_len))
         if 'train_source_factors' in data:
-            prepare_params += TRAIN_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
+            prepare_params += TRAIN_WITH_SOURCE_FACTORS_COMMON.format(
+                source_factors=" ".join(data['train_source_factors']))
         if 'train_target_factors' in data:
-            prepare_params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(data['train_target_factors']))
+            prepare_params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(
+                target_factors=" ".join(data['train_target_factors']))
 
         if '--weight-tying-type src_trg' in train_params:
             prepare_params += ' --shared-vocab'
 
         logger.info("Preparing data with parameters %s.", prepare_params)
         with patch.object(sys, "argv", prepare_params.split()):
-            sockeye.prepare_data.main()
+            sockeye.prepare_data_pt.main() if use_pytorch else sockeye.prepare_data.main()
         # Train model
         params = "{} {} {}".format(sockeye.train.__file__,
                                    TRAIN_PARAMS_PREPARED_DATA_COMMON.format(prepared_data=data['train_prepared'],

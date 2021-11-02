@@ -557,9 +557,6 @@ def add_prepare_data_cli_args(params):
                         required=True,
                         help='Folder where the prepared and possibly sharded data is written to.')
 
-    # TODO(migration): Remove after removing MXNet code
-    params.add_argument('--use-pytorch', action="store_true", help='Use PyTorch to prepare data.')
-
     add_logging_args(params)
     add_process_pool_args(params)
 
