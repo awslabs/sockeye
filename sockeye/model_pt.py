@@ -397,8 +397,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
             utils.check_condition(not unexpected, f"extra keys: {unexpected}")
         logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
-    def set_parameters(self,  # TODO
-                       new_params: Dict[str, 'gluon.Parameter'],
+    def set_parameters(self,
+                       new_params: Dict[str, pt.nn.Parameter],
                        allow_missing: bool = True,
                        ignore_extra: bool = False):
         """
@@ -408,23 +408,20 @@ class PyTorchSockeyeModel(pt.nn.Module):
         :param allow_missing: Whether to skip setting parameters not represented in the dictionary.
         :param ignore_extra: Whether to ignore parameters from new_params that are not present in this model.
         """
-        model_params = self.collect_params()
+        model_params = dict(self.named_parameters())
         if not allow_missing:
-            for k in model_params.keys():
-                assert k in new_params.keys(), "Parameter '%s' is missing in new_params dictionary. " \
-                                               "Set allow_missing=True to ignore missing parameters." % k
-        for k in new_params:
-            assert new_params[k]._data is not None, "Parameter '%s' is not initialized in new_params dictionary." % k
-            if not ignore_extra and k not in model_params:
-                raise ValueError("Parameter '%s' in new_params dictionary is not preset in ParameterDict. "
-                                 "Set ignore_extra=True to ignore." % k)
-            if k in model_params:
-                assert model_params[k]._data is not None, "Parameter '%s' must be initialized before it can be reset " \
-                                                          "using set_parameters." % k
-                assert model_params[k].shape == new_params[k].shape, \
+            for name, param in model_params.items():
+                assert name in new_params.keys(), "Parameter '%s' is missing in new_params dictionary. " \
+                                                  "Set allow_missing=True to ignore missing parameters." % name
+        for name in new_params:
+            if not ignore_extra and name not in model_params:
+                raise ValueError("Parameter '%s' in new_params dictionary is not present in ParameterDict. "
+                                 "Set ignore_extra=True to ignore." % name)
+            if name in model_params:
+                assert model_params[name].size() == new_params[name].size(), \
                     "Parameter '%s' has shape '%s' in the model but shape '%s' in the new_params dictionary." % \
-                    (k, model_params[k].shape, new_params[k].shape)
-                model_params[k].set_data(new_params[k].data())
+                    (name, model_params[name].size(), new_params[name].size())
+                model_params[name].data[:] = new_params[name].data
 
     @staticmethod
     def save_version(folder: str):
