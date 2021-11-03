@@ -31,6 +31,7 @@ from . import lexicon
 logger = logging.getLogger(__name__)
 
 
+# TODO (fhieber): Consider making inference classes regular modules (or move logic into the model module)
 class _Inference(ABC):
 
     @abstractmethod
@@ -83,9 +84,77 @@ class _SingleModelInference(_Inference):
         target_factors = None  # type: Optional[pt.tensor]
         if target_factor_outputs:
             # target factors are greedily 'decoded'.
-            factor_predictions = [pt.argmax(tfo, dim=1).unsqueeze(1).int() for tfo in target_factor_outputs]
+            factor_predictions = [tfo.argmax(dim=1).unsqueeze(1).int() for tfo in target_factor_outputs]
             target_factors = factor_predictions[0] if len(factor_predictions) == 1 else pt.cat(factor_predictions, 1)
         return scores, states, target_factors
+
+
+class _EnsembleInference(_Inference):
+
+    def __init__(self,
+                 models: List[PyTorchSockeyeModel],
+                 ensemble_mode: str = 'linear',
+                 constant_length_ratio: float = 0.0,
+                 softmax_temperature: Optional[float] = None) -> None:
+        self._models = models
+        if ensemble_mode == 'linear':
+            self._interpolation = self.linear_interpolation
+        elif ensemble_mode == 'log_linear':
+            self._interpolation = self.log_linear_interpolation
+        else:
+            raise ValueError()
+        self._const_lr = constant_length_ratio
+        self._softmax_temperature = softmax_temperature
+
+    def state_structure(self) -> List:
+        return [model.state_structure() for model in self._models]
+
+    def encode_and_initialize(self, inputs: pt.tensor, valid_length: Optional[pt.tensor] = None):
+        model_states = []  # type: List[pt.tensor]
+        predicted_output_lengths = []  # type: List[pt.tensor]
+        for model in self._models:
+            states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
+            predicted_output_lengths.append(predicted_output_length)
+            model_states += states
+        # average predicted output lengths, (batch, 1)
+        predicted_output_lengths = pt.stack(predicted_output_lengths, dim=1).float().mean(dim=1)
+        return model_states, predicted_output_lengths
+
+    def decode_step(self,
+                    step_input: pt.tensor,
+                    states: List,
+                    vocab_slice_ids: Optional[pt.tensor] = None):
+        outputs = []  # type: List[pt.tensor]
+        new_states = []  # type: List[pt.tensor]
+        factor_outputs = []  # type: List[List[pt.tensor]]
+        state_index = 0
+        for model, model_state_structure in zip(self._models, self.state_structure()):
+            model_states = states[state_index:state_index+len(model_state_structure)]
+            state_index += len(model_state_structure)
+            logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
+            probs = logits.softmax(dim=-1)
+            outputs.append(probs)
+            target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
+            factor_outputs.append(target_factor_probs)
+            new_states += model_states
+        scores = self._interpolation(outputs)
+
+        target_factors = None  # type: Optional[pt.tensor]
+        if factor_outputs:
+            # target factors are greedily 'decoded'.
+            factor_predictions = [self._interpolation(fs).argmin(dim=-1).unsqueeze(1).int() for fs in zip(*factor_outputs)]
+            if factor_predictions:
+                target_factors = factor_predictions[0] if len(factor_predictions) == 1 else pt.cat(factor_predictions, 1)
+        return scores, new_states, target_factors
+
+    @staticmethod
+    def linear_interpolation(predictions):
+        return -(utils.average_tensors(predictions).log())
+
+    @staticmethod
+    def log_linear_interpolation(predictions):
+        log_probs = utils.average_tensors([p.log() for p in predictions])
+        return -(log_probs.log_softmax())
 
 
 class UpdateScores(pt.nn.Module):
@@ -874,11 +943,10 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
                                               constant_length_ratio=constant_length_ratio,
                                               softmax_temperature=softmax_temperature)
         else:
-            assert False, "NOT IMPLEMENTED"
-            # inference = _EnsembleInference(models=models,
-            #                                ensemble_mode=ensemble_mode,
-            #                                constant_length_ratio=constant_length_ratio,
-            #                                softmax_temperature=softmax_temperature)
+            inference = _EnsembleInference(models=models,
+                                           ensemble_mode=ensemble_mode,
+                                           constant_length_ratio=constant_length_ratio,
+                                           softmax_temperature=softmax_temperature)
 
         global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
         search = BeamSearch(
