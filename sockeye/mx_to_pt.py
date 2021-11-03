@@ -15,28 +15,15 @@ import sockeye.model
 from . import initial_setup
 initial_setup.handle_env_cli_arg()
 
-import argparse
 import logging
-import sys
-import time
-from . import inference
-from contextlib import ExitStack
-from typing import Dict, Generator, List, Optional, Union
+from typing import Optional
 
-from sockeye.lexicon import TopKLexicon
-from sockeye.log import setup_main_logger
-from sockeye.output_handler import get_output_handler, OutputHandler
-from sockeye.utils import determine_context, log_basic_info, check_condition, grouper
 from . import arguments
 from sockeye.log import setup_main_logger
 import torch as pt
 from .model_pt import make_pytorch_model_from_mxnet_model
-from . import inference_pt
 from . import constants as C
-from . import data_io
 
-from . import utils
-from .model import load_models
 import os
 
 logger = logging.getLogger(__name__)
