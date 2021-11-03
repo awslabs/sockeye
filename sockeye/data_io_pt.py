@@ -17,7 +17,7 @@ Implements data iterators and I/O related functions for sequence-to-sequence mod
 import bisect
 import logging
 import math
-import multiprocessing
+import multiprocessing.pool
 import os
 import pickle
 import random
@@ -594,7 +594,7 @@ def prepare_data(source_fnames: List[str],
                  output_prefix: str,
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
-                 pool: multiprocessing.Pool = None,
+                 pool: multiprocessing.pool.Pool = None,
                  shards: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None):
     """
     :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.
