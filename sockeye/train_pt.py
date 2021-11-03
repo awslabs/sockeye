@@ -751,14 +751,12 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
         rescale_grad /= C.FIXED_GRAD_SCALE_FP16
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                             args.initial_learning_rate,
                                              args.learning_rate_t_scale,
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
                                              args.learning_rate_warmup,
                                              args.max_updates)
-    # TODO(mdenkows): Make this part of the constructor once we use 100% PyTorch
-    if lr_sched is not None:
-        lr_sched.base_lr = args.initial_learning_rate
 
     config = optimizers.PyTorchOptimizerConfig(name=args.optimizer,
                                                running_on_gpu=not args.use_cpu,

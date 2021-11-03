@@ -807,6 +807,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
         raise ValueError("Invalid weight initialization type: %s" % args.weight_init)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                             args.initial_learning_rate,
                                              args.learning_rate_t_scale,
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
