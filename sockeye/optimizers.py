@@ -81,7 +81,7 @@ def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> Tup
     sgd_impl = torch.optim.SGD
     # Built-in optimizers take the "set_to_none" argument. See:
     # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
-    zero_grad_args = {'set_to_none': True}
+    zero_grad_kwargs = {'set_to_none': True}
 
     if config.running_on_gpu:
         try:
@@ -91,7 +91,7 @@ def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> Tup
             # Apex optimizers automatically set gradients to none instead of
             # zeroing and do not have a "set_to_none" argument. See:
             # https://nvidia.github.io/apex/optimizers.html
-            zero_grad_args = {}
+            zero_grad_kwargs = {}
             logging.info('Using NVIDIA Apex fused optimizers')
         except ImportError:
             logger.warning('Cannot import NVIDIA Apex optimizers (FusedAdam, FusedSGD). Consider installing Apex for '
@@ -99,8 +99,8 @@ def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> Tup
 
     if config.name == C.OPTIMIZER_ADAM:
         return adam_impl(model.parameters(), lr=config.lr, betas=config.betas, eps=config.eps,
-                         weight_decay=config.weight_decay), zero_grad_args
+                         weight_decay=config.weight_decay), zero_grad_kwargs
     elif config.name == C.OPTIMIZER_SGD:
         return sgd_impl(model.parameters(), lr=config.lr, momentum=config.momentum,
-                        weight_decay=config.weight_decay), zero_grad_args
+                        weight_decay=config.weight_decay), zero_grad_kwargs
     raise ValueError(f'Unknown optimizer: {config.name}')

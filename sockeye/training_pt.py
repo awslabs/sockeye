@@ -143,7 +143,7 @@ class PyTorchEarlyStoppingTrainer:
                  sockeye_model: model_pt.PyTorchSockeyeModel,
                  traced_model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
-                 zero_grad_args: Dict[str, Any],
+                 zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss_pt.Loss],
                  device: torch.device,
                  dtype: str,
@@ -155,7 +155,7 @@ class PyTorchEarlyStoppingTrainer:
         self.sockeye_model = sockeye_model
         self.traced_model = traced_model
         self.optimizer = optimizer
-        self.zero_grad_args = zero_grad_args
+        self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
         self.device = device
         self.dtype = dtype
@@ -359,7 +359,7 @@ class PyTorchEarlyStoppingTrainer:
                 self._scaler.update()
             else:
                 self.optimizer.step()
-            self.optimizer.zero_grad(**self.zero_grad_args)
+            self.optimizer.zero_grad(**self.zero_grad_kwargs)
             did_grad_step = True
 
         self._speedometer(self.state.epoch, self.state.batches,

@@ -1024,7 +1024,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                  device_ids=None if args.use_cpu else [device],
                                                                  output_device=None if args.use_cpu else device)
 
-    optimizer, zero_grad_args = optimizers.get_optimizer(traced_model, optimizer_config)
+    optimizer, zero_grad_kwargs = optimizers.get_optimizer(traced_model, optimizer_config)
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
@@ -1034,7 +1034,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         sockeye_model=sockeye_model,
         traced_model=traced_model,
         optimizer=optimizer,
-        zero_grad_args=zero_grad_args,
+        zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
         device=device,
         dtype=args.dtype,
