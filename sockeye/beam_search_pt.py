@@ -40,15 +40,15 @@ class _Inference(ABC):
 
     @abstractmethod
     def encode_and_initialize(self,
-                              inputs: pt.tensor,
-                              valid_length: Optional[pt.tensor] = None):
+                              inputs: pt.Tensor,
+                              valid_length: Optional[pt.Tensor] = None):
         raise NotImplementedError()
 
     @abstractmethod
     def decode_step(self,
-                    step_input: pt.tensor,
+                    step_input: pt.Tensor,
                     states: List,
-                    vocab_slice_ids: Optional[pt.tensor] = None):
+                    vocab_slice_ids: Optional[pt.Tensor] = None):
         raise NotImplementedError()
 
 
@@ -68,20 +68,20 @@ class _SingleModelInference(_Inference):
     def state_structure(self) -> List:
         return [self._model.state_structure()]
 
-    def encode_and_initialize(self, inputs: pt.tensor, valid_length: Optional[pt.tensor] = None):
+    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
         return states, predicted_output_length
 
     def decode_step(self,
-                    step_input: pt.tensor,
+                    step_input: pt.Tensor,
                     states: List,
-                    vocab_slice_ids: Optional[pt.tensor] = None):
+                    vocab_slice_ids: Optional[pt.Tensor] = None):
         logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             logits = pt.log_softmax(logits, dim=-1)
         scores = -logits
 
-        target_factors = None  # type: Optional[pt.tensor]
+        target_factors = None  # type: Optional[pt.Tensor]
         if target_factor_outputs:
             # target factors are greedily 'decoded'.
             factor_predictions = [tfo.argmax(dim=1).unsqueeze(1).int() for tfo in target_factor_outputs]
@@ -109,9 +109,9 @@ class _EnsembleInference(_Inference):
     def state_structure(self) -> List:
         return [model.state_structure() for model in self._models]
 
-    def encode_and_initialize(self, inputs: pt.tensor, valid_length: Optional[pt.tensor] = None):
-        model_states = []  # type: List[pt.tensor]
-        predicted_output_lengths = []  # type: List[pt.tensor]
+    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None):
+        model_states = []  # type: List[pt.Tensor]
+        predicted_output_lengths = []  # type: List[pt.Tensor]
         for model in self._models:
             states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
             predicted_output_lengths.append(predicted_output_length)
@@ -121,12 +121,12 @@ class _EnsembleInference(_Inference):
         return model_states, predicted_output_lengths
 
     def decode_step(self,
-                    step_input: pt.tensor,
+                    step_input: pt.Tensor,
                     states: List,
-                    vocab_slice_ids: Optional[pt.tensor] = None):
-        outputs = []  # type: List[pt.tensor]
-        new_states = []  # type: List[pt.tensor]
-        factor_outputs = []  # type: List[List[pt.tensor]]
+                    vocab_slice_ids: Optional[pt.Tensor] = None):
+        outputs = []  # type: List[pt.Tensor]
+        new_states = []  # type: List[pt.Tensor]
+        factor_outputs = []  # type: List[List[pt.Tensor]]
         state_index = 0
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
@@ -139,7 +139,7 @@ class _EnsembleInference(_Inference):
             new_states += model_states
         scores = self._interpolation(outputs)
 
-        target_factors = None  # type: Optional[pt.tensor]
+        target_factors = None  # type: Optional[pt.Tensor]
         if factor_outputs:
             # target factors are greedily 'decoded'.
             factor_predictions = [self._interpolation(fs).argmin(dim=-1).unsqueeze(1).int() for fs in zip(*factor_outputs)]
@@ -467,10 +467,10 @@ class SortStates(pt.nn.Module):
 
 
 def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
-                         source_words: pt.tensor,
+                         source_words: pt.Tensor,
                          raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                          eos_id: int,
-                         beam_size: int) -> Tuple[pt.tensor, int, List[Optional[constrained.RawConstraintList]]]:
+                         beam_size: int) -> Tuple[pt.Tensor, int, List[Optional[constrained.RawConstraintList]]]:
     device = source_words.device
     vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.int().cpu().numpy())
     if any(raw_constraint_list):
@@ -527,13 +527,13 @@ class GreedySearch(pt.nn.Module):
         self.work_block = GreedyTop1()
 
     def forward(self,
-                source: pt.tensor,
-                source_length: pt.tensor,
+                source: pt.Tensor,
+                source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
                 raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                 raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                max_output_lengths: pt.tensor) -> Tuple[pt.tensor, pt.tensor, pt.tensor, pt.tensor,
-                                                        List[Optional[pt.tensor]],
+                max_output_lengths: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor,
+                                                        List[Optional[pt.Tensor]],
                                                         List[Optional[constrained.ConstrainedHypothesis]]]:
         """
         Translates a single sentence (batch_size=1) using greedy search.
@@ -561,9 +561,9 @@ class GreedySearch(pt.nn.Module):
         # best word_indices (also act as input: (batch*beam, num_target_factors
         best_word_index = pt.full((batch_size, self.num_target_factors),
                                   fill_value=self.bos_id, device=self.device, dtype=pt.int32)
-        outputs = []  # type: List[pt.tensor]
+        outputs = []  # type: List[pt.Tensor]
 
-        vocab_slice_ids = None  # type: Optional[pt.tensor]
+        vocab_slice_ids = None  # type: Optional[pt.Tensor]
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         if restrict_lexicon:
@@ -605,9 +605,9 @@ class GreedyTop1(pt.nn.Module):
     """
 
     def forward(self,
-                scores: pt.tensor,
-                vocab_slice_ids: Optional[pt.tensor] = None,
-                target_factors: Optional[pt.tensor] = None) -> pt.tensor:
+                scores: pt.Tensor,
+                vocab_slice_ids: Optional[pt.Tensor] = None,
+                target_factors: Optional[pt.Tensor] = None) -> pt.Tensor:
         # shape: (batch*beam=1, 1)
         # argmin has trouble with fp16 inputs on GPUs, using top1 instead
         best_word_index = pt.argmin(scores, dim=-1, keepdim=True)
@@ -682,13 +682,13 @@ class BeamSearch(pt.nn.Module):
         self._traced_top = None
 
     def forward(self,
-                source: pt.tensor,
-                source_length: pt.tensor,
+                source: pt.Tensor,
+                source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
                 raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                 raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                max_output_lengths: pt.tensor) -> Tuple[pt.tensor, pt.tensor, pt.tensor, pt.tensor,
-                                                        List[Optional[pt.tensor]],
+                max_output_lengths: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor,
+                                                        List[Optional[pt.Tensor]],
                                                         List[Optional[constrained.ConstrainedHypothesis]]]:
         """
         Translates multiple sentences using beam search.
@@ -733,8 +733,8 @@ class BeamSearch(pt.nn.Module):
         first_step_mask[batch_indices] = 0.0
 
         # Best word and hypotheses indices across beam search steps from topk operation.
-        best_hyp_indices_list = []  # type: List[pt.tensor]
-        best_word_indices_list = []  # type: List[pt.tensor]
+        best_hyp_indices_list = []  # type: List[pt.Tensor]
+        best_word_indices_list = []  # type: List[pt.Tensor]
 
         lengths = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.int32)
         finished = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.bool)
@@ -749,7 +749,7 @@ class BeamSearch(pt.nn.Module):
 
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
-        vocab_slice_ids = None  # type: Optional[pt.tensor]
+        vocab_slice_ids = None  # type: Optional[pt.Tensor]
         if restrict_lexicon:
             source_words = pt.split(source, 1, dim=2)[0].squeeze(2)
             vocab_slice_ids, output_vocab_size, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon,
@@ -885,7 +885,7 @@ class BeamSearch(pt.nn.Module):
                estimated_reference_lengths, \
                constraints
 
-    def _should_stop(self, finished: pt.tensor, batch_size: int) -> bool:
+    def _should_stop(self, finished: pt.Tensor, batch_size: int) -> bool:
         if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
             at_least_one_finished = finished.reshape(batch_size, self.beam_size).sum(dim=1) > 0
             return at_least_one_finished.sum().item() == batch_size

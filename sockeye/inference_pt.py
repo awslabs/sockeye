@@ -842,12 +842,12 @@ class Translator:
         return results
 
     def _get_inference_input(self,
-                             trans_inputs: List[TranslatorInput]) -> Tuple[pt.tensor,
+                             trans_inputs: List[TranslatorInput]) -> Tuple[pt.Tensor,
                                                                            int,
                                                                            Optional[lexicon.TopKLexicon],
                                                                            List[Optional[constrained.RawConstraintList]],
                                                                            List[Optional[constrained.RawConstraintList]],
-                                                                           pt.tensor]:
+                                                                           pt.Tensor]:
         """
         Assembles the numerical data for the batch. This comprises an NDArray for the source sentences,
         the bucket key (padded source length), and a list of raw constraint lists, one for each sentence in the batch,
@@ -1000,12 +1000,12 @@ class Translator:
                                 nbest_factor_tokens=nbest_factor_tokens)
 
     def _translate_np(self,
-                      source: pt.tensor,
-                      source_length: pt.tensor,
+                      source: pt.Tensor,
+                      source_length: pt.Tensor,
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
                       raw_constraints: List[Optional[constrained.RawConstraintList]],
                       raw_avoid_list: List[Optional[constrained.RawConstraintList]],
-                      max_output_lengths: pt.tensor) -> List[Translation]:
+                      max_output_lengths: pt.Tensor) -> List[Translation]:
         """
         Translates source of source_length and returns list of Translations.
 
@@ -1024,11 +1024,11 @@ class Translator:
                                                          max_output_lengths))
 
     def _get_best_translations(self,
-                               best_hyp_indices: pt.tensor,
-                               best_word_indices: pt.tensor,
-                               seq_scores: pt.tensor,
-                               lengths: pt.tensor,
-                               estimated_reference_lengths: Optional[pt.tensor] = None,
+                               best_hyp_indices: pt.Tensor,
+                               best_word_indices: pt.Tensor,
+                               seq_scores: pt.Tensor,
+                               lengths: pt.Tensor,
+                               estimated_reference_lengths: Optional[pt.Tensor] = None,
                                constraints: List[Optional[constrained.ConstrainedHypothesis]] = [],
                                beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
         """

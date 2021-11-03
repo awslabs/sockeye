@@ -110,7 +110,7 @@ class Scorer:
         model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
         if self.traced_model is None:
             self.traced_model = pt.jit.trace(self.model, model_inputs, strict=False)
-        outputs = self.traced_model(*model_inputs)  # type: Dict[str, pt.tensor]
+        outputs = self.traced_model(*model_inputs)  # type: Dict[str, pt.Tensor]
 
         scorer_inputs = (outputs[C.LOGITS_NAME],
                          batch.labels[C.TARGET_LABEL_NAME].long(),
