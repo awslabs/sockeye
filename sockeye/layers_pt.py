@@ -14,7 +14,7 @@
 import logging
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch as pt
 
@@ -648,12 +648,12 @@ class PyTorchSSRU(AutoregressiveLayer):
         """Update SSRU cell at training time"""
         steps = weighted_inputs.size()[0]
         cell_state = previous_cell_state.squeeze(0)
-        states = []
+        states_list = []  # type: List[pt.Tensor]
         for t in range(steps):
             cell_state = forget_rates[t, :, :] * cell_state + weighted_inputs[t, :, :]
-            states.append(cell_state)
+            states_list.append(cell_state)
 
-        states = pt.stack(states, dim=0)
+        states = pt.stack(states_list, dim=0)
         return states, cell_state.unsqueeze(0)
 
     @staticmethod

@@ -17,7 +17,7 @@ Decoders for sequence-to-sequence models.
 import logging
 from abc import abstractmethod
 from itertools import islice
-from typing import List, Optional, Tuple, Type, Union
+from typing import Dict, List, Optional, Tuple, Type, Union
 
 import torch as pt
 
