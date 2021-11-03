@@ -24,7 +24,6 @@ import os
 import shutil
 import sys
 import tempfile
-from contextlib import ExitStack
 from typing import cast, Callable, Optional, Dict, List, Tuple
 
 import torch
@@ -778,11 +777,10 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
     return config
 
 
-def set_grad_req_for_fixed_params(config: model_pt.ModelConfig,
-                                  params: Dict[str, torch.nn.parameter.Parameter],
-                                  fixed_param_names: List[str],
-                                  fixed_param_strategy: Optional[str] = None) -> Dict[str,
-                                                                                      torch.nn.parameter.Parameter]:
+def unset_requires_grad_for_fixed_params(config: model_pt.ModelConfig,
+                                         params: Dict[str, torch.nn.parameter.Parameter],
+                                         fixed_param_names: List[str],
+                                         fixed_param_strategy: Optional[str] = None):
     utils.check_condition(not config.lhuc or fixed_param_strategy is None,
                           "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
     if config.lhuc:
@@ -793,14 +791,11 @@ def set_grad_req_for_fixed_params(config: model_pt.ModelConfig,
         fixed_param_names += fixed_param_names_from_strategy(config, params, fixed_param_strategy)
         logger.info("Fixed param strategy: '%s'", fixed_param_strategy)
 
-    # set grad_req for fixed params
     for name in fixed_param_names:
         if name not in params:
             logger.warning("Fixed parameter name '%s' not part of model parameters, ignoring", name)
             continue
         params[name].requires_grad = False
-
-    return params
 
 
 def fixed_param_names_from_strategy(config: model_pt.ModelConfig,
@@ -915,153 +910,146 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-    with ExitStack() as exit_stack:
-        # TODO(mdenkows): Update to device_id after removing MXNet code
-        device = torch.device('cpu') if args.use_cpu \
-                 else torch.device('cuda', utils.get_local_rank()) if utils.is_distributed() \
-                 else torch.device('cuda', max(0, args.device_ids[0]))
-        if not args.use_cpu:
-            # Ensure that GPU operations use the correct device by default
-            torch.cuda.set_device(device)
-        logger.info(f'Training Device: {device}')
-        utils.seed_rngs(args.seed)
+    # TODO(mdenkows): Update to device_id after removing MXNet code
+    device = torch.device('cpu') if args.use_cpu \
+             else torch.device('cuda', utils.get_local_rank()) if utils.is_distributed() \
+             else torch.device('cuda', max(0, args.device_ids[0]))
+    if not args.use_cpu:
+        # Ensure that GPU operations use the correct device by default
+        torch.cuda.set_device(device)
+    logger.info(f'Training Device: {device}')
+    utils.seed_rngs(args.seed)
 
-        train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
-            args=args,
-            max_seq_len_source=max_seq_len_source,
-            max_seq_len_target=max_seq_len_target,
-            shared_vocab=use_shared_vocab(args),
-            resume_training=resume_training,
-            output_folder=output_folder)
+    train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
+        args=args,
+        max_seq_len_source=max_seq_len_source,
+        max_seq_len_target=max_seq_len_target,
+        shared_vocab=use_shared_vocab(args),
+        resume_training=resume_training,
+        output_folder=output_folder)
 
-        if max_seq_len_source != config_data.max_seq_len_source:
-            logger.info("Maximum source length determined by prepared data. Using %d instead of %d",
-                        config_data.max_seq_len_source, max_seq_len_source)
-            max_seq_len_source = config_data.max_seq_len_source
-        if max_seq_len_target != config_data.max_seq_len_target:
-            logger.info("Maximum target length determined by prepared data. Using %d instead of %d",
-                        config_data.max_seq_len_target, max_seq_len_target)
-            max_seq_len_target = config_data.max_seq_len_target
+    if max_seq_len_source != config_data.max_seq_len_source:
+        logger.info("Maximum source length determined by prepared data. Using %d instead of %d",
+                    config_data.max_seq_len_source, max_seq_len_source)
+        max_seq_len_source = config_data.max_seq_len_source
+    if max_seq_len_target != config_data.max_seq_len_target:
+        logger.info("Maximum target length determined by prepared data. Using %d instead of %d",
+                    config_data.max_seq_len_target, max_seq_len_target)
+        max_seq_len_target = config_data.max_seq_len_target
 
-        # Dump the vocabularies if we're just starting up
-        if utils.is_primary_worker() and not resume_training:
-            vocab.save_source_vocabs(source_vocabs, output_folder)
-            vocab.save_target_vocabs(target_vocabs, output_folder)
+    # Dump the vocabularies if we're just starting up
+    if utils.is_primary_worker() and not resume_training:
+        vocab.save_source_vocabs(source_vocabs, output_folder)
+        vocab.save_target_vocabs(target_vocabs, output_folder)
 
-        source_vocab_sizes = [len(v) for v in source_vocabs]
-        target_vocab_sizes = [len(v) for v in target_vocabs]
-        logger.info('Vocabulary sizes: source=[%s] target=[%s]',
-                    '|'.join([str(size) for size in source_vocab_sizes]),
-                    '|'.join([str(size) for size in target_vocab_sizes]))
+    source_vocab_sizes = [len(v) for v in source_vocabs]
+    target_vocab_sizes = [len(v) for v in target_vocabs]
+    logger.info('Vocabulary sizes: source=[%s] target=[%s]',
+                '|'.join([str(size) for size in source_vocab_sizes]),
+                '|'.join([str(size) for size in target_vocab_sizes]))
 
-        model_config = create_model_config(args=args,
-                                           source_vocab_sizes=source_vocab_sizes,
-                                           target_vocab_sizes=target_vocab_sizes,
-                                           max_seq_len_source=max_seq_len_source,
-                                           max_seq_len_target=max_seq_len_target,
-                                           config_data=config_data)
+    model_config = create_model_config(args=args,
+                                       source_vocab_sizes=source_vocab_sizes,
+                                       target_vocab_sizes=target_vocab_sizes,
+                                       max_seq_len_source=max_seq_len_source,
+                                       max_seq_len_target=max_seq_len_target,
+                                       config_data=config_data)
 
-        # Handle options that override training settings
-        trainer_config = training_pt.TrainerConfig(
-            output_dir=args.output,
-            early_stopping_metric=args.optimized_metric,
-            max_params_files_to_keep=args.keep_last_params,
-            keep_initializations=args.keep_initializations,
-            max_params_files_to_cache=args.cache_last_best_params,
-            cache_strategy=args.cache_strategy,
-            cache_metric=args.cache_metric,
-            checkpoint_interval=args.checkpoint_interval,
-            max_num_checkpoint_not_improved=args.max_num_checkpoint_not_improved,
-            checkpoint_improvement_threshold=args.checkpoint_improvement_threshold,
-            max_checkpoints=args.max_checkpoints,
-            min_samples=args.min_samples,
-            max_samples=args.max_samples,
-            min_updates=args.min_updates,
-            max_updates=args.max_updates,
-            min_epochs=args.min_num_epochs,
-            max_epochs=args.max_num_epochs,
-            max_seconds=args.max_seconds,
-            update_interval=args.update_interval,
-            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure
-        )
-        if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
-            check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
-                            "Minimum number of epochs must be smaller than maximum number of epochs")
+    # Handle options that override training settings
+    trainer_config = training_pt.TrainerConfig(output_dir=args.output,
+                                               early_stopping_metric=args.optimized_metric,
+                                               max_params_files_to_keep=args.keep_last_params,
+                                               keep_initializations=args.keep_initializations,
+                                               max_params_files_to_cache=args.cache_last_best_params,
+                                               cache_strategy=args.cache_strategy,
+                                               cache_metric=args.cache_metric,
+                                               checkpoint_interval=args.checkpoint_interval,
+                                               max_num_checkpoint_not_improved=args.max_num_checkpoint_not_improved,
+                                               checkpoint_improvement_threshold=args.checkpoint_improvement_threshold,
+                                               max_checkpoints=args.max_checkpoints,
+                                               min_samples=args.min_samples,
+                                               max_samples=args.max_samples,
+                                               min_updates=args.min_updates,
+                                               max_updates=args.max_updates,
+                                               min_epochs=args.min_num_epochs,
+                                               max_epochs=args.max_num_epochs,
+                                               max_seconds=args.max_seconds,
+                                               update_interval=args.update_interval,
+                                               stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
+    if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
+        check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
+                        "Minimum number of epochs must be smaller than maximum number of epochs")
 
-        optimizer_config = create_optimizer_config(args)
+    optimizer_config = create_optimizer_config(args)
 
-        sockeye_model = model_pt.PyTorchSockeyeModel(
-            model_config,
-            train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
-        sockeye_model.to(device)
-        sockeye_model.apply(model_pt.initialize_parameters)
+    sockeye_model = model_pt.PyTorchSockeyeModel(
+        model_config,
+        train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
+    sockeye_model.to(device)
+    sockeye_model.apply(model_pt.initialize_parameters)
 
-        # Load starting parameters if specified
-        if args.params is not None:
-            sockeye_model.load_parameters(filename=args.params,
-                                          device=device,
-                                          allow_missing=args.allow_missing_params or model_config.lhuc,
-                                          ignore_extra=args.ignore_extra_params)
+    # Load starting parameters if specified
+    if args.params is not None:
+        sockeye_model.load_parameters(filename=args.params,
+                                      device=device,
+                                      allow_missing=args.allow_missing_params or model_config.lhuc,
+                                      ignore_extra=args.ignore_extra_params)
 
-        params = dict(sockeye_model.named_parameters())
+    unset_requires_grad_for_fixed_params(config=model_config,
+                                         params=dict(sockeye_model.named_parameters()),
+                                         fixed_param_names=args.fixed_param_names,
+                                         fixed_param_strategy=args.fixed_param_strategy)
 
-        # Turn off requires_grad for fixed parameters
-        params = set_grad_req_for_fixed_params(config=model_config,
-                                               params=params,
-                                               fixed_param_names=args.fixed_param_names,
-                                               fixed_param_strategy=args.fixed_param_strategy)
+    if args.dtype == C.DTYPE_FP16:
+        sockeye_model.cast(C.DTYPE_FP16)
+    utils.log_parameters_pt(sockeye_model)
 
-        if args.dtype == C.DTYPE_FP16:
-            sockeye_model.cast(C.DTYPE_FP16)
-        utils.log_parameters_pt(sockeye_model)
+    logger.info('Tracing model on validation batch')
+    batch = eval_iter.next().load(device=device)
+    # When using AMP, turn on autocasting when tracing the model so that
+    # dtypes will match during AMP training. Disable the weight cache for
+    # compatibility with tracing. See:
+    # https://github.com/pytorch/pytorch/pull/63552
+    with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():
+        traced_model = torch.jit.trace(sockeye_model, (batch.source, batch.source_length,
+                                                       batch.target, batch.target_length), strict=False)
+    eval_iter.reset()
 
-        logger.info('Tracing model on validation batch')
-        batch = eval_iter.next().load(device=device)
-        # When using AMP, turn on autocasting when tracing the model so that
-        # dtypes will match during AMP training. Disable the weight cache for
-        # compatibility with tracing. See:
-        # https://github.com/pytorch/pytorch/pull/63552
-        with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():
-            traced_model = torch.jit.trace(sockeye_model, (batch.source, batch.source_length,
-                                                           batch.target, batch.target_length), strict=False)
-        eval_iter.reset()
+    if utils.is_distributed():
+        # In distributed mode, wrap the traced model with a distributed
+        # data-parallel model that shares (averages) gradients with models
+        # in other worker processes.
+        traced_model = torch.nn.parallel.DistributedDataParallel(traced_model,
+                                                                 device_ids=None if args.use_cpu else [device],
+                                                                 output_device=None if args.use_cpu else device)
 
-        if utils.is_distributed():
-            # In distributed mode, wrap the traced model with a distributed
-            # data-parallel model that shares (averages) gradients with models
-            # in other worker processes.
-            traced_model = torch.nn.parallel.DistributedDataParallel(traced_model,
-                                                                     device_ids=None if args.use_cpu else [device],
-                                                                     output_device=None if args.use_cpu else device)
+    optimizer, zero_grad_args = optimizers.get_optimizer(traced_model, optimizer_config)
 
+    losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
-        optimizer, zero_grad_args = optimizers.get_optimizer(traced_model, optimizer_config)
+    trainer = training_pt.PyTorchEarlyStoppingTrainer(
+        config=trainer_config,
+        optimizer_config=optimizer_config,
+        sockeye_model=sockeye_model,
+        traced_model=traced_model,
+        optimizer=optimizer,
+        zero_grad_args=zero_grad_args,
+        loss_functions=losses,
+        device=device,
+        dtype=args.dtype,
+        using_amp=args.amp,
+        custom_metrics_logger=custom_metrics_logger,
+        checkpoint_callback=checkpoint_callback)
 
-        losses = create_losses(args, all_num_classes=target_vocab_sizes)
+    # Only primary worker runs checkpoint decoder
+    checkpoint_decoder = None
+    if utils.is_primary_worker():
+        checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
 
-        trainer = training_pt.PyTorchEarlyStoppingTrainer(
-            config=trainer_config,
-            optimizer_config=optimizer_config,
-            sockeye_model=sockeye_model,
-            traced_model=traced_model,
-            optimizer=optimizer,
-            zero_grad_args=zero_grad_args,
-            loss_functions=losses,
-            device=device,
-            dtype=args.dtype,
-            using_amp=args.amp,
-            custom_metrics_logger=custom_metrics_logger,
-            checkpoint_callback=checkpoint_callback)
+    training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
+                                 checkpoint_decoder=checkpoint_decoder)
 
-        # Only primary worker runs checkpoint decoder
-        checkpoint_decoder = None
-        if utils.is_primary_worker():
-            checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
-
-        training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
-                                     checkpoint_decoder=checkpoint_decoder)
-
-        return training_state
+    return training_state
 
 
 if __name__ == "__main__":
