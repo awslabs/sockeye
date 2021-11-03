@@ -23,7 +23,7 @@ import shutil
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
+from typing import Any, Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
 import numpy as np
 import torch
@@ -143,6 +143,7 @@ class PyTorchEarlyStoppingTrainer:
                  sockeye_model: model_pt.PyTorchSockeyeModel,
                  traced_model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
+                 zero_grad_args: Dict[str, Any],
                  loss_functions: List[loss_pt.Loss],
                  device: torch.device,
                  dtype: str,
@@ -154,12 +155,7 @@ class PyTorchEarlyStoppingTrainer:
         self.sockeye_model = sockeye_model
         self.traced_model = traced_model
         self.optimizer = optimizer
-        # Built-in optimizers take the "set_to_none" argument. Apex optimizers
-        # automatically set gradients to none instead of zeroing. See:
-        # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
-        # https://nvidia.github.io/apex/optimizers.html
-        self.zero_grad_args = {'set_to_none': True} if (isinstance(self.optimizer, torch.optim.Adam) or
-                                                        isinstance(self.optimizer, torch.optim.SGD)) else {}
+        self.zero_grad_args = zero_grad_args
         self.loss_functions = loss_functions
         self.device = device
         self.dtype = dtype

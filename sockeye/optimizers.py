@@ -67,18 +67,31 @@ class PyTorchOptimizerConfig(config.Config):
     lr_scheduler: Optional[LearningRateScheduler] = None
 
 
-def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> torch.optim.Optimizer:
+def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> Tuple[torch.optim.Optimizer, Dict[str, Any]]:
     """
     Create an optimizer for a Sockeye model using the specified config settings.
+
+    :param model: Sockeye model.
+    :param config: Optimizer config.
+
+    :return: Tuple of an Optimizer and the kwargs dict for calling that
+             optimizer's `zero_grad()` method.
     """
     adam_impl = torch.optim.Adam
     sgd_impl = torch.optim.SGD
+    # Built-in optimizers take the "set_to_none" argument. See:
+    # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
+    zero_grad_args = {'set_to_none': True}
 
     if config.running_on_gpu:
         try:
             from apex.optimizers import FusedAdam, FusedSGD
             adam_impl = FusedAdam
             sgd_impl = FusedSGD
+            # Apex optimizers automatically set gradients to none instead of
+            # zeroing and do not have a "set_to_none" argument. See:
+            # https://nvidia.github.io/apex/optimizers.html
+            zero_grad_args = {}
             logging.info('Using NVIDIA Apex fused optimizers')
         except ImportError:
             logger.warning('Cannot import NVIDIA Apex optimizers (FusedAdam, FusedSGD). Consider installing Apex for '
@@ -86,7 +99,8 @@ def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> tor
 
     if config.name == C.OPTIMIZER_ADAM:
         return adam_impl(model.parameters(), lr=config.lr, betas=config.betas, eps=config.eps,
-                         weight_decay=config.weight_decay)
+                         weight_decay=config.weight_decay), zero_grad_args
     elif config.name == C.OPTIMIZER_SGD:
-        return sgd_impl(model.parameters(), lr=config.lr, momentum=config.momentum, weight_decay=config.weight_decay)
+        return sgd_impl(model.parameters(), lr=config.lr, momentum=config.momentum,
+                        weight_decay=config.weight_decay), zero_grad_args
     raise ValueError(f'Unknown optimizer: {config.name}')
