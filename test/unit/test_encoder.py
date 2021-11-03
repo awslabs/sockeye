@@ -131,7 +131,7 @@ def test_mx_pt_eq_embedding(vocab_size, num_embed, factor_configs, sparse):
     vl_pt = pt.as_tensor(vl_mx.asnumpy())
 
     r_mx, _ = block_mx(data_mx, vl_mx)
-    r_pt, _ = block_pt(data_pt, vl_pt)
+    r_pt = block_pt(data_pt)
 
     r_mx = r_mx.asnumpy()
     r_pt = r_pt.detach().numpy()

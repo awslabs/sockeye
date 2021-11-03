@@ -179,14 +179,14 @@ class PyTorchSockeyeModel(pt.nn.Module):
         outputs : list
             Outputs of the encoder.
         """
-        source_embed, source_embed_length = self.embedding_source(inputs, valid_length)
+        source_embed = self.embedding_source(inputs)
         if self.inference_only:
             if self.traced_encoder is None:
                 logger.debug("Tracing encoder")
-                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, source_embed_length))
-            source_encoded, source_encoded_length = self.traced_encoder(source_embed, source_embed_length)
+                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
+            source_encoded, source_encoded_length = self.traced_encoder(source_embed, valid_length)
         else:
-            source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+            source_encoded, source_encoded_length = self.encoder(source_embed, valid_length)
         return source_encoded, source_encoded_length
 
     def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None,
@@ -238,9 +238,9 @@ class PyTorchSockeyeModel(pt.nn.Module):
         :param target_length: Length of target inputs.
         :return: encoder outputs and lengths, target embeddings, and decoder initial states
         """
-        source_embed, source_embed_length = self.embedding_source(source, source_length)
-        target_embed, target_embed_length = self.embedding_target(target, target_length)
-        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        source_embed = self.embedding_source(source)
+        target_embed = self.embedding_target(target)
+        source_encoded, source_encoded_length = self.encoder(source_embed, source_length)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         return source_encoded, source_encoded_length, target_embed, states
 
@@ -271,8 +271,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
             # Turn on training mode so mxnet knows to add dropout
             # _ = mx.autograd.set_training(True)
 
-        valid_length = pt.ones(step_input.size()[0], device=step_input.device)
-        target_embed, _ = self.embedding_target(step_input.unsqueeze(1), valid_length=valid_length)
+        target_embed = self.embedding_target(step_input.unsqueeze(1))
         if self.inference_only:
             if self.traced_decoder is None:
                 logger.debug("Tracing decoder step")

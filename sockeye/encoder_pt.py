@@ -109,8 +109,7 @@ class PyTorchEmbedding(PyTorchEncoder):
 
         self.dropout = pt.nn.Dropout(p=self.config.dropout) if self.config.dropout > 0.0 else None
 
-    def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor,
-                                                                         pt.Tensor]:  # pylint: disable=arguments-differ
+    def forward(self, data: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:  # pylint: disable=arguments-differ
         # We will catch the optional factor weights in kwargs
         average_factors_embeds = []  # type: List[pt.Tensor]
         concat_factors_embeds = []  # type: List[pt.Tensor]
@@ -146,7 +145,7 @@ class PyTorchEmbedding(PyTorchEncoder):
         if self.dropout is not None:
             embedded = self.dropout(embedded)
 
-        return embedded, valid_length
+        return embedded
 
     def get_num_hidden(self) -> int:
         """
