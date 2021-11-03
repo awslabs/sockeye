@@ -97,55 +97,43 @@ class PyTorchOutputLayer(pt.nn.Module):
         if weight is None:
             self.weight = pt.nn.Parameter(pt.Tensor(vocab_size, hidden_size))
         else:
-            # Note: its unclear whether wrapping weight in pt.nn.Parameter again works correctly
-            # w.r.t weight sharing. The resulting hash of this object differs which causes utils.log_parameters
-            # to report shared weights incorrectly
-            # self.weight = pt.nn.Parameter(weight)
             self.weight = weight
-
-        # Bias stays fp32 even with int8 weights.
         self.bias = pt.nn.Parameter(pt.Tensor(vocab_size))
 
-        self._cache_key = None  # type: Optional[pt.tensor]
-        self._weight_slice_cache = None  # type: Optional[pt.tensor]
-        self._bias_slice_cache = None  # type: Optional[pt.tensor]
+        self.previous_slice_ids = None  # type: Optional[pt.tensor]
+        self.reduced_weight_bias = None  # type: Optional[Tuple[pt.Tensor, pt.Tensor]]
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={} dtype={}'.format(
             self.in_features, self.out_features, self.bias is not None, self.weight.dtype)
 
-    def _is_new_vocab_slices(self, x: pt.Tensor) -> bool:
-        if self._cache_key is None or x.size() != self._cache_key.size() or pt.all(x != self._cache_key):
-            self._cache_key = x
+    def _is_new_slice(self, x: pt.Tensor) -> bool:
+        if self.previous_slice_ids is None or \
+                x.size() != self.previous_slice_ids.size() or \
+                pt.any(x != self.previous_slice_ids):
             return True
         return False
 
     def _take_slice(self, vocab_slice_ids: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
-        if self.weight.dtype == C.DTYPE_INT8:
-            raise NotImplementedError('int8 not implemented yet')
-            #weight = npx.intgemm_take_weight(self.weight.data(), vocab_slice_ids)
-        else:
-            weight = self.weight[vocab_slice_ids]  # Shape: (len(vocab_slice_ids), hidden)
+        weight = self.weight[vocab_slice_ids]  # Shape: (len(vocab_slice_ids), hidden)
         bias = self.bias[vocab_slice_ids]
         return weight, bias
 
     def forward(self, data: pt.Tensor, vocab_slice_ids: Optional[pt.Tensor] = None) -> pt.Tensor:
         if vocab_slice_ids is not None:
-            weight, bias = self._take_slice(vocab_slice_ids)
-            # # imperative, reduced matrix multiplication for vocabulary selection
-            # if self._is_new_vocab_slices(vocab_slice_ids):
-            #     weight, bias = self._take_slice(vocab_slice_ids)
-            #     self._weight_slice_cache, self._bias_slice_cache = weight, bias
-            # else:
-            #     weight, bias = self._weight_slice_cache, self._bias_slice_cache
+            # Imperative, reduced matrix multiplication for vocabulary selection.
+            # vocab_slice_ids is constant across decoder step calls, so we cache the result of _take_slice
+            # across decoder steps. If a new vocab_slice_ids tensor is observed, we re-run _take_slice.
+            # This significantly reduces latency for CPU decoding.
+            if self._is_new_slice(vocab_slice_ids):
+                self.previous_slice_ids = vocab_slice_ids
+                weight, bias = self.reduced_weight_bias = self._take_slice(vocab_slice_ids)
+            else:
+                weight, bias = self.reduced_weight_bias
         else:
             weight, bias = self.weight, self.bias
 
-        if self.weight.dtype == C.DTYPE_INT8:
-            # needs scaling
-            raise NotImplementedError("int8 not implemented yet")
-        else:
-            return pt.nn.functional.linear(data, weight, bias)
+        return pt.nn.functional.linear(data, weight, bias)
 
     def weights_from_mxnet_block(self, block_mx: 'OutputLayer'):
         self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
