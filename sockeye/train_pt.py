@@ -14,10 +14,9 @@
 """
 Simple Training CLI.
 """
-# TODO(mdenkows) pre_mxnet -> before_torch
-from . import pre_mxnet
-# Called before importing torch or any module that imports torch
-pre_mxnet.init()
+# Run before importing torch or any module that imports torch
+from . import initial_setup
+initial_setup.handle_env_cli_arg()
 
 import argparse
 import logging

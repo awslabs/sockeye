@@ -11,9 +11,9 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 import sockeye.model
-from . import pre_mxnet
 # Called before importing mxnet or any module that imports mxnet
-pre_mxnet.init()
+from . import initial_setup
+initial_setup.handle_env_cli_arg()
 
 import argparse
 import logging
