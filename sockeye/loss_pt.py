@@ -19,7 +19,6 @@ import torch as pt
 import math
 
 from . import constants as C
-# TODO: consider inheriting from 'from torch.nn.modules.loss import _Loss' ?
 from . import utils
 
 logger = logging.getLogger(__name__)
@@ -142,14 +141,27 @@ class PyTorchCrossEntropyLoss(Loss):
                  output_name: str = C.LOGITS_NAME,
                  label_name: str = C.TARGET_LABEL_NAME,
                  ignore_label: int = C.PAD_ID,
-                 metric_prefix: str = '') -> None:
+                 metric_prefix: str = '',
+                 label_smoothing_impl: str = 'mxnet') -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name,
                          weight=weight, metric_prefix=metric_prefix)
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._dtype = dtype
         self._reduction = 'mean'  # TODO: consider sum reduction and normalization outside of loss for reporting
-        self._use_mx_style_smoothing = True
+        if label_smoothing > 0.0 and label_smoothing_impl == 'mxnet':
+            logger.info("Label smoothing type: mxnet")
+            self._ce_impl = self._compute_smoothed_loss_as_in_mxnet
+        elif label_smoothing > 0.0 and label_smoothing_impl == 'fairseq':
+            logger.info("Label smoothing type: fairseq")
+            self._ce_impl = self._compute_smoothed_loss_as_in_fairseq
+        elif label_smoothing > 0.0 and label_smoothing_impl == 'torch':
+            logger.info("Label smoothing type: torch")
+            self._ce_impl = self._compute_smoothed_loss_with_torch_110
+        elif label_smoothing == 0.0:
+            self._ce_impl = None
+        else:
+            raise ValueError("unknown label_smoothing impl. choose from mxnet, fairseq, or torch.")
 
     def _compute_smoothed_loss_as_in_mxnet(self, logits, labels):
         """
@@ -197,6 +209,17 @@ class PyTorchCrossEntropyLoss(Loss):
         ce = nll.sum() * self.weight / num_valid
         return ce
 
+    def _compute_smoothed_loss_with_torch_110(self, logits, labels):
+        logits = logits.view(-1, logits.size()[-1])
+        labels = labels.reshape(-1)
+        ce = pt.nn.functional.cross_entropy(logits, labels.long(),
+                                            weight=None,
+                                            ignore_index=self.ignore_label,
+                                            reduction=self._reduction,
+                                            label_smoothing=self._alpha)
+        ce *= self.weight
+        return ce
+
     def forward(self, logits: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         if self._alpha == 0.0:
             logits = logits.view(-1, logits.size()[-1])
@@ -207,11 +230,8 @@ class PyTorchCrossEntropyLoss(Loss):
             ce *= self.weight
             return ce, pt.ones(1, device=ce.device)  # TODO: check device or whether that can be simplified
         else:
-            if self._use_mx_style_smoothing:
-                ce = self._compute_smoothed_loss_as_in_mxnet(logits, labels)
-            else:
-                ce = self._compute_smoothed_loss_as_in_fairseq(logits, labels)
-            return ce, pt.ones(1, device=ce.device)  # TODO: check device or whether that can be simplified
+            ce = self._ce_impl(logits, labels)
+            return ce, pt.ones(1, device=ce.device)
 
     def create_metric(self) -> 'LossMetric':
         """

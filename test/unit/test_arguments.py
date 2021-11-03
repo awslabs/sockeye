@@ -178,6 +178,7 @@ def test_inference_args(test_params, expected_params):
               batch_sentences_multiple_of=8,
               loss='cross-entropy-without-softmax-output',
               label_smoothing=0.1,
+              label_smoothing_type='mxnet',
               length_task=None,
               length_task_layers=1,
               length_task_weight=1.0,
