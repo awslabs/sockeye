@@ -90,12 +90,11 @@ scratch.
 
 Sockeye can write all evaluation metrics in a Tensorboard compatible format.
 This way you can monitor the training progress in the browser.
-To enable this feature, install the MXNet-compatible interface, mxboard:
+To visualize logged events, install Tensorboard:
 ```bash
-> pip install mxboard
+> pip install tensorboard
 ```
 
-For visualization, you still need the official tensorboard release (i.e. `pip install tensorboard`).
 Start tensorboard and point it to the model directory (or any parent directory):
 ```bash
 > tensorboard --logdir model_dir
@@ -104,24 +103,19 @@ Start tensorboard and point it to the model directory (or any parent directory):
 ### CPU/GPU training
 
 By default, training is carried out on the first GPU device of your machine.
-You can specify alternative GPU devices with the `--device-ids` option, with
+~~You can specify alternative GPU devices with the `--device-ids` option, with
 which you can also activate multi-GPU training (see below). If
 `--device-ids -1`, sockeye will try to find a free GPU on your machine and block
 until one is available. The locking mechanism is based on files and therefore assumes all processes are running
 on the same machine with the same file system.
 If this is not the case there is a chance that two processes will be using the same GPU and you run out of GPU memory.
 If you do not have or do not want to use a GPU, specify `--use-cpu`.
-In this case a drop in performance is expected.
+In this case a drop in performance is expected.~~
 
 ##### Multi-GPU training
-Training can be carried out on multiple GPUs by either specifying multiple GPU device ids:
-`--device-ids 0 1 2 3`, or specifying the number GPUs required: `--device-ids -n` attempts to acquire `n` GPUs through
-the locking mechanism described above.
-This will train using [Data Parallelism](https://github.com/dmlc/mxnet/blob/master/docs/how_to/multi_devices.md).
-MXNet will divide the data in each batch and send it to the different devices.
-Note that you should increase the batch size: for `k` GPUs use ``--batch-size k*<original_batch_size>``.
-Also note that this will likely linearly increase your throughput in terms of sentences/second, but not necessarily
-increase the model's convergence speed.
+
+Training can be carried out on multiple GPUs. See the
+[WMT 2014 English-German tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html) for more information.
 
 
 ### Checkpoint averaging

@@ -168,23 +168,6 @@ and use it to calculate the (logarithmic) brevity penalty `weight * min(0.0, 1 -
 The latter setting, by default, will use a constant length ratio for all sentences that was estimated on the training data.
 The value of the constant can be changed with `--brevity-penalty-constant-length-ratio`.
 
-## CPU process per core translation
-
-On multi-core computers, translation per core separately can speedup translation performance, due to some operation can't be handled parallel in one process.
-Using this method, translation on each core can be parallel.
-
-One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/cpu_process_per_core_translation.py) is given and you can run it as follows:
-
-```bash
-> python cpu_process_per_core_translation.py -m model -i input_file_name -o output_file_name -bs batch_size -t true
-```
-
-Options:
-
-- `-t true`: each core translate the whole input file.
-
-- `-t false`: each core translate (input file line/core number) lines , then merge the translated file into one complete output file.
-
 ## Sampling
 
 Instead of filling the beam with the best items at each step of the decoder, Sockeye can sample from the target distributions of each hypothesis using `--sample [N]`.

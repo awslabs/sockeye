@@ -16,17 +16,17 @@ git clone https://github.com/rsennrich/subword-nmt.git
 export PYTHONPATH=$(pwd)/subword-nmt:$PYTHONPATH
 ```
 
-We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`.
+We will visualize training progress using Tensorboard.
 Install it using:
 ```bash
-pip install tensorboard mxboard
+pip install tensorboard
 ```
 
 ## GPU
 
 All of the commands below assume you're running on a CPU.
 If you have a GPU available you can simply remove `--use-cpu`.
-With multiple GPUs you can use them via the `--device-ids` command line argument.
+With multiple GPUs you can use `torchrun` to spawn multiple training processes (see [WMT 2014 English-German tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html)).
 
 ## Data
 
@@ -125,8 +125,8 @@ In the next section we discuss how you can monitor the training progress.
 There are basically three ways of tracking the training progress: the training log and log file, the metrics file and tensorboard.
 In addition to printing training and validation metrics on stdout Sockeye also keeps track of them in the file `wmt_model/metrics`. Here you find all relevant metrics that were calculated during checkpointing.
 
-[tensorboard](https://github.com/awslabs/mxboard) allows for monitoring training and validation metrics in a browser.
-If you have installed it (`pip install mxboard`), Sockeye will log training events in a Tensorboard file that can be visualized with Tensorboard (`pip install tensorboard`)
+Tensorboard allows for monitoring training and validation metrics in a browser.
+Sockeye will log training events in a Tensorboard file that can be visualized with Tensorboard (`pip install tensorboard`)
 
 ```bash
 tensorboard --logdir .
