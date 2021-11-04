@@ -127,7 +127,8 @@ def test_device_args(test_params, expected_params):
               encoder=C.TRANSFORMER_TYPE,
               decoder=C.TRANSFORMER_TYPE,
               dtype='float32',
-              amp=False))
+              amp=False,
+              apex_amp=False))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)

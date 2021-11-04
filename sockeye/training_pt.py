@@ -28,6 +28,12 @@ from typing import Any, Callable, Dict, List, Optional, Iterable, Tuple, Union, 
 import numpy as np
 import torch
 import torch.distributed
+try:
+    import apex.amp
+except ImportError:
+    # Not an issue because Apex AMP is only used when the trainer setting is
+    # activated. We check that Apex can be imported before creating the trainer.
+    pass
 
 from . import average
 from . import checkpoint_decoder_pt
@@ -146,8 +152,8 @@ class PyTorchEarlyStoppingTrainer:
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss_pt.Loss],
                  device: torch.device,
-                 dtype: str,
                  using_amp: bool = False,
+                 using_apex_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
                  checkpoint_callback: Optional[Callable] = None) -> None:
         self.config = config
@@ -158,10 +164,10 @@ class PyTorchEarlyStoppingTrainer:
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
         self.device = device
-        self.dtype = dtype
         self.using_amp = using_amp
         if using_amp:
             self._scaler = torch.cuda.amp.GradScaler()
+        self.using_apex_amp = using_apex_amp
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
@@ -314,10 +320,14 @@ class PyTorchEarlyStoppingTrainer:
             loss_values = [v / self.config.update_interval if self.config.update_interval > 1
                            else v for v, _ in loss_outputs]
             sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
+        # Backward. PyTorch AMP and Apex AMP use different loss scaling APIs.
         if self.using_amp:
             sum_losses = self._scaler.scale(sum_losses)
-        # Backward
-        sum_losses.backward()
+        if self.using_apex_amp:
+            with apex.amp.scale_loss(sum_losses, self.optimizer) as scaled_sum_losses:
+                scaled_sum_losses.backward()
+        else:
+            sum_losses.backward()
         return loss_outputs
 
     def _step(self, batch: data_io_pt.Batch) -> bool:
@@ -581,13 +591,11 @@ class PyTorchEarlyStoppingTrainer:
                              self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
 
     def _save_optimizer_state(self, fname):
-        with open(fname, "wb") as fp:
-            pickle.dump(self.optimizer.state_dict(), fp)
+        torch.save(self.optimizer.state_dict(), fname)
         logger.info('Saved optimizer state to "%s"', fname)
 
     def _load_optimizer_state(self, fname):
-        with open(fname, "rb") as fp:
-            self.optimizer.load_state_dict(pickle.load(fp))
+        self.optimizer.load_state_dict(torch.load(fname))
         logger.info('Loaded optimizer state from "%s"', fname)
 
     def _save_lr_scheduler(self, fname):
@@ -641,8 +649,9 @@ class PyTorchEarlyStoppingTrainer:
 
         # (6) AMP grad scaler state
         if self.using_amp:
-            with open(os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME), "wb") as fp:
-                pickle.dump(self._scaler.state_dict(), fp)
+            torch.save(self._scaler.state_dict(), os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME))
+        if self.using_apex_amp:
+            torch.save(apex.amp.state_dict(), os.path.join(training_state_dirname, C.APEX_AMP_STATE_NAME))
 
         # First we rename the existing directory to minimize the risk of state
         # loss if the process is aborted during deletion (which will be slower
@@ -693,8 +702,9 @@ class PyTorchEarlyStoppingTrainer:
 
         # (6) AMP grad scaler state
         if self.using_amp:
-            with open(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME), "rb") as fp:
-                self._scaler.load_state_dict(pickle.load(fp))
+            self._scaler.load_state_dict(torch.load(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME)))
+        if self.using_apex_amp:
+            apex.amp.load_state_dict(torch.load(os.path.join(self.training_state_dirname, C.APEX_AMP_STATE_NAME)))
 
         logger.info("Training State: epoch=%d, checkpoint=%d batches=%d updates=%d best_metric=%.2f, " \
                     "best_checkpoint=%d time_elapsed=%d" % (

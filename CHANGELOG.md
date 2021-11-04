@@ -16,6 +16,10 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 ### Sockeye 3: Fast Neural Machine Translation in PyTorch
 
+### Added
+
+- Added `--apex-amp` training argument that runs entire model in FP16 mode, replaces `--dtype float16`.
+
 ### Changed
 
 - `sockeye.train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --nproc_per_node N -m sockeye.train --dist ...`

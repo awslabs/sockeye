@@ -124,6 +124,10 @@ def check_arg_compatibility(args: argparse.Namespace):
         # Length 1: expand the list to the appropriate length
         args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
 
+    if args.dtype != C.DTYPE_FP32:
+        logger.warning('Specifying a non-float32 dtype to sockeye.train has no effect. Use --amp or --apex-amp for '
+                       'mixed precision training.')
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -672,12 +676,11 @@ def create_model_config(args: argparse.Namespace,
                                         config_length_task=config_length_task,
                                         weight_tying_type=args.weight_tying_type,
                                         lhuc=args.lhuc is not None,
-                                        dtype=args.dtype)
+                                        dtype=C.DTYPE_FP32)
     return model_config
 
 
 def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss_pt.Loss]:
-    softmax_output_grad_scale = C.FIXED_GRAD_SCALE_FP16 if args.dtype == C.DTYPE_FP16 else 1.0
 
     # loss weights per factor
     if len(args.target_factors_weight) != len(all_num_classes) - 1:
@@ -686,7 +689,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         factor_weights = args.target_factors_weight * (len(all_num_classes) - 1)
     else:
         factor_weights = args.target_factors_weight
-    loss_weights = [softmax_output_grad_scale] + factor_weights
+    loss_weights = [1.0] + factor_weights
 
     losses = []  # type: List[loss_pt.Loss]
 
@@ -706,7 +709,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
             losses.append(loss_pt.PyTorchCrossEntropyLoss(name=name,
                                                           weight=weight,
                                                           label_smoothing=label_smoothing,
-                                                          dtype=args.dtype,
+                                                          dtype=C.DTYPE_FP32,
                                                           output_name=output_name,
                                                           label_name=label_name,
                                                           metric_prefix=metric_prefix,
@@ -744,11 +747,6 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
         gradient_clipping_type = C.GRADIENT_CLIPPING_TYPE_NONE
     else:
         gradient_clipping_type = args.gradient_clipping_type
-
-    # We normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
-    rescale_grad = 1.0
-    if args.dtype == C.DTYPE_FP16:
-        rescale_grad /= C.FIXED_GRAD_SCALE_FP16
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.initial_learning_rate,
@@ -1001,9 +999,22 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                          fixed_param_names=args.fixed_param_names,
                                          fixed_param_strategy=args.fixed_param_strategy)
 
-    if args.dtype == C.DTYPE_FP16:
-        sockeye_model.cast(C.DTYPE_FP16)
     utils.log_parameters_pt(sockeye_model)
+
+    optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
+
+    traced_model = sockeye_model  # Placeholder; not traced yet
+
+    if args.apex_amp:
+        try:
+            import apex.amp
+        except ImportError:
+            logger.error('Cannot import NVIDIA Apex AMP. Please install Apex: https://github.com/NVIDIA/apex')
+            sys.exit(1)
+        # Optimization level 2 runs the entire model in FP16 mode with FP32
+        # master weights and loss scaling. See:
+        # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
+        traced_model, optimizer = apex.amp.initialize(traced_model, optimizer, opt_level='O2')
 
     logger.info('Tracing model on validation batch')
     batch = eval_iter.next().load(device=device)
@@ -1024,8 +1035,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                  device_ids=None if args.use_cpu else [device],
                                                                  output_device=None if args.use_cpu else device)
 
-    optimizer, zero_grad_kwargs = optimizers.get_optimizer(traced_model, optimizer_config)
-
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
     trainer = training_pt.PyTorchEarlyStoppingTrainer(
@@ -1037,8 +1046,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
         device=device,
-        dtype=args.dtype,
         using_amp=args.amp,
+        using_apex_amp=args.apex_amp,
         custom_metrics_logger=custom_metrics_logger,
         checkpoint_callback=checkpoint_callback)
 

@@ -206,6 +206,7 @@ TRAINING_STATE_NAME = "training.pkl"
 AMP_LOSS_SCALER_STATE_NAME = "amp_loss_scaler.pkl"
 # PyTorch
 GRAD_SCALER_STATE_NAME = "grad_scaler.pkl"
+APEX_AMP_STATE_NAME = "apex_amp_state.pkl"
 SCHEDULER_STATE_NAME = "scheduler.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.yaml"
@@ -350,8 +351,7 @@ LARGE_VALUES = {
 }
 LARGEST_INT = sys.maxsize
 
-# see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
-# TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutput loss for CE.
+# TODO(migration) Remove constant only used by MXNet code
 FIXED_GRAD_SCALE_FP16 = 1024.0
 
 # lhuc application points
