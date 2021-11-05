@@ -85,7 +85,8 @@ Before we start training we will prepare the training data by splitting it into 
 python -m sockeye.prepare_data \
                         -s corpus.tc.BPE.de \
                         -t corpus.tc.BPE.en \
-                        -o train_data
+                        -o train_data \
+                        --shared-vocab
 ```
 While this is an optional step it has the advantage of considerably lowering the time needed before training starts and also limiting the memory usage as only one shard is loaded into memory at a time.
 
@@ -98,7 +99,9 @@ python -m sockeye.train -d train_data \
                         --max-seq-len 60 \
                         --decode-and-evaluate 500 \
                         --use-cpu \
-                        -o wmt_model
+                        -o wmt_model \
+                        --shared-vocab \
+                        --max-num-epochs 3
 ```
 
 This will train a "base" [Transformer](https://arxiv.org/abs/1706.03762) model.
