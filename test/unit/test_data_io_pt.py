@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -22,7 +22,6 @@ import numpy as np
 import pytest
 
 from sockeye import constants as C
-from sockeye import data_io
 from sockeye import data_io_pt
 from sockeye import utils
 from sockeye import vocab
@@ -71,7 +70,7 @@ define_parallel_bucket_tests = [(50, 50, 10, True, 1.0, [(10, 10), (20, 20), (30
 def test_define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width, bucket_scaling, length_ratio,
                                  expected_buckets):
     buckets = data_io_pt.define_parallel_buckets(max_seq_len_source, max_seq_len_target, bucket_width=bucket_width,
-                                              bucket_scaling=bucket_scaling, length_ratio=length_ratio)
+                                                 bucket_scaling=bucket_scaling, length_ratio=length_ratio)
     assert buckets == expected_buckets
 
 
@@ -234,29 +233,29 @@ def test_sample_based_define_bucket_batch_sizes():
     max_seq_len = 100
     buckets = data_io_pt.define_parallel_buckets(max_seq_len, max_seq_len, 10, True, 1.5)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets=buckets,
-                                                           batch_size=batch_size,
-                                                           batch_type=batch_type,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                              batch_size=batch_size,
+                                                              batch_type=batch_type,
+                                                              data_target_average_len=[None] * len(buckets))
     for bbs in bucket_batch_sizes:
         assert bbs.batch_size == batch_size
         assert bbs.average_target_words_per_batch == bbs.bucket[1] * batch_size
 
 
 @pytest.mark.parametrize("length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
-        # Reference batch sizes manually inspected for sanity.
-        (0.5, 1, [200, 100, 67, 50, 40, 33, 29, 25, 22, 20]),
-        (1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
-        (1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
+    # Reference batch sizes manually inspected for sanity.
+    (0.5, 1, [200, 100, 67, 50, 40, 33, 29, 25, 22, 20]),
+    (1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
+    (1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
 def test_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
     batch_type = C.BATCH_TYPE_WORD
     batch_size = 1000
     max_seq_len = 50
     buckets = data_io_pt.define_parallel_buckets(max_seq_len, max_seq_len, 10, True, length_ratio)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets=buckets,
-                                                           batch_size=batch_size,
-                                                           batch_type=batch_type,
-                                                           data_target_average_len=[None] * len(buckets),
-                                                           batch_sentences_multiple_of=batch_sentences_multiple_of)
+                                                              batch_size=batch_size,
+                                                              batch_type=batch_type,
+                                                              data_target_average_len=[None] * len(buckets),
+                                                              batch_sentences_multiple_of=batch_sentences_multiple_of)
     for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
         assert bbs.batch_size == expected_batch_size
         expected_average_target_words_per_batch = expected_batch_size * bbs.bucket[1]
@@ -264,20 +263,20 @@ def test_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_mult
 
 
 @pytest.mark.parametrize("length_ratio,batch_sentences_multiple_of,expected_batch_sizes", [
-        # Reference batch sizes manually inspected for sanity.
-        (0.5, 1, [200, 100, 66, 50, 40, 33, 28, 25, 22, 20]),
-        (1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
-        (1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
+    # Reference batch sizes manually inspected for sanity.
+    (0.5, 1, [200, 100, 66, 50, 40, 33, 28, 25, 22, 20]),
+    (1.5, 1, [100, 50, 33, 25, 20, 20, 20, 20]),
+    (1.5, 8, [96, 48, 32, 24, 16, 16, 16, 16])])
 def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_multiple_of, expected_batch_sizes):
     batch_type = C.BATCH_TYPE_MAX_WORD
     batch_size = 1000
     max_seq_len = 50
     buckets = data_io_pt.define_parallel_buckets(max_seq_len, max_seq_len, 10, True, length_ratio)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets=buckets,
-                                                           batch_size=batch_size,
-                                                           batch_type=batch_type,
-                                                           data_target_average_len=[None] * len(buckets),
-                                                           batch_sentences_multiple_of=batch_sentences_multiple_of)
+                                                              batch_size=batch_size,
+                                                              batch_type=batch_type,
+                                                              data_target_average_len=[None] * len(buckets),
+                                                              batch_sentences_multiple_of=batch_sentences_multiple_of)
     for bbs, expected_batch_size in zip(bucket_batch_sizes, expected_batch_sizes):
         assert bbs.batch_size == expected_batch_size
         expected_average_target_words_per_batch = expected_batch_size * bbs.bucket[1]
@@ -332,9 +331,9 @@ def test_parallel_data_set_fill_up():
     batch_size = 32
     buckets = data_io_pt.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
-                                                           batch_size,
-                                                           batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                              batch_size,
+                                                              batch_type=C.BATCH_TYPE_SENTENCE,
+                                                              data_target_average_len=[None] * len(buckets))
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
 
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
@@ -370,9 +369,9 @@ def test_parallel_data_set_permute():
     batch_size = 5
     buckets = data_io_pt.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
-                                                           batch_size,
-                                                           batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                              batch_size,
+                                                              batch_type=C.BATCH_TYPE_SENTENCE,
+                                                              data_target_average_len=[None] * len(buckets))
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
         bucket_batch_sizes)
 
@@ -396,12 +395,12 @@ def test_get_batch_indices():
     batch_size = 10
     buckets = data_io_pt.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
-                                                           batch_size,
-                                                           batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                              batch_size,
+                                                              batch_type=C.BATCH_TYPE_SENTENCE,
+                                                              data_target_average_len=[None] * len(buckets))
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets=buckets,
-                                                                 min_count=1,
-                                                                 max_count=max_bucket_size))
+                                                                    min_count=1,
+                                                                    max_count=max_bucket_size))
 
     indices = data_io_pt.get_batch_indices(dataset, bucket_batch_sizes=bucket_batch_sizes)
 
@@ -557,12 +556,12 @@ def test_parallel_sample_iter():
     # The first bucket is going to be empty:
     bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
-                                                           batch_size,
-                                                           batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                              batch_size,
+                                                              batch_type=C.BATCH_TYPE_SENTENCE,
+                                                              data_target_average_len=[None] * len(buckets))
 
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                 bucket_counts=bucket_counts))
+                                                                    bucket_counts=bucket_counts))
     it = data_io_pt.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
 
     with TemporaryDirectory() as work_dir:
@@ -614,14 +613,14 @@ def test_sharded_parallel_sample_iter():
     # The first bucket is going to be empty:
     bucket_counts = [0] + [None] * (len(buckets) - 1)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
-                                                           batch_size,
-                                                           batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                              batch_size,
+                                                              batch_type=C.BATCH_TYPE_SENTENCE,
+                                                              data_target_average_len=[None] * len(buckets))
 
     dataset1 = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts))
+                                                                     bucket_counts=bucket_counts))
     dataset2 = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts))
+                                                                     bucket_counts=bucket_counts))
 
     with TemporaryDirectory() as work_dir:
         shard1_fname = os.path.join(work_dir, 'shard1')
@@ -683,14 +682,14 @@ def test_sharded_parallel_sample_iter_num_batches():
     num_batches_per_shard = num_batches_per_bucket * len(buckets)
     num_batches = num_shards * num_batches_per_shard
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
-                                                           batch_size,
-                                                           batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                              batch_size,
+                                                              batch_type=C.BATCH_TYPE_SENTENCE,
+                                                              data_target_average_len=[None] * len(buckets))
 
     dataset1 = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts))
+                                                                     bucket_counts=bucket_counts))
     dataset2 = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts))
+                                                                     bucket_counts=bucket_counts))
     with TemporaryDirectory() as work_dir:
         shard1_fname = os.path.join(work_dir, 'shard1')
         shard2_fname = os.path.join(work_dir, 'shard2')
@@ -716,12 +715,12 @@ def test_sharded_and_parallel_iter_same_num_batches():
     bucket_counts = [batch_size * num_batches_per_bucket for _ in buckets]
     num_batches = num_batches_per_bucket * len(buckets)
     bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
-                                                           batch_size,
-                                                           batch_type=C.BATCH_TYPE_SENTENCE,
-                                                           data_target_average_len=[None] * len(buckets))
+                                                              batch_size,
+                                                              batch_type=C.BATCH_TYPE_SENTENCE,
+                                                              data_target_average_len=[None] * len(buckets))
 
     dataset = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                 bucket_counts=bucket_counts))
+                                                                    bucket_counts=bucket_counts))
 
     with TemporaryDirectory() as work_dir:
         shard_fname = os.path.join(work_dir, 'shard1')
@@ -790,6 +789,9 @@ def _assert_mx_pt_batches_equal(mx_batch, pt_batch):
 
 
 def test_mx_pt_eq_training_data():
+    pytest.importorskip("mxnet")
+    from sockeye import data_io
+
     train_line_count = 100
     train_line_count_empty = 0
     train_max_length = 30
@@ -810,7 +812,6 @@ def test_mx_pt_eq_training_data():
 
         # For each implementation
         for key, data_io_module in (('mx', data_io), ('pt', data_io_pt)):
-
             # Create iterators with no data permutation (preserve order for
             # batch equality checks)
             train_iter, val_iter, _, _ = data_io_module.get_training_data_iters(
@@ -840,6 +841,9 @@ def test_mx_pt_eq_training_data():
 
 
 def test_mx_pt_eq_prepared_data():
+    pytest.importorskip("mxnet")
+    from sockeye import data_io
+
     train_line_count = 100
     train_line_count_empty = 0
     train_max_length = 30
@@ -894,14 +898,14 @@ def test_mx_pt_eq_prepared_data():
 
                 # Create iterators
                 train_iter, val_iter, _, _, _ = data_io_module.get_prepared_data_iters(
-                        prepared_data_dir=output_folder,
-                        validation_sources=[data['dev_source']],
-                        validation_targets=[data['dev_target']],
-                        shared_vocab=True,
-                        batch_size=batch_size,
-                        batch_type=C.BATCH_TYPE_SENTENCE,
-                        batch_sentences_multiple_of=batch_sentences_multiple_of,
-                        permute=False)
+                    prepared_data_dir=output_folder,
+                    validation_sources=[data['dev_source']],
+                    validation_targets=[data['dev_target']],
+                    shared_vocab=True,
+                    batch_size=batch_size,
+                    batch_type=C.BATCH_TYPE_SENTENCE,
+                    batch_sentences_multiple_of=batch_sentences_multiple_of,
+                    permute=False)
 
                 train_iters[key] = train_iter
                 val_iters[key] = val_iter
