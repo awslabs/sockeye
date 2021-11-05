@@ -1,4 +1,4 @@
-# Copyright 2018--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -13,11 +13,11 @@
 
 from unittest.mock import Mock
 
-from mxnet import np
+import numpy as np
 import pytest
 
-from sockeye.data_io import get_tokens, strids2ids
-from sockeye.inference import Translator
+from sockeye.data_io_pt import get_tokens, strids2ids
+from sockeye.inference_pt import Translator
 from sockeye.lexical_constraints import init_batch, get_bank_sizes, ConstrainedHypothesis, AvoidBatch, AvoidState, \
     AvoidTrie
 
