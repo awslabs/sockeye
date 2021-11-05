@@ -301,11 +301,13 @@ class PyTorchEarlyStoppingTrainer:
         if self.checkpoint_callback:
             self.checkpoint_callback(self.state.checkpoint)
 
-    def _forward_backward(self, batch: data_io_pt.Batch):
+    def _forward_backward(self, batch: data_io_pt.Batch, is_update_batch: bool = True):
         """
         Performs forward-backward pass on a batch.
 
         :param batch: Current data batch.
+        :param is_update_batch: Whether this is the final batch before updating
+                                weights.
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
@@ -324,7 +326,8 @@ class PyTorchEarlyStoppingTrainer:
         if self.using_amp:
             sum_losses = self._scaler.scale(sum_losses)
         if self.using_apex_amp:
-            with apex.amp.scale_loss(sum_losses, self.optimizer) as scaled_sum_losses:
+            with apex.amp.scale_loss(sum_losses, self.optimizer,
+                                     delay_unscale=not is_update_batch) as scaled_sum_losses:
                 scaled_sum_losses.backward()
         else:
             sum_losses.backward()
@@ -343,7 +346,7 @@ class PyTorchEarlyStoppingTrainer:
         # average the accumulated gradients across workers during the update
         # batch.
         with self.traced_model.no_sync() if utils.is_distributed() and not is_update_batch else utils.no_context():
-            loss_outputs = self._forward_backward(batch)
+            loss_outputs = self._forward_backward(batch, is_update_batch)
 
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
             loss_func.metric.update(loss_value.item(), num_samples.item())
