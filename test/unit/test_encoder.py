@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,27 +14,24 @@
 import numpy as onp
 import pytest
 import torch as pt
-from mxnet import np
-import mxnet as mx
 
 import sockeye.constants as C
-import sockeye.encoder
 import sockeye.encoder_pt
-import sockeye.transformer
 import sockeye.transformer_pt
 
 
 @pytest.mark.parametrize('dropout, factor_configs', [
     (0., None),
-    (0.1, [sockeye.encoder.FactorConfig(vocab_size=5,
-                                        num_embed=5,
-                                        combine=C.FACTORS_COMBINE_SUM,
-                                        share_embedding=False)]),
+    (0.1, [sockeye.encoder_pt.FactorConfig(vocab_size=5,
+                                           num_embed=5,
+                                           combine=C.FACTORS_COMBINE_SUM,
+                                           share_embedding=False)]),
 ])
 def test_embedding_encoder(dropout, factor_configs):
-    config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, factor_configs=factor_configs)
-    embedding = sockeye.encoder.Embedding(config)
-    assert type(embedding) == sockeye.encoder.Embedding
+    config = sockeye.encoder_pt.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout,
+                                                factor_configs=factor_configs)
+    embedding = sockeye.encoder_pt.PyTorchEmbedding(config)
+    assert type(embedding) == sockeye.encoder_pt.PyTorchEmbedding
 
 
 @pytest.mark.parametrize('lhuc', [
@@ -42,28 +39,31 @@ def test_embedding_encoder(dropout, factor_configs):
     (True,)
 ])
 def test_get_transformer_encoder(lhuc):
-    config = sockeye.transformer.TransformerConfig(model_size=20,
-                                                   attention_heads=10,
-                                                   feed_forward_num_hidden=30,
-                                                   act_type='test_act',
-                                                   num_layers=40,
-                                                   dropout_attention=1.0,
-                                                   dropout_act=2.0,
-                                                   dropout_prepost=3.0,
-                                                   positional_embedding_type=C.LEARNED_POSITIONAL_EMBEDDING,
-                                                   preprocess_sequence='test_pre',
-                                                   postprocess_sequence='test_post',
-                                                   max_seq_len_source=50,
-                                                   max_seq_len_target=60,
-                                                   use_lhuc=lhuc)
-    encoder = sockeye.encoder.get_transformer_encoder(config, dtype=C.DTYPE_FP32)
-    encoder.initialize()
-    encoder.hybridize(static_alloc=True)
-
-    assert type(encoder) == sockeye.encoder.TransformerEncoder
+    config = sockeye.transformer_pt.TransformerConfig(model_size=20,
+                                                      attention_heads=10,
+                                                      feed_forward_num_hidden=30,
+                                                      act_type='test_act',
+                                                      num_layers=40,
+                                                      dropout_attention=1.0,
+                                                      dropout_act=0.5,
+                                                      dropout_prepost=0.2,
+                                                      positional_embedding_type=C.LEARNED_POSITIONAL_EMBEDDING,
+                                                      preprocess_sequence='test_pre',
+                                                      postprocess_sequence='test_post',
+                                                      max_seq_len_source=50,
+                                                      max_seq_len_target=60,
+                                                      use_lhuc=lhuc)
+    encoder = sockeye.encoder_pt.pytorch_get_transformer_encoder(config)
+    assert type(encoder) == sockeye.encoder_pt.PyTorchTransformerEncoder
 
 
 def test_mx_pt_eq_transformer_encoder():
+    pytest.importorskip("mxnet")
+    import sockeye.transformer
+    import sockeye.encoder
+    import mxnet as mx
+    from mxnet import np
+
     pt.manual_seed(13)
     mx.random.seed(13)
     config = sockeye.transformer.TransformerConfig(model_size=128,
@@ -107,11 +107,15 @@ def test_mx_pt_eq_transformer_encoder():
 @pytest.mark.parametrize('vocab_size, num_embed, factor_configs, sparse',
                          [(300, 32, None, False),
                           (300, 32, None, True),
-                          (300, 32, [sockeye.encoder.FactorConfig(300, 8, C.FACTORS_COMBINE_CONCAT, False),
-                                     sockeye.encoder.FactorConfig(300, 32, C.FACTORS_COMBINE_AVERAGE, False),
-                                     sockeye.encoder.FactorConfig(300, 32, C.FACTORS_COMBINE_AVERAGE, True),
-                                     sockeye.encoder.FactorConfig(300, 32, C.FACTORS_COMBINE_SUM, True)], True)])
+                          (300, 32, [sockeye.encoder_pt.FactorConfig(300, 8, C.FACTORS_COMBINE_CONCAT, False),
+                                     sockeye.encoder_pt.FactorConfig(300, 32, C.FACTORS_COMBINE_AVERAGE, False),
+                                     sockeye.encoder_pt.FactorConfig(300, 32, C.FACTORS_COMBINE_AVERAGE, True),
+                                     sockeye.encoder_pt.FactorConfig(300, 32, C.FACTORS_COMBINE_SUM, True)], True)])
 def test_mx_pt_eq_embedding(vocab_size, num_embed, factor_configs, sparse):
+    pytest.importorskip("mxnet")
+    import sockeye.encoder
+    from mxnet import np
+
     config = sockeye.encoder.EmbeddingConfig(vocab_size=vocab_size,
                                              num_embed=num_embed,
                                              dropout=0,
@@ -137,5 +141,3 @@ def test_mx_pt_eq_embedding(vocab_size, num_embed, factor_configs, sparse):
     r_pt = r_pt.detach().numpy()
 
     assert np.allclose(r_mx, r_pt)
-
-
