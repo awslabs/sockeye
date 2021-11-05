@@ -16,8 +16,7 @@ from unittest import mock
 import pytest
 
 import sockeye.constants as C
-from sockeye.model import SockeyeModel
-from sockeye.train import fixed_param_names_from_stragegy
+from sockeye.train_pt import fixed_param_names_from_strategy
 
 
 NUM_LAYERS = 3
@@ -380,5 +379,5 @@ def test_fixed_param_strategy(param_names, strategy, expected_fixed_param_names)
     config.config_encoder.num_layers = NUM_LAYERS
     config.config_decoder.num_layers = NUM_LAYERS
     params = {name: None for name in ALL_PARAMS}
-    fixed_param_names = fixed_param_names_from_stragegy(config, params, strategy)
+    fixed_param_names = fixed_param_names_from_strategy(config, params, strategy)
     assert sorted(fixed_param_names) == sorted(expected_fixed_param_names)
