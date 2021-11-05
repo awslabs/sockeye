@@ -231,7 +231,7 @@ def make_input_from_json_string(sentence_id: SentenceId,
     :return: A TranslatorInput.
     """
     try:
-        jobj = json.loads(json_string, encoding=C.JSON_ENCODING)
+        jobj = json.loads(json_string)
         return make_input_from_dict(sentence_id, jobj, translator)
 
     except Exception as e:
