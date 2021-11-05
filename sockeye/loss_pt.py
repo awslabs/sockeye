@@ -126,7 +126,6 @@ class LossMetric(ABC):
 
 
 # TODO(fhieber): should be scriptable/traceable
-# TODO(fhieber): PyTorch 1.10 CrossEntropyLoss supports label smoothing.
 class PyTorchCrossEntropyLoss(Loss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
@@ -149,21 +148,16 @@ class PyTorchCrossEntropyLoss(Loss):
         self._alpha = label_smoothing
         self._dtype = dtype
         self._reduction = 'mean'  # TODO: consider sum reduction and normalization outside of loss for reporting
-        if label_smoothing > 0.0 and label_smoothing_impl == 'mxnet':
-            logger.info("Label smoothing type: mxnet")
-            self._ce_impl = self._compute_smoothed_loss_as_in_mxnet
+        if label_smoothing == 0 or label_smoothing_impl == 'torch':
+            self._ce_impl = self._torch_cross_entropy_loss
+        elif label_smoothing > 0.0 and label_smoothing_impl == 'mxnet':
+            self._ce_impl = self._smoothed_loss_as_in_mxnet
         elif label_smoothing > 0.0 and label_smoothing_impl == 'fairseq':
-            logger.info("Label smoothing type: fairseq")
-            self._ce_impl = self._compute_smoothed_loss_as_in_fairseq
-        elif label_smoothing > 0.0 and label_smoothing_impl == 'torch':
-            logger.info("Label smoothing type: torch")
-            self._ce_impl = self._compute_smoothed_loss_with_torch_110
-        elif label_smoothing == 0.0:
-            self._ce_impl = None
+            self._ce_impl = self._smoothed_loss_as_in_fairseq
         else:
             raise ValueError("unknown label_smoothing impl. choose from mxnet, fairseq, or torch.")
 
-    def _compute_smoothed_loss_as_in_mxnet(self, logits, labels):
+    def _smoothed_loss_as_in_mxnet(self, logits, labels):
         """
         Computes label-smoothed cross-entropy loss just like sockeye.loss.CrossEntropyLossWithoutSoftmaxOutput()
         Notable details:
@@ -184,7 +178,7 @@ class PyTorchCrossEntropyLoss(Loss):
         ce = nll.sum() * self.weight / num_valid
         return ce
 
-    def _compute_smoothed_loss_as_in_fairseq(self, logits, labels):
+    def _smoothed_loss_as_in_fairseq(self, logits, labels):
         """
         Computes smoothed NLL as in fairseq, see
         # https://github.com/pytorch/fairseq/blob/db0175a882e8ae0f30d89b5a610373dbe032d528/fairseq/criterions/label_smoothed_cross_entropy.py#L33
@@ -209,8 +203,10 @@ class PyTorchCrossEntropyLoss(Loss):
         ce = nll.sum() * self.weight / num_valid
         return ce
 
-    def _compute_smoothed_loss_with_torch_110(self, logits, labels):
+    def _torch_cross_entropy_loss(self, logits, labels):
         logits = logits.view(-1, logits.size()[-1])
+        # Reshape due to: view size is not compatible with input tensor's size and stride
+        # (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
         labels = labels.reshape(-1)
         ce = pt.nn.functional.cross_entropy(logits, labels.long(),
                                             weight=None,
@@ -221,17 +217,8 @@ class PyTorchCrossEntropyLoss(Loss):
         return ce
 
     def forward(self, logits: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
-        if self._alpha == 0.0:
-            logits = logits.view(-1, logits.size()[-1])
-            # Reshape due to: view size is not compatible with input tensor's size and stride (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
-            labels = labels.reshape(-1)
-            ce = pt.nn.functional.cross_entropy(logits, labels.long(),
-                                                weight=None, ignore_index=self.ignore_label, reduction=self._reduction)
-            ce *= self.weight
-            return ce, pt.ones(1, device=ce.device)  # TODO: check device or whether that can be simplified
-        else:
-            ce = self._ce_impl(logits, labels)
-            return ce, pt.ones(1, device=ce.device)
+        ce = self._ce_impl(logits, labels)
+        return ce, pt.ones(1, device=ce.device)
 
     def create_metric(self) -> 'LossMetric':
         """

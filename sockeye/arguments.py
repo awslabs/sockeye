@@ -833,10 +833,11 @@ def add_training_args(params):
                               default=0.1,
                               type=float,
                               help='Smoothing constant for label smoothing. Default: %(default)s.')
-    train_params.add_argument('--label-smoothing-type',
+    train_params.add_argument('--label-smoothing-impl',
                               default='mxnet',
                               choices=['mxnet', 'fairseq', 'torch'],
-                              help='What label smoothing implementation to use. Default: mxnet. torch requires PyTorch 1.10')
+                              help='Choose label smoothing implementation. Default: %(default)s. '
+                                   '`torch` requires PyTorch 1.10.')
 
     train_params.add_argument('--length-task',
                               type=str,

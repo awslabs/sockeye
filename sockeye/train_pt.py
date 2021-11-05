@@ -713,7 +713,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
                                                           output_name=output_name,
                                                           label_name=label_name,
                                                           metric_prefix=metric_prefix,
-                                                          label_smoothing_impl=args.label_smoothing_type))
+                                                          label_smoothing_impl=args.label_smoothing_impl))
         else:
             raise ValueError('Unknown loss %s', args.loss)
 
