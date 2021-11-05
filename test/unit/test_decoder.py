@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,16 +11,12 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import mxnet as mx
 import numpy as onp
 import pytest
 import torch as pt
-from mxnet import np
 
 import sockeye.constants as C
-import sockeye.decoder
 import sockeye.decoder_pt
-import sockeye.transformer
 import sockeye.transformer_pt
 
 
@@ -29,7 +25,7 @@ import sockeye.transformer_pt
     (True,)
 ])
 def test_get_decoder(lhuc):
-    config = sockeye.transformer.TransformerConfig(
+    config = sockeye.transformer_pt.TransformerConfig(
         model_size=20,
         attention_heads=10,
         feed_forward_num_hidden=30,
@@ -44,25 +40,31 @@ def test_get_decoder(lhuc):
         max_seq_len_source=60,
         max_seq_len_target=70,
         use_lhuc=lhuc)
-    decoder = sockeye.decoder.get_decoder(config, inference_only=False)
+    decoder = sockeye.decoder_pt.pytorch_get_decoder(config, inference_only=False)
 
-    assert type(decoder) == sockeye.decoder.TransformerDecoder
+    assert type(decoder) == sockeye.decoder_pt.PyTorchTransformerDecoder
 
 
 @pytest.mark.parametrize("inference_only", [False, True])
 def test_mx_pt_eq_transformer_decoder(inference_only):
+    pytest.importorskip("mxnet")
+    import sockeye.transformer
+    import sockeye.decoder
+    import mxnet as mx
+    from mxnet import np
+
     pt.manual_seed(13)
     mx.random.seed(13)
     config_mx = sockeye.transformer.TransformerConfig(model_size=128,
-                                                   attention_heads=8,
-                                                   feed_forward_num_hidden=256,
-                                                   act_type='relu',
-                                                   num_layers=12,
-                                                   dropout_attention=0,
-                                                   dropout_act=0,
-                                                   dropout_prepost=0,
-                                                   positional_embedding_type=C.FIXED_POSITIONAL_EMBEDDING,
-                                                   preprocess_sequence='n',
+                                                      attention_heads=8,
+                                                      feed_forward_num_hidden=256,
+                                                      act_type='relu',
+                                                      num_layers=12,
+                                                      dropout_attention=0,
+                                                      dropout_act=0,
+                                                      dropout_prepost=0,
+                                                      positional_embedding_type=C.FIXED_POSITIONAL_EMBEDDING,
+                                                      preprocess_sequence='n',
                                                       postprocess_sequence='r',
                                                       max_seq_len_source=50,
                                                       max_seq_len_target=60,
@@ -127,4 +129,3 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
     for i, (s_mx, s_pt, structure) in enumerate(zip(new_states_mx, new_states_pt, decoder_mx.state_structure())):
         if structure != C.MASK_STATE:  # MASK state is new in Pytorch and not equivalent
             assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
-
