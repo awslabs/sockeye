@@ -1,4 +1,4 @@
-# Copyright 2018--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,20 +11,20 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import mxnet as mx
 import numpy as onp
 import pytest
 import torch as pt
-from mxnet import np
 
 import sockeye.constants as C
-import sockeye.transformer
 import sockeye.transformer_pt
-from sockeye.layers import prepare_source_valid_lengths
 from sockeye.layers_pt import prepare_source_length_mask
 
 
 def test_auto_regressive_bias_dtype():
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.transformer
+
     block = sockeye.transformer.AutoRegressiveBias()
     block.initialize()
     length = 10
@@ -41,6 +41,10 @@ def test_auto_regressive_bias_dtype():
 
 
 def test_auto_regressive_bias_output():
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.transformer
+
     block = sockeye.transformer.AutoRegressiveBias()
     block.initialize()
     length = 2
@@ -53,6 +57,9 @@ def test_auto_regressive_bias_output():
 
 @pytest.mark.parametrize('use_glu', [(False), (True)])
 def test_transformer_feed_forward(use_glu):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.transformer
     block = sockeye.transformer.TransformerFeedForward(num_hidden=2,
                                                        num_model=2,
                                                        act_type=C.RELU,
@@ -67,7 +74,23 @@ def test_transformer_feed_forward(use_glu):
 
 
 @pytest.mark.parametrize('use_glu', [(False), (True)])
+def test_pt_transformer_feed_forward(use_glu):
+    block = sockeye.transformer_pt.PyTorchTransformerFeedForward(num_hidden=2,
+                                                                 num_model=2,
+                                                                 act_type=C.RELU,
+                                                                 dropout=0.1,
+                                                                 use_glu=use_glu)
+
+    data = pt.ones(1, 10, 2)
+    block(data)
+
+
+@pytest.mark.parametrize('use_glu', [(False), (True)])
 def test_mx_pt_eq_transformer_feed_forward(use_glu):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.transformer
+
     b_mx = sockeye.transformer.TransformerFeedForward(num_hidden=4,
                                                       num_model=2,
                                                       act_type=C.RELU,
@@ -101,6 +124,10 @@ def test_pt_autoregressive_mask(length):
 
 @pytest.mark.parametrize('sequence', ['rn', 'nr', 'r', 'n', ''])  # not testing dropout
 def test_mx_pt_eq_transformer_process_block(sequence):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.transformer
+
     num_hidden = 32
     x_mx = np.random.uniform(0, 1, (2, 10, num_hidden))
     prev_mx = np.random.uniform(0, 1, (2, 10, num_hidden))
@@ -127,6 +154,10 @@ def test_mx_pt_eq_transformer_process_block(sequence):
 def test_mx_pt_eq_transformer_encoder_block(batch_size, input_len, model_size, heads,
                                             ff_hidden, num_layers, use_lhuc, preprocess_sequence,
                                             postprocess_sequence, use_glu):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.transformer
+
     config = sockeye.transformer.TransformerConfig(
         model_size=model_size,
         attention_heads=heads,
@@ -182,8 +213,13 @@ def test_mx_pt_eq_transformer_encoder_block(batch_size, input_len, model_size, h
 def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target_input_len, model_size, heads,
                                             ff_hidden, num_layers, use_lhuc, preprocess_sequence,
                                             postprocess_sequence, use_glu, inference_only, decoder_type):
+    mxnet = pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.transformer
+    import sockeye.layers
+
     pt.manual_seed(13)
-    mx.random.seed(13)
+    mxnet.random.seed(13)
     config = sockeye.transformer.TransformerConfig(
         model_size=model_size,
         attention_heads=heads,
@@ -218,7 +254,7 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
 
     source_lengths_mx = np.random.randint(0, source_input_len, (batch_size,))
     source_lengths_pt = pt.tensor(source_lengths_mx.asnumpy())
-    source_lengths_mx = prepare_source_valid_lengths(source_lengths_mx, target_mx, heads)
+    source_lengths_mx = sockeye.layers.prepare_source_valid_lengths(source_lengths_mx, target_mx, heads)
     source_max_len = source_pt.size()[0]
     source_length_mask_pt = prepare_source_length_mask(source_lengths_pt, heads, source_max_len)
 

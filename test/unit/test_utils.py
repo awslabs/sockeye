@@ -17,8 +17,9 @@ import os
 import re
 from tempfile import TemporaryDirectory
 
-from mxnet import np
 import pytest
+import numpy as np
+import torch as pt
 
 from sockeye import __version__
 from sockeye import constants as C
@@ -275,18 +276,18 @@ def test_combine_stds(samples, sample_means, sample_stds, expected_std):
 def test_average_arrays():
     n = 4
     shape = (12, 14)
-    arrays = [np.random.uniform(0, 1, (12, 14)) for _ in range(n)]
-    expected_average = np.zeros(shape)
+    arrays = [pt.rand(12, 14) for _ in range(n)]
+    expected_average = pt.zeros(*shape)
     for array in arrays:
         expected_average += array
     expected_average /= 4
 
-    assert np.allclose(utils.average_arrays(arrays), expected_average)
+    pt.testing.assert_allclose(utils.average_tensors(arrays), expected_average)
 
     with pytest.raises(utils.SockeyeError) as e:
         other_shape = (12, 13)
-        utils.average_arrays(arrays + [np.zeros(other_shape)])
-    assert "nd array shapes do not match" == str(e.value)
+        utils.average_tensors(arrays + [pt.zeros(*other_shape)])
+    assert "tensor shapes do not match" == str(e.value)
 
 
 @pytest.mark.parametrize("new, old, metric, result",
