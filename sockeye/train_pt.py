@@ -124,6 +124,8 @@ def check_arg_compatibility(args: argparse.Namespace):
         # Length 1: expand the list to the appropriate length
         args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
 
+    check_condition(not (args.amp and args.apex_amp), 'Use either --amp (safer) or --apex-amp (faster).')
+
     if args.dtype != C.DTYPE_FP32:
         logger.warning('Specifying a non-float32 dtype to sockeye.train has no effect. Use --amp or --apex-amp for '
                        'mixed precision training.')
@@ -720,16 +722,15 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
     if args.length_task is not None:
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:
-            length_loss = loss_pt.MSELoss(name=f'{C.LENRATIO_NAME}_{C.LINK_NORMAL}',
+            losses.append(loss_pt.MSELoss(name=f'{C.LENRATIO_NAME}_{C.LINK_NORMAL}',
                                           weight=weight,
                                           output_name=C.LENRATIO_NAME,
-                                          label_name=C.LENRATIO_LABEL_NAME)
+                                          label_name=C.LENRATIO_LABEL_NAME))
         else:
-            length_loss = loss_pt.PoissonLoss(name=f'{C.LENRATIO_NAME}_{C.LINK_POISSON}',
+            losses.append(loss_pt.PoissonLoss(name=f'{C.LENRATIO_NAME}_{C.LINK_POISSON}',
                                               weight=weight,
                                               output_name=C.LENRATIO_NAME,
-                                              label_name=C.LENRATIO_LABEL_NAME)
-        losses.append(length_loss)
+                                              label_name=C.LENRATIO_LABEL_NAME))
     return losses
 
 
@@ -1003,7 +1004,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
 
-    traced_model = sockeye_model  # Placeholder; not traced yet
+    # This starts as a reference to the original Sockeye model. It is
+    # sequentially transformed/wrapped to produce the model instance used for
+    # training.
+    training_model = sockeye_model  # type: torch.nn.Module
 
     if args.apex_amp:
         try:
@@ -1014,26 +1018,26 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # Optimization level 2 runs the entire model in FP16 mode with FP32
         # master weights and loss scaling. See:
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
-        traced_model, optimizer = apex.amp.initialize(traced_model, optimizer, opt_level='O2')
+        training_model, optimizer = apex.amp.initialize(training_model, optimizer, opt_level='O2')
 
     logger.info('Tracing model on validation batch')
-    batch = eval_iter.next().load(device=device)
+    batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
     # When using AMP, turn on autocasting when tracing the model so that
     # dtypes will match during AMP training. Disable the weight cache for
     # compatibility with tracing. See:
     # https://github.com/pytorch/pytorch/pull/63552
-    with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():
-        traced_model = torch.jit.trace(sockeye_model, (batch.source, batch.source_length,
-                                                       batch.target, batch.target_length), strict=False)
+    with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
+        training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
+                                                          batch.target, batch.target_length), strict=False)
     eval_iter.reset()
 
     if utils.is_distributed():
         # In distributed mode, wrap the traced model with a distributed
         # data-parallel model that shares (averages) gradients with models
         # in other worker processes.
-        traced_model = torch.nn.parallel.DistributedDataParallel(traced_model,
-                                                                 device_ids=None if args.use_cpu else [device],
-                                                                 output_device=None if args.use_cpu else device)
+        training_model = torch.nn.parallel.DistributedDataParallel(training_model,
+                                                                   device_ids=None if args.use_cpu else [device],
+                                                                   output_device=None if args.use_cpu else device)
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
@@ -1041,7 +1045,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         config=trainer_config,
         optimizer_config=optimizer_config,
         sockeye_model=sockeye_model,
-        traced_model=traced_model,
+        training_model=training_model,
         optimizer=optimizer,
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,

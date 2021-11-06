@@ -781,7 +781,8 @@ def add_model_parameters(params):
                               action='store_true',
                               help='Use NVIDIA Apex automatic mixed precision (AMP) to run the entire model in float16 '
                                    'mode with float32 master weights and dynamic loss scaling. This is faster than '
-                                   'PyTorch AMP and requires installing Apex: https://github.com/NVIDIA/apex')
+                                   'PyTorch AMP with some additional risk and requires installing Apex: '
+                                   'https://github.com/NVIDIA/apex')
 
 def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',

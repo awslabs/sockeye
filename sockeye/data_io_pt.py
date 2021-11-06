@@ -494,17 +494,15 @@ class RawParallelDatasetLoader:
 
             bucket_sample_index[buck_index] += 1
 
-        # Convert to torch tensors
-        for i in range(len(data_source)):
-            data_source[i] = torch.from_numpy(data_source[i])
-            data_target[i] = torch.from_numpy(data_target[i])
+        data_source_tensors = [torch.from_numpy(data) for data in data_source]
+        data_target_tensors = [torch.from_numpy(data) for data in data_target]
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-        return ParallelDataSet(data_source, data_target)
+        return ParallelDataSet(data_source_tensors, data_target_tensors)
 
 
 def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
@@ -1576,7 +1574,7 @@ class BaseParallelSampleIter:
         pass
 
     def __next__(self):
-        return self.next()
+        return self.next()  # pylint: disable=not-callable
 
     @abstractmethod
     def save_state(self, fname: str):

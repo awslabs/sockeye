@@ -295,7 +295,7 @@ def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
     if len(tensors) == 1:
         return tensors[0]
     check_condition(all(tensors[0].shape == t.shape for t in tensors), "tensor shapes do not match")
-    return sum(tensors) / len(tensors)
+    return sum(tensors) / len(tensors)  # type: ignore
 
 
 def get_num_gpus() -> int:
@@ -825,6 +825,6 @@ def broadcast_object(obj: T, src: int = 0) -> T:
 
 def all_gather_object(obj: T) -> List[T]:
     """Gather each worker's instance of an object, returned as a list"""
-    obj_list = [None] * torch.distributed.get_world_size()
+    obj_list = [None] * torch.distributed.get_world_size()  # type: List[T]
     torch.distributed.all_gather_object(obj_list, obj)
     return obj_list

@@ -147,7 +147,7 @@ class PyTorchEarlyStoppingTrainer:
                  config: TrainerConfig,
                  optimizer_config: optimizers.PyTorchOptimizerConfig,
                  sockeye_model: model_pt.PyTorchSockeyeModel,
-                 traced_model: torch.nn.Module,
+                 training_model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss_pt.Loss],
@@ -159,7 +159,7 @@ class PyTorchEarlyStoppingTrainer:
         self.config = config
         self.optimizer_config = optimizer_config
         self.sockeye_model = sockeye_model
-        self.traced_model = traced_model
+        self.training_model = training_model
         self.optimizer = optimizer
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
@@ -311,9 +311,9 @@ class PyTorchEarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
-        with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():
+        with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
             # Forward
-            outputs = self.traced_model(batch.source, batch.source_length, batch.target, batch.target_length)
+            outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
             # Loss (scaled by update interval)
             loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
             # TODO(mdenkows): We currently give 1/N weight to every batch in the
@@ -330,7 +330,7 @@ class PyTorchEarlyStoppingTrainer:
                                      delay_unscale=not is_update_batch) as scaled_sum_losses:
                 scaled_sum_losses.backward()
         else:
-            sum_losses.backward()
+            sum_losses.backward()  # type: ignore
         return loss_outputs
 
     def _step(self, batch: data_io_pt.Batch) -> bool:
@@ -345,7 +345,8 @@ class PyTorchEarlyStoppingTrainer:
         # workers accumulate gradients locally for N-1 batches (no_sync), then
         # average the accumulated gradients across workers during the update
         # batch.
-        with self.traced_model.no_sync() if utils.is_distributed() and not is_update_batch else utils.no_context():
+        with (self.training_model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
+              else utils.no_context()):
             loss_outputs = self._forward_backward(batch, is_update_batch)
 
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
@@ -358,10 +359,10 @@ class PyTorchEarlyStoppingTrainer:
                 self._scaler.unscale_(self.optimizer)
             # Clip gradients
             if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
-                torch.nn.utils.clip_grad.clip_grad_value_(self.traced_model.parameters(),
+                torch.nn.utils.clip_grad.clip_grad_value_(self.training_model.parameters(),
                                                           self.optimizer_config.gradient_clipping_threshold)
             elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-                torch.nn.utils.clip_grad.clip_grad_norm_(self.traced_model.parameters(),
+                torch.nn.utils.clip_grad.clip_grad_norm_(self.training_model.parameters(),
                                                          self.optimizer_config.gradient_clipping_threshold)
             # Set learning rate for current step
             for param_group in self.optimizer.param_groups:
@@ -395,8 +396,8 @@ class PyTorchEarlyStoppingTrainer:
         for batch in data_iter:
             batch = batch.load(device=self.device)
             with torch.inference_mode():
-                # Forward: use sockeye_model because traced_model doesn't
-                # support eval mode (still runs dropout, etc.)
+                # Forward: use sockeye_model because (traced) training_model
+                # doesn't support eval mode (still runs dropout, etc.)
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
@@ -553,8 +554,7 @@ class PyTorchEarlyStoppingTrainer:
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
         """
         data = {"epoch": self.state.epoch,
-                # TODO(fhieber): self.trainer undefined
-                "learning-rate": (self.trainer.learning_rate if self.optimizer_config.lr_scheduler is None
+                "learning-rate": (self.optimizer_config.lr if self.optimizer_config.lr_scheduler is None
                                   else self.optimizer_config.lr_scheduler.lr),
                 "time-elapsed": self.state.time_elapsed,
                 "max-gpu-memory": torch.cuda.max_memory_allocated(self.device),
