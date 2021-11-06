@@ -13,11 +13,10 @@
 
 import io
 
-import numpy as np
 import pytest
 
 import sockeye.output_handler
-from sockeye.inference import TranslatorInput, TranslatorOutput
+from sockeye.inference_pt import TranslatorInput, TranslatorOutput
 
 stream_handler_tests = [(sockeye.output_handler.StringOutputHandler(io.StringIO()),
                          TranslatorInput(sentence_id=0, tokens=[], factors=[], constraints=[]),
