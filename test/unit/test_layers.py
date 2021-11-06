@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,35 +11,34 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-from functools import partial
-
-import mxnet as mx
 import numpy as onp
 import pytest
 import torch as pt
-from mxnet import np, npx
 
-import sockeye.layers
 import sockeye.layers_pt
 
 
 def test_lhuc():
     num_hidden = 50
     batch_size = 10
-    inp = np.random.uniform(0, 1, size=(batch_size, num_hidden))
+    inp = pt.rand(batch_size, num_hidden)
 
-    lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init='zeros')
-    lhuc.initialize()
+    lhuc = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
+    pt.nn.init.zeros_(lhuc.weight)
     out = lhuc(inp)
-    assert onp.allclose(inp, out)
+    pt.testing.assert_allclose(inp, out)
 
-    lhuc = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mx.init.Constant(value=20.0))
-    lhuc.initialize()
+    lhuc = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
+    pt.nn.init.constant_(lhuc.weight, 20.0)
     out = lhuc(inp)
-    assert onp.allclose(2 * inp, out)
+    pt.testing.assert_allclose(2 * inp, out)
 
 
 def test_mx_pt_eq_lhuc():
+    mxnet = pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     num_hidden = 50
     batch_size = 10
     inp_mx = np.random.uniform(0, 1, size=(batch_size, num_hidden))
@@ -54,7 +53,7 @@ def test_mx_pt_eq_lhuc():
 
     assert onp.allclose(out_mx, out_pt)
 
-    b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mx.init.Constant(value=20.0))
+    b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mxnet.init.Constant(value=20.0))
     b_mx.initialize()
     b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
     pt.nn.init.constant_(b_pt.weight, 20.0)
@@ -66,16 +65,19 @@ def test_mx_pt_eq_lhuc():
 
 
 def test_weight_normalization():
-    expected_norm = np.array([1., 1.])
-    weight = np.array([[1., 2.],
-                       [3., 4.]])
-    weight_norm = sockeye.layers.WeightNormalization(num_hidden=2)
-    weight_norm.initialize()
-    norm_weight = weight_norm(weight)
-    assert onp.allclose(np.linalg.norm(norm_weight, axis=1), expected_norm)
+    expected_norm = onp.array([1., 1.])
+    weight = pt.tensor([[1., 2.],
+                        [3., 4.]])
+    weight_norm = sockeye.layers_pt.PyTorchWeightNormalization(num_hidden=2)
+    norm_weight = weight_norm(weight).detach().numpy()
+    assert onp.allclose(onp.linalg.norm(norm_weight, axis=1), expected_norm)
 
 
 def test_mx_pt_eq_weight_normalization():
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     num_hidden = 3
     weight_mx = np.random.uniform(0, 1, size=(num_hidden, 4))
     weight_pt = pt.as_tensor(weight_mx.asnumpy())
@@ -95,39 +97,40 @@ def test_positional_embeddings():
     scale_up_input = False
     scale_down_positions = False
     data_len = 5
-    data = np.zeros((2, data_len, num_embed))
+    data = pt.zeros(2, data_len, num_embed)
 
     # fixed embeddings
-    expected_fixed_embedding = sockeye.layers.get_positional_embeddings(data_len, num_embed)
-    b = sockeye.layers.PositionalEmbeddings(weight_type='fixed',
-                                            num_embed=num_embed,
-                                            max_seq_len=max_seq_len,
-                                            scale_up_input=scale_up_input,
-                                            scale_down_positions=scale_down_positions,
-                                            weight_init=None)
-    b.initialize()
+    expected_fixed_embedding = sockeye.layers_pt.pytorch_get_positional_embeddings(data_len, num_embed)
+    b = sockeye.layers_pt.PyTorchPositionalEmbeddings(weight_type='fixed',
+                                                      num_embed=num_embed,
+                                                      max_seq_len=max_seq_len,
+                                                      scale_up_input=scale_up_input,
+                                                      scale_down_positions=scale_down_positions)
     # no steps
     out = b(data, None)
-    assert np.allclose(out[0], expected_fixed_embedding)
-    assert np.allclose(out[1], expected_fixed_embedding)
+    pt.testing.assert_allclose(out[0], expected_fixed_embedding)
+    pt.testing.assert_allclose(out[1], expected_fixed_embedding)
 
     # steps
-    steps = np.expand_dims(np.array([2, 3]), axis=1)
+    steps = pt.tensor([2, 3, 1, 1, 1]).unsqueeze(0)
     out = b(data, steps)
-    assert onp.allclose(out[0], expected_fixed_embedding[2])
-    assert onp.allclose(out[1], expected_fixed_embedding[3])
+    pt.testing.assert_allclose(out[0, 0], expected_fixed_embedding[2])
+    pt.testing.assert_allclose(out[1, 0], expected_fixed_embedding[2])
+    pt.testing.assert_allclose(out[0, 1], expected_fixed_embedding[3])
+    pt.testing.assert_allclose(out[1, 1], expected_fixed_embedding[3])
+    pt.testing.assert_allclose(out[0, 2], expected_fixed_embedding[1])
+    pt.testing.assert_allclose(out[1, 2], expected_fixed_embedding[1])
 
     # learned embeddings
-    b = sockeye.layers.PositionalEmbeddings(weight_type='learned',
-                                            num_embed=num_embed,
-                                            max_seq_len=max_seq_len,
-                                            scale_up_input=scale_up_input,
-                                            scale_down_positions=scale_down_positions,
-                                            weight_init='ones')
-    b.initialize()
-    expected_learned_embeddings = np.ones((data_len, num_embed))
+    b = sockeye.layers_pt.PyTorchPositionalEmbeddings(weight_type='learned',
+                                                      num_embed=num_embed,
+                                                      max_seq_len=max_seq_len,
+                                                      scale_up_input=scale_up_input,
+                                                      scale_down_positions=scale_down_positions)
+    pt.nn.init.constant_(b.weight, val=1.0)
+    expected_learned_embeddings = pt.ones(data_len, num_embed)
     out = b(data, None)
-    assert onp.allclose(out[0], expected_learned_embeddings)
+    pt.testing.assert_allclose(out[0], expected_learned_embeddings)
 
 
 @pytest.mark.parametrize('data_len, num_embed, scale_up_input, scale_down_positions, steps',
@@ -136,6 +139,10 @@ def test_positional_embeddings():
                           (10, 32, True, False, [1, 3]),
                           (4, 32, False, True, [2, 3])])
 def test_mx_pt_eq_positional_embeddings(data_len, num_embed, scale_up_input, scale_down_positions, steps):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     max_seq_len = 10
     data_mx = np.random.uniform(0, 1, (2, data_len, num_embed))
     data_pt = pt.as_tensor(data_mx.asnumpy())
@@ -166,46 +173,42 @@ def test_mx_pt_eq_positional_embeddings(data_len, num_embed, scale_up_input, sca
 
 
 def test_mx_pt_eq_get_positional_embeddings():
+    pytest.importorskip("mxnet")
+    import sockeye.layers
+
     data_len = 5
     num_embed = 32
 
     embed_mx = sockeye.layers.get_positional_embeddings(data_len, num_embed).asnumpy()
     embed_pt = sockeye.layers_pt.pytorch_get_positional_embeddings(data_len, num_embed).detach().numpy()
 
-    assert np.allclose(embed_mx, embed_pt)
+    assert onp.allclose(embed_mx, embed_pt)
 
 
 def test_output_layer():
     num_hidden = 32
     vocab_size = 64
-    data = np.ones((2, 10, num_hidden))
-    vocab_slice_ids = np.array([4, 7, 23])
+    data = pt.ones(2, 10, num_hidden)
+    vocab_slice_ids = pt.tensor([4, 7, 23])
 
-    b = sockeye.layers.OutputLayer(num_hidden, vocab_size)
-    b.initialize()
-    assert b.weight.data().shape == (vocab_size, num_hidden)
+    b = sockeye.layers_pt.PyTorchOutputLayer(num_hidden, vocab_size)
+    assert b.weight.data.shape == (vocab_size, num_hidden)
 
     output = b(data, None)
     assert output.shape == (2, 10, vocab_size)
-    reduced_output = output.take(vocab_slice_ids, axis=-1)
+    reduced_output = output.index_select(-1, vocab_slice_ids)
 
     output_restricted = b(data, vocab_slice_ids)
     assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
 
-    assert onp.allclose(output_restricted, reduced_output)
-
-    b.hybridize()
-    output = b(data, None)
-    assert output.shape == (2, 10, vocab_size)
-    reduced_output = output.take(vocab_slice_ids, axis=-1)
-
-    output_restricted = b(data, vocab_slice_ids)
-    assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
-
-    assert onp.allclose(output_restricted, reduced_output)
+    pt.testing.assert_allclose(output_restricted, reduced_output)
 
 
 def test_mx_pt_eq_output_layer():
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     num_hidden = 32
     vocab_size = 64
     data_mx = np.random.uniform(0, 1, (2, 10, num_hidden))
@@ -243,6 +246,10 @@ def test_mx_pt_eq_output_layer():
 @pytest.mark.parametrize('qlen, kvlen, batch_size',
                          [(10, 9, 1), (1, 1, 1), (3, 32, 128)])
 def test_mx_pt_eq_interleaved_matmul_encdec_qk(qlen, kvlen, batch_size):
+    pytest.importorskip("mxnet")
+    from mxnet import np, npx
+    import sockeye.layers
+
     hidden = 32
     q_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
     kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
@@ -261,6 +268,10 @@ def test_mx_pt_eq_interleaved_matmul_encdec_qk(qlen, kvlen, batch_size):
 @pytest.mark.parametrize('qlen, kvlen, batch_size',
                          [(10, 9, 1), (1, 1, 1), (3, 32, 128)])
 def test_mx_pt_eq_interleaved_matmul_encdec_valatt(qlen, kvlen, batch_size):
+    pytest.importorskip("mxnet")
+    from mxnet import np, npx
+    import sockeye.layers
+
     hidden = 32
     kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
     heads = 4
@@ -280,6 +291,12 @@ def test_mx_pt_eq_interleaved_matmul_encdec_valatt(qlen, kvlen, batch_size):
                              (3, 32, 64, 128, 2)
                          ])
 def test_mx_pt_eq_dot_attention_cell(qlen, kvlen, batch_size, hidden, heads):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+    import sockeye.transformer
+    import sockeye.transformer_pt
+
     q_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
     kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
     q_pt = pt.as_tensor(q_mx.asnumpy())
@@ -295,7 +312,7 @@ def test_mx_pt_eq_dot_attention_cell(qlen, kvlen, batch_size, hidden, heads):
         att_mask_pt = mask_pt(q_pt.permute(1, 0, 2))
 
     else:  # cross-attention
-        lengths_mx = np.random.randint(1, kvlen, (batch_size,),)
+        lengths_mx = np.random.randint(1, kvlen, (batch_size,), )
         valid_lengths_mx = sockeye.layers.prepare_source_valid_lengths(lengths_mx, q_mx.transpose(1, 0, 2), heads)
         mx_args = (valid_lengths_mx, None)  # source mask, no autoregr mask
 
@@ -315,6 +332,10 @@ def test_mx_pt_eq_dot_attention_cell(qlen, kvlen, batch_size, hidden, heads):
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
                          [(10, 9, 1, 12, 4), (1, 1, 1, 4, 1), (3, 32, 15, 64, 2)])
 def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, heads):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     q_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
     kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))
     q_pt = pt.as_tensor(q_mx.asnumpy())
@@ -335,6 +356,10 @@ def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, hea
 @pytest.mark.parametrize('seq_len, batch_size, hidden, heads',
                          [(10, 1, 12, 4), (1, 1, 4, 1), (3, 15, 64, 2)])
 def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     inputs_mx = np.random.uniform(0, 1, (seq_len, batch_size, hidden))
     inputs_pt = pt.as_tensor(inputs_mx.asnumpy())
 
@@ -358,6 +383,10 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
                          [(10, 9, 1, 12, 4), (1, 1, 1, 4, 1), (3, 32, 15, 64, 2)])
 def test_mx_pt_eq_multi_head_attention(qlen, kvlen, batch_size, hidden, heads):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     queries_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
     queries_pt = pt.as_tensor(queries_mx.asnumpy())
     memory_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden))
@@ -383,8 +412,12 @@ def test_mx_pt_eq_multi_head_attention(qlen, kvlen, batch_size, hidden, heads):
 @pytest.mark.parametrize('hidden, inference_only, seq_len, batch',
                          [(16, False, 10, 4),
                           (10, False, 2, 1),
-                          (16, True, 1, 4),])
+                          (16, True, 1, 4), ])
 def test_mx_pt_eq_ssru(hidden, inference_only, seq_len, batch):
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     b_mx = sockeye.layers.SSRU(hidden, inference_only)
     b_mx.initialize()
     b_pt = sockeye.layers_pt.PyTorchSSRU(hidden, inference_only)
@@ -407,7 +440,11 @@ def test_mx_pt_eq_ssru(hidden, inference_only, seq_len, batch):
     assert np.allclose(r2_mx, r2_pt)
 
 
-def test_mx_pt_length_ratio():
+def test_mx_pt_eq_length_ratio():
+    pytest.importorskip("mxnet")
+    from mxnet import np
+    import sockeye.layers
+
     hidden_size = 32
     seq_len = 10
     batch_size = 8
