@@ -58,7 +58,6 @@ def test_backwards_compatibility():
             assert model_out.read() == EXPECTED_OUTPUT
 
 
-@pytest.mark.skip
 def test_backwards_compatibility_pt():
     """
     This test checks whether the current code can still produce translations with a model that was trained with the

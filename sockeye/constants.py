@@ -383,7 +383,7 @@ SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-PREPARED_DATA_VERSION = 5
+PREPARED_DATA_VERSION = 6
 
 # reranking
 RERANK_BLEU = "bleu"

@@ -58,6 +58,12 @@ def check_version(version: str):
     """
     code_version = parse_version(__version__)
     given_version = parse_version(version)
+    # TODO(fhieber): temporarily maintain backwards compoatibility for 2.3.x models
+    if given_version[0] == '2' and given_version[1] == '3':
+        logger.info(f"Code version: {__version__}")
+        logger.warning(f"Given release version ({version}) does not match code version ({__version__}). "
+                       f"Models with version {version} should be compatible though.")
+        return
     check_condition(code_version[0] == given_version[0],
                     "Given release version (%s) does not match release code version (%s)" % (version, __version__))
     check_condition(code_version[1] == given_version[1],
