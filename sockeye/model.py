@@ -582,8 +582,8 @@ def load_model(model_folder: str,
 
     if os.path.exists(params_fname + '.mx'):
         logger.warning(f"!!!!! Found '{params_fname}.mx' file, indicating that {params_fname} has been converted to "
-                       f"PyTorch."
-                       "Using '{params_fname}.mx' because behavior when loading PyTorch files is undefined.!!!!!\n")
+                       "PyTorch."
+                       f"Using '{params_fname}.mx' because behavior when loading PyTorch files is undefined.!!!!!\n")
         params_fname += '.mx'
 
     if (dtype == C.DTYPE_INT8 or
