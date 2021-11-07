@@ -565,7 +565,6 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
         # (length, num_embed)
         if steps is None:
             # (batch, length, num_embed)
-            # TODO: using size here, thats dynamic
             pos_embedding = self.weight.unsqueeze(0)[:, :data.size()[1]]
         else:
             # (batch_size or 1, seq_len, num_embed)
