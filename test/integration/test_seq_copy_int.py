@@ -21,6 +21,12 @@ from unittest.mock import patch
 import pytest
 import torch as pt
 
+try:
+    import mxnet
+    backends = [False, True]
+except ImportError:
+    backends = [True]
+
 import sockeye.average
 import sockeye.checkpoint_decoder_pt
 import sockeye.evaluate
@@ -133,7 +139,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
 
 # expand test cases across transformer & ssru, as well as use_pytorch true/false
 TEST_CASES = [(use_pytorch, train_params.format(decoder=decoder), *other_params)
-              for decoder, use_pytorch in product(C.DECODERS, [False, True])
+              for decoder, use_pytorch in product(C.DECODERS, backends)
               for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
 
 

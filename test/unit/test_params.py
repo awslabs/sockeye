@@ -11,22 +11,18 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import itertools
 import glob
+import itertools
 import os.path
 import tempfile
 
-import mxnet as mx
-import torch as pt
 import pytest
+import torch as pt
 
-import sockeye.encoder
-import sockeye.model
-import sockeye.training
+import sockeye.constants as C
 import sockeye.encoder_pt
 import sockeye.model_pt
 import sockeye.training_pt
-import sockeye.constants as C
 
 
 def test_cleanup_param_files():
@@ -57,6 +53,8 @@ def test_cleanup_param_files_keep_first():
 
 
 def mock_model():
+    import sockeye.encoder
+    import sockeye.model
     config_embed = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=4, dropout=0.0)
     config_encoder = sockeye.encoder.EncoderConfig(model_size=4, attention_heads=1, feed_forward_num_hidden=4,
                                                    act_type='relu', num_layers=1, dropout_attention=0.0,
@@ -88,6 +86,7 @@ def mock_model_pt():
 
 
 def test_set_parameters():
+    mx = pytest.importorskip('mxnet')
     model = mock_model()
     model.initialize(init='xavier', ctx=mx.cpu(0))
     model_params = model.collect_params()
@@ -112,6 +111,7 @@ def test_set_parameters_pt():
 
 
 def test_set_parameters_allow_missing():
+    mx = pytest.importorskip('mxnet')
     model = mock_model()
     model.initialize(init='xavier', ctx=mx.cpu(0))
     model.set_parameters({}, allow_missing=True)
@@ -135,6 +135,7 @@ def test_set_parameters_allow_missing_pt():
 
 
 def test_set_parameters_ignore_extra():
+    mx = pytest.importorskip('mxnet')
     model = mock_model()
     model.initialize(init='xavier', ctx=mx.cpu(0))
     p = mx.gluon.Parameter('embedding_source.weight', shape=(20, 4))
@@ -171,6 +172,7 @@ def test_set_parameters_ignore_extra_pt():
 
 
 def test_set_parameters_context():
+    mx = pytest.importorskip('mxnet')
     model = mock_model()
     model.initialize(init='xavier', ctx=[mx.cpu(0), mx.cpu(1)])
     p = mx.gluon.Parameter('embedding_source.weight', shape=(20, 4))
@@ -182,6 +184,7 @@ def test_set_parameters_context():
 
 
 def test_set_parameters_shape():
+    mx = pytest.importorskip('mxnet')
     model = mock_model()
     model.initialize(init='xavier', ctx=mx.cpu(0))
     p = mx.gluon.Parameter('embedding_source.weight', shape=(10, 10))
@@ -193,6 +196,7 @@ def test_set_parameters_shape():
 
 
 def test_set_parameters_uninitialized():
+    mx = pytest.importorskip('mxnet')
     model = mock_model()
     model.initialize(init='xavier', ctx=mx.cpu(0))
     p = mx.gluon.Parameter('embedding_source.weight', shape=(20, 4))

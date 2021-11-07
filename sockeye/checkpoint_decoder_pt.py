@@ -27,7 +27,6 @@ import torch
 from . import constants as C
 from . import data_io_pt
 from . import evaluate
-from . import inference
 from . import inference_pt
 from . import model_pt
 from . import utils
@@ -160,7 +159,7 @@ class CheckpointDecoder:
             tic = time.time()
             trans_inputs = []  # type: List[inference_pt.TranslatorInput]
             for i, inputs in enumerate(self.inputs_sentences):
-                trans_inputs.append(inference.make_input_from_multiple_strings(i, inputs))
+                trans_inputs.append(inference_pt.make_input_from_multiple_strings(i, inputs))
             trans_outputs = self.translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
@@ -203,7 +202,7 @@ class CheckpointDecoder:
 
     def warmup(self):
         """Translate a single sentence to warm up the model"""
-        one_sentence = [inference.make_input_from_multiple_strings(0, self.inputs_sentences[0])]
+        one_sentence = [inference_pt.make_input_from_multiple_strings(0, self.inputs_sentences[0])]
         _ = self.translator.translate(one_sentence)
 
 

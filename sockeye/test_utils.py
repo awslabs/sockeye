@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -21,20 +21,8 @@ from tempfile import TemporaryDirectory
 from typing import Any, Dict, List
 from unittest.mock import patch
 
-import sockeye.average
-import sockeye.checkpoint_decoder
 import sockeye.constants as C
-import sockeye.evaluate
 import sockeye.lexicon
-import sockeye.mx_to_pt
-import sockeye.prepare_data
-import sockeye.prepare_data_pt
-import sockeye.score
-import sockeye.train
-import sockeye.train_pt
-import sockeye.translate
-import sockeye.translate_pt
-import sockeye.utils
 
 logger = logging.getLogger(__name__)
 
@@ -220,13 +208,28 @@ def run_train_translate(train_params: str,
     :param use_pytorch: Whether to use PyTorch.
     :return: Data dictionary, updated with translation outputs and scores
     """
+    if use_pytorch:
+        import sockeye.prepare_data_pt
+        import sockeye.train_pt
+        import sockeye.translate_pt
+        prepare_data_mod = sockeye.prepare_data_pt
+        train_mod = sockeye.train_pt
+        translate_mod = sockeye.translate_pt
+    else:
+        import sockeye.prepare_data
+        import sockeye.train
+        import sockeye.translate
+        prepare_data_mod = sockeye.prepare_data
+        train_mod = sockeye.train
+        translate_mod = sockeye.translate
+
     work_dir = os.path.join(data['work_dir'], 'train_translate')
     data['model'] = os.path.join(work_dir, "model")
     # Optionally create prepared data directory
     if use_prepared_data:
         data['train_prepared'] = os.path.join(work_dir, "prepared_data")
         prepare_params = "{} {}".format(
-            sockeye.prepare_data_pt.__file__ if use_pytorch else sockeye.prepare_data.__file__,
+            prepare_data_mod.__file__,
             PREPARE_DATA_COMMON.format(train_source=data['train_source'],
                                        train_target=data['train_target'],
                                        output=data['train_prepared'],
@@ -243,9 +246,9 @@ def run_train_translate(train_params: str,
 
         logger.info("Preparing data with parameters %s.", prepare_params)
         with patch.object(sys, "argv", prepare_params.split()):
-            sockeye.prepare_data_pt.main() if use_pytorch else sockeye.prepare_data.main()
+            prepare_data_mod.main()
         # Train model
-        params = "{} {} {}".format(sockeye.train.__file__,
+        params = "{} {} {}".format(train_mod.__file__,
                                    TRAIN_PARAMS_PREPARED_DATA_COMMON.format(prepared_data=data['train_prepared'],
                                                                             dev_source=data['dev_source'],
                                                                             dev_target=data['dev_target'],
@@ -260,13 +263,10 @@ def run_train_translate(train_params: str,
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
-            if use_pytorch:
-                sockeye.train_pt.main()
-            else:
-                sockeye.train.main()
+            train_mod.main()
     else:
         # Train model
-        params = "{} {} {}".format(sockeye.train.__file__,
+        params = "{} {} {}".format(train_mod.__file__,
                                    TRAIN_PARAMS_COMMON.format(train_source=data['train_source'],
                                                               train_target=data['train_target'],
                                                               dev_source=data['dev_source'],
@@ -287,10 +287,7 @@ def run_train_translate(train_params: str,
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
-            if use_pytorch:
-                sockeye.train_pt.main()
-            else:
-                sockeye.train.main()
+            train_mod.main()
 
     # create Top-K lexicon from simple ttable mapping digit to digit
     ttable_path = os.path.join(data['work_dir'], "ttable")
@@ -307,7 +304,7 @@ def run_train_translate(train_params: str,
 
     # Translate corpus with the 1st params and scoring output handler to obtain scores
     data['test_output'] = os.path.join(work_dir, "test.out")
-    params = "{} {} {}".format(sockeye.translate_pt.__file__ if use_pytorch else sockeye.translate.__file__,
+    params = "{} {} {}".format(translate_mod.__file__,
                                TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                               input=data['test_source'],
                                                               output=data['test_output']),
@@ -318,7 +315,7 @@ def run_train_translate(train_params: str,
 
     logger.info("Translating with params %s", params)
     with patch.object(sys, "argv", params.split()):
-        sockeye.translate_pt.main() if use_pytorch else sockeye.translate.main()
+        translate_mod.main()
 
     # Collect test inputs
     with open(data['test_source']) as inputs:
@@ -339,9 +336,15 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str, use_pyto
     Runs sockeye.translate with vocabulary selection and checks if number of outputs are the same as without
     vocabulary selection. Adds restricted outputs and scores to the data dictionary.
     """
+    if use_pytorch:
+        import sockeye.translate_pt
+        translate_mod = sockeye.translate_pt
+    else:
+        import sockeye.translate
+        translate_mod = sockeye.translate
     out_path = os.path.join(data['work_dir'], "out-restrict.txt")
     # Translate corpus with restrict-lexicon
-    params = "{} {} {} {}".format(sockeye.translate_pt.__file__ if use_pytorch else sockeye.translate.__file__,
+    params = "{} {} {} {}".format(translate_mod.__file__,
                                   TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                                  input=data['test_source'],
                                                                  output=out_path),
@@ -350,7 +353,7 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str, use_pyto
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
     with patch.object(sys, "argv", params.split()):
-        sockeye.translate_pt.main() if use_pytorch else sockeye.translate.main()
+        translate_mod.main()
 
     # Collect test translate outputs and scores
     data['test_outputs_restricted'] = collect_translate_output_and_scores(out_path)

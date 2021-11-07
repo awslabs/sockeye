@@ -1,4 +1,4 @@
-# Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -20,7 +20,7 @@ import sys
 from typing import Dict, List, Any
 from unittest.mock import patch
 
-import sockeye.translate
+import sockeye.translate_pt
 from sockeye.test_utils import collect_translate_output_and_scores, TRANSLATE_PARAMS_COMMON
 
 _TRAIN_LINE_COUNT = 20
@@ -84,13 +84,13 @@ def _test_constrained_type(constraint_type: str, data: Dict[str, Any], translate
             print(json_line, file=out)
     out_path_constrained = os.path.join(data['work_dir'], "out_constrained.txt")
     params = "{} {} {} --json-input --output-type translation_with_score".format(
-        sockeye.translate.__file__,
+        sockeye.translate_pt.__file__,
         TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                        input=new_test_source_path,
                                        output=out_path_constrained),
         translate_params)
     with patch.object(sys, "argv", params.split()):
-        sockeye.translate.main()
+        sockeye.translate_pt.main()
     constrained_outputs = collect_translate_output_and_scores(out_path_constrained)
     assert len(constrained_outputs) == len(data['test_outputs']) == len(constrained_inputs)
     for json_source, json_constrained, json_unconstrained in zip(constrained_inputs,

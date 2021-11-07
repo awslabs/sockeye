@@ -1,4 +1,4 @@
-# Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2020--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -16,7 +16,8 @@ import os
 import sys
 from tempfile import TemporaryDirectory
 
-import sockeye.translate
+import pytest
+
 from unittest.mock import patch
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ def test_backwards_compatibility():
     This test checks whether the current code can still produce translations with a model that was trained with the
     same major version.
     """
+    pytest.importorskip('mxnet')
+    import sockeye.translate
     with TemporaryDirectory() as work_dir:
         output_file = os.path.join(work_dir, "out")
         params = """{sockeye} --use-cpu --models {model} --input {input} --output {output} """.format(
@@ -50,6 +53,29 @@ def test_backwards_compatibility():
         logger.info("Translating with params %s", params)
         with patch.object(sys, "argv", params.split()):
             sockeye.translate.main()
+
+        with open(output_file) as model_out:
+            assert model_out.read() == EXPECTED_OUTPUT
+
+
+@pytest.mark.skip
+def test_backwards_compatibility_pt():
+    """
+    This test checks whether the current code can still produce translations with a model that was trained with the
+    same major version.
+    """
+    import sockeye.translate_pt
+    with TemporaryDirectory() as work_dir:
+        output_file = os.path.join(work_dir, "out")
+        params = """{sockeye} --use-cpu --models {model} --input {input} --output {output} """.format(
+            sockeye=sockeye.translate_pt.__file__,
+            model="test/data/model_2.3.x",
+            input="test/data/model_2.3.x/model_input",
+            output=output_file
+        )
+        logger.info("Translating with params %s", params)
+        with patch.object(sys, "argv", params.split()):
+            sockeye.translate_pt.main()
 
         with open(output_file) as model_out:
             assert model_out.read() == EXPECTED_OUTPUT

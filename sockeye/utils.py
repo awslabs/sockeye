@@ -306,6 +306,9 @@ def get_num_gpus() -> int:
     """
     try:
         import mxnet as mx
+    except ImportError:
+        return 0
+    try:
         return mx.context.num_gpus()
     except mx.MXNetError:
         # Some builds of MXNet will raise a CUDA error when CUDA is not

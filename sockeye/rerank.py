@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -27,7 +27,6 @@ import sacrebleu
 
 from . import arguments
 from . import constants as C
-from .data_io import smart_open
 from . import log
 from . import utils
 
@@ -92,7 +91,7 @@ def rerank(args: argparse.Namespace):
     :param args: Namespace object holding CLI arguments.
     """
     reranker = Reranker(args.metric, args.return_score)
-    output_stream = sys.stdout if args.output is None else smart_open(args.output, mode='w')
+    output_stream = sys.stdout if args.output is None else utils.smart_open(args.output, mode='w')
 
     with utils.smart_open(args.reference) as reference, utils.smart_open(args.hypotheses) as hypotheses:
         for i, (reference_line, hypothesis_line) in enumerate(zip(reference, hypotheses), 1):

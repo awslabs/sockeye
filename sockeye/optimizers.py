@@ -15,7 +15,6 @@ from dataclasses import dataclass
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-import mxnet as mx
 import torch
 
 from . import config
@@ -30,7 +29,7 @@ class OptimizerConfig(config.Config):
     name: str
     params: Dict[str, Any]
     kvstore: str
-    initializer: mx.initializer.Initializer
+    initializer: 'mx.initializer.Initializer'
     gradient_clipping_type: str
     gradient_clipping_threshold: Optional[float]
     update_interval: int = 1

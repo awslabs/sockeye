@@ -10,7 +10,7 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-import sockeye.model
+
 # Called before importing mxnet or any module that imports mxnet
 from . import initial_setup
 initial_setup.handle_env_cli_arg()
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 def convert(model: str, checkpoint: Optional[int]):
     setup_main_logger(file_logging=False)
+    import sockeye.model
     logger.info(f"############### Loading MXNet model from '{model}', checkpoint={checkpoint}")
     model_mx, _, _ = sockeye.model.load_model(model,
                                               checkpoint=checkpoint,

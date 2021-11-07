@@ -26,6 +26,7 @@ from sockeye import data_io_pt
 from sockeye import utils
 from sockeye import vocab
 from sockeye.utils import SockeyeError, get_tokens, seed_rngs
+
 from sockeye.test_utils import tmp_digits_dataset
 
 seed_rngs(12)
@@ -462,6 +463,8 @@ def test_non_parallel_calculate_length_statistics(sources, targets):
 
 
 def test_get_training_data_iters():
+    from sockeye.test_utils import tmp_digits_dataset
+
     train_line_count = 100
     train_line_count_empty = 0
     train_max_length = 30
