@@ -529,7 +529,6 @@ def make_pytorch_model_from_mxnet_model(mx_model: 'SockeyeModel') -> PyTorchSock
                                 inference_only=mx_model.decoder.inference_only,
                                 mc_dropout=mx_model.mc_dropout,
                                 forward_pass_cache_size=mx_model.forward_pass_cache_size)
-    assert not mx_model.train_decoder_only, 'not implemented yet'
     model.weights_from_mxnet_block(mx_model)
     return model
 
@@ -577,7 +576,6 @@ def load_model(model_folder: str,
                inference_only: bool = False,
                train_decoder_only: bool = False,
                mc_dropout: bool = False,
-               for_disk_saving: Optional[str] = None,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
                forward_pass_cache_size: int = 0) -> Tuple[PyTorchSockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
@@ -592,21 +590,13 @@ def load_model(model_folder: str,
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
     :param mc_dropout: Turn on dropout during inference.
-    :param for_disk_saving: For saving quantized models to disk.
-           None: load as usual and the model will work.
-           int8: The model loaded into RAM will not work, but is suitable for
-               writing to disk in quantized format (including scaling factors).
-           float32: The model loaded into RAM will not work, but is suitable
-               for writing to disk as float32 with precomputed scaling factors.
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :return: List of models, source vocabularies, target vocabularies.
     """
-    assert not train_decoder_only, 'not implemented yet'
-    assert not forward_pass_cache_size, 'not implemented yet'
-    assert not for_disk_saving, 'not implemented yet'
-    assert dtype in (None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8), 'not implemented yet'
+    assert dtype in (None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8), \
+        f"dtype must be one of {C.DTYPE_FP32}, {C.DTYPE_FP16}, or {C.DTYPE_INT8}"
 
     source_vocabs = vocab.load_source_vocabs(model_folder)
     target_vocabs = vocab.load_target_vocabs(model_folder)
@@ -646,17 +636,6 @@ def load_model(model_folder: str,
     else:
         model.cast(dtype)
         logger.info("Model dtype: overridden to %s" % dtype)
-
-    # if for_disk_saving is not None:
-    #     # Saving scaling factors and possibly int8 values to disk.
-    #     if not quantizing:
-    #         raise RuntimeError("Model is already quantized and for_disk_saving is set.")
-    #     quantization.convert_weights_disk_format(params, for_disk_saving)
-    #     model.config.dtype = for_disk_saving
-    #     # TODO: check for missing parameters somehow (we allowed scaling to be missing)
-    # if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
-    #     # Disk format to CPU-dependent format.
-    #     quantization.convert_weights_cpu_dependent(params)
 
     utils.check_condition(model.num_source_factors == len(source_vocabs),
                           "Number of loaded source vocabularies (%d) does not match "

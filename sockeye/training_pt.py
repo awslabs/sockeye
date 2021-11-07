@@ -741,7 +741,7 @@ class PyTorchEarlyStoppingTrainer:
     @property
     def best_params_fname(self) -> str:
         # TODO(mdenkows): Remove ".pt" when we move to 100% PyTorch
-        return os.path.join(self.config.output_dir, C.PARAMS_BEST_NAME + '.pt')
+        return os.path.join(self.config.output_dir, C.PARAMS_BEST_NAME + '.' + C.TORCH_SUFFIX)
 
     @property
     def training_state_dirname(self) -> str:
