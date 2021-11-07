@@ -13,7 +13,7 @@ For questions and issue reports, please [file an issue](https://github.com/awsla
 
 ### Version 3.0.0 & Backwards Compatibility
 From version 3.0.0 on Sockeye is now based on PyTorch. We maintain backwards compatibility with
-MXNet models in version 2.3.x a little bit longer.
+MXNet models in version 2.3.x a little bit longer if MXNet is installed.
 
 All models trained with 2.3.x (using MXNet)
 can be converted to models running with PyTorch using the converter CLI (`sockeye.mx_to_pt`). This will
@@ -21,10 +21,13 @@ create a PyTorch parameter file (`<model>/params.best`) and backup the existing 
 file to `<model>/params.best.mx`. Note that this only applies to fully-trained models that are to be used 
 for inference. Continued training of an MXNet model with PyTorch is not supported 
 (because we do not convert training and optimizer states).
+`sockeye.mx_to_pt` requires MXNet to be installed into the environment.
 
 All CLIs of Version 3.0.0 now use PyTorch by default, e.g. `sockeye-{train,translate,score}`.
-MXNet-based CLIs/modules are still operational and accessible via `sockeye-{train,translate,score}-mx`. 
+MXNet-based CLIs/modules are still operational and accessible via `sockeye-{train,translate,score}-mx`.
 
+Sockeye 3 can be installed and run without MXNet, but if installed, an extended test suite is executed to ensure
+equivalence between PyTorch and MXNet models.
 
 ## Installation
 
