@@ -23,9 +23,11 @@ import torch as pt
 
 try:
     import mxnet
-    backends = [False, True]
+    # run integration tests with both MXNet and Pytorch
+    test_both_backends = [False, True]
 except ImportError:
-    backends = [True]
+    # only run PyTorch-based tests
+    test_both_backends = [True]
 
 import sockeye.average
 import sockeye.checkpoint_decoder_pt
@@ -139,7 +141,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
 
 # expand test cases across transformer & ssru, as well as use_pytorch true/false
 TEST_CASES = [(use_pytorch, train_params.format(decoder=decoder), *other_params)
-              for decoder, use_pytorch in product(C.DECODERS, backends)
+              for decoder, use_pytorch in product(C.DECODERS, test_both_backends)
               for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
 
 

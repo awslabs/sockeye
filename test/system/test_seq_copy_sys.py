@@ -23,6 +23,14 @@ import sockeye.utils
 from sockeye.test_utils import tmp_digits_dataset
 from test.common import check_train_translate
 
+try:
+    import mxnet
+    # run integration tests with both MXNet and Pytorch
+    test_both_backends = [False, True]
+except ImportError:
+    # only run PyTorch-based tests
+    test_both_backends = [True]
+
 logger = logging.getLogger(__name__)
 
 _TRAIN_LINE_COUNT = 10000
@@ -94,8 +102,7 @@ TEST_CASES = [
      0.94)
 ]
 
-# run each test with MXNet and PyTorch
-TEST_CASES = [(use_pytorch, *other_params) for use_pytorch in [True, False] for other_params in TEST_CASES]
+TEST_CASES = [(use_pytorch, *other_params) for use_pytorch in test_both_backends for other_params in TEST_CASES]
 
 
 @pytest.mark.parametrize("use_pytorch, name, train_params, translate_params, use_prepared_data, "
