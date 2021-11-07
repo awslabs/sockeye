@@ -580,6 +580,12 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
+    if os.path.exists(params_fname + '.mx'):
+        logger.warning(f"!!!!! Found '{params_fname}.mx' file, indicating that {params_fname} has been converted to "
+                       f"PyTorch."
+                       "Using '{params_fname}.mx' because behavior when loading PyTorch files is undefined.!!!!!\n")
+        params_fname += '.mx'
+
     if (dtype == C.DTYPE_INT8 or
         model_config.dtype == C.DTYPE_INT8 or
         for_disk_saving is not None) and "intgemm_fully_connected" not in dir(npx):

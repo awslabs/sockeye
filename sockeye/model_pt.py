@@ -10,7 +10,7 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-
+import _pickle
 import copy
 import logging
 import os
@@ -389,7 +389,11 @@ class PyTorchSockeyeModel(pt.nn.Module):
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                         "This is either not a model directory or the first training "
                                                         "checkpoint has not happened yet." % filename)
-        state_dict = pt.load(filename, map_location=device)
+        try:
+            state_dict = pt.load(filename, map_location=device)
+        except _pickle.UnpicklingError as e:
+            logger.error(f"Could not load from '{filename}'. Is this a MXNet parameter file? Please convert first.")
+            raise e
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         if not allow_missing:
             utils.check_condition(not missing, f"missing keys: {missing}")
@@ -613,10 +617,9 @@ def load_model(model_folder: str,
         logger.info("Monte Carlo dropout enabled, inference output will be non-deterministic.")
 
     if checkpoint is None:
-        params_fname = os.path.join(model_folder, f'{C.PARAMS_BEST_NAME}.{C.TORCH_SUFFIX}')
+        params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
     else:
-        params_fname = os.path.join(model_folder, f'{C.PARAMS_NAME % checkpoint}.{C.TORCH_SUFFIX}')
-    assert os.path.exists(params_fname), "Torch parameters not found. Run sockeye.mx_to_pt first."
+        params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
     model = PyTorchSockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
                                 mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
