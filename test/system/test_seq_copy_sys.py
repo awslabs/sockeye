@@ -31,6 +31,7 @@ except ImportError:
     # only run PyTorch-based tests
     test_both_backends = [True]
 
+
 logger = logging.getLogger(__name__)
 
 _TRAIN_LINE_COUNT = 10000
@@ -55,7 +56,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
                          " --optimized-metric perplexity --loss cross-entropy --weight-tying-type src_trg_softmax"
 
 
-TEST_CASES = [
+COPY_CASES = [
     ("Copy:transformer:transformer",
      "--encoder transformer --decoder transformer"
      " --max-updates 4000"
@@ -102,11 +103,11 @@ TEST_CASES = [
      0.94)
 ]
 
-TEST_CASES = [(use_pytorch, *other_params) for use_pytorch in test_both_backends for other_params in TEST_CASES]
+COPY_CASES = [(use_pytorch, *other_params) for use_pytorch in test_both_backends for other_params in COPY_CASES]
 
 
 @pytest.mark.parametrize("use_pytorch, name, train_params, translate_params, use_prepared_data, "
-                         "perplexity_thresh, bleu_thresh", TEST_CASES)
+                         "perplexity_thresh, bleu_thresh", COPY_CASES)
 def test_seq_copy(use_pytorch, name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset(prefix="test_seq_copy",
@@ -150,8 +151,7 @@ def test_seq_copy(use_pytorch, name, train_params, translate_params, use_prepare
         assert bleu_restrict >= bleu_thresh
 
 
-@pytest.mark.parametrize(
-    "name, train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors, perplexity_thresh, bleu_thresh", [
+SORT_CASES = [
     ("Sort:transformer:transformer:batch_word",
      "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
@@ -187,8 +187,15 @@ def test_seq_copy(use_pytorch, name, train_params, translate_params, use_prepare
      True, 0, 0,
      1.03,
      0.97)
-])
-def test_seq_sort(name, train_params, translate_params, use_prepared_data,
+]
+
+
+SORT_CASES = [(use_pytorch, *other_params) for use_pytorch in test_both_backends for other_params in SORT_CASES]
+
+
+@pytest.mark.parametrize("use_pytorch, name, train_params, translate_params, use_prepared_data, n_source_factors, "
+                         "n_target_factors, perplexity_thresh, bleu_thresh", SORT_CASES)
+def test_seq_sort(use_pytorch, name, train_params, translate_params, use_prepared_data,
                   n_source_factors, n_target_factors, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.",
@@ -204,7 +211,8 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH,
                                      compare_output=True,
-                                     seed=seed)
+                                     seed=seed,
+                                     use_pytorch=use_pytorch)
 
         # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(os.path.join(data['model'], C.METRICS_NAME))
