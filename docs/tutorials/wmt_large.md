@@ -40,7 +40,7 @@ cp newstest2014.de test.de
 The data is already tokenized, so we only need to apply byte-pair encoding ([Sennrich et al., 2016](https://aclanthology.org/P16-1162/)):
 
 ```bash
-cat train.de train.en |subword-nmt learn-bpe -s 32000 > codes
+cat train.de train.en |subword-nmt learn-bpe -s 32000 >codes
 for SET in train dev test; do
   subword-nmt apply-bpe -c codes <${SET}.en >${SET}.en.bpe
   subword-nmt apply-bpe -c codes <${SET}.de >${SET}.de.bpe
@@ -49,11 +49,11 @@ done
 
 ## Training
 
-After our training data is byte-pair encoded, we split it into shards and serialize it in PyTorch's tensor format.
+We first split the byte-pair encoded training data into shards and serialize it in PyTorch's tensor format.
 This allows us to train on data of any size by loading and unloading different pieces throughout training:
 
 ```bash
-python3 -m sockeye.prepare_data \
+sockeye-prepare-data \
     --source train.en.bpe --target train.de.bpe --shared-vocab \
     --word-min-count 2 --pad-vocab-to-multiple-of 8 --max-seq-len 95 \
     --num-samples-per-shard 10000000 --output prepared --max-processes $(nproc)
@@ -63,7 +63,7 @@ We then launch distributed training on 8 GPUs.
 The following command trains a big transformer ([Vaswani et al., 2017](https://arxiv.org/abs/1706.03762)) using the large batch recipe described by Ott et al. ([2018](https://arxiv.org/abs/1806.00187)):
 
 ```bash
-torchrun --nproc_per_node 8 -m sockeye.train \
+torchrun --no_python --nproc_per_node 8 sockeye-train \
     --prepared-data prepared --validation-source dev.en.bpe \
     --validation-target dev.de.bpe --output model --num-layers 6 \
     --transformer-model-size 1024 --transformer-attention-heads 16 \
@@ -78,7 +78,7 @@ torchrun --nproc_per_node 8 -m sockeye.train \
 Alternate command for 4 GPUs:
 
 ```bash
-torchrun --nproc_per_node 4 -m sockeye.train \
+torchrun --no_python --nproc_per_node 4 sockeye-train \
     --prepared-data prepared --validation-source dev.en.bpe \
     --validation-target dev.de.bpe --output model --num-layers 6 \
     --transformer-model-size 1024 --transformer-attention-heads 16 \
@@ -93,7 +93,7 @@ torchrun --nproc_per_node 4 -m sockeye.train \
 Alternate command for 1 GPU:
 
 ```bash
-python -m sockeye.train \
+sockeye-train \
     --prepared-data prepared --validation-source dev.en.bpe \
     --validation-target dev.de.bpe --output model --num-layers 6 \
     --transformer-model-size 1024 --transformer-attention-heads 16 \
@@ -105,15 +105,15 @@ python -m sockeye.train \
     --seed 1 --device-ids -1
 ```
 
-To apply these settings to larger data, increase the length of training (`--max-updates`).
-Another option is stopping training when the model reaches a perplexity plateau (specify `--max-num-checkpoint-not-improved N` instead of `--max-updates N`).
+Training on larger data typically requires more updates for the model to reach a perplexity plateau.
+When using the above recipe with larger data sets, increase the number of updates (`--max-updates`) or train until the model does not improve over many checkpoints (specify `--max-num-checkpoint-not-improved X` instead of `--max-updates Y`).
 
 ## Evaluation
 
-Once the model is trained, use the following command to translate the test set that we've already preprocessed:
+When training is complete, we translate the preprocessed test set:
 
 ```bash
-python3 -m sockeye.translate \
+sockeye-translate \
     --input test.en.bpe \
     --output out.bpe \
     --model model \
@@ -123,7 +123,7 @@ python3 -m sockeye.translate \
     --device-ids -1
 ```
 
-To evaluate the translations, reverse the BPE sub-word encoding and compute the BLEU score using [sacreBLEU](https://github.com/mjpost/sacreBLEU):
+We then reverse BPE and score the translations against the reference using [sacreBLEU](https://github.com/mjpost/sacreBLEU):
 
 ```bash
 sed -re 's/(@@ |@@$)//g' <out.bpe >out.tok

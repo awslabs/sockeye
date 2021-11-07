@@ -7,7 +7,7 @@
 
 Sockeye is an open-source sequence-to-sequence framework for Neural Machine Translation built on [PyTorch](https://pytorch.org/). It implements distributed training and optimized inference for state-of-the-art models, powering [Amazon Translate](https://aws.amazon.com/translate/) and other MT applications. Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
 
-For a quickstart guide to training a standard NMT model on any size of data, see the [WMT 2014 English-German tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html).
+For a quickstart guide to training a standard NMT model on any size of data, see the [WMT 2014 English-German tutorial](docs/tutorials/wmt_large.md).
 
 For questions and issue reports, please [file an issue](https://github.com/awslabs/sockeye/issues/new) on GitHub.
 
@@ -17,9 +17,9 @@ MXNet models in version 2.3.x a little bit longer if MXNet is installed.
 
 All models trained with 2.3.x (using MXNet)
 can be converted to models running with PyTorch using the converter CLI (`sockeye.mx_to_pt`). This will
-create a PyTorch parameter file (`<model>/params.best`) and backup the existing MXNet parameter 
-file to `<model>/params.best.mx`. Note that this only applies to fully-trained models that are to be used 
-for inference. Continued training of an MXNet model with PyTorch is not supported 
+create a PyTorch parameter file (`<model>/params.best`) and backup the existing MXNet parameter
+file to `<model>/params.best.mx`. Note that this only applies to fully-trained models that are to be used
+for inference. Continued training of an MXNet model with PyTorch is not supported
 (because we do not convert training and optimizer states).
 `sockeye.mx_to_pt` requires MXNet to be installed into the environment.
 
