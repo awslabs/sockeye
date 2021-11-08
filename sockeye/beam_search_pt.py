@@ -580,7 +580,7 @@ class GreedySearch(pt.nn.Module):
         # TODO: check for disabled predicted output length
 
         t = 1
-        for t in range(start=1, stop=max_iterations + 1):
+        for t in range(1, max_iterations + 1):
             scores, model_states, target_factors = self._inference.decode_step(best_word_index,
                                                                                model_states,
                                                                                vocab_slice_ids=vocab_slice_ids)
