@@ -24,7 +24,7 @@ If you want to run sockeye on a GPU you need to make sure your version of Apache
 Depending on your version of CUDA, you can do this by running the following:
 
 ```bash
-> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements/requirements.gpu-cu${CUDA_VERSION}.txt
+> wget https://raw.githubusercontent.com/awslabs/sockeye/main/requirements/requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 > rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
@@ -66,7 +66,7 @@ On an instance with a GPU, the following commands will work
 ```bash
 > conda create -n sockeye python=3.6
 > source activate sockeye
-> wget https://raw.githubusercontent.com/awslabs/sockeye/master/requirements/requirements.gpu-cu${CUDA_VERSION}.txt
+> wget https://raw.githubusercontent.com/awslabs/sockeye/main/requirements/requirements.gpu-cu${CUDA_VERSION}.txt
 > pip install sockeye --no-deps -r requirements.gpu-cu${CUDA_VERSION}.txt
 rm requirements.gpu-cu${CUDA_VERSION}.txt
 ```
