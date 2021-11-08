@@ -90,7 +90,7 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
     decoder_seq_len = 39 if not inference_only else 1
     encoder_outputs_mx = np.random.uniform(0, 1, (batch, encoder_seq_len, config_mx.model_size))
     encoder_outputs_pt = pt.tensor(encoder_outputs_mx.asnumpy())
-    encoder_valid_length_mx = np.random.randint(0, encoder_seq_len, (batch,))
+    encoder_valid_length_mx = np.random.randint(1, encoder_seq_len, (batch,))
     encoder_valid_length_pt = pt.tensor(encoder_valid_length_mx.asnumpy())
     inputs_mx = np.random.uniform(0, 1, (batch, decoder_seq_len, config_mx.model_size))
     inputs_pt = pt.tensor(inputs_mx.asnumpy())
@@ -119,7 +119,7 @@ def test_mx_pt_eq_transformer_decoder(inference_only):
         if structure != C.MASK_STATE:  # MASK state is new in Pytorch and not equivalent
             assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
 
-    output_mx, output_mx.asnumpy()
+    output_mx = output_mx.asnumpy()
     output_pt = output_pt.detach().numpy()
 
     print("Max deviation:", onp.abs(output_mx - output_pt).max())

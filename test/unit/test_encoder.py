@@ -90,7 +90,7 @@ def test_mx_pt_eq_transformer_encoder():
     seq_len = 45
     data_mx = np.random.uniform(0, 1, (batch, seq_len, config.model_size))
     data_pt = pt.as_tensor(data_mx.asnumpy())
-    lengths_mx = np.random.randint(0, seq_len, (batch,))
+    lengths_mx = np.random.randint(1, seq_len, (batch,))
     lengths_pt = pt.as_tensor(lengths_mx.asnumpy())
 
     r1_mx, r2_mx = encoder_mx(data_mx, lengths_mx)
