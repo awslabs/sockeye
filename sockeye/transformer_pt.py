@@ -123,13 +123,14 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
         super().__init__()
         self.decoder_type = config.decoder_type
 
+        self.autoregr_layer = None
         if self.decoder_type == C.TRANSFORMER_TYPE:
             self.autoregr_layer = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(depth_att=config.model_size,
                                                                                   heads=config.attention_heads,
                                                                                   depth_out=config.model_size,
                                                                                   dropout=config.dropout_attention)
         elif self.decoder_type == C.SSRU_TRANSFORMER:
-            self.autoregr_layer = sockeye.layers_pt.PyTorchSSRU(model_size=config.model_size,
+            self.autoregr_layer = sockeye.layers_pt.PyTorchSSRU(model_size=config.model_size,  # type: ignore
                                                                 inference_only=inference_only)  # type: ignore
         else:
             raise ValueError("Invalid decoder type.")
