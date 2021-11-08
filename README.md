@@ -49,6 +49,11 @@ For faster GPU training, install [NVIDIA Apex](https://github.com/NVIDIA/apex). 
 - For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
 - Developers may be interested in our [developer guidelines](https://awslabs.github.io/sockeye/development.html).
 
+### Older versions
+
+- Sockeye 2.x, based on the MXNet Gluon API, is available in the `sockeye_2` branch.
+- Sockeye 1.x, based on the MXNet Module API, is available in the `sockeye_1` branch.
+
 ## Citation
 
 For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
