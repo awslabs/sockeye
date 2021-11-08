@@ -173,7 +173,7 @@ The value of the constant can be changed with `--brevity-penalty-constant-length
 On multi-core computers, translation per core separately can speedup translation performance, due to some operation can't be handled parallel in one process.
 Using this method, translation on each core can be parallel.
 
-One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/cpu_process_per_core_translation.py) is given and you can run it as follows:
+One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/main/docs/tutorials/cpu_process_per_core_translation.py) is given and you can run it as follows:
 
 ```bash
 > python cpu_process_per_core_translation.py -m model -i input_file_name -o output_file_name -bs batch_size -t true
