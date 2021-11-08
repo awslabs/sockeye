@@ -97,9 +97,9 @@ class Scorer:
         self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
         self.target_vocab_inv = vocab.reverse_vocab(target_vocabs[0])
         self.model = model
-        self.traced_model = None
+        self.traced_model = None  # type: Optional[pt.jit.ScriptModule]
         self.batch_scorer = batch_scorer
-        self.traced_batch_scorer = None
+        self.traced_batch_scorer = None  # type: Optional[pt.jit.ScriptModule]
         self.device = device
         self.exclude_list = {C.BOS_ID, C.EOS_ID, C.PAD_ID}
 

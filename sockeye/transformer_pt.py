@@ -102,7 +102,7 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
 
         return data
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerEncoderBlock'):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerEncoderBlock'):  # type: ignore
         self.pre_self_attention.weights_from_mxnet_block(block_mx.pre_self_attention)
         self.self_attention.weights_from_mxnet_block(block_mx.self_attention)
         self.post_self_attention.weights_from_mxnet_block(block_mx.post_self_attention)
@@ -130,7 +130,7 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
                                                                                   dropout=config.dropout_attention)
         elif self.decoder_type == C.SSRU_TRANSFORMER:
             self.autoregr_layer = sockeye.layers_pt.PyTorchSSRU(model_size=config.model_size,
-                                                                inference_only=inference_only)
+                                                                inference_only=inference_only)  # type: ignore
         else:
             raise ValueError("Invalid decoder type.")
 
@@ -218,7 +218,7 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
 
         return target, new_autoregr_states
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerDecoderBlock'):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerDecoderBlock'):  # type: ignore
         self.pre_autoregr_layer.weights_from_mxnet_block(block_mx.pre_autoregr_layer)
         self.autoregr_layer.weights_from_mxnet_block(block_mx.autoregr_layer)
         self.post_autoregr_layer.weights_from_mxnet_block(block_mx.post_autoregr_layer)
@@ -286,7 +286,7 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
 
         return data
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerProcessBlock'):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerProcessBlock'):  # type: ignore
         if 'n' in self.sequence:
             assert 'n' in block_mx.sequence
             self.layer_norm.bias.data[:] = pt.as_tensor(block_mx.layer_norm.beta.data().asnumpy())
@@ -323,7 +323,7 @@ class PyTorchTransformerFeedForward(pt.nn.Module):
         y = self.ff2(h)
         return y
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerFeedForward'):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerFeedForward'):  # type: ignore
         self.ff1.weight.data[:] = pt.as_tensor(block_mx.ff1.weight.data().asnumpy())
         self.ff2.weight.data[:] = pt.as_tensor(block_mx.ff2.weight.data().asnumpy())
         self.ff1.bias.data[:] = pt.as_tensor(block_mx.ff1.bias.data().asnumpy())

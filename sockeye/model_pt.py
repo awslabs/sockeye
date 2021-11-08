@@ -111,9 +111,9 @@ class PyTorchSockeyeModel(pt.nn.Module):
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder,
                                                                   inference_only=inference_only)
-        self.traced_encoder = None
+        self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
         self.decoder = decoder_pt.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
-        self.traced_decoder = None
+        self.traced_decoder = None  # type: Optional[pt.jit.ScriptModule]
 
         self.output_layer = layers_pt.PyTorchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                          vocab_size=self.config.vocab_target_size,
@@ -138,7 +138,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         self.dtype = pt.float32
         self.cast(config.dtype)
 
-    def weights_from_mxnet_block(self, block_mx: 'SockeyeModel'):
+    def weights_from_mxnet_block(self, block_mx: 'SockeyeModel'):  # type: ignore
         self.embedding_source.weights_from_mxnet_block(block_mx.embedding_source)
         self.embedding_target.weights_from_mxnet_block(block_mx.embedding_target)
         self.encoder.weights_from_mxnet_block(block_mx.encoder)
@@ -461,11 +461,11 @@ class PyTorchSockeyeModel(pt.nn.Module):
                                                sparse=target_grad_sparse)
 
         if tie_weights:
-            output_weight = target_embedding.weight
+            output_weight = target_embedding.weight  # type: ignore
         else:
             output_weight = None  # will be created when instantiating the OutputLayer
 
-        return source_embedding, target_embedding, output_weight
+        return source_embedding, target_embedding, output_weight  # type: ignore
 
     @property
     def num_source_factors(self) -> int:
@@ -525,7 +525,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         return cache_func
 
 
-def make_pytorch_model_from_mxnet_model(mx_model: 'SockeyeModel') -> PyTorchSockeyeModel:
+def make_pytorch_model_from_mxnet_model(mx_model: 'SockeyeModel') -> PyTorchSockeyeModel:  # type: ignore
     """
     Constructs a PyTorchSockeyeModel from a given SockeyeModel and copies its parameters in-memory.
     """

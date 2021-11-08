@@ -27,7 +27,7 @@ from . import transformer_pt
 from .transformer_pt import TransformerConfig
 
 logger = logging.getLogger(__name__)
-DecoderConfig = Union[TransformerConfig, 'sockeye.transformer.TransformerConfig']
+DecoderConfig = Union[TransformerConfig, 'sockeye.transformer.TransformerConfig']  # type: ignore
 
 
 def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'PyTorchDecoder':
@@ -250,7 +250,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         if any(layer.num_state_tensors > 1 for layer in self.layers):
             # separates autoregressive states by layer
             states_iter = iter(autoregr_states)
-            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
+            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]  # type: ignore
 
         batch, heads, source_max_len = source_mask.size()
         source_mask_view = source_mask.view(batch * heads, 1, source_max_len)
@@ -292,7 +292,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
     def get_num_hidden(self):
         return self.config.model_size
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerDecoder'):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerDecoder'):  # type: ignore
         self.pos_embedding.weights_from_mxnet_block(block_mx.pos_embedding)
         for i, l in enumerate(self.layers):
             l.weights_from_mxnet_block(block_mx.layers[i])

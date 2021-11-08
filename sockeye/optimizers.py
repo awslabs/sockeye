@@ -29,7 +29,7 @@ class OptimizerConfig(config.Config):
     name: str
     params: Dict[str, Any]
     kvstore: str
-    initializer: 'mx.initializer.Initializer'
+    initializer: 'mx.initializer.Initializer'  # type: ignore
     gradient_clipping_type: str
     gradient_clipping_threshold: Optional[float]
     update_interval: int = 1

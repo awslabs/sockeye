@@ -19,6 +19,7 @@ from typing import Optional
 
 import sockeye.constants as C
 from sockeye.utils import smart_open
+from . import inference_pt
 
 
 def get_output_handler(output_type: str,
@@ -56,8 +57,8 @@ class OutputHandler(ABC):
 
     @abstractmethod
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -86,8 +87,8 @@ class StringOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -112,8 +113,8 @@ class StringWithScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -137,8 +138,8 @@ class ScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -162,8 +163,8 @@ class PairWithScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -184,8 +185,8 @@ class BenchmarkOutputHandler(StringOutputHandler):
     """
 
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -215,8 +216,8 @@ class BeamStoringHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -245,8 +246,8 @@ class JSONOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         Outputs a JSON object of the fields in the `TranslatorOutput` object.
@@ -267,8 +268,8 @@ class FactoredStringOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: 'inference.TranslatorInput',
-               t_output: 'inference.TranslatorOutput',
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.

@@ -407,4 +407,4 @@ BREVITY_PENALTY_CONSTANT = 'constant'
 BREVITY_PENALTY_LEARNED = 'learned'
 BREVITY_PENALTY_NONE = 'none'
 
-ParameterDict = Dict[str, 'gluon.Parameter']
+ParameterDict = Dict[str, 'gluon.Parameter']  # type: ignore

@@ -807,7 +807,7 @@ class Translator:
 
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
             with pt.inference_mode():
-                batch_translations = self._translate_np(*self._get_inference_input(translator_inputs))
+                batch_translations = self._translate_np(*self._get_inference_input(translator_inputs))  # type: ignore
 
             # truncate to remove filler translations
             if fill_up_batches and rest > 0:
@@ -918,10 +918,10 @@ class Translator:
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        source = pt.tensor(source, device=self.device, dtype=pt.int32)
+        source = pt.tensor(source, device=self.device, dtype=pt.int32)  # type: ignore
         source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
-        max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)
-        return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths
+        max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)  # type: ignore
+        return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths  # type: ignore
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -1068,7 +1068,7 @@ class Translator:
                 best_ids += onp.argmin(filtered, axis=1).astype('int32', copy=False)
 
             # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
-            indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)
+            indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)  # type: ignore
             indices_shape_1 = indices.shape[1]  # pylint: disable=unsubscriptable-object
             nbest_translations.append(
                     [self._assemble_translation(*x, unshift_target_factors=C.TARGET_FACTOR_SHIFT) for x in
@@ -1078,7 +1078,7 @@ class Translator:
                          lengths[best_ids],
                          seq_scores[best_ids],
                          histories,
-                         reference_lengths[best_ids])])
+                         reference_lengths[best_ids])])  # type: ignore
 
         # reorder and regroup lists
         reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]  # type: ignore

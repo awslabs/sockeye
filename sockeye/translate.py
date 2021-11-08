@@ -264,7 +264,7 @@ def translate(output_handler: OutputHandler,
     total_time = time.time() - tic
     batch_time = total_time / len(trans_inputs)
     for trans_input, trans_output in zip(trans_inputs, trans_outputs):
-        output_handler.handle(trans_input, trans_output, batch_time)
+        output_handler.handle(trans_input, trans_output, batch_time)  # type: ignore
     return total_time
 
 

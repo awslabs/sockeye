@@ -119,9 +119,11 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     assert len(data['test_outputs']) == len(translate_outputs_equiv)
     if compare_output:
         for json_output, json_output_equiv in zip(data['test_outputs'], translate_outputs_equiv):
-            assert json_output['translation'] == json_output_equiv['translation']
+            assert json_output['translation'] == json_output_equiv['translation'], \
+                f"'{json_output['translation']}' vs. '{json_output_equiv['translation']}'"
             assert abs(json_output['score'] - json_output_equiv['score']) < 0.01 or \
-                   np.isnan(json_output['score'] - json_output_equiv['score'])
+                   np.isnan(json_output['score'] - json_output_equiv['score']), \
+                f"'{json_output['score']}' vs. '{ json_output_equiv['score']}'"
 
 
 # TODO Currently not used

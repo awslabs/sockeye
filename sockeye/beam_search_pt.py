@@ -16,7 +16,7 @@ import logging
 
 import operator
 from abc import abstractmethod, ABC
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Union
 
 import torch as pt
 import numpy as onp
@@ -117,7 +117,7 @@ class _EnsembleInference(_Inference):
             predicted_output_lengths.append(predicted_output_length)
             model_states += states
         # average predicted output lengths, (batch, 1)
-        predicted_output_lengths = pt.stack(predicted_output_lengths, dim=1).float().mean(dim=1)
+        predicted_output_lengths = pt.stack(predicted_output_lengths, dim=1).float().mean(dim=1)  # type: ignore
         return model_states, predicted_output_lengths
 
     def decode_step(self,
@@ -481,22 +481,25 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
                                raw_constraint_list]
     # Pad to a multiple of 8.
-    vocab_slice_ids = pt.nn.functional.pad(pt.tensor(vocab_slice_ids, device=source_words.device, dtype=pt.int64),
+    vocab_slice_ids = pt.nn.functional.pad(pt.tensor(vocab_slice_ids, device=source_words.device, dtype=pt.int64),  # type: ignore
                                            pad=(0, 7 - ((vocab_slice_ids.size - 1) % 8)),
                                            mode='constant', value=eos_id)
 
-    vocab_slice_ids_shape = vocab_slice_ids.size()[0]
+    vocab_slice_ids_shape = vocab_slice_ids.size()[0]  # type: ignore
     if vocab_slice_ids_shape < beam_size + 1:
         # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
         # smaller than the beam size.
         logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
                        vocab_slice_ids_shape, beam_size)
         n = beam_size - vocab_slice_ids_shape + 1
-        vocab_slice_ids = pt.cat((vocab_slice_ids, pt.full((n,), fill_value=eos_id, device=device, dtype=pt.int32)),
+        vocab_slice_ids = pt.cat((vocab_slice_ids, pt.full((n,),  # type: ignore
+                                                           fill_value=eos_id,
+                                                           device=device,
+                                                           dtype=pt.int32)),
                                  dim=0)
 
     logger.debug(f'decoder softmax size: {vocab_slice_ids_shape}')
-    return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list
+    return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list  # type: ignore
 
 
 class GreedySearch(pt.nn.Module):
@@ -506,7 +509,7 @@ class GreedySearch(pt.nn.Module):
     """
 
     def __init__(self,
-                 dtype: str,
+                 dtype: pt.dtype,
                  bos_id: int,
                  eos_id: int,
                  device: pt.device,
@@ -555,7 +558,7 @@ class GreedySearch(pt.nn.Module):
         assert batch_size == 1, "Greedy Search does not support batch_size != 1"
 
         # Maximum  search iterations (determined by longest input with eos)
-        max_iterations = max_output_lengths.max().item()
+        max_iterations = int(max_output_lengths.max().item())
         logger.debug("max greedy search iterations: %d", max_iterations)
 
         # best word_indices (also act as input: (batch*beam, num_target_factors
@@ -577,7 +580,7 @@ class GreedySearch(pt.nn.Module):
         # TODO: check for disabled predicted output length
 
         t = 1
-        for t in range(1, max_iterations + 1):
+        for t in range(start=1, stop=max_iterations + 1):
             scores, model_states, target_factors = self._inference.decode_step(best_word_index,
                                                                                model_states,
                                                                                vocab_slice_ids=vocab_slice_ids)
@@ -663,15 +666,15 @@ class BeamSearch(pt.nn.Module):
         self.prevent_unk = prevent_unk
 
         self._repeat_states = RepeatStates(beam_size=beam_size, state_structure=self._inference.state_structure())
-        self._traced_repeat_states = None
+        self._traced_repeat_states = None  # type: Optional[pt.jit.ScriptModule]
         self._sort_states = SortStates(state_structure=self._inference.state_structure())
-        self._traced_sort_states = None
+        self._traced_sort_states = None  # type: Optional[pt.jit.ScriptModule]
         self._update_scores = UpdateScores(prevent_unk)  # tracing this module seems to incur a small slowdown on GPUs
         self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
             pad_id=C.PAD_ID,
             eos_id=eos_id,
             scorer=scorer)
-        self._traced_sort_norm_and_update_finished = None
+        self._traced_sort_norm_and_update_finished = None  # type: Optional[pt.jit.ScriptModule]
 
         self._sample = None  # type: Optional[pt.nn.Module]
         self._top = None  # type: Optional[pt.nn.Module]
@@ -679,7 +682,7 @@ class BeamSearch(pt.nn.Module):
             self._sample = SampleK(sample)
         else:
             self._top = TopK(self.beam_size)
-        self._traced_top = None
+        self._traced_top = None  # type: Optional[pt.jit.ScriptModule]
 
     def forward(self,
                 source: pt.Tensor,
@@ -710,7 +713,7 @@ class BeamSearch(pt.nn.Module):
         logger.debug("beam_search batch size: %d", batch_size)
 
         # Maximum beam search iterations (determined by longest input with eos)
-        max_iterations = max_output_lengths.max().item()
+        max_iterations = int(max_output_lengths.max().item())
         logger.debug("max beam search iterations: %d", max_iterations)
 
         if self._sample is not None:
@@ -770,7 +773,8 @@ class BeamSearch(pt.nn.Module):
             avoid_states = constrained.AvoidBatch(batch_size, self.beam_size,
                                                   avoid_list=raw_avoid_list,
                                                   global_avoid_trie=self.global_avoid_trie)
-            avoid_states.consume(best_word_indices[:, 0])  # constraints operate only on primary target factor
+            # constraints operate only on primary target factor
+            avoid_states.consume(best_word_indices[:, 0])  # type: ignore
 
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
@@ -824,16 +828,19 @@ class BeamSearch(pt.nn.Module):
 
             # Constraints for constrained decoding are processed sentence by sentence
             if any(raw_constraint_list):
-                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = constrained.topk(
+                # TODO(fhieber): constrained decoding not yet working
+                # type: ignore
+                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = \
+                    constrained.topk(  # type: ignore
                     t,
                     batch_size,
                     self.beam_size,
-                    inactive,
-                    scores,
-                    constraints,
-                    best_hyp_indices,
-                    best_word_indices,
-                    scores_accumulated)
+                    inactive,  # type: ignore
+                    scores,  # type: ignore
+                    constraints,  # type: ignore
+                    best_hyp_indices,  # type: ignore
+                    best_word_indices,  # type: ignore
+                    scores_accumulated)  # type: ignore
 
             # Map from restricted to full vocab ids if needed
             if restrict_lexicon:
@@ -906,12 +913,13 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
                          sample: Optional[int] = None,
                          softmax_temperature: Optional[float] = None,
                          prevent_unk: bool = False,
-                         greedy: bool = False) -> GreedySearch:
+                         greedy: bool = False) -> Union[BeamSearch, GreedySearch]:
     """
     Returns an instance of BeamSearch or GreedySearch depending.
 
     """
     # TODO: consider automatically selecting GreedySearch if flags to this method are compatible.
+    search = None  # type: Optional[Union[BeamSearch, GreedySearch]]
     if greedy:
         assert len(models) == 1, "Greedy search does not support ensemble decoding"
         assert beam_size == 1, "Greedy search does not support beam_size > 1"
@@ -922,7 +930,7 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
         assert sample is None, "Greedy search does not support sampling"
         assert not prevent_unk, "Greedy Search does not support prevention of unknown tokens"  # TODO: add support
         search = GreedySearch(
-            dtype=C.DTYPE_FP32 if models[0].dtype == C.DTYPE_INT8 else models[0].dtype,
+            dtype=models[0].dtype,
             bos_id=C.BOS_ID,
             eos_id=C.EOS_ID,
             device=device,

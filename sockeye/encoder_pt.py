@@ -153,7 +153,7 @@ class PyTorchEmbedding(PyTorchEncoder):
         """
         return self.config.num_embed
 
-    def weights_from_mxnet_block(self, block_mx: 'Embedding'):
+    def weights_from_mxnet_block(self, block_mx: 'Embedding'):  # type: ignore
         self.embedding.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
         if self.config.factor_configs is not None:
             for embedding, mx_weight, fc in zip(self.factor_embeds, block_mx.factor_weights, self.config.factor_configs):
@@ -214,7 +214,7 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
         """
         return self.config.model_size
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerEncoder'):
+    def weights_from_mxnet_block(self, block_mx: 'TransformerEncoder'):  # type: ignore
         self.pos_embedding.weights_from_mxnet_block(block_mx.pos_embedding)
         for i, l in enumerate(self.layers):
             l.weights_from_mxnet_block(block_mx.layers[i])

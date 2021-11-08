@@ -53,7 +53,7 @@ class PyTorchLHUC(pt.nn.Module):
         weight = 2 * pt.sigmoid(self.weight)
         return weight * data
 
-    def weights_from_mxnet_block(self, block_mx: 'LHUC'):
+    def weights_from_mxnet_block(self, block_mx: 'LHUC'):  # type: ignore
         self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
 
 
@@ -73,7 +73,7 @@ class PyTorchWeightNormalization(pt.nn.Module):
         self._axis_arg = tuple(range(1, ndim))
 
     def forward(self, weight: pt.Tensor) -> pt.Tensor:
-        return pt.nn.functional.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale
+        return pt.nn.functional.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale  # type: ignore
 
 
 class PyTorchOutputLayer(pt.nn.Module):
@@ -135,7 +135,7 @@ class PyTorchOutputLayer(pt.nn.Module):
 
         return pt.nn.functional.linear(data, weight, bias)
 
-    def weights_from_mxnet_block(self, block_mx: 'OutputLayer'):
+    def weights_from_mxnet_block(self, block_mx: 'OutputLayer'):  # type: ignore
         self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
         self.bias.data[:] = pt.as_tensor(block_mx.bias.data().asnumpy())
 
@@ -162,7 +162,7 @@ class PyTorchLengthRatio(pt.nn.Module):
         self.num_layers = num_layers
         self.hidden_size = hidden_size
 
-        modules = []
+        modules = []  # type: List[pt.nn.Module]
         for _ in range(num_layers - 1):
             modules.append(pt.nn.Linear(in_features=hidden_size, out_features=hidden_size))
             modules.append(pt.nn.Tanh())
@@ -187,7 +187,7 @@ class PyTorchLengthRatio(pt.nn.Module):
         data = self.layers(data).squeeze(1)  # (n, 1)
         return data
 
-    def weights_from_mxnet_block(self, block_mx: 'LengthRatio'):
+    def weights_from_mxnet_block(self, block_mx: 'LengthRatio'):  # type: ignore
         for l_pt, l_mx in zip(self.layers, block_mx.layers):
             if isinstance(l_pt, pt.nn.Linear):
                 l_pt.weight.data[:] = pt.as_tensor(l_mx.weight.data().asnumpy())
@@ -416,11 +416,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         # shape: (length, batch, key_depth + value_depth)
         return 0, batch_size, self.depth_out * 2
 
-    def forward(self,
-                inputs: pt.Tensor,
-                previous_states: Optional[pt.Tensor] = None,
-                mask: Optional[pt.Tensor] = None,
-                **args) -> Tuple[pt.Tensor, pt.Tensor]:  # mypy: ignore
+    def forward(self, inputs: pt.Tensor, previous_states: Optional[pt.Tensor] = None, mask: Optional[pt.Tensor] = None, **args) -> Tuple[pt.Tensor, pt.Tensor]:  # type: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -442,7 +438,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
 
         return self._attend(queries=queries, key_values=states, mask=mask), states
 
-    def weights_from_mxnet_block(self, block_mx: 'MultiHeadSelfAttention'):
+    def weights_from_mxnet_block(self, block_mx: 'MultiHeadSelfAttention'):  # type: ignore
         self.ff_in.weight.data[:] = pt.as_tensor(block_mx.ff_in.weight.data().asnumpy())
         self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
 
@@ -492,7 +488,7 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
         key_values = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(key_values)
         return self._attend(queries=queries, key_values=key_values, mask=mask)
 
-    def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):
+    def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):  # type: ignore
         self.ff_q.weight.data[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
         self.ff_kv.weight.data[:] = pt.as_tensor(block_mx.ff_kv.weight.data().asnumpy())
         self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
@@ -580,7 +576,7 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
 
         return data + pos_embedding
 
-    def weights_from_mxnet_block(self, block_mx: 'PositionalEmbeddings'):
+    def weights_from_mxnet_block(self, block_mx: 'PositionalEmbeddings'):  # type: ignore
         if self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
             self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
 
@@ -652,8 +648,8 @@ class PyTorchSSRU(AutoregressiveLayer):
             cell_state = forget_rates[t, :, :] * cell_state + weighted_inputs[t, :, :]
             states.append(cell_state)
 
-        states = pt.stack(states, dim=0)
-        return states, cell_state.unsqueeze(0)
+        states = pt.stack(states, dim=0)  # type: ignore
+        return states, cell_state.unsqueeze(0)  # type: ignore
 
     @staticmethod
     def _inference_cell_state_transform(previous_cell_state, weighted_inputs, forget_rates) -> Tuple[pt.Tensor,
@@ -662,7 +658,7 @@ class PyTorchSSRU(AutoregressiveLayer):
         new_step_state = forget_rates * previous_cell_state + weighted_inputs  # (1, batch, input_depth)
         return new_step_state, new_step_state
 
-    def forward(self, inputs: pt.Tensor, previous_states: pt.Tensor, **args) -> Tuple[pt.Tensor, pt.Tensor]:
+    def forward(self, inputs: pt.Tensor, previous_states: pt.Tensor, **args) -> Tuple[pt.Tensor, pt.Tensor]:  # type: ignore
         """
         :param inputs: input data. Shape: (max_length, batch, input_depth).
         :param previous_states: previous cell states. Shape: (max_length, batch, input_depth)
@@ -675,7 +671,7 @@ class PyTorchSSRU(AutoregressiveLayer):
 
         return self.relu(cell_state), last_step_state
 
-    def weights_from_mxnet_block(self, block_mx: 'SSRU'):
+    def weights_from_mxnet_block(self, block_mx: 'SSRU'):  # type: ignore
         self.forget_gate.weight.data[:] = pt.as_tensor(block_mx.forget_gate.weight.data().asnumpy())
         self.forget_gate.bias.data[:] = pt.as_tensor(block_mx.forget_gate.bias.data().asnumpy())
         self.linear.weight.data[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())

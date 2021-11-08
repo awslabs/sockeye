@@ -142,8 +142,8 @@ class Scorer:
                     score = -np.inf
 
                 # Output handling routines require us to make use of inference classes.
-                output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),
-                                      inference.TranslatorOutput(sentence_no, target_string,
+                output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),  # type: ignore
+                                      inference.TranslatorOutput(sentence_no, target_string,  # type: ignore
                                                                  target_tokens, score),
                                       batch_time)
 

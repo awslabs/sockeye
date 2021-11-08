@@ -108,7 +108,7 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seed_rngs(seed: int, ctx: Optional[Union['mx.Context', List['mx.Context']]] = None) -> None:
+def seed_rngs(seed: int, ctx: Optional[Union['mx.Context', List['mx.Context']]] = None) -> None:  # type: ignore
     """
     Seed the random number generators (Python, Numpy and MXNet).
 
@@ -322,7 +322,7 @@ def get_num_gpus() -> int:
         return 0
 
 
-def get_gpu_memory_usage(ctx: Union['mx.context.Context', List['mx.context.Context']]) -> Dict[int, Tuple[int, int]]:
+def get_gpu_memory_usage(ctx: Union['mx.context.Context', List['mx.context.Context']]) -> Dict[int, Tuple[int, int]]:  # type: ignore
     """
     Returns used and total memory for GPUs identified by the given context list.
 
@@ -362,7 +362,7 @@ def determine_context(device_ids: List[int],
                       use_cpu: bool,
                       disable_device_locking: bool,
                       lock_dir: str,
-                      exit_stack: ExitStack) -> List['mx.Context']:
+                      exit_stack: ExitStack) -> List['mx.Context']:  # type: ignore
     """
     Determine the MXNet context to run on (CPU or GPU).
 
