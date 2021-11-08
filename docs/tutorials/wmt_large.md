@@ -72,7 +72,7 @@ torchrun --no_python --nproc_per_node 8 sockeye-train \
     --max-updates 15000 --optimizer-betas 0.9:0.98 --dist \
     --initial-learning-rate 0.06325 \
     --learning-rate-scheduler-type inv-sqrt-decay --learning-rate-warmup 4000 \
-    --seed 1 --device-ids -1 --quiet-secondary-workers
+    --seed 1 --quiet-secondary-workers
 ```
 
 Alternate command for 4 GPUs:
@@ -87,7 +87,7 @@ torchrun --no_python --nproc_per_node 4 sockeye-train \
     --max-updates 15000 --optimizer-betas 0.9:0.98 --dist \
     --initial-learning-rate 0.06325 \
     --learning-rate-scheduler-type inv-sqrt-decay --learning-rate-warmup 4000 \
-    --seed 1 --device-ids -1 --quiet-secondary-workers
+    --seed 1 --quiet-secondary-workers
 ```
 
 Alternate command for 1 GPU:
@@ -102,7 +102,7 @@ sockeye-train \
     --max-updates 15000 --optimizer-betas 0.9:0.98 \
     --initial-learning-rate 0.06325 \
     --learning-rate-scheduler-type inv-sqrt-decay --learning-rate-warmup 4000 \
-    --seed 1 --device-ids -1
+    --seed 1
 ```
 
 Training on larger data typically requires more updates for the model to reach a perplexity plateau.
@@ -119,8 +119,7 @@ sockeye-translate \
     --model model \
     --dtype float16 \
     --beam-size 5 \
-    --batch-size 64 \
-    --device-ids -1
+    --batch-size 64
 ```
 
 We then reverse BPE and score the translations against the reference using [sacreBLEU](https://github.com/mjpost/sacreBLEU):
