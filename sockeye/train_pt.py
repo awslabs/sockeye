@@ -703,10 +703,6 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         label_name = C.TARGET_LABEL_NAME if i == 0 else C.TARGET_FACTOR_LABEL_NAME % i
         label_smoothing = args.label_smoothing if i == 0 else .0  # Note: No label smoothing for target factor losses.
 
-        if args.loss == C.CROSS_ENTROPY:
-            logger.warning("cross-entropy with SoftmaxOutput is deprecated with MXNet 2.0. "
-                           "Using 'cross-entropy-without-softmax-output'")
-
         if args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT or args.loss == C.CROSS_ENTROPY:
             losses.append(loss_pt.PyTorchCrossEntropyLoss(name=name,
                                                           weight=weight,
