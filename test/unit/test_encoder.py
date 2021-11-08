@@ -100,8 +100,8 @@ def test_mx_pt_eq_transformer_encoder():
     r1_pt, r2_pt = r1_pt.detach().numpy(), r2_pt.detach().numpy()
 
     print("Max deviation:", onp.abs(r1_mx - r1_pt).max())
-    assert np.allclose(r1_mx, r1_pt, atol=1e-05)
-    assert np.allclose(r2_mx, r2_pt, atol=1e-05)
+    assert np.allclose(r1_mx, r1_pt, atol=1e-04)
+    assert np.allclose(r2_mx, r2_pt, atol=1e-04)
 
 
 @pytest.mark.parametrize('vocab_size, num_embed, factor_configs, sparse',

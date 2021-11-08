@@ -316,7 +316,7 @@ def get_num_gpus() -> int:
         return 0
     try:
         return mx.context.num_gpus()
-    except mx.MXNetError:
+    except:
         # Some builds of MXNet will raise a CUDA error when CUDA is not
         # installed on the host.  In this case, zero GPUs are available.
         return 0
@@ -333,7 +333,7 @@ def get_gpu_memory_usage(ctx: Union['mx.context.Context', List['mx.context.Conte
         import mxnet as mx
     except ImportError:
         return {}
-    if isinstance(ctx, mx.context.Context):
+    if not isinstance(ctx, List):
         ctx = [ctx]
     ctx = [c for c in ctx if c.device_type == 'gpu']
     if not ctx:

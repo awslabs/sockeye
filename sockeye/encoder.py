@@ -171,7 +171,7 @@ class Embedding(Encoder):
                               input_dim=self.config.vocab_size,
                               output_dim=self.config.num_embed,
                               dtype=self._dtype,
-                              sparse_grad=self._use_sparse_grad)
+                              sparse_grad=False)
 
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
             if average_factors_embeds:

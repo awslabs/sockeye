@@ -916,7 +916,7 @@ class Translator:
                     logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
                                    "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
 
-        source = source.as_in_ctx(self.context)
+        source = np.array(source, ctx=self.context)
         source_length = np.array(lengths, ctx=self.context, dtype=self.dtype)  # shape: (batch_size,)
         max_output_lengths = np.array(max_output_lengths, ctx=self.context, dtype='int32')
         return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths

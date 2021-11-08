@@ -229,18 +229,18 @@ def test_mx_pt_eq_output_layer():
     out_pt = b_pt(data_pt, None)
     assert out_pt.shape == (2, 10, vocab_size)
 
-    assert np.allclose(out_mx.asnumpy(), out_pt.detach().numpy())
+    assert np.allclose(out_mx.asnumpy(), out_pt.detach().numpy(), atol=1e-06)
 
     reduced_out_mx = out_mx.take(vocab_slice_ids_mx, axis=-1).asnumpy()
     reduced_out_pt = pt.index_select(out_pt, 2, vocab_slice_ids_pt).detach().numpy()
-    assert np.allclose(reduced_out_mx, reduced_out_pt)
+    assert np.allclose(reduced_out_mx, reduced_out_pt, atol=1e-06)
 
     out_restricted_mx = b_mx(data_mx, vocab_slice_ids_mx).asnumpy()
     out_restricted_pt = b_pt(data_pt, vocab_slice_ids_pt).detach().numpy()
     assert out_restricted_mx.shape == (2, 10, len(vocab_slice_ids_mx))
     assert out_restricted_pt.shape == (2, 10, len(vocab_slice_ids_pt))
 
-    assert onp.allclose(out_restricted_mx, out_restricted_pt)
+    assert onp.allclose(out_restricted_mx, out_restricted_pt, atol=1e-06)
 
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size',
@@ -377,7 +377,7 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
     states_pt = states_pt.detach().numpy()
 
     assert np.allclose(r_mx, r_pt, atol=1e-06)
-    assert np.allclose(states_mx, states_pt)
+    assert np.allclose(states_mx, states_pt, atol=1e-06)
 
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
