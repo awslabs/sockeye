@@ -12,8 +12,8 @@ For a quickstart guide to training a standard NMT model on any size of data, see
 For questions and issue reports, please [file an issue](https://github.com/awslabs/sockeye/issues/new) on GitHub.
 
 ### Version 3.0.0 & Backwards Compatibility
-From version 3.0.0 on Sockeye is now based on PyTorch. We maintain backwards compatibility with
-MXNet models in version 2.3.x a little bit longer if MXNet is installed.
+With version 3.0.0, Sockeye is based on PyTorch. We maintain backwards compatibility with
+MXNet models in version 2.3.x a little bit longer. If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet.
 
 All models trained with 2.3.x (using MXNet)
 can be converted to models running with PyTorch using the converter CLI (`sockeye.mx_to_pt`). This will
@@ -27,7 +27,8 @@ All CLIs of Version 3.0.0 now use PyTorch by default, e.g. `sockeye-{train,trans
 MXNet-based CLIs/modules are still operational and accessible via `sockeye-{train,translate,score}-mx`.
 
 Sockeye 3 can be installed and run without MXNet, but if installed, an extended test suite is executed to ensure
-equivalence between PyTorch and MXNet models.
+equivalence between PyTorch and MXNet models. Note that running Sockeye 3.0.0 with MXNet requires MXNet 2.x to be
+installed (`pip install --pre -f https://dist.mxnet.io/python 'mxnet>=2.0.0b2021'`)
 
 ## Installation
 
