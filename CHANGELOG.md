@@ -17,11 +17,20 @@ Each version section may have have subsections for: _Added_, _Changed_, _Removed
 
 - Updated to MXnet 2.0 with Gluon 2.0 and full numpy support.
 
+## [2.3.24]
+### Added
+
+- Use of the safe yaml loader for the model configuration files.
+
+## [2.3.23]
+### Changed
+
+- Do not sort BIAS_STATE in beam search. It is constant across decoder steps.
+
 ## [2.3.22]
 ### Fixed
 
 - The previous commit introduced a regression for vocab creation. The results was that the vocabulary was created on the input characters rather than on tokens.
-
 
 ## [2.3.21]
 ### Added
