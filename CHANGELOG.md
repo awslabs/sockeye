@@ -9,7 +9,7 @@ Any bump in the second digit indicates a backwards-incompatible change,
 e.g. due to changing the architecture or simply modifying model parameter names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 
-Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 
 ## [3.0.0]
