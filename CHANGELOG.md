@@ -11,17 +11,17 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.0] Sockeye 3: Fast Neural Machine Translation with PyTorch
 
-## [3.0.0] Sockeye 3: Fast Neural Machine Translation in PyTorch
-
-Sockeye is now based on PyTorch. We maintain backwards compatibility with
-MXNet models in version 2.3.x until 3.1.0.
+Sockeye is now based on PyTorch.
+We maintain backwards compatibility with MXNet models in version 2.3.x until 3.1.0.
 If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet is no longer strictly required.
 
 ### Added
 
-- Added `--apex-amp` training argument that runs entire model in FP16 mode, replaces `--dtype float16`.
 - Added model converter CLI `sockeye.mx_to_pt` that converts MXNet models to PyTorch models.
+- Added `--apex-amp` training argument that runs entire model in FP16 mode, replaces `--dtype float16` (requires [Apex](https://github.com/NVIDIA/apex)).
+- Training automatically uses Apex fused optimizers if available (requires [Apex](https://github.com/NVIDIA/apex)).
 
 ### Changed
 
@@ -35,8 +35,6 @@ If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet 
 - Removed `--horovod` argument used with `horovodrun` (use `--dist` with `torchrun`).
 - Removed `--optimizer-params` argument (use `--optimizer-betas`, `--optimizer-eps`).
 - Removed `--no-hybridization` argument (use `PYTORCH_JIT=0`, see [Disable JIT for Debugging](https://pytorch.org/docs/stable/jit.html#disable-jit-for-debugging)).
-- TODO
-- ...
 
 ### Removed
 
