@@ -12,17 +12,24 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
 
-## [3.0.0]
+## [3.0.0] Sockeye 3: Fast Neural Machine Translation in PyTorch
 
-### Sockeye 3: Fast Neural Machine Translation in PyTorch
+Sockeye is now based on PyTorch. We maintain backwards compatibility with
+MXNet models in version 2.3.x until 3.1.0.
+If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet is no longer strictly required.
 
 ### Added
 
 - Added `--apex-amp` training argument that runs entire model in FP16 mode, replaces `--dtype float16`.
+- Added model converter CLI `sockeye.mx_to_pt` that converts MXNet models to PyTorch models.
 
 ### Changed
 
-- `sockeye.train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --nproc_per_node N -m sockeye.train --dist ...`
+- CLI names point to the PyTorch code base (e.g. `sockeye-train` etc.).
+- MXNet-based CLIs are now accessible via `sockeye-<name>-mx`. 
+- MXNet code requires MXNet >= 2.0 since we adopted the new numpy interface.
+- `sockeye-train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --nproc_per_node N -m sockeye.train --dist ...`
+- Updated `wmt_large.md` tutorial to illustrate how to run multi-device training with PyTorch Sockeye.
 - Changed `--device-ids` argument (plural) to `--device-id` (singular). For multi-GPU training, see distributed mode noted above.
 - Updated default value: `--pad-vocab-to-multiple-of 8`
 - Removed `--horovod` argument used with `horovodrun` (use `--dist` with `torchrun`).
@@ -34,10 +41,12 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 ### Removed
 
 - Removed support for constrained decoding (both positive and negative lexical constraints)
+- Removed support for beam histories
 - Removed `--amp-scale-interval` argument.
 - Removed `--kvstore` argument.
 - Removed arguments: `--weight-init`, `--weight-init-scale` `--weight-init-xavier-factor-type`, `--weight-init-xavier-rand-type`
 - Removed `--decode-and-evaluate-device-id` argument.
+- Removed CUDA-specific requirements files in `requirements/`
 
 ## [2.3.24]
 ### Added
