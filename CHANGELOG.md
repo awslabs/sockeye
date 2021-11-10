@@ -22,6 +22,7 @@ If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet 
 - Added model converter CLI `sockeye.mx_to_pt` that converts MXNet models to PyTorch models.
 - Added `--apex-amp` training argument that runs entire model in FP16 mode, replaces `--dtype float16` (requires [Apex](https://github.com/NVIDIA/apex)).
 - Training automatically uses Apex fused optimizers if available (requires [Apex](https://github.com/NVIDIA/apex)).
+- Added training argument `--label-smoothing-impl` to choose label smoothing implementation (default of `mxnet` uses the same logic as MXNet Sockeye 2).
 
 ### Changed
 
@@ -35,6 +36,7 @@ If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet 
 - Removed `--horovod` argument used with `horovodrun` (use `--dist` with `torchrun`).
 - Removed `--optimizer-params` argument (use `--optimizer-betas`, `--optimizer-eps`).
 - Removed `--no-hybridization` argument (use `PYTORCH_JIT=0`, see [Disable JIT for Debugging](https://pytorch.org/docs/stable/jit.html#disable-jit-for-debugging)).
+- Removed `--omp-num-threads` argument (use `--env=OMP_NUM_THREADS=N`).
 
 ### Removed
 
@@ -44,6 +46,7 @@ If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet 
 - Removed `--kvstore` argument.
 - Removed arguments: `--weight-init`, `--weight-init-scale` `--weight-init-xavier-factor-type`, `--weight-init-xavier-rand-type`
 - Removed `--decode-and-evaluate-device-id` argument.
+- Removed arguments: `--monitor-pattern'`, `--monitor-stat-func`
 - Removed CUDA-specific requirements files in `requirements/`
 
 ## [2.3.24]
