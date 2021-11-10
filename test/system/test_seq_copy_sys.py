@@ -82,7 +82,7 @@ COPY_CASES = [
      " --max-updates 4000"
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
-     " --length-task length --length-task-weight 1.5 --length-task-layers 3"
+     " --length-task length --length-task-weight 1.5 --length-task-layers 1"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 5 --batch-size 2 --brevity-penalty-type learned"
      " --brevity-penalty-weight 0.9 --max-input-length %s" % _TEST_MAX_LENGTH,
