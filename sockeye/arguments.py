@@ -549,7 +549,12 @@ def add_prepare_data_cli_args(params):
 def add_device_args(params):
     device_params = params.add_argument_group("Device parameters")
 
-    # TODO(migration): Change to --device-id after removing MXNet code
+    device_params.add_argument('--device-id',
+                               type=int_greater_or_equal(0),
+                               default=0,
+                               help='GPU to use. 0 translates to "cuda:0", etc. When running in distributed mode '
+                                    '(--dist), each process\'s device is set automatically. Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     device_params.add_argument('--device-ids', default=[-1],
                                help='List or number of GPUs ids to use. Default: %(default)s. '
                                     'Use negative numbers to automatically acquire a certain number of GPUs, e.g. -5 '

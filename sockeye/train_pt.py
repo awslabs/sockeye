@@ -906,10 +906,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-    # TODO(mdenkows): Update to device_id after removing MXNet code
     device = torch.device('cpu') if args.use_cpu \
              else torch.device('cuda', utils.get_local_rank()) if utils.is_distributed() \
-             else torch.device('cuda', max(0, args.device_ids[0]))
+             else torch.device('cuda', args.device_id)
     if not args.use_cpu:
         # Ensure that GPU operations use the correct device by default
         torch.cuda.set_device(device)

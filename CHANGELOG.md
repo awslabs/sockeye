@@ -26,10 +26,10 @@ If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet 
 ### Changed
 
 - CLI names point to the PyTorch code base (e.g. `sockeye-train` etc.).
-- MXNet-based CLIs are now accessible via `sockeye-<name>-mx`. 
+- MXNet-based CLIs are now accessible via `sockeye-<name>-mx`.
 - MXNet code requires MXNet >= 2.0 since we adopted the new numpy interface.
-- `sockeye-train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --nproc_per_node N -m sockeye.train --dist ...`
-- Updated `wmt_large.md` tutorial to illustrate how to run multi-device training with PyTorch Sockeye.
+- `sockeye-train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --no_python --nproc_per_node N sockeye-train --dist ...`
+- Updated the [quickstart tutorial](docs/tutorials/wmt_large.md) to cover multi-device training with PyTorch Sockeye.
 - Changed `--device-ids` argument (plural) to `--device-id` (singular). For multi-GPU training, see distributed mode noted above.
 - Updated default value: `--pad-vocab-to-multiple-of 8`
 - Removed `--horovod` argument used with `horovodrun` (use `--dist` with `torchrun`).

@@ -68,9 +68,7 @@ def run_translate(args: argparse.Namespace):
     hybridize = not args.no_hybridization
 
     with ExitStack() as exit_stack:
-        check_condition(len(args.device_ids) == 1, "translate only supports single device for now")
-        # TODO: placeholder
-        device = pt.device('cpu' if args.use_cpu else f'cuda:0')
+        device = pt.device('cpu') if args.use_cpu else pt.device('cuda', args.device_id)
         logger.info(f"Translate Device: {device}")
         models, source_vocabs, target_vocabs = load_models(device=device,
                                                            model_folders=args.models,
