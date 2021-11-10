@@ -110,14 +110,6 @@ def test_strids2ids(tokens, expected_ids):
     assert ids == expected_ids
 
 
-@pytest.mark.parametrize("ids, expected_string", [([1, 2, 3, 0], "1 2 3 0"), ([], "")])
-def test_ids2strids(ids, expected_string):
-    pytest.importorskip('mxnet')
-    from sockeye import data_io
-    string = data_io.ids2strids(ids)
-    assert string == expected_string
-
-
 sequence_reader_tests = [(["1 2 3", "2", "", "2 2 2"], False, False, False),
                          (["a b c", "c"], True, False, False),
                          (["a b c", ""], True, False, False),

@@ -117,22 +117,10 @@ GELU = "gelu"
 TRANSFORMER_ACTIVATION_TYPES = [RELU, SWISH1, GELU]
 
 # default I/O variable names
-SOURCE_NAME = "source"
-SOURCE_LENGTH_NAME = "source_length"
-TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
 TARGET_FACTOR_LABEL_NAME = "target_factor%d_label"
 LENRATIO_LABEL_NAME = "length_ratio_label"
-LENRATIO_LABEL_OUTPUT_NAME = "length_ratio_label" + "_output"
 LENRATIO_NAME = "length_ratio"
-LENRATIO_LOSS_NAME = LENRATIO_NAME + "_loss"
-LENRATIO_OUTPUT_NAME = LENRATIO_NAME + "_output"
-LEXICON_NAME = "lexicon"
-
-SOURCE_ENCODED_NAME = "encoded_source"
-TARGET_PREVIOUS_NAME = "prev_target_word_id"
-HIDDEN_PREVIOUS_NAME = "prev_hidden"
-SOURCE_DYNAMIC_PREVIOUS_NAME = "prev_dynamic_source"
 
 LOGITS_NAME = "logits"
 FACTOR_LOGITS_NAME = "factor%d_logits"
@@ -178,7 +166,6 @@ PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
 DECODE_OUT_NAME = "decode.output.{{factor}}.{checkpoint:05d}"
 DECODE_IN_NAME = "decode.source.{factor}"
 DECODE_REF_NAME = "decode.target.{factor}"
-SYMBOL_NAME = "symbol" + JSON_SUFFIX
 METRICS_NAME = "metrics"
 TENSORBOARD_NAME = "tensorboard"
 
@@ -190,14 +177,12 @@ TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
 # MXNet
 OPT_STATES_LAST = "mx_optimizer_last.pkl"
 OPT_STATES_BEST = "mx_optimizer_best.pkl"
-OPT_STATES_INITIAL = "mx_optimizer_initial.pkl"
 # PyTorch
 OPT_STATE_LAST = "optimizer_last.pkl"
 OPT_STATE_BEST = "optimizer_best.pkl"
 
 LR_SCHEDULER_LAST = "lr_scheduler_last.pkl"
 LR_SCHEDULER_BEST = "lr_scheduler_best.pkl"
-LR_SCHEDULER_INITIAL = "lr_scheduler_initial.pkl"
 
 BUCKET_ITER_STATE_NAME = "bucket.pkl"
 RNG_STATE_NAME = "rng.pkl"
@@ -206,7 +191,6 @@ AMP_LOSS_SCALER_STATE_NAME = "amp_loss_scaler.pkl"
 # PyTorch
 GRAD_SCALER_STATE_NAME = "grad_scaler.pkl"
 APEX_AMP_STATE_NAME = "apex_amp_state.pkl"
-SCHEDULER_STATE_NAME = "scheduler.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.yaml"
 
@@ -231,7 +215,6 @@ INFERENCE_ARG_INPUT_FACTORS_LONG = "--input-factors"
 INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
 TRAIN_ARGS_CHECKPOINT_INTERVAL = "--checkpoint-interval"
-TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
 TRAIN_ARGS_STOP_ON_DECODER_FAILURE = "--stop-training-on-decoder-failure"
 
 # Used to delimit factors on STDIN for inference
@@ -295,13 +278,11 @@ OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
 
 # metrics
 ACCURACY = 'accuracy'
-ACCURACY_SHORT_NAME = 'acc'
 PERPLEXITY = 'perplexity'
 PERPLEXITY_SHORT_NAME = 'ppl'
 LENRATIO_MSE = 'length-ratio-mse'
 BLEU = 'bleu'
 CHRF = 'chrf'
-ROUGE = 'rouge'
 ROUGE1 = 'rouge1'
 ROUGE2 = 'rouge2'
 ROUGEL = 'rougel'
@@ -317,7 +298,6 @@ EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
 # loss
 CROSS_ENTROPY = 'cross-entropy'
 CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT = 'cross-entropy-without-softmax-output'
-LENRATIO_REGRESSION = 'length-ratio-regression'
 
 LINK_NORMAL = 'normal'
 LINK_POISSON = 'poisson'
@@ -331,7 +311,6 @@ DTYPE_INT8 = 'int8'
 DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
 LARGE_POSITIVE_VALUE = 99999999.
-LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
 LARGE_VALUES = {
     # Something at the middle of 32768<x<65519. Will be rounded to a multiple of 32.
     # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
@@ -345,7 +324,6 @@ LARGE_VALUES = {
     np.float32: LARGE_POSITIVE_VALUE,
     pt.float32: LARGE_POSITIVE_VALUE
 }
-LARGEST_INT = sys.maxsize
 
 # TODO(migration) Remove constant only used by MXNet code
 FIXED_GRAD_SCALE_FP16 = 1024.0

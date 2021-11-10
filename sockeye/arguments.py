@@ -103,15 +103,6 @@ def load_args(fname: str) -> argparse.Namespace:
         return argparse.Namespace(**yaml.safe_load(inp))
 
 
-class Removed(argparse.Action):
-    """
-    When this argument is specified, raise an error with the argument's help
-    message.  This is used to notify users when arguments are removed.
-    """
-    def __call__(self, parser, namespace, values, option_string=None):
-        raise RuntimeError(self.help)
-
-
 def regular_file() -> Callable:
     """
     Returns a method that can be used in argument parsing to check the argument is a regular file or a symbolic link,
@@ -302,24 +293,6 @@ def add_average_args(params):
         choices=C.AVERAGE_CHOICES,
         default=C.AVERAGE_BEST,
         help="selection method. Default: %(default)s.")
-
-
-def add_extract_args(params):
-    extract_params = params.add_argument_group("Extracting")
-    extract_params.add_argument("input",
-                                metavar="INPUT",
-                                type=str,
-                                help="Either a model directory (using its %s) or a specific params.x file." % C.PARAMS_BEST_NAME)
-    extract_params.add_argument('--names', '-n',
-                                nargs='*',
-                                default=[],
-                                help='Names of parameters to be extracted.')
-    extract_params.add_argument('--list-all', '-l',
-                                action='store_true',
-                                help='List names of all available parameters.')
-    extract_params.add_argument('--output', '-o',
-                                type=str,
-                                help="File to write extracted parameters to (in .npz format).")
 
 
 def add_rerank_args(params):
@@ -1430,19 +1403,3 @@ def add_build_vocab_args(params):
     params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
     add_vocab_args(params)
     add_process_pool_args(params)
-
-
-def add_init_embedding_args(params):
-    params.add_argument('--weight-files', '-w', required=True, nargs='+',
-                        help='List of input weight files in .npy, .npz or Sockeye parameter format.')
-    params.add_argument('--vocabularies-in', '-i', required=True, nargs='+',
-                        help='List of input vocabularies as token-index dictionaries in .json format.')
-    params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
-                        help='List of output vocabularies as token-index dictionaries in .json format.')
-    params.add_argument('--names', '-n', nargs='+',
-                        help='List of Sockeye parameter names for (embedding) weights. Default: %(default)s.',
-                        default=[n + "weight" for n in [C.SOURCE_EMBEDDING_PREFIX, C.TARGET_EMBEDDING_PREFIX]])
-    params.add_argument('--file', '-f', required=True,
-                        help='File to write initialized parameters to.')
-    params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
-                        help='Open input vocabularies with specified encoding. Default: %(default)s.')

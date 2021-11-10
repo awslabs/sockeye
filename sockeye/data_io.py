@@ -100,28 +100,6 @@ def define_parallel_buckets(max_seq_len_source: int,
     return buckets
 
 
-def define_empty_source_parallel_buckets(max_seq_len_target: int,
-                                         bucket_width: int = 10) -> List[Tuple[int, int]]:
-    """
-    Returns (source, target) buckets up to (None, max_seq_len_target). The source
-    is empty since it is supposed to not contain data that can be bucketized.
-    The target is used as reference to create the buckets.
-
-    :param max_seq_len_target: Maximum target bucket size.
-    :param bucket_width: Width of buckets on longer side.
-    """
-    target_step_size = max(1, bucket_width)
-    target_buckets = define_buckets(max_seq_len_target, step=target_step_size)
-    # source buckets are always 0 since there is no text
-    source_buckets = [0 for b in target_buckets]
-    target_buckets = [max(2, b) for b in target_buckets]
-    parallel_buckets = list(zip(source_buckets, target_buckets))
-    # deduplicate for return
-    buckets = list(OrderedDict.fromkeys(parallel_buckets))
-    buckets.sort()
-    return buckets
-
-
 def get_bucket(seq_len: int, buckets: List[int]) -> Optional[int]:
     """
     Given sequence length and a list of buckets, return corresponding bucket.
@@ -1204,16 +1182,6 @@ def strids2ids(tokens: Iterable[str]) -> List[int]:
     return list(map(int, tokens))
 
 
-def ids2strids(ids: Iterable[int]) -> str:
-    """
-    Returns a string representation of a sequence of integers.
-
-    :param ids: Sequence of integers.
-    :return: String sequence
-    """
-    return C.TOKEN_SEPARATOR.join(map(str, ids))
-
-
 def ids2tokens(token_ids: Iterable[int],
                vocab_inv: Dict[int, str],
                exclude_set: Set[int]) -> Iterator[str]:
@@ -1358,33 +1326,6 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
         all(next(cast(Iterator, s), None) is None for s in source_iterators) and \
         all(next(cast(Iterator, t), None) is None for t in target_iterators),
         "Different number of lines in source(s) and target(s) iterables.")
-
-
-class FileListReader:
-    """
-    Reads sequence samples from path provided in a file.
-
-    :param fname: File name containing a list of relative paths.
-    :param path: Path to read data from, which is prefixed to the relative paths of fname.
-    """
-
-    def __init__(self,
-                 fname: str,
-                 path: str) -> None:
-        self.fname = fname
-        self.path = path
-        self.fd = smart_open(fname)
-        self.count = 0
-
-    def __next__(self):
-        fname = self.fd.readline().strip("\n")
-
-        if fname is None:
-            self.fd.close()
-            raise StopIteration
-
-        self.count += 1
-        return os.path.join(self.path, fname)
 
 
 def get_default_bucket_key(buckets: List[Tuple[int, int]]) -> Tuple[int, int]:

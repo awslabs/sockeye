@@ -22,7 +22,6 @@ from typing import Any, Dict, List
 from unittest.mock import patch
 
 import sockeye.constants as C
-import sockeye.lexicon
 
 logger = logging.getLogger(__name__)
 
