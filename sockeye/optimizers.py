@@ -61,7 +61,6 @@ class PyTorchOptimizerConfig(config.Config):
     gradient_clipping_type: str = C.GRADIENT_CLIPPING_TYPE_NONE
     gradient_clipping_threshold: Optional[float] = None
     update_interval: int = 1
-    rescale_grad: float = 1.
 
     lr_scheduler: Optional[LearningRateScheduler] = None
 

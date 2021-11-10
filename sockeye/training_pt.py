@@ -773,7 +773,6 @@ class TensorboardLogger:
         self.source_labels = vocab.get_ordered_tokens_from_vocab(source_vocab) if source_vocab is not None else None
         self.target_labels = vocab.get_ordered_tokens_from_vocab(target_vocab) if target_vocab is not None else None
         try:
-            import tensorboard
             from torch.utils.tensorboard import SummaryWriter
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
             self._writer = SummaryWriter(log_dir=self.logdir, flush_secs=60)
@@ -796,21 +795,6 @@ class TensorboardLogger:
             else:
                 self._writer.add_scalar(tag=name, scalar_value=value, global_step=checkpoint)
         self._writer.flush()
-
-    def log_source_embedding(self, embedding: torch.Tensor, checkpoint: int):
-        if self._writer is None or self.source_labels is None:
-            return
-        self._writer.add_embedding(mat=embedding, tag="source", label_img=self.source_labels, global_step=checkpoint)
-
-    def log_target_embedding(self, embedding: torch.Tensor, checkpoint: int):
-        if self._writer is None or self.target_labels is None:
-            return
-        self._writer.add_embedding(mat=embedding, tag="target", label_img=self.target_labels, global_step=checkpoint)
-
-    def log_output_embedding(self, embedding: torch.Tensor, checkpoint: int):
-        if self._writer is None or self.target_labels is None:
-            return
-        self._writer.add_embedding(mat=embedding, tag="output", label_img=self.target_labels, global_step=checkpoint)
 
 
 class Speedometer:
