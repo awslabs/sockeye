@@ -106,11 +106,9 @@ def test_pytorch_brevity_penalty_default():
     hyp_lengths = pt.tensor([[1], [2], [3]])
     ref_lengths = pt.tensor([[2], [3], [2]])
     brevity_penalty = sockeye.beam_search_pt.BrevityPenalty(0.0)
-    expected_bp = pt.tensor([[0.0], [0.0], [0.0]])
-    expected_bp_np = pt.tensor([0.0, 0.0, 0.0])
+    expected_bp = pt.tensor([[0.0], [0.0], [0.0]], dtype=pt.long)
 
     pt.testing.assert_allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
-    assert onp.allclose(brevity_penalty(hyp_lengths, ref_lengths).detach().numpy(), expected_bp_np)
 
 
 def test_brevity_penalty():

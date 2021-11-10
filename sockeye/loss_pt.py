@@ -208,11 +208,10 @@ class PyTorchCrossEntropyLoss(Loss):
         # Reshape due to: view size is not compatible with input tensor's size and stride
         # (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
         labels = labels.reshape(-1)
-        ce = pt.nn.functional.cross_entropy(logits, labels.long(),
-                                            weight=None,
-                                            ignore_index=self.ignore_label,
-                                            reduction=self._reduction,
-                                            label_smoothing=self._alpha)
+        _kwargs = {'weight': None, 'ignore_index': self.ignore_label, 'reduction': self._reduction}
+        if self._alpha > 0.0:
+            _kwargs['label_smoothing'] = self._alpha
+        ce = pt.nn.functional.cross_entropy(logits, labels.long(), **_kwargs)
         ce *= self.weight
         return ce
 
