@@ -755,7 +755,7 @@ def log_parameters_pt(model: pt.nn.Module):
             else:
                 total_learned += size if param not in visited else 0
                 learned_parameter_names.append(repr)
-            visited[param].append(name)
+            visited[param].append(param_name)
     shared_parameter_names = []  # type: List[str]
     total_shared = 0
     for param, names in visited.items():
@@ -769,7 +769,7 @@ def log_parameters_pt(model: pt.nn.Module):
                 total_shared, total_shared / total_parameters * 100,
                 total_fixed, total_fixed / total_parameters * 100)
     logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
-    logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names))
+    logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names, width=120))
     logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
 
 
