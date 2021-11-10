@@ -798,12 +798,12 @@ def get_prepared_data_iters(prepared_data_dir: str,
     info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
     check_condition(os.path.exists(info_file),
                     "Could not find data info %s. Are you sure %s is a directory created with "
-                    "python -m sockeye.prepare_data?" % (info_file, prepared_data_dir))
+                    "sockeye-prepare-data?" % (info_file, prepared_data_dir))
     data_info = cast(DataInfo, DataInfo.load(info_file))
     config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
     check_condition(os.path.exists(config_file),
                     "Could not find data config %s. Are you sure %s is a directory created with "
-                    "python -m sockeye.prepare_data?" % (config_file, prepared_data_dir))
+                    "sockeye-prepare-data?" % (config_file, prepared_data_dir))
     config_data = cast(DataConfig, DataConfig.load(config_file))
     shard_fnames = [os.path.join(prepared_data_dir,
                                  C.SHARD_NAME % shard_idx) for shard_idx in range(data_info.num_shards)]

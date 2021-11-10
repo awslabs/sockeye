@@ -96,9 +96,9 @@ class CheckpointDecoder:
             inputs_sentences = [f.readlines() for f in inputs_fins]
             targets_sentences = [f.readlines() for f in references_fins]
 
-            utils.check_condition(all(len(l) == len(targets_sentences[0]) for l in chain(inputs_sentences,
-                                                                                         targets_sentences)),
-                                  "Sentences differ in length")
+            utils.check_condition(all(len(l) == len(targets_sentences[0])
+                                      for l in chain(inputs_sentences, targets_sentences)),
+                                  "Sentences differ in length.")
             utils.check_condition(all(len(sentence.strip()) > 0 for sentence in targets_sentences[0]),
                                   "Empty target validation sentence.")
 

@@ -844,7 +844,7 @@ class Translator:
         lengths = [len(inp) for inp in trans_inputs]
 
         max_length = max(len(inp) for inp in trans_inputs)
-        # assembling source ids on cpu array (faster) and copy to Translator.context (potentially GPU) in one go below.
+        # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
         source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]

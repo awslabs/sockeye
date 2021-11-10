@@ -210,8 +210,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         """
         if self.mc_dropout:
             raise NotImplementedError('mc dropout not implemented yet')
-            # Turn on training mode so mxnet knows to add dropout
-            # _ = mx.autograd.set_training(True)
+            # Turn on training mode so PyTorch knows to add dropout
+            # self.train()
 
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
@@ -268,8 +268,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         """
         if self.mc_dropout:
             raise NotImplementedError('mc dropout not implented yet')
-            # Turn on training mode so mxnet knows to add dropout
-            # _ = mx.autograd.set_training(True)
+            # Turn on training mode so PyTorch knows to add dropout
+            # self.train()
 
         target_embed = self.embedding_target(step_input.unsqueeze(1))
         if self.inference_only:
@@ -381,10 +381,6 @@ class PyTorchSockeyeModel(pt.nn.Module):
         ignore_extra : bool, default False
             Whether to silently ignore parameters from the file that are not
             present in this Block.
-        References
-        ----------
-        `Saving and Loading Gluon Models \
-        <https://mxnet.incubator.apache.org/tutorials/gluon/save_load_params.html>`_
         """
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                         "This is either not a model directory or the first training "
@@ -406,7 +402,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
                        allow_missing: bool = True,
                        ignore_extra: bool = False):
         """
-        Update model params on all contexts of the model with new values from a dictionary.
+        Update model params with new values from a dictionary.
 
         :param new_params: Dictionary containing the new parameters.
         :param allow_missing: Whether to skip setting parameters not represented in the dictionary.
@@ -414,7 +410,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         """
         model_params = dict(self.named_parameters())
         if not allow_missing:
-            for name, param in model_params.items():
+            for name, _ in model_params.items():
                 assert name in new_params.keys(), "Parameter '%s' is missing in new_params dictionary. " \
                                                   "Set allow_missing=True to ignore missing parameters." % name
         for name in new_params:

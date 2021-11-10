@@ -241,9 +241,7 @@ class BrevityPenalty(pt.nn.Module):
             if isinstance(hyp_lengths, (int, float)):
                 return 0.0
             else:
-                # subtract to avoid MxNet's warning of not using both arguments
-                # this branch should not and is not used during inference
-                return pt.zeros_like(hyp_lengths - reference_lengths)
+                return pt.zeros_like(hyp_lengths)
         else:
             # log_bp is always <= 0.0
             if isinstance(hyp_lengths, (int, float)):
@@ -484,8 +482,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         vocab_slice_ids = pt.cat((vocab_slice_ids, pt.full((n,),  # type: ignore
                                                            fill_value=eos_id,
                                                            device=device,
-                                                           dtype=pt.int32)),
-                                 dim=0)
+                                                           dtype=pt.int32)), dim=0)
 
     logger.debug(f'decoder softmax size: {vocab_slice_ids_shape}')
     return vocab_slice_ids, vocab_slice_ids_shape  # type: ignore
