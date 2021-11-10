@@ -474,10 +474,9 @@ def test_pytorch_update_scores(use_unk_dist):
                           True,  # finished
                           False],  # not finished
                          dtype=pt.bool)
-    inactive = pt.zeros_like(finished)
     target_dists = onp.random.uniform(0, 1, (3, vocab_size)).astype('float32')
 
-    scores, lengths = us(pt.tensor(target_dists), finished, inactive,
+    scores, lengths = us(pt.tensor(target_dists), finished,
                          pt.tensor(scores_accumulated), pt.tensor(lengths), pt.tensor(max_lengths),
                          pt.tensor(pad_dist), pt.tensor(eos_dist))
     scores = scores.detach().numpy()
@@ -606,7 +605,6 @@ def test_beam_search():
         num_target_factors=num_target_factors,
         inference=inference,
         beam_search_stop=C.BEAM_SEARCH_STOP_ALL,
-        global_avoid_trie=None,
         sample=None)
 
     # inputs
@@ -616,12 +614,10 @@ def test_beam_search():
     source_length = (source != C.PAD_ID).sum(1).reshape(-1)  # (batch_size,)
 
     restrict_lexicon = None
-    raw_constraints = [None] * batch_size
-    raw_avoid_list = [None] * batch_size
     max_output_lengths = pt.tensor([max_length], dtype=pt.int)
 
-    bs_out = bs(source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths)
-    best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths, constraints = bs_out
+    bs_out = bs(source, source_length, restrict_lexicon, max_output_lengths)
+    best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths = bs_out
 
     print('beam search lengths', lengths)
     print('internal lengths', inference.states[0])

@@ -1245,7 +1245,7 @@ def add_inference_args(params):
                                action="store_true",
                                default=False,
                                help='Enables an alternative, faster greedy decoding implementation. It does not '
-                                    'support batch decoding, ensembles, or lexical constraints, and hypothesis scores '
+                                    'support batch decoding, ensembles, and hypothesis scores '
                                     'are not normalized. Default: %(default)s.')
 
     decode_params.add_argument('--beam-search-stop',
@@ -1329,6 +1329,7 @@ def add_inference_args(params):
                                default=None,
                                help="Specify the number of translations to load for each source word from the lexicon "
                                     "given with --restrict-lexicon. Default: Load all entries from the lexicon.")
+    # TODO(migration): remove once MXNet is removed
     decode_params.add_argument('--avoid-list',
                                type=str,
                                default=None,

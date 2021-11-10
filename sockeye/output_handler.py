@@ -205,38 +205,6 @@ class BenchmarkOutputHandler(StringOutputHandler):
         return False
 
 
-class BeamStoringHandler(OutputHandler):
-    """
-    Output handler to store beam histories in JSON format.
-
-    :param stream: Stream to write translations to (e.g. sys.stdout).
-    """
-
-    def __init__(self, stream):
-        self.stream = stream
-
-    def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
-               t_walltime: float = 0.):
-        """
-        :param t_input: Translator input.
-        :param t_output: Translator output.
-        :param t_walltime: Total wall-clock time for translation.
-        """
-        assert len(t_output.beam_histories) >= 1, "Translator output should contain beam histories."
-        # If the sentence was max_len split, we may have more than one history
-        for h in t_output.beam_histories:
-            # Add the number of steps in each beam
-            h["number_steps"] = len(h["predicted_tokens"])  # type: ignore
-            # Some outputs can have more than one beam, add the id for bookkeeping
-            h["id"] = t_output.sentence_id  # type: ignore
-            print(json.dumps(h, sort_keys=True), file=self.stream, flush=True)
-
-    def reports_score(self) -> bool:
-        return False
-
-
 class JSONOutputHandler(OutputHandler):
     """
     Output single-line JSON objects.

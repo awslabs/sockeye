@@ -20,11 +20,9 @@ from typing import Optional, Tuple, List, Union
 
 import torch as pt
 import numpy as onp
-from . import vocab
 
 from .model_pt import PyTorchSockeyeModel
 import sockeye.constants as C
-from . import lexical_constraints as constrained
 from . import utils
 from . import lexicon
 
@@ -160,7 +158,7 @@ class _EnsembleInference(_Inference):
 class UpdateScores(pt.nn.Module):
     """
     A Module that updates the scores from the decoder step with accumulated scores.
-    Inactive hypotheses receive score inf. Finished hypotheses receive their accumulated score for C.PAD_ID.
+    Finished hypotheses receive their accumulated score for C.PAD_ID.
     Hypotheses at maximum length are forced to produce C.EOS_ID.
     All other options are set to infinity.
     """
@@ -170,7 +168,7 @@ class UpdateScores(pt.nn.Module):
         self.prevent_unk = prevent_unk
         assert C.PAD_ID == 0, "This block only works with PAD_ID == 0"
 
-    def forward(self, target_dists, finished, inactive, scores_accumulated, lengths, max_lengths, pad_dist, eos_dist):
+    def forward(self, target_dists, finished, scores_accumulated, lengths, max_lengths, pad_dist, eos_dist):
 
         if self.prevent_unk:  # make sure to avoid generating <unk>
             target_dists[:, C.UNK_ID] = onp.inf
@@ -180,14 +178,13 @@ class UpdateScores(pt.nn.Module):
         # target_dists. Shape: (batch*beam, vocab_size)
         scores = target_dists + scores_accumulated
 
-        # Special treatment for finished and inactive rows. Inactive rows are inf everywhere;
-        # finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
-        # Items that are finished (but not inactive) get their previous accumulated score for the <pad> symbol,
+        # Special treatment for finished rows.
+        # Finished rows are inf everywhere except column zero (pad_id), which holds the accumulated model score.
+        # Items that are finished get their previous accumulated score for the <pad> symbol,
         # infinity otherwise.
         pad_dist = scores_accumulated + pad_dist  # (batch*beam, vocab_size)
-        scores = pt.where(pt.logical_or(finished, inactive).unsqueeze(1), pad_dist, scores)
-        # Update lengths of all items, except those that were already finished. This updates
-        # the lengths for inactive items, too, but that doesn't matter since they are ignored anyway.
+        scores = pt.where(finished.unsqueeze(1), pad_dist, scores)
+        # Update lengths of all items, except those that were already finished.
         lengths = lengths + ~finished
         # Items that are at their maximum length and not finished now are forced to produce the <eos> symbol.
         # That is, we keep scores for hypotheses below max length or finished, and 'force-eos' the rest.
@@ -468,18 +465,10 @@ class SortStates(pt.nn.Module):
 
 def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
                          source_words: pt.Tensor,
-                         raw_constraint_list: List[Optional[constrained.RawConstraintList]],
                          eos_id: int,
-                         beam_size: int) -> Tuple[pt.Tensor, int, List[Optional[constrained.RawConstraintList]]]:
+                         beam_size: int) -> Tuple[pt.Tensor, int]:
     device = source_words.device
     vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.int().cpu().numpy())
-    if any(raw_constraint_list):
-        # Add the constraint IDs to the list of permissibled IDs, and then project them into the reduced space
-        constraint_ids = pt.tensor(word_id for sent in raw_constraint_list for phr in sent for word_id in phr)
-        vocab_slice_ids = onp.lib.arraysetops.union1d(vocab_slice_ids, constraint_ids)  # type: ignore
-        full_to_reduced = dict((val, i) for i, val in enumerate(vocab_slice_ids))
-        raw_constraint_list = [[[full_to_reduced[x] for x in phr] for phr in sent] for sent in
-                               raw_constraint_list]
     # Pad to a multiple of 8.
     vocab_slice_ids = pt.nn.functional.pad(pt.tensor(vocab_slice_ids, device=source_words.device, dtype=pt.int64),  # type: ignore
                                            pad=(0, 7 - ((vocab_slice_ids.size - 1) % 8)),
@@ -499,13 +488,13 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
                                  dim=0)
 
     logger.debug(f'decoder softmax size: {vocab_slice_ids_shape}')
-    return vocab_slice_ids, vocab_slice_ids_shape, raw_constraint_list  # type: ignore
+    return vocab_slice_ids, vocab_slice_ids_shape  # type: ignore
 
 
 class GreedySearch(pt.nn.Module):
     """
     Implements greedy search, not supporting various features from the BeamSearch class
-    (scoring, sampling, ensembling, lexical constraints, batch decoding).
+    (scoring, sampling, ensembling, batch decoding).
     """
 
     def __init__(self,
@@ -533,26 +522,19 @@ class GreedySearch(pt.nn.Module):
                 source: pt.Tensor,
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
-                raw_constraint_list: List[Optional[constrained.RawConstraintList]],
-                raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                 max_output_lengths: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor,
-                                                        List[Optional[pt.Tensor]],
-                                                        List[Optional[constrained.ConstrainedHypothesis]]]:
+                                                        List[Optional[pt.Tensor]]]:
         """
         Translates a single sentence (batch_size=1) using greedy search.
 
         :param source: Source ids. Shape: (batch_size=1, bucket_key, num_factors).
         :param source_length: Valid source lengths. Shape: (batch_size=1,).
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
-        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
-                that must appear in each output.
-        :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
-                that must NOT appear in each output.
         :param max_output_lengths: ndarray of maximum output lengths per input in source.
                 Shape: (batch_size=1,). Dtype: int32.
         :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
-                predicted lengths of references (if any), constraints (if any).
+                predicted lengths of references (if any).
         """
         batch_size = source.size()[0]
         assert batch_size == 1, "Greedy Search does not support batch_size != 1"
@@ -571,9 +553,7 @@ class GreedySearch(pt.nn.Module):
         # target vocab for this sentence.
         if restrict_lexicon:
             source_words = pt.split(source, 1, dim=2)[0].squeeze(2)
-            vocab_slice_ids, _, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon, source_words,
-                                                                           raw_constraint_list,
-                                                                           self.eos_id, beam_size=1)
+            vocab_slice_ids, _ = _get_vocab_slice_ids(restrict_lexicon, source_words, self.eos_id, beam_size=1)
 
         # (0) encode source sentence, returns a list
         model_states, _ = self._inference.encode_and_initialize(source, source_length)
@@ -599,7 +579,7 @@ class GreedySearch(pt.nn.Module):
         hyp_indices = pt.zeros(1, t + 1, dtype=pt.int32)
         score = pt.tensor([-1.])  # TODO: return unnormalized proper score
 
-        return hyp_indices, stacked_outputs, score, length, None, []  # type: ignore
+        return hyp_indices, stacked_outputs, score, length, None  # type: ignore
 
 
 class GreedyTop1(pt.nn.Module):
@@ -626,7 +606,6 @@ class BeamSearch(pt.nn.Module):
     """
     Features:
     - beam search stop
-    - constraints (pos & neg)
     - ensemble decoding
     - vocabulary selection
     - sampling
@@ -648,7 +627,6 @@ class BeamSearch(pt.nn.Module):
                  num_target_factors: int,
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
-                 global_avoid_trie: Optional[constrained.AvoidTrie] = None,
                  sample: Optional[int] = None,
                  prevent_unk: bool = False) -> None:
         super().__init__()
@@ -662,7 +640,6 @@ class BeamSearch(pt.nn.Module):
         self.beam_search_stop = beam_search_stop
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
-        self.global_avoid_trie = global_avoid_trie
         self.prevent_unk = prevent_unk
 
         self._repeat_states = RepeatStates(beam_size=beam_size, state_structure=self._inference.state_structure())
@@ -688,26 +665,19 @@ class BeamSearch(pt.nn.Module):
                 source: pt.Tensor,
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
-                raw_constraint_list: List[Optional[constrained.RawConstraintList]],
-                raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                 max_output_lengths: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor,
-                                                        List[Optional[pt.Tensor]],
-                                                        List[Optional[constrained.ConstrainedHypothesis]]]:
+                                                        List[Optional[pt.Tensor]]]:
         """
         Translates multiple sentences using beam search.
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Valid source lengths. Shape: (batch_size,).
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
-        :param raw_constraint_list: A list of optional lists containing phrases (as lists of target word IDs)
-               that must appear in each output.
-        :param raw_avoid_list: A list of optional lists containing phrases (as lists of target word IDs)
-               that must NOT appear in each output.
         :param max_output_lengths: Tensor of maximum output lengths per input in source.
                 Shape: (batch_size,). Dtype: int32.
         :return List of best hypotheses indices, list of best word indices,
                 array of accumulated length-normalized negative log-probs, hypotheses lengths,
-                predicted lengths of references (if any), constraints (if any).
+                predicted lengths of references (if any).
         """
         batch_size = source.size()[0]
         logger.debug("beam_search batch size: %d", batch_size)
@@ -717,7 +687,7 @@ class BeamSearch(pt.nn.Module):
         logger.debug("max beam search iterations: %d", max_iterations)
 
         if self._sample is not None:
-            utils.check_condition(restrict_lexicon is None, "restriced lexicon not available when sampling.")
+            utils.check_condition(restrict_lexicon is None, "restricted lexicon not available when sampling.")
 
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
@@ -755,26 +725,14 @@ class BeamSearch(pt.nn.Module):
         vocab_slice_ids = None  # type: Optional[pt.Tensor]
         if restrict_lexicon:
             source_words = pt.split(source, 1, dim=2)[0].squeeze(2)
-            vocab_slice_ids, output_vocab_size, raw_constraint_list = _get_vocab_slice_ids(restrict_lexicon,
-                                                                                           source_words,
-                                                                                           raw_constraint_list,
-                                                                                           self.eos_id, beam_size=1)
+            vocab_slice_ids, output_vocab_size = _get_vocab_slice_ids(restrict_lexicon, source_words, self.eos_id,
+                                                                      beam_size=1)
 
         pad_dist = pt.full((1, output_vocab_size), fill_value=onp.inf, device=self.device, dtype=self.dtype)
         pad_dist[0, 0] = 0  # [0, inf, inf, ...]
         eos_dist = pt.full((1, output_vocab_size),
                            fill_value=onp.inf, device=self.device, dtype=self.dtype)
         eos_dist[:, C.EOS_ID] = 0
-
-        # Initialize the beam to track constraint sets, where target-side lexical constraints are present
-        constraints = constrained.init_batch(raw_constraint_list, self.beam_size, self.bos_id, self.eos_id)
-
-        if self.global_avoid_trie or any(raw_avoid_list):
-            avoid_states = constrained.AvoidBatch(batch_size, self.beam_size,
-                                                  avoid_list=raw_avoid_list,
-                                                  global_avoid_trie=self.global_avoid_trie)
-            # constraints operate only on primary target factor
-            avoid_states.consume(best_word_indices[:, 0])  # type: ignore
 
         # (0) encode source sentence, returns a list
         model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
@@ -786,9 +744,6 @@ class BeamSearch(pt.nn.Module):
         # repeat estimated_reference_lengths to shape (batch_size * beam_size)
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
 
-        # Records items in the beam that are inactive. At the beginning (t==1), there is only one valid or active
-        # item on the beam for each sentence
-        inactive = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.int32)
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
@@ -798,18 +753,10 @@ class BeamSearch(pt.nn.Module):
                                                                                      vocab_slice_ids)
 
             # (2) Produces the accumulated cost of target words in each row.
-            # There is special treatment for finished and inactive rows: inactive rows are inf everywhere;
-            # finished rows are inf everywhere except column zero, which holds the accumulated model score
-            scores, lengths = self._update_scores(target_dists, finished, inactive, scores_accumulated,
+            # There is special treatment for finished rows.
+            # Finished rows are inf everywhere except column zero, which holds the accumulated model score
+            scores, lengths = self._update_scores(target_dists, finished, scores_accumulated,
                                                   lengths, max_output_lengths, pad_dist, eos_dist)
-
-            # Mark entries that should be blocked as having a score of np.inf
-            if self.global_avoid_trie or any(raw_avoid_list):
-                block_indices = avoid_states.avoid()
-                if len(block_indices) > 0:
-                    scores[block_indices] = onp.inf
-                    if self._sample is not None:
-                        target_dists[block_indices] = onp.inf
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
@@ -825,22 +772,6 @@ class BeamSearch(pt.nn.Module):
                     logger.debug("Tracing _top")
                     self._traced_top = pt.jit.trace(self._top, (scores, offset))
                 best_hyp_indices, best_word_indices, scores_accumulated = self._traced_top(scores, offset)
-
-            # Constraints for constrained decoding are processed sentence by sentence
-            if any(raw_constraint_list):
-                # TODO(fhieber): constrained decoding not yet working
-                # type: ignore
-                best_hyp_indices, best_word_indices, scores_accumulated, constraints, inactive = \
-                    constrained.topk(  # type: ignore
-                    t,
-                    batch_size,
-                    self.beam_size,
-                    inactive,  # type: ignore
-                    scores,  # type: ignore
-                    constraints,  # type: ignore
-                    best_hyp_indices,  # type: ignore
-                    best_word_indices,  # type: ignore
-                    scores_accumulated)  # type: ignore
 
             # Map from restricted to full vocab ids if needed
             if restrict_lexicon:
@@ -883,14 +814,12 @@ class BeamSearch(pt.nn.Module):
         lengths = lengths.index_select(0, best_hyp_indices)
         all_best_hyp_indices = pt.stack(best_hyp_indices_list, dim=1)
         all_best_word_indices = pt.stack(best_word_indices_list, dim=2)
-        constraints = [constraints[x] for x in best_hyp_indices.tolist()]
 
         return all_best_hyp_indices, \
                all_best_word_indices, \
                scores_accumulated, \
                lengths, \
-               estimated_reference_lengths, \
-               constraints
+               estimated_reference_lengths
 
     def _should_stop(self, finished: pt.Tensor, batch_size: int) -> bool:
         if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
@@ -903,13 +832,11 @@ class BeamSearch(pt.nn.Module):
 def get_search_algorithm(models: List[PyTorchSockeyeModel],
                          beam_size: int,
                          device: pt.device,
-                         vocab_target: vocab.Vocab,
                          output_scores: bool,
                          scorer: CandidateScorer,
                          ensemble_mode: str = 'linear',
                          beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                          constant_length_ratio: float = 0.0,
-                         avoid_list: Optional[str] = None,
                          sample: Optional[int] = None,
                          softmax_temperature: Optional[float] = None,
                          prevent_unk: bool = False,
@@ -926,7 +853,6 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
         if output_scores:
             logger.warning("Greedy Search does not return proper hypothesis scores")
         assert constant_length_ratio == -1.0, "Greedy search does not support brevity penalty"
-        assert avoid_list is None, "Greedy Search does not support avoid constraints"
         assert sample is None, "Greedy search does not support sampling"
         assert not prevent_unk, "Greedy Search does not support prevention of unknown tokens"  # TODO: add support
         search = GreedySearch(
@@ -956,7 +882,6 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
                                            constant_length_ratio=constant_length_ratio,
                                            softmax_temperature=softmax_temperature)
 
-        global_avoid_trie = None if avoid_list is None else constrained.get_avoid_trie(avoid_list, vocab_target)
         search = BeamSearch(
             beam_size=beam_size,
             dtype=models[0].dtype,
@@ -969,7 +894,6 @@ def get_search_algorithm(models: List[PyTorchSockeyeModel],
             sample=sample,
             num_source_factors=models[0].num_source_factors,
             num_target_factors=models[0].num_target_factors,
-            global_avoid_trie=global_avoid_trie,
             prevent_unk=prevent_unk,
             inference=inference
         )

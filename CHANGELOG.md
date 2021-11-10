@@ -33,6 +33,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Removed
 
+- Removed support for constrained decoding (both positive and negative lexical constraints)
 - Removed `--amp-scale-interval` argument.
 - Removed `--kvstore` argument.
 - Removed arguments: `--weight-init`, `--weight-init-scale` `--weight-init-xavier-factor-type`, `--weight-init-xavier-rand-type`

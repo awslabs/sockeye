@@ -24,7 +24,6 @@ import sockeye.beam_search_pt
 import sockeye.constants as C
 import sockeye.data_io_pt
 import sockeye.inference_pt
-import sockeye.lexical_constraints
 import sockeye.lexicon
 import sockeye.model_pt
 import sockeye.utils
@@ -78,10 +77,6 @@ def mock_translator(batch_size: int = 1,
                           (1.0, 2.0, 4.0),  # LP and BP
                           (1.0, 0.0, 5.0)])  # no LP and BP
 def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
-    beam_history1 = {"id": [1]}
-    beam_history2 = {"id": [2]}
-    beam_history3 = {"id": [3]}
-    expected_beam_histories = [beam_history1, beam_history2, beam_history3]
     expected_target_ids = [[0], [1], [2], [0], [8], [9], [0], [3], [4], [5], [-1]]
 
     scorer = sockeye.beam_search_pt.CandidateScorer(lp_alpha, lp_beta, bp_weight)
@@ -94,25 +89,21 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     #                  brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
     translations = [sockeye.inference_pt.Translation([[0], [1], [2], [-1]],
                                                      scorer(1.0, 4, 10),
-                                                     [beam_history1],
                                                      None,
                                                      10),
                     # Translation without EOS
                     sockeye.inference_pt.Translation([[0], [8], [9]],
                                                      scorer(2.0, 3, 11),
-                                                     [beam_history2],
                                                      None,
                                                      11),
                     sockeye.inference_pt.Translation([[0], [3], [4], [5], [-1]],
                                                      scorer(3.0, 5, 12),
-                                                     [beam_history3],
                                                      None,
                                                      12)]
     combined = sockeye.inference_pt._concat_translations(translations, stop_ids={_EOS}, scorer=scorer)
 
     assert combined.target_ids == expected_target_ids
     assert np.isclose(combined.score, expected_score)
-    assert combined.beam_histories == expected_beam_histories
 
 
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
@@ -388,13 +379,11 @@ def test_get_best_word_indices_for_kth_hypotheses():
     assert (result == expected_indices).all()
 
 
-@pytest.mark.parametrize("raw_constraints, beam_histories, expected_best_ids, expected_best_indices",
-                         [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'),
-                           np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),
-                          ([[[1]], [], [[3]], []], [None, None], np.array([1, 3], dtype='int32'),
-                           np.array([[1, 0, 0], [3, 2, 2]], dtype='int32'))
+@pytest.mark.parametrize("expected_best_ids, expected_best_indices",
+                         [(np.array([0, 2], dtype='int32'),
+                           np.array([[1, 1, 1], [3, 3, 3]], dtype='int32'))
                           ])
-def test_get_best_translations(raw_constraints, beam_histories, expected_best_ids, expected_best_indices):
+def test_get_best_translations(expected_best_ids, expected_best_indices):
     best_hyp_indices = pt.tensor([[0, 1, 0, 1],
                                   [0, 1, 1, 0],
                                   [2, 3, 2, 3],
@@ -418,24 +407,18 @@ def test_get_best_translations(raw_constraints, beam_histories, expected_best_id
         best_word_indices[expected_best_indices, :, np.arange(expected_best_indices.shape[1])],
         lengths[expected_best_ids],
         seq_scores[expected_best_ids],
-        beam_histories,
         itertools.repeat(None))]
-
-    constraints = [sockeye.lexical_constraints.ConstrainedHypothesis(rc, _EOS) for rc in raw_constraints]
 
     actual_result = sockeye.inference_pt.Translator._get_best_translations(translator,
                                                                            best_hyp_indices,
                                                                            best_word_indices,
                                                                            seq_scores,
                                                                            lengths,
-                                                                           None,
-                                                                           constraints,
-                                                                           beam_histories)
+                                                                           None)
 
     for expected_translation, actual_translation in zip(expected_result, actual_result):
         assert expected_translation.target_ids == actual_translation.target_ids
         assert expected_translation.score == actual_translation.score
-        assert expected_translation.beam_histories == actual_translation.beam_histories
 
 
 @pytest.mark.parametrize("sequence, fill_with, expected_sequence",

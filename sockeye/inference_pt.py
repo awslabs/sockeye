@@ -27,7 +27,6 @@ import numpy as onp
 import torch as pt
 
 from . import constants as C
-from . import lexical_constraints as constrained
 from . import lexicon
 from . import utils
 from . import vocab
@@ -380,8 +379,6 @@ class TranslatorOutput:
     tokens: List of translated tokens.
     score: Negative log probability of generated translation.
     pass_through_dict: Dictionary of key/value pairs to pass through when working with JSON.
-    beam_histories: List of beam histories. The list will contain more than one
-        history if it was split due to exceeding max_length.
     nbest_translations: List of nbest translations as strings.
     nbest_tokens: List of nbest translations as lists of tokens.
     nbest_scores: List of nbest scores, one for each nbest translation.
@@ -393,7 +390,6 @@ class TranslatorOutput:
     tokens: Tokens
     score: float
     pass_through_dict: Optional[Dict[str, Any]] = None
-    beam_histories: Optional[List[BeamHistory]] = None
     nbest_translations: Optional[List[str]] = None
     nbest_tokens: Optional[List[Tokens]] = None
     nbest_scores: Optional[List[float]] = None
@@ -444,8 +440,7 @@ class NBestTranslations:
 class Translation:
     target_ids: TokenIds
     score: float
-    beam_histories: List[BeamHistory] = None
-    nbest_translations: NBestTranslations = None
+    nbest_translations: Optional[NBestTranslations] = None
     estimated_reference_length: Optional[float] = None
 
 
@@ -528,7 +523,6 @@ def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Tr
 
     return Translation(best_translation.target_ids,
                        best_translation.score,
-                       best_translation.beam_histories,
                        nbest_translations,
                        best_translation.estimated_reference_length)
 
@@ -543,7 +537,7 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
     """
     nbest_list = []  # type = List[Translation]
     for target_ids, score in zip(translation.nbest_translations.target_ids_list, translation.nbest_translations.scores):
-        nbest_list.append(Translation(target_ids, score, translation.beam_histories,
+        nbest_list.append(Translation(target_ids, score,
                                       estimated_reference_length=translation.estimated_reference_length))
 
     return nbest_list
@@ -565,7 +559,6 @@ def _concat_translations(translations: List[Translation],
 
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
-    beam_histories = []  # type: List[BeamHistory]
     estimated_reference_length = None  # type: Optional[float]
 
     for idx, translation in enumerate(translations):
@@ -576,7 +569,6 @@ def _concat_translations(translations: List[Translation],
                 target_ids.extend(translation.target_ids[:-1])
             else:
                 target_ids.extend(translation.target_ids)
-        beam_histories.extend(translation.beam_histories)
         if translation.estimated_reference_length is not None:
             if estimated_reference_length is None:
                 estimated_reference_length = translation.estimated_reference_length
@@ -586,7 +578,7 @@ def _concat_translations(translations: List[Translation],
     # Unnormalize + sum and renormalize the score:
     raw_score = sum(scorer.unnormalize(t.score, len(t.target_ids), t.estimated_reference_length) for t in translations)
     score = scorer(raw_score, len(target_ids), estimated_reference_length)
-    return Translation(target_ids, score, beam_histories,
+    return Translation(target_ids, score,
                        estimated_reference_length=estimated_reference_length)
 
 
@@ -606,14 +598,12 @@ class Translator:
     :param nbest_size: Size of nbest list of translations.
     :param restrict_lexicon: Top-k lexicon to use for target vocabulary selection. Can be a dict of
                              of named lexicons.
-    :param avoid_list: Global list of phrases to exclude from the output.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     :param sample: If True, sample from softmax multinomial instead of using topk.
     :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
            log probabilities. If False, scores will be negative, raw logit activations if decoding with beam size 1
            and a single model.
     :param constant_length_ratio: If > 0, will override models' prediction of the length ratio (if any).
-    :param hybridize: Whether to hybridize inference code.
     :param max_output_length_num_stds: Number of standard deviations to add as a safety margin when computing the
            maximum output length. If -1, returned maximum output lengths will always be 2 * input_length.
     :param max_input_length: Maximum input length this Translator should allow. If None, value will be taken from the
@@ -636,12 +626,10 @@ class Translator:
                  beam_size: int = 5,
                  nbest_size: int = 1,
                  restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
-                 avoid_list: Optional[str] = None,
                  strip_unknown_words: bool = False,
                  sample: int = None,
                  output_scores: bool = False,
                  constant_length_ratio: float = 0.0,
-                 hybridize: bool = True,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None,
@@ -684,14 +672,12 @@ class Translator:
             models=self.models,
             beam_size=self.beam_size,
             device=self.device,
-            vocab_target=target_vocabs[0],  # only primary target factor used for constrained decoding.
             output_scores=output_scores,
             sample=sample,
             ensemble_mode=ensemble_mode,
             beam_search_stop=beam_search_stop,
             scorer=self._scorer,
             constant_length_ratio=constant_length_ratio,
-            avoid_list=avoid_list,
             softmax_temperature=softmax_temperature,
             prevent_unk=prevent_unk,
             greedy=greedy)
@@ -701,7 +687,7 @@ class Translator:
                                             scorer=self._scorer)  # type: Callable
 
         logger.info("PyTorchTranslator (%d model(s) beam_size=%d algorithm=%s, beam_search_stop=%s max_input_length=%s "
-                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d avoiding=%d dtype=%s softmax_temperature=%s)",
+                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d dtype=%s softmax_temperature=%s)",
                     len(self.models),
                     self.beam_size,
                     "GreedySearch" if isinstance(self._search, GreedySearch) else "BeamSearch",
@@ -710,7 +696,6 @@ class Translator:
                     self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.max_batch_size,
-                    0 if self._search.global_avoid_trie is None else len(self._search.global_avoid_trie),
                     self.dtype,
                     softmax_temperature)
 
@@ -845,19 +830,14 @@ class Translator:
                              trans_inputs: List[TranslatorInput]) -> Tuple[pt.Tensor,
                                                                            int,
                                                                            Optional[lexicon.TopKLexicon],
-                                                                           List[Optional[constrained.RawConstraintList]],
-                                                                           List[Optional[constrained.RawConstraintList]],
                                                                            pt.Tensor]:
         """
-        Assembles the numerical data for the batch. This comprises an NDArray for the source sentences,
-        the bucket key (padded source length), and a list of raw constraint lists, one for each sentence in the batch,
-        an NDArray of maximum output lengths for each sentence in the batch.
-        Each raw constraint list contains phrases in the form of lists of integers in the target language vocabulary.
+        Assembles the numerical data for the batch. This comprises a tensor for the source sentences,
+        the bucket key (padded source length), a tensor of maximum output lengths for each sentence in the batch.
 
         :param trans_inputs: List of TranslatorInputs.
         :return tensor of source ids (shape=(batch_size, bucket_key, num_factors)),
-                tensor of valid source lengths, lexicon for vocabulary restriction, list of raw constraint
-                lists, and list of phrases to avoid, and an ndarray of maximum output
+                tensor of valid source lengths, lexicon for vocabulary restriction, and a tensor of maximum output
                 lengths.
         """
         batch_size = len(trans_inputs)
@@ -868,8 +848,6 @@ class Translator:
         source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
-        raw_constraints = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
-        raw_avoid_list = [None] * batch_size  # type: List[Optional[constrained.RawConstraintList]]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
@@ -907,21 +885,10 @@ class Translator:
                 else:
                     restrict_lexicon = self.restrict_lexicon
 
-            if trans_input.constraints is not None:
-                raw_constraints[j] = [tokens2ids(phrase, self.vocab_targets[0]) for phrase in
-                                      trans_input.constraints]
-
-            if trans_input.avoid_list is not None:
-                raw_avoid_list[j] = [tokens2ids(phrase, self.vocab_targets[0]) for phrase in
-                                     trans_input.avoid_list]
-                if any(self.unk_id in phrase for phrase in raw_avoid_list[j]):
-                    logger.warning("Sentence %s: %s was found in the list of phrases to avoid; "
-                                   "this may indicate improper preprocessing.", trans_input.sentence_id, C.UNK_SYMBOL)
-
         source = pt.tensor(source, device=self.device, dtype=pt.int32)  # type: ignore
         source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
         max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)  # type: ignore
-        return source, source_length, restrict_lexicon, raw_constraints, raw_avoid_list, max_output_lengths  # type: ignore
+        return source, source_length, restrict_lexicon, max_output_lengths  # type: ignore
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -990,7 +957,6 @@ class Translator:
                                 tokens=primary_tokens,
                                 score=translation.score,
                                 pass_through_dict=trans_input.pass_through_dict,
-                                beam_histories=translation.beam_histories,
                                 nbest_translations=nbest_translations,
                                 nbest_tokens=nbest_tokens,
                                 nbest_scores=nbest_scores,
@@ -1003,8 +969,6 @@ class Translator:
                       source: pt.Tensor,
                       source_length: pt.Tensor,
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
-                      raw_constraints: List[Optional[constrained.RawConstraintList]],
-                      raw_avoid_list: List[Optional[constrained.RawConstraintList]],
                       max_output_lengths: pt.Tensor) -> List[Translation]:
         """
         Translates source of source_length and returns list of Translations.
@@ -1012,15 +976,12 @@ class Translator:
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Valid source lengths.
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
-        :param raw_constraints: A list of optional constraint lists.
 
         :return: List of translations.
         """
         return self._get_best_translations(*self._search(source,
                                                          source_length,
                                                          restrict_lexicon,
-                                                         raw_constraints,
-                                                         raw_avoid_list,
                                                          max_output_lengths))
 
     def _get_best_translations(self,
@@ -1028,9 +989,7 @@ class Translator:
                                best_word_indices: pt.Tensor,
                                seq_scores: pt.Tensor,
                                lengths: pt.Tensor,
-                               estimated_reference_lengths: Optional[pt.Tensor] = None,
-                               constraints: List[Optional[constrained.ConstrainedHypothesis]] = [],
-                               beam_histories: Optional[List[BeamHistory]] = None) -> List[Translation]:
+                               estimated_reference_lengths: Optional[pt.Tensor] = None) -> List[Translation]:
         """
         Return the nbest (aka n top) entries from the n-best list.
 
@@ -1040,8 +999,6 @@ class Translator:
         :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
         :param lengths: The lengths of all items in the beam. Shape: (batch * beam). Dtype: int32.
         :param estimated_reference_lengths: Predicted reference lengths.
-        :param constraints: The constraints for all items in the beam. Shape: (batch * beam).
-        :param beam_histories: The beam histories for each sentence in the batch.
         :return: List of Translation objects containing all relevant information.
         """
         best_hyp_indices = best_hyp_indices.cpu().numpy()
@@ -1051,22 +1008,12 @@ class Translator:
         estimated_reference_lengths = estimated_reference_lengths.cpu().numpy() if estimated_reference_lengths is not None else None
         batch_size = best_hyp_indices.shape[0] // self.beam_size
         nbest_translations = []  # type: List[List[Translation]]
-        histories = beam_histories if beam_histories is not None else [None] * self.batch_size  # type: List
         reference_lengths = estimated_reference_lengths if estimated_reference_lengths is not None \
                                                         else onp.zeros((self.batch_size * self.beam_size, 1))
         for n in range(0, self.nbest_size):
 
             # Initialize the best_ids to the first item in each batch, plus current nbest index
             best_ids = onp.arange(n, batch_size * self.beam_size, self.beam_size, dtype='int32')
-
-            # only check for constraints for 1-best translation for each sequence in batch
-            if n == 0 and any(constraints):
-                # For constrained decoding, select from items that have met all constraints (might not be finished)
-                unmet = onp.array([c.num_needed() if c is not None else 0 for c in constraints])
-                filtered = onp.where(unmet == 0, seq_scores.flatten(), onp.inf)
-                filtered = filtered.reshape((batch_size, self.beam_size))
-                best_ids += onp.argmin(filtered, axis=1).astype('int32', copy=False)
-
             # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)  # type: ignore
             indices_shape_1 = indices.shape[1]  # pylint: disable=unsubscriptable-object
@@ -1077,7 +1024,6 @@ class Translator:
                                            onp.arange(indices_shape_1)],
                          lengths[best_ids],
                          seq_scores[best_ids],
-                         histories,
                          reference_lengths[best_ids])])  # type: ignore
 
         # reorder and regroup lists
@@ -1112,7 +1058,6 @@ class Translator:
     def _assemble_translation(sequence: onp.ndarray,
                               length: onp.ndarray,
                               seq_score: onp.ndarray,
-                              beam_history: Optional[BeamHistory],
                               estimated_reference_length: Optional[float],
                               unshift_target_factors: bool = False) -> Translation:
         """
@@ -1122,7 +1067,6 @@ class Translator:
         :param length: The length of the translated segment.
         :param seq_score: Array of length-normalized negative log-probs.
         :param estimated_reference_length: Estimated reference length (if any).
-        :param beam_history: The optional beam histories for each sentence in the batch.
         :return: A Translation object.
         """
         if unshift_target_factors:
@@ -1133,8 +1077,7 @@ class Translator:
         sequence = sequence[:length]  # type: ignore
         score = float(seq_score)
         estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
-        beam_history_list = [beam_history] if beam_history is not None else []
-        return Translation(sequence, score, beam_history_list,  # type: ignore
+        return Translation(sequence, score,  # type: ignore
                            nbest_translations=None,
                            estimated_reference_length=estimated_reference_length)
 

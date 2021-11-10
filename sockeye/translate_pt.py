@@ -133,7 +133,6 @@ def run_translate(args: argparse.Namespace):
                                              source_vocabs=source_vocabs,
                                              target_vocabs=target_vocabs,
                                              restrict_lexicon=restrict_lexicon,
-                                             avoid_list=args.avoid_list,
                                              strip_unknown_words=args.strip_unknown_words,
                                              sample=args.sample,
                                              output_scores=output_handler.reports_score(),
@@ -141,7 +140,6 @@ def run_translate(args: argparse.Namespace):
                                              max_output_length_num_stds=args.max_output_length_num_stds,
                                              max_input_length=args.max_input_length,
                                              max_output_length=args.max_output_length,
-                                             hybridize=hybridize,
                                              softmax_temperature=args.softmax_temperature,
                                              prevent_unk=args.prevent_unk,
                                              greedy=args.greedy)
