@@ -313,6 +313,17 @@ def run_train_translate(train_params: str,
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
 
+    # Try to fix transient errors with mxnet tests where parameter file does not yet exist
+    # TODO(migration): remove once mxnet is removed
+    if not use_pytorch:
+        try:
+            from mxnet import npx
+            npx.waitall()
+            import time
+            time.sleep(1)
+        except:
+            pass
+
     logger.info("Translating with params %s", params)
     with patch.object(sys, "argv", params.split()):
         translate_mod.main()
