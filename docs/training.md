@@ -103,16 +103,11 @@ Start tensorboard and point it to the model directory (or any parent directory):
 ### CPU/GPU training
 
 By default, training is carried out on the first GPU device of your machine.
-~~You can specify alternative GPU devices with the `--device-ids` option, with
-which you can also activate multi-GPU training (see below). If
-`--device-ids -1`, sockeye will try to find a free GPU on your machine and block
-until one is available. The locking mechanism is based on files and therefore assumes all processes are running
-on the same machine with the same file system.
-If this is not the case there is a chance that two processes will be using the same GPU and you run out of GPU memory.
+You can specify an alternative GPU device with the `--device-id` option.
 If you do not have or do not want to use a GPU, specify `--use-cpu`.
-In this case a drop in performance is expected.~~
+In this case a drop in training throughput is expected.
 
-##### Multi-GPU training
+#### Multi-GPU training
 
 Training can be carried out on multiple GPUs. See the
 [WMT 2014 English-German tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html) for more information.
