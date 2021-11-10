@@ -1114,7 +1114,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             amp.init_trainer(gluon_trainer)
             # AMP does not allow passing args when creating the loss scaler, so
             # we set them immediately after calling init.
-            gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
+            gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval  # pylint: disable=no-member
 
         losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
