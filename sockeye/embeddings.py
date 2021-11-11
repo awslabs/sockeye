@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -19,10 +19,10 @@ import logging
 import sys
 from typing import Iterable, Tuple
 
-from mxnet import np, npx
+import torch as pt
 
 import sockeye.constants as C
-from . import model
+from . import model_pt
 from . import utils
 from .data_io import tokens2ids
 from .log import setup_main_logger
@@ -32,25 +32,25 @@ from .vocab import reverse_vocab
 logger = logging.getLogger(__name__)
 
 
-def compute_sims(inputs: np.ndarray, normalize: bool) -> np.ndarray:
+def compute_sims(inputs: pt.Tensor, normalize: bool) -> pt.Tensor:
     """
     Returns a matrix with pair-wise similarity scores between inputs.
     Similarity score is (normalized) Euclidean distance. 'Similarity with self' is masked
     to large negative value.
 
-    :param inputs: ndarray of inputs.
+    :param inputs: tensor of inputs.
     :param normalize: Whether to normalize to unit-length.
-    :return: ndarray with pairwise similarities of same shape as inputs.
+    :return: tensor with pairwise similarities of same shape as inputs.
     """
     if normalize:
         logger.info("Normalizing embeddings to unit length")
-        inputs = inputs / np.linalg.norm(inputs, keepdims=True, axis=-1)
-    sims = np.dot(inputs, inputs.transpose())
-    np.fill_diagonal(sims, -9999999.)
+        inputs = inputs / pt.linalg.norm(inputs, dim=-1, keepdim=True)
+    sims = pt.mm(inputs, inputs.transpose(0, 1))
+    sims.fill_diagonal_(-9999999.)
     return sims
 
 
-def nearest_k(similarity_matrix: np.ndarray,
+def nearest_k(similarity_matrix: pt.Tensor,
               query_word_id: int,
               k: int,
               gamma: float = 1.0) -> Iterable[Tuple[int, float]]:
@@ -64,7 +64,7 @@ def nearest_k(similarity_matrix: np.ndarray,
     :return: List of indices and values of k nearest elements.
     """
     # pylint: disable=unbalanced-tuple-unpacking
-    values, indices = npx.topk(npx.softmax(similarity_matrix[query_word_id] / gamma), k=k, ret_typ='both')
+    values, indices = pt.topk((similarity_matrix[query_word_id] / gamma).softmax(0), k=k)
     return zip(indices.tolist(), values.tolist())
 
 
@@ -89,9 +89,10 @@ def main():
 def embeddings(args: argparse.Namespace):
     logger.info("Arguments: %s", args)
 
-    sockeye_model, source_vocabs, target_vocabs = model.load_model(args.model,
-                                                                   checkpoint=args.checkpoint,
-                                                                   hybridize=False)
+    sockeye_model, source_vocabs, target_vocabs = model_pt.load_model(args.model,
+                                                                      checkpoint=args.checkpoint,
+                                                                      device=pt.device('cpu'))
+    sockeye_model.eval()
 
     if args.side == "source":
         vocab = source_vocabs[0]
@@ -100,9 +101,9 @@ def embeddings(args: argparse.Namespace):
     vocab_inv = reverse_vocab(vocab)
 
     if args.side == "source":
-        weights = sockeye_model.embedding_source.weight.data()
+        weights = sockeye_model.embedding_source.embedding.weight.data
     else:
-        weights = sockeye_model.embedding_target.weight.data()
+        weights = sockeye_model.embedding_target.embedding.weight.data
     logger.info("Embedding size: %d", weights.shape[1])
 
     logger.info("Computing pairwise similarities...")
