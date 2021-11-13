@@ -273,7 +273,11 @@ class CandidateScorer(pt.nn.Module):
         if isinstance(scores, (int, float)):
             return scores / lp - bp
         else:
-            return (scores.squeeze(1) / lp.to(scores.dtype) - bp).unsqueeze(1)
+            if isinstance(lp, pt.Tensor):
+                lp = lp.to(scores.dtype)
+            if isinstance(bp, pt.Tensor):
+                bp = bp.to(scores.dtype)
+            return (scores.squeeze(1) / lp - bp).unsqueeze(1)
 
     def unnormalize(self, scores, lengths, reference_lengths):
         bp = 0.0 if self._bp is None else self._bp(lengths, reference_lengths)
