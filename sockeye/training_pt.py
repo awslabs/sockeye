@@ -598,7 +598,7 @@ class PyTorchEarlyStoppingTrainer:
         logger.info('Saved optimizer state to "%s"', fname)
 
     def _load_optimizer_state(self, fname):
-        self.optimizer.load_state_dict(torch.load(fname))
+        self.optimizer.load_state_dict(torch.load(fname, map_location=self.device))
         logger.info('Loaded optimizer state from "%s"', fname)
 
     def _save_lr_scheduler(self, fname):
