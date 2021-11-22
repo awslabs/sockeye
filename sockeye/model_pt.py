@@ -540,10 +540,11 @@ def initialize_parameters(module: pt.nn.Module):
     For reproducibility, set pt.random.manual_seed.
 
     This implementation follows the default MXNet initialization scheme:
-    - weights: Xavier(uniform, avg, magnitude=3.0)
+    - linear/feed-forward weights: Xavier(uniform, avg, magnitude=3.0)
     - biases: 0.0
     - layer norm gamma / weight: 1.0
     - layer norm beta / bias: 0.0
+    - embedding parameters: uniform(-0.07, 0.07) [matches MXNet's default initialization]
 
     MXNet computes the uniform bounds for Xavier initialization as follows:
       sqrt(3 / ((fan_in + fan_out) / 2))
@@ -558,6 +559,8 @@ def initialize_parameters(module: pt.nn.Module):
         pt.nn.init.xavier_uniform_(module.weight, gain=1.0)
         if module.bias is not None:
             pt.nn.init.zeros_(module.bias)
+    elif isinstance(module, pt.nn.Embedding):
+        pt.nn.init.uniform_(module.weight, -0.07, 0.07)
     elif isinstance(module, pt.nn.LayerNorm):
         if module.elementwise_affine:
             pt.nn.init.ones_(module.weight)
