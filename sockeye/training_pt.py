@@ -530,9 +530,10 @@ class PyTorchEarlyStoppingTrainer:
 
     def _adjust_learning_rate(self, has_improved: bool):
         """
-        Adjusts the optimizer learning rate if required.
+        Adjusts the optimizer learning rate if required and logs it.
         """
         scheduler = self.optimizer_config.lr_scheduler
+        lr = self.optimizer_config.lr
         if scheduler is not None:
             if issubclass(type(scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
                 lr_adjusted = scheduler.new_evaluation_result(has_improved)  # type: ignore
@@ -545,6 +546,8 @@ class PyTorchEarlyStoppingTrainer:
                     self.sockeye_model.load_parameters(filename=self.best_params_fname, device=self.device)
                 if os.path.exists(self.best_optimizer_state_fname):
                     self._load_optimizer_state(self.best_optimizer_state_fname)
+            lr = scheduler.lr
+        logger.info("Checkpoint [%d]\tLearning-rate=%.6f", self.state.checkpoint, lr)
 
     def _write_and_log_metrics(self,
                                train_metrics: Iterable[loss_pt.LossMetric],
