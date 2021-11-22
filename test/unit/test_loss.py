@@ -147,6 +147,7 @@ def test_mx_pt_eq_cross_entropy_loss(logits, labels, weight, alpha):
                                              {C.TARGET_LABEL_NAME: labels_pt, 'other_stuff': None})
     loss_value_pt.backward()
 
+    assert np.allclose(loss_value_mx.asnumpy(), loss_value_pt.detach().numpy())
     assert loss_samples_mx.item() == loss_samples_pt.detach().numpy()
     assert np.allclose(logits_mx.grad.asnumpy(), logits_pt.grad.numpy())
 
