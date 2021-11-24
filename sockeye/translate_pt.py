@@ -66,7 +66,11 @@ def run_translate(args: argparse.Namespace):
     output_handler = get_output_handler(args.output_type,
                                         args.output)
 
-    device = pt.device('cpu') if args.use_cpu else pt.device('cuda', args.device_id)
+    use_cpu = args.use_cpu
+    if not pt.cuda.is_available():
+        logger.info("CUDA not available, using cpu")
+        use_cpu = True
+    device = pt.device('cpu') if use_cpu else pt.device('cuda', args.device_id)
     logger.info(f"Translate Device: {device}")
     models, source_vocabs, target_vocabs = load_models(device=device,
                                                        model_folders=args.models,

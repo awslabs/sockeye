@@ -75,8 +75,6 @@ class PyTorchDecoder(pt.nn.Module):
         :return: Decoder instance.
         """
         config_type = type(config)
-        print(config_type)
-        print(cls.__registry)
         if config_type not in cls.__registry:
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls = cls.__registry[config_type]

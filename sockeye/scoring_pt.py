@@ -57,8 +57,8 @@ class BatchScorer(pt.nn.Module):
         """
         logprobs = pt.log_softmax(logits, dim=-1)
 
-        # Select the label probability, then take their logs.
-        # probs and scores: (batch_size, target_seq_len)
+        # Select the label log probability
+        # logprobs and scores: (batch_size, target_seq_len)
         token_scores = logprobs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze()
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
             token_scores = token_scores * -1
