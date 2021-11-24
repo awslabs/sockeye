@@ -44,7 +44,6 @@ def main():
 
 
 def run_translate(args: argparse.Namespace):
-
     # Seed randomly unless a seed has been passed
     seed_rngs(args.seed if args.seed is not None else int(time.time()))
 
@@ -60,8 +59,9 @@ def run_translate(args: argparse.Namespace):
 
     if args.nbest_size > 1:
         if args.output_type != C.OUTPUT_HANDLER_JSON:
-            logger.warning("For nbest translation, you must specify `--output-type '%s'; overriding your setting of '%s'.",
-                           C.OUTPUT_HANDLER_JSON, args.output_type)
+            logger.warning(
+                "For nbest translation, you must specify `--output-type '%s'; overriding your setting of '%s'.",
+                C.OUTPUT_HANDLER_JSON, args.output_type)
             args.output_type = C.OUTPUT_HANDLER_JSON
     output_handler = get_output_handler(args.output_type,
                                         args.output)
@@ -69,11 +69,11 @@ def run_translate(args: argparse.Namespace):
     device = pt.device('cpu') if args.use_cpu else pt.device('cuda', args.device_id)
     logger.info(f"Translate Device: {device}")
     models, source_vocabs, target_vocabs = load_models(device=device,
-                                                        model_folders=args.models,
-                                                        checkpoints=args.checkpoints,
-                                                        dtype=args.dtype,
-                                                        inference_only=True,
-                                                        mc_dropout=args.mc_dropout)
+                                                       model_folders=args.models,
+                                                       checkpoints=args.checkpoints,
+                                                       dtype=args.dtype,
+                                                       inference_only=True,
+                                                       mc_dropout=args.mc_dropout)
 
     restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
     if args.restrict_lexicon is not None:
@@ -119,33 +119,33 @@ def run_translate(args: argparse.Namespace):
     scorer.to(models[0].dtype)
 
     translator = inference_pt.Translator(device=device,
-                                            ensemble_mode=args.ensemble_mode,
-                                            scorer=scorer,
-                                            batch_size=args.batch_size,
-                                            beam_size=args.beam_size,
-                                            beam_search_stop=args.beam_search_stop,
-                                            nbest_size=args.nbest_size,
-                                            models=models,
-                                            source_vocabs=source_vocabs,
-                                            target_vocabs=target_vocabs,
-                                            restrict_lexicon=restrict_lexicon,
-                                            strip_unknown_words=args.strip_unknown_words,
-                                            sample=args.sample,
-                                            output_scores=output_handler.reports_score(),
-                                            constant_length_ratio=constant_length_ratio,
-                                            max_output_length_num_stds=args.max_output_length_num_stds,
-                                            max_input_length=args.max_input_length,
-                                            max_output_length=args.max_output_length,
-                                            softmax_temperature=args.softmax_temperature,
-                                            prevent_unk=args.prevent_unk,
-                                            greedy=args.greedy)
+                                         ensemble_mode=args.ensemble_mode,
+                                         scorer=scorer,
+                                         batch_size=args.batch_size,
+                                         beam_size=args.beam_size,
+                                         beam_search_stop=args.beam_search_stop,
+                                         nbest_size=args.nbest_size,
+                                         models=models,
+                                         source_vocabs=source_vocabs,
+                                         target_vocabs=target_vocabs,
+                                         restrict_lexicon=restrict_lexicon,
+                                         strip_unknown_words=args.strip_unknown_words,
+                                         sample=args.sample,
+                                         output_scores=output_handler.reports_score(),
+                                         constant_length_ratio=constant_length_ratio,
+                                         max_output_length_num_stds=args.max_output_length_num_stds,
+                                         max_input_length=args.max_input_length,
+                                         max_output_length=args.max_output_length,
+                                         softmax_temperature=args.softmax_temperature,
+                                         prevent_unk=args.prevent_unk,
+                                         greedy=args.greedy)
 
     read_and_translate(translator=translator,
-                        output_handler=output_handler,
-                        chunk_size=args.chunk_size,
-                        input_file=args.input,
-                        input_factors=args.input_factors,
-                        input_is_json=args.json_input)
+                       output_handler=output_handler,
+                       chunk_size=args.chunk_size,
+                       input_file=args.input,
+                       input_factors=args.input_factors,
+                       input_is_json=args.json_input)
 
 
 def make_inputs(input_file: Optional[str],
