@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,9 +12,8 @@
 # permissions and limitations under the License.
 
 import argparse
-import os
 import logging
-import multiprocessing
+import os
 
 from . import arguments
 from . import constants as C
@@ -31,6 +30,7 @@ def main():
     arguments.add_prepare_data_cli_args(params)
     args = params.parse_args()
     prepare_data(args)
+
 
 def prepare_data(args: argparse.Namespace):
     output_folder = os.path.abspath(args.output)
@@ -76,12 +76,12 @@ def prepare_data(args: argparse.Namespace):
     logger.info("%d samples will be split into %d shard(s) (requested samples/shard=%d, min_num_shards=%d)."
                 % (num_sents, num_shards, samples_per_shard, minimum_num_shards))
     shards, keep_tmp_shard_files = data_io.create_shards(source_fnames=source_paths,
-                                   target_fnames=target_paths,
-                                   num_shards=num_shards,
-                                   output_prefix=output_folder)
+                                                         target_fnames=target_paths,
+                                                         num_shards=num_shards,
+                                                         output_prefix=output_folder)
     shard_source_paths, shard_target_paths = [paths for paths in zip(*shards)]
 
-    # Process shards in parallel using max_processes process    
+    # Process shards in parallel using max_processes process
     with utils.create_pool(args.max_processes) as pool:
         source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
             shard_source_paths=shard_source_paths,
@@ -99,22 +99,22 @@ def prepare_data(args: argparse.Namespace):
             mapper=pool.map)
 
         data_io.prepare_data(source_fnames=source_paths,
-                            target_fnames=target_paths,
-                            source_vocabs=source_vocabs,
-                            target_vocabs=target_vocabs,
-                            source_vocab_paths=source_vocab_paths,
-                            target_vocab_paths=[args.target_vocab],
-                            shared_vocab=args.shared_vocab,
-                            max_seq_len_source=max_seq_len_source,
-                            max_seq_len_target=max_seq_len_target,
-                            bucketing=bucketing,
-                            bucket_width=bucket_width,
-                            num_shards=num_shards,
-                            output_prefix=output_folder,
-                            bucket_scaling=bucket_scaling,
-                            pool=pool,
-                            shards=shards,
-                            keep_tmp_shard_files=keep_tmp_shard_files)
+                             target_fnames=target_paths,
+                             source_vocabs=source_vocabs,
+                             target_vocabs=target_vocabs,
+                             source_vocab_paths=source_vocab_paths,
+                             target_vocab_paths=[args.target_vocab],
+                             shared_vocab=args.shared_vocab,
+                             max_seq_len_source=max_seq_len_source,
+                             max_seq_len_target=max_seq_len_target,
+                             bucketing=bucketing,
+                             bucket_width=bucket_width,
+                             num_shards=num_shards,
+                             output_prefix=output_folder,
+                             bucket_scaling=bucket_scaling,
+                             pool=pool,
+                             shards=shards,
+                             keep_tmp_shard_files=keep_tmp_shard_files)
 
 
 if __name__ == "__main__":

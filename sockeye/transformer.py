@@ -14,7 +14,7 @@
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-import mxnet as mx
+from mxnet import gluon, npx, np
 
 from . import config
 from . import constants as C
@@ -43,7 +43,7 @@ class TransformerConfig(config.Config):
     use_glu: bool = False
 
 
-class TransformerEncoderBlock(mx.gluon.HybridBlock):
+class TransformerEncoderBlock(gluon.HybridBlock):
     """
     A transformer encoder block consists self-attention and a feed-forward layer with pre/post process blocks
     in between.
@@ -51,46 +51,38 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
 
     def __init__(self,
                  config: TransformerConfig,
-                 prefix: str,
                  dtype: str) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
 
-        with self.name_scope():
-            self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                              dropout=config.dropout_prepost,
-                                                              prefix="att_self_pre_",
-                                                              num_hidden=config.model_size)
-            self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                                heads=config.attention_heads,
-                                                                depth_out=config.model_size,
-                                                                dropout=config.dropout_attention,
-                                                                prefix="att_self_",
-                                                                dtype=dtype)
-            self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                               dropout=config.dropout_prepost,
-                                                               prefix="att_self_post_",
-                                                               num_hidden=config.model_size)
+        self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                          dropout=config.dropout_prepost,
+                                                          num_hidden=config.model_size)
+        self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                            heads=config.attention_heads,
+                                                            depth_out=config.model_size,
+                                                            dropout=config.dropout_attention,
+                                                            dtype=dtype)
+        self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                           dropout=config.dropout_prepost,
+                                                           num_hidden=config.model_size)
 
-            self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                  dropout=config.dropout_prepost,
-                                                  prefix="ff_pre_",
-                                                  num_hidden=config.model_size)
-            self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                             num_model=config.model_size,
-                                             act_type=config.act_type,
-                                             dropout=config.dropout_act,
-                                             prefix="ff_",
-                                             dtype=dtype,
-                                             use_glu=config.use_glu)
-            self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                   dropout=config.dropout_prepost,
-                                                   prefix="ff_post_",
-                                                   num_hidden=config.model_size)
-            self.lhuc = None
-            if config.use_lhuc:
-                self.lhuc = layers.LHUC(config.model_size)
+        self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                              dropout=config.dropout_prepost,
+                                              num_hidden=config.model_size)
+        self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                         num_model=config.model_size,
+                                         act_type=config.act_type,
+                                         dropout=config.dropout_act,
+                                         dtype=dtype,
+                                         use_glu=config.use_glu)
+        self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                               dropout=config.dropout_prepost,
+                                               num_hidden=config.model_size)
+        self.lhuc = None
+        if config.use_lhuc:
+            self.lhuc = layers.LHUC(config.model_size)
 
-    def hybrid_forward(self, F, data: mx.sym.Symbol, lengths: mx.sym.Symbol) -> mx.sym.Symbol:
+    def forward(self, data: np.ndarray, lengths: np.ndarray) -> np.ndarray:
         # self-attention
         data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, lengths, None)
         data = self.post_self_attention(data_self_att, data)
@@ -105,7 +97,7 @@ class TransformerEncoderBlock(mx.gluon.HybridBlock):
         return data
 
 
-class TransformerDecoderBlock(mx.gluon.HybridBlock):
+class TransformerDecoderBlock(gluon.HybridBlock):
     """
     A transformer decoder block consists of an autoregressive attention block, encoder attention,
     and a feed-forward layer with pre/post process blocks in between.
@@ -114,71 +106,60 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
     def __init__(self,
                  config: TransformerConfig,
                  inference_only: bool,
-                 prefix: str,
                  dtype: str) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.decoder_type = config.decoder_type
 
-        with self.name_scope():
-            if self.decoder_type == C.TRANSFORMER_TYPE:
-                self.autoregr_layer = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                                    heads=config.attention_heads,
-                                                                    depth_out=config.model_size,
-                                                                    dropout=config.dropout_attention,
-                                                                    prefix="att_self_",
-                                                                    dtype=dtype)
-            elif self.decoder_type == C.SSRU_TRANSFORMER:
-                self.autoregr_layer = layers.SSRU(model_size=config.model_size,
-                                                  inference_only=inference_only,
-                                                  dtype=dtype)
-            else:
-                raise ValueError("Invalid decoder type.")
+        if self.decoder_type == C.TRANSFORMER_TYPE:
+            self.autoregr_layer = layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                                heads=config.attention_heads,
+                                                                depth_out=config.model_size,
+                                                                dropout=config.dropout_attention,
+                                                                dtype=dtype)
+        elif self.decoder_type == C.SSRU_TRANSFORMER:
+            self.autoregr_layer = layers.SSRU(model_size=config.model_size,
+                                              inference_only=inference_only,
+                                              dtype=dtype)
+        else:
+            raise ValueError("Invalid decoder type.")
 
-            self.pre_autoregr_layer = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                              dropout=config.dropout_prepost,
-                                                              prefix=self.autoregr_layer.prefix + "pre_",
-                                                              num_hidden=config.model_size)
+        self.pre_autoregr_layer = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                          dropout=config.dropout_prepost,
+                                                          num_hidden=config.model_size)
 
-            self.post_autoregr_layer = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                               dropout=config.dropout_prepost,
-                                                               prefix=self.autoregr_layer.prefix + "post_",
-                                                               num_hidden=config.model_size)
+        self.post_autoregr_layer = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                           dropout=config.dropout_prepost,
+                                                           num_hidden=config.model_size)
 
-            self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                             dropout=config.dropout_prepost,
-                                                             prefix="att_enc_pre_",
-                                                             num_hidden=config.model_size)
-            self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
-                                                           heads=config.attention_heads,
-                                                           depth_out=config.model_size,
-                                                           dropout=config.dropout_attention,
-                                                           depth_key_value=config.depth_key_value,
-                                                           prefix="att_enc_",
-                                                           dtype=dtype)
-            self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                              dropout=config.dropout_prepost,
-                                                              prefix="att_enc_post_",
-                                                              num_hidden=config.model_size)
+        self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                         dropout=config.dropout_prepost,
+                                                         num_hidden=config.model_size)
+        self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
+                                                       heads=config.attention_heads,
+                                                       depth_out=config.model_size,
+                                                       dropout=config.dropout_attention,
+                                                       depth_key_value=config.depth_key_value,
+                                                       dtype=dtype)
+        self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                          dropout=config.dropout_prepost,
+                                                          num_hidden=config.model_size)
 
-            self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                  dropout=config.dropout_prepost,
-                                                  prefix="ff_pre_",
-                                                  num_hidden=config.model_size)
-            self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                             num_model=config.model_size,
-                                             act_type=config.act_type,
-                                             dropout=config.dropout_act,
-                                             prefix="ff_",
-                                             dtype=dtype,
-                                             use_glu=config.use_glu)
-            self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                   dropout=config.dropout_prepost,
-                                                   prefix="ff_post_",
-                                                   num_hidden=config.model_size)
+        self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                              dropout=config.dropout_prepost,
+                                              num_hidden=config.model_size)
+        self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                         num_model=config.model_size,
+                                         act_type=config.act_type,
+                                         dropout=config.dropout_act,
+                                         dtype=dtype,
+                                         use_glu=config.use_glu)
+        self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                               dropout=config.dropout_prepost,
+                                               num_hidden=config.model_size)
 
-            self.lhuc = None
-            if config.use_lhuc:
-                self.lhuc = layers.LHUC(config.model_size)
+        self.lhuc = None
+        if config.use_lhuc:
+            self.lhuc = layers.LHUC(config.model_size)
 
     @property
     def num_state_tensors(self) -> int:
@@ -197,14 +178,13 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         """
         return self.autoregr_layer.get_state_shape(batch_size)
 
-    def hybrid_forward(self, F,
-                       target: mx.sym.Symbol,
-                       target_bias: mx.sym.Symbol,
-                       source: mx.sym.Symbol,
-                       source_att_lengths: mx.sym.Symbol,
-                       autoregr_states: mx.sym.Symbol,
-                       enc_att_kv: Optional[mx.sym.Symbol] = None) -> Tuple[mx.sym.Symbol,
-                                                                            mx.sym.Symbol]:
+    def forward(self,
+                target: np.ndarray,
+                target_bias: np.ndarray,
+                source: np.ndarray,
+                source_att_lengths: np.ndarray,
+                autoregr_states: np.ndarray,
+                enc_att_kv: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
         target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
                                                                     autoregr_states,
                                                                     None,
@@ -231,7 +211,7 @@ class TransformerDecoderBlock(mx.gluon.HybridBlock):
         return target, new_autoregr_states
 
 
-class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
+class TransformerProcessBlock(gluon.HybridBlock):
     """
     Block to perform pre/post processing on layer inputs.
     The processing steps are determined by the sequence argument, which can contain one of the three operations:
@@ -243,17 +223,15 @@ class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
     def __init__(self,
                  sequence: str,
                  dropout: float,
-                 prefix: str,
                  num_hidden: int = 0) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.sequence = sequence
         self.dropout = dropout
         self.layer_norm = None
-        with self.name_scope():
-            if 'n' in sequence:
-                self.layer_norm = mx.gluon.nn.LayerNorm(axis=-1, in_channels=num_hidden, epsilon=1e-06, prefix="norm_")
+        if 'n' in sequence:
+            self.layer_norm = gluon.nn.LayerNorm(axis=-1, in_channels=num_hidden, epsilon=1e-06)
 
-    def hybrid_forward(self, F, data: mx.sym.Symbol, prev: Optional[mx.sym.Symbol]) -> mx.sym.Symbol:
+    def forward(self, data: np.ndarray, prev: Optional[np.ndarray]) -> np.ndarray:
         """
         Apply processing sequence to data with optional previous input.
 
@@ -277,14 +255,14 @@ class TransformerProcessBlock(mx.gluon.nn.HybridBlock):
 
             elif step == "d":
                 if self.dropout > 0.0:
-                    data = F.Dropout(data, p=self.dropout)
+                    data = npx.dropout(data, p=self.dropout)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
         return data
 
 
-class TransformerFeedForward(mx.gluon.HybridBlock):
+class TransformerFeedForward(gluon.HybridBlock):
     """
     Position-wise feed-forward block with activation.
     """
@@ -294,49 +272,47 @@ class TransformerFeedForward(mx.gluon.HybridBlock):
                  num_model: int,
                  act_type: str,
                  dropout: float,
-                 prefix: str,
                  dtype: str,
                  use_glu: bool = False) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.dropout = dropout
         self.use_glu = use_glu
-        with self.name_scope():
-            self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, prefix='i2h_',
-                                                     dtype=dtype)
-            self.act = layers.get_activation(act_type)
-            if use_glu:
-                self.linear = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False,
-                                                            prefix='i2l_', dtype=dtype)
-            self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, prefix='h2o_',
-                                                     dtype=dtype)
+        self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, dtype=dtype)
+        self.act = layers.get_activation(act_type)
+        if use_glu:
+            self.linear = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False,
+                                                        dtype=dtype)
+        self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, dtype=dtype)
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x: np.ndarray) -> np.ndarray:
         h = self.ff1(x)
         h = self.act(h)
         if self.use_glu:
             h = h * self.linear(x)
         if self.dropout > 0.0:
-            h = F.Dropout(h, p=self.dropout)
+            h = npx.dropout(h, p=self.dropout)
         y = self.ff2(h)
         return y
 
 
-class AutoRegressiveBias(mx.gluon.HybridBlock):
-    def __init__(self, prefix: str = '') -> None:
-        super().__init__(prefix=prefix)
+class AutoRegressiveBias(gluon.HybridBlock):
+    def __init__(self) -> None:
+        super().__init__()
         self._dtype = 'float32'
 
     def cast(self, dtype):
         self._dtype = dtype
         super().cast(dtype)
 
-    def hybrid_forward(self, F, x):
+    def forward(self, x: np.ndarray) -> np.ndarray:
         # Shape: (length, 1)
-        length_array = F.contrib.arange_like(x, axis=1)
+        length_array = npx.arange_like(x, axis=1)
         # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
         # Shape: (length, length)
-        bias = F.broadcast_greater(F.expand_dims(length_array, axis=0),
-                                   F.expand_dims(length_array, axis=1))
+        bias = npx.broadcast_greater(np.expand_dims(length_array, axis=0),
+                                     np.expand_dims(length_array, axis=1))
         bias = bias * -C.LARGE_VALUES[self._dtype]
-        bias = F.expand_dims(bias, axis=0)
-        return F.BlockGrad(bias)
+        bias = np.expand_dims(bias, axis=0)
+        return npx.stop_gradient(bias)
+
+

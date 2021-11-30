@@ -21,9 +21,14 @@ logger = logging.getLogger(__name__)
 
 
 class LearningRateScheduler:
-
-    def __init__(self, warmup: int = 0, t_scale: float = 1.0) -> None:
-        self.base_lr = None  # Note: will be overwritten by MXNet optimizer
+    """
+    :param base_lr: Base learning rate.
+    :param warmup: Number of initial updates during which the learning rate
+                   linearly increases.
+    :param t_scale: Scaling factor for step number.
+    """
+    def __init__(self, base_lr: float = 1.0, warmup: int = 0, t_scale: float = 1.0) -> None:
+        self.base_lr = base_lr
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
         self.warmup = warmup
         self.t_scale = t_scale
@@ -38,7 +43,6 @@ class LearningRateScheduler:
         by t_scale, as individual schedulers should scale t prior to calling
         this method.
         """
-        assert self.base_lr is not None
         if not self.warmup:
             return self.base_lr
         return self.base_lr * min(1.0, scaled_t / self.warmup)
@@ -66,9 +70,6 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
 
     This is the schedule used by Vaswani et al. in the Transformer paper
     (https://arxiv.org/pdf/1706.03762.pdf)
-
-    :param warmup: Number of initial updates during which the learning rate
-                   linearly increases.
     """
 
     def __call__(self, t: int):
@@ -95,14 +96,16 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
     This is the schedule used by Devlin et al. in the BERT paper
     (https://arxiv.org/pdf/1810.04805.pdf).
 
-    :param max_updates: Number of total training updates.  The learning rate
+    :param base_lr: Base learning rate.
+    :param total_steps: Number of total training updates.  The learning rate
                         linearly decays to zero over this period.
     :param warmup: Number of initial updates during which the learning rate
                    linearly increases.
+    :param t_scale: Scaling factor for step number.
     """
 
-    def __init__(self, total_steps: int, warmup: int = 0, t_scale: float = 1.0) -> None:
-        super().__init__(warmup, t_scale)
+    def __init__(self, base_lr: float, total_steps: int, warmup: int = 0, t_scale: float = 1.0) -> None:
+        super().__init__(base_lr, warmup, t_scale)
         check_condition(total_steps >= 0, "total_steps need to be >= 0.")
         self.total_steps = total_steps
 
@@ -124,21 +127,23 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
     """
     Lower the learning rate as soon as the validation score plateaus.
 
+    :param base_lr: Base learning rate.
     :param reduce_factor: Factor to reduce learning rate with.
-    :param reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is reduced.
+    :param reduce_num_not_improved: Number of checkpoints with no improvement
+                                    after which learning rate is reduced.
+    :param warmup: Number of initial updates during which the learning rate
+                   linearly increases.
     """
 
-    def __init__(self, reduce_factor: float, reduce_num_not_improved: int, warmup: int = 0) -> None:
-        super().__init__(warmup)
+    def __init__(self, base_lr: float, reduce_factor: float, reduce_num_not_improved: int, warmup: int = 0) -> None:
+        super().__init__(base_lr, warmup)
         check_condition(0.0 < reduce_factor < 1, "reduce_factor should be between (0, 1).")
         self.reduce_factor = reduce_factor
         self.reduce_num_not_improved = reduce_num_not_improved
         self.num_not_improved = 0
 
-        self.lr = None  # type: Optional[float]
-        self.t_last_log = -1
         self.warmed_up = not self.warmup > 0
-        
+
         logger.info("Will reduce the learning rate by a factor of %.2f whenever"
                     " the validation score doesn't improve %d times.",
                     reduce_factor, reduce_num_not_improved)
@@ -186,6 +191,7 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
 
 
 def get_lr_scheduler(scheduler_type: str,
+                     base_learning_rate: float,
                      learning_rate_t_scale: float,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
@@ -195,6 +201,7 @@ def get_lr_scheduler(scheduler_type: str,
     Returns a learning rate scheduler.
 
     :param scheduler_type: Scheduler type.
+    :param base_lr: Base learning rate.
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
     :param learning_rate_t_scale: Scaling factor for step number.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no
@@ -210,12 +217,14 @@ def get_lr_scheduler(scheduler_type: str,
     if scheduler_type is None or scheduler_type == C.LR_SCHEDULER_NONE:
         return None
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
-        return LearningRateSchedulerInvSqrtDecay(warmup=learning_rate_warmup, t_scale=learning_rate_t_scale)
+        return LearningRateSchedulerInvSqrtDecay(base_lr=base_learning_rate, warmup=learning_rate_warmup,
+                                                 t_scale=learning_rate_t_scale)
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
         check_condition(max_updates is not None,
                         "The total number of training updates (--max-updates) must be specified when using the linear "
                         "decay learning rate scheduler.")
-        return LearningRateSchedulerLinearDecay(total_steps=max_updates,
+        return LearningRateSchedulerLinearDecay(base_lr=base_learning_rate,
+                                                total_steps=max_updates,
                                                 warmup=learning_rate_warmup,
                                                 t_scale=learning_rate_t_scale)
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
@@ -227,6 +236,6 @@ def get_lr_scheduler(scheduler_type: str,
             logger.warning("Not using %s learning rate scheduling: learning_rate_reduce_factor == 1.0",
                            C.LR_SCHEDULER_PLATEAU_REDUCE)
             return None
-        return LearningRateSchedulerPlateauReduce(learning_rate_reduce_factor, learning_rate_reduce_num_not_improved,
-                                                  learning_rate_warmup)
+        return LearningRateSchedulerPlateauReduce(base_learning_rate, learning_rate_reduce_factor,
+                                                  learning_rate_reduce_num_not_improved, learning_rate_warmup)
     raise ValueError("Unknown learning rate scheduler type %s." % scheduler_type)

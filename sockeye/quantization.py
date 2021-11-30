@@ -15,6 +15,7 @@ import logging
 import math
 
 import mxnet as mx
+from mxnet import np, npx
 from mxnet.gluon.nn.activations import Activation
 
 from . import constants as C
@@ -96,34 +97,31 @@ class QuantizableDense(mx.gluon.HybridBlock):
     """
     def __init__(self, units, dtype: str, activation=None, use_bias=True, flatten=True,
                  weight_initializer=None, bias_initializer='zeros',
-                 in_units=0, **kwargs):
-        super(QuantizableDense, self).__init__(**kwargs)
+                 in_units=0):
+        super(QuantizableDense, self).__init__()
         self._flatten = flatten
         self._dtype = dtype
-        with self.name_scope():
-            self._units = units
-            self._in_units = in_units
-            if dtype == C.DTYPE_INT8:
-                self.scaling = self.params.get('scaling', shape=(1,),
-                                               #Initialize to an obviously wrong value so we can detect later
-                                               init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32,
-                                               allow_deferred_init=True)
-                weight_initializer = 'zeros' # Most initializers don't work for int8, but this is for inference anyway.
+        self._units = units
+        self._in_units = in_units
 
-            self.weight = self.params.get('weight', shape=(units, in_units),
-                                          init=weight_initializer, dtype=dtype,
-                                          allow_deferred_init=True)
+        self.scaling = None
+        if dtype == C.DTYPE_INT8:
+            self.scaling = mx.gluon.Parameter('scaling', shape=(1,),
+                                              # Initialize to an obviously wrong value so we can detect later
+                                              init=mx.initializer.Constant(-1.0), dtype=C.DTYPE_FP32,
+                                              allow_deferred_init=True)
+            weight_initializer = 'zeros'  # Most initializers don't work for int8, but this is for inference anyway.
 
-            if use_bias:
-                self.bias = self.params.get('bias', shape=(units,),
-                                            init=bias_initializer, dtype = C.DTYPE_FP32,
-                                            allow_deferred_init=True)
-            else:
-                self.bias = None
-            if activation is not None:
-                self.act = Activation(activation, prefix=activation+'_')
-            else:
-                self.act = None
+        self.weight = mx.gluon.Parameter('weight', shape=(units, in_units),
+                                         init=weight_initializer, dtype=dtype,
+                                         allow_deferred_init=True)
+
+        self.bias = mx.gluon.Parameter('bias', shape=(units,),
+                                       init=bias_initializer, dtype=C.DTYPE_FP32,
+                                       allow_deferred_init=True) if use_bias else None
+        self.act = Activation(activation) if activation is not None else None
+        if activation is not None:
+            self.act = Activation(activation)
 
     def cast(self, dtype):
         if self._dtype != C.DTYPE_INT8:
@@ -133,19 +131,37 @@ class QuantizableDense(mx.gluon.HybridBlock):
             #No casting an already quantized matrix.
             logger.warning("Ignoring casting on int8 matrix")
 
-    def hybrid_forward(self, F, x, weight, scaling=None, bias=None):
-        if self._dtype == C.DTYPE_INT8:
-            if bias is not None:
-                act = F.contrib.intgemm_fully_connected(x, weight, scaling, bias, no_bias=False, num_hidden=self._units,
-                                                        flatten=self._flatten, name='fwd')
-            else:
-                act = F.contrib.intgemm_fully_connected(x, weight, scaling, no_bias=True, num_hidden=self._units,
-                                                        flatten=self._flatten, name='fwd')
+    def infer_shape(self, x, *args):
+        if self._flatten:
+            num_input = 1
+            for i in range(1, x.ndim):
+                num_input *= x.shape[i]
+            self.weight.shape = (self.weight.shape[0], num_input)
         else:
-            #Newer MXNet allows a numpy array.
-            #fc = F.npx.fully_connected if is_np_array() else F.FullyConnected
-            act = F.FullyConnected(x, weight, bias, no_bias=bias is None, num_hidden=self._units,
-                     flatten=self._flatten, name='fwd')
+            self.weight.shape = (self.weight.shape[0], x.shape[x.ndim - 1])
+
+    def forward(self, x):
+        if self._dtype == C.DTYPE_INT8:
+            if self.bias is not None:
+                act = npx.intgemm_fully_connected(x,
+                                                  weight=self.weight.data(),
+                                                  scaling=self.scaling.data(),
+                                                  bias=self.bias.data(), no_bias=False,
+                                                  num_hidden=self._units,
+                                                  flatten=self._flatten)
+            else:
+                act = npx.intgemm_fully_connected(x,
+                                                  weight=self.weight.data(),
+                                                  scaling=self.scaling.data(),
+                                                  no_bias=True,
+                                                  num_hidden=self._units,
+                                                  flatten=self._flatten)
+        else:
+            act = npx.fully_connected(x,
+                                      weight=self.weight.data(),
+                                      bias=self.bias.data() if self.bias else None, no_bias=self.bias is None,
+                                      num_hidden=self._units,
+                                      flatten=self._flatten)
         if self.act is not None:
             act = self.act(act)
         return act
@@ -168,21 +184,21 @@ def optimize_quantization_mse(tensor, rounds=10):
     """
     best_mse = math.inf
     best_top = None
-    maxabs = mx.nd.contrib.intgemm_maxabsolute(tensor)
+    maxabs = npx.intgemm_maxabsolute(tensor)
     low = 0.0
     high = maxabs
     for _ in range(rounds):
         value = (low + high) / 2.0
-        quant = mx.nd.contrib.intgemm_prepare_data(tensor, value)
-        quant_float = mx.nd.cast(quant, dtype=C.DTYPE_FP32)
-        mse = (quant_float * (value / 127.0) - tensor).norm().asscalar() / math.sqrt(float(tensor.size))
+        quant = npx.intgemm_prepare_data(tensor, value)
+        quant_float = quant.astype(C.DTYPE_FP32)
+        mse = (quant_float * (value / 127.0) - tensor).norm().item() / math.sqrt(float(tensor.size))
         if mse < best_mse:
             best_mse = mse
             best_top = value
         # This optimizes scaling subject to cluster assignment.
         # It can be used for EM but the step is really slow, so use it for direction.
-        scale = mx.nd.sum(quant_float * quant_float) / mx.nd.sum(quant_float * tensor)
-        top = 127.0 / scale.asscalar()
+        scale = np.sum(quant_float * quant_float) / np.sum(quant_float * tensor)
+        top = 127.0 / scale.item()
         if top < value:
             high = value
         else:
@@ -195,7 +211,7 @@ def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param:
     Extract or tune the scaling factor for a parameter.
     """
     scaling = scaling_param.data()
-    if scaling.asscalar() < 0:
+    if scaling.item() < 0:
         # Bogus auto initialized scaling factor.
         b_max = optimize_quantization_mse(tensor_param.data())
         scaling_param.set_data(b_max / 127.0)
@@ -204,7 +220,7 @@ def extract_quant_max(tensor_param: mx.gluon.parameter.Parameter, scaling_param:
     return b_max
 
 
-def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_store: str):
+def convert_weights_disk_format(params: C.ParameterDict, dtype_store: str):
     """
     Convert weights from float32 MXNet format (B^T in float32) to disk format
     (B^T in int8 format).
@@ -222,12 +238,12 @@ def convert_weights_disk_format(params: mx.gluon.parameter.ParameterDict, dtype_
             if scaling_name in params:
                 b_max = extract_quant_max(param, params[scaling_name])
                 if dtype_store == C.DTYPE_INT8:
-                    quantized = mx.nd.contrib.intgemm_prepare_data(param.data(), b_max)
+                    quantized = npx.intgemm_prepare_data(param.data(), b_max)
                     param.set_data(quantized)
                     param.dtype = C.DTYPE_INT8
 
 
-def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
+def convert_weights_cpu_dependent(params: C.ParameterDict):
     """
     Convert weights from disk format to intgemm's CPU-dependent format for
     quantized matrix multiplication.
@@ -242,10 +258,10 @@ def convert_weights_cpu_dependent(params: mx.gluon.parameter.ParameterDict):
             if scaling_name in params:
                 if param.dtype == C.DTYPE_INT8:
                     # Already fully quantized, just rearrange.
-                    weight = mx.nd.contrib.intgemm_prepare_weight(param.data(), already_quantized = True)
+                    weight = npx.intgemm_prepare_weight(param.data(), already_quantized=True)
                 else:
                     # Use offline scaling factor if available.
                     b_max = extract_quant_max(param, params[scaling_name])
-                    weight = mx.nd.contrib.intgemm_prepare_weight(param.data(), b_max)
+                    weight = npx.intgemm_prepare_weight(param.data(), b_max)
                 param.set_data(weight)
                 param.dtype = C.DTYPE_INT8

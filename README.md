@@ -5,33 +5,54 @@
 [![GitHub issues](https://img.shields.io/github/issues/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/issues)
 [![Documentation Status](https://readthedocs.org/projects/sockeye/badge/?version=latest)](http://sockeye.readthedocs.io/en/latest/?badge=latest)
 
-This package contains the Sockeye project, an open-source sequence-to-sequence framework for Neural Machine Translation based on [Apache MXNet (Incubating)](http://mxnet.incubator.apache.org/). Sockeye powers several Machine Translation use cases, including [Amazon Translate](https://aws.amazon.com/translate/). The framework implements state-of-the-art machine translation models with Transformers ([Vaswani et al, 2017](https://arxiv.org/abs/1706.03762)). Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
+Sockeye is an open-source sequence-to-sequence framework for Neural Machine Translation built on [PyTorch](https://pytorch.org/). It implements distributed training and optimized inference for state-of-the-art models, powering [Amazon Translate](https://aws.amazon.com/translate/) and other MT applications. Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/master/CHANGELOG.md).
 
-If you have any questions or discover problems, please [file an issue](https://github.com/awslabs/sockeye/issues/new). You can also send questions to *sockeye-dev-at-amazon-dot-com*.
+For a quickstart guide to training a standard NMT model on any size of data, see the [WMT 2014 English-German tutorial](docs/tutorials/wmt_large.md).
 
-#### Version 2.0
+For questions and issue reports, please [file an issue](https://github.com/awslabs/sockeye/issues/new) on GitHub.
 
-With version 2.0, we have updated the usage of MXNet by moving to the [Gluon API](https://mxnet.incubator.apache.org/api/python/docs/api/gluon/index.html) and adding support for several state-of-the-art features such as distributed training, low-precision training and decoding, as well as easier debugging of neural network architectures.
-In the context of this rewrite, we also trimmed down the large feature set of version 1.18.x to concentrate on the most important types of models and features, to provide a maintainable framework that is suitable for fast prototyping, research, and production.
-We welcome Pull Requests if you would like to help with adding back features when needed.
+### Version 3.0.0 & Backwards Compatibility
+With version 3.0.0, Sockeye is based on PyTorch. We maintain backwards compatibility with
+MXNet models in version 2.3.x a little bit longer. If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet.
+
+All models trained with 2.3.x (using MXNet)
+can be converted to models running with PyTorch using the converter CLI (`sockeye.mx_to_pt`). This will
+create a PyTorch parameter file (`<model>/params.best`) and backup the existing MXNet parameter
+file to `<model>/params.best.mx`. Note that this only applies to fully-trained models that are to be used
+for inference. Continued training of an MXNet model with PyTorch is not supported
+(because we do not convert training and optimizer states).
+`sockeye.mx_to_pt` requires MXNet to be installed into the environment.
+
+All CLIs of Version 3.0.0 now use PyTorch by default, e.g. `sockeye-{train,translate,score}`.
+MXNet-based CLIs/modules are still operational and accessible via `sockeye-{train,translate,score}-mx`.
+
+Sockeye 3 can be installed and run without MXNet, but if installed, an extended test suite is executed to ensure
+equivalence between PyTorch and MXNet models. Note that running Sockeye 3.0.0 with MXNet requires MXNet 2.x to be
+installed (`pip install --pre -f https://dist.mxnet.io/python 'mxnet>=2.0.0b2021'`)
 
 ## Installation
 
-The easiest way to run Sockeye is with [Docker](https://www.docker.com) or [nvidia-docker](https://github.com/NVIDIA/nvidia-docker).
-To build a Sockeye image with all features enabled, run the build script:
-
+Download the current version of Sockeye:
 ```bash
-python3 sockeye_contrib/docker/build.py
+git clone https://github.com/awslabs/sockeye.git
 ```
 
-See the [Dockerfile documentation](sockeye_contrib/docker) for more information.
+Install the sockeye module and its dependencies:
+```bash
+cd sockeye && pip3 install --editable .
+```
+
+For faster GPU training, install [NVIDIA Apex](https://github.com/NVIDIA/apex). NVIDIA also provides [PyTorch Docker containers](https://ngc.nvidia.com/catalog/containers/nvidia:pytorch) that include Apex.
 
 ## Documentation
 
-For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
-
-- For a quickstart guide to training a large data WMT model, see the [WMT 2018 German-English tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html).
+- For information on how to use Sockeye, please visit [our documentation](https://awslabs.github.io/sockeye/).
 - Developers may be interested in our [developer guidelines](https://awslabs.github.io/sockeye/development.html).
+
+### Older versions
+
+- Sockeye 2.x, based on the MXNet Gluon API, is available in the `sockeye_2` branch.
+- Sockeye 1.x, based on the MXNet Module API, is available in the `sockeye_1` branch.
 
 ## Citation
 
@@ -124,7 +145,7 @@ Annotations." arXiv preprint arXiv:2010.06203 (2020)
 * Vyas, Yogarshi, Xing Niu and Marine Carpuat “Identifying Semantic Divergences in Parallel Text without Annotations”. Proceedings of NAACL-HLT (2018)
 * Wang, Weiyue, Derui Zhu, Tamer Alkhouli, Zixuan Gan, and Hermann Ney. "Neural Hidden Markov Model for Machine Translation". Proceedings of 56th ACL (2018)
 * Zhang, Xuan, Gaurav Kumar, Huda Khayrallah, Kenton Murray, Jeremy Gwinnup, Marianna J Martindale, Paul McNamee, Kevin Duh, and Marine Carpuat. "An Empirical Exploration of Curriculum Learning for Neural Machine Translation." arXiv preprint arXiv:1811.00739 (2018)
-* Swe Zin Moe, Ye Kyaw Thu, Hnin Aye Thant and Nandar Win Min, "Neural Machine Translation between Myanmar Sign Language and Myanmar Written Text", In the second Regional Conference on Optical character recognition and Natural language processing technologies for ASEAN languages 2018 (ONA 2018), December 13-14, 2018, Phnom Penh, Cambodia.  
+* Swe Zin Moe, Ye Kyaw Thu, Hnin Aye Thant and Nandar Win Min, "Neural Machine Translation between Myanmar Sign Language and Myanmar Written Text", In the second Regional Conference on Optical character recognition and Natural language processing technologies for ASEAN languages 2018 (ONA 2018), December 13-14, 2018, Phnom Penh, Cambodia.
 * Tang, Gongbo, Mathias Müller, Annette Rios and Rico Sennrich. "Why Self-attention? A Targeted Evaluation of Neural Machine Translation Architectures." Proceedings of EMNLP (2018)
 
 ### 2017

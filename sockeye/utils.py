@@ -26,23 +26,23 @@ import pprint
 import random
 import sys
 import time
+from collections import defaultdict
 from contextlib import contextmanager, ExitStack
 from functools import reduce
 from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
 from itertools import starmap
 
-import mxnet as mx
+import torch as pt
+import torch.distributed
+
 import numpy as np
 import portalocker
 
 from . import __version__, constants as C
 from . import horovod_mpi
-from .log import log_sockeye_version, log_mxnet_version
+from .log import log_sockeye_version, log_mxnet_version, log_torch_version
 
 logger = logging.getLogger(__name__)
-
-
-NDarrayOrSymbol = Union[mx.nd.NDArray, mx.sym.Symbol]
 
 
 class SockeyeError(Exception):
@@ -58,6 +58,12 @@ def check_version(version: str):
     """
     code_version = parse_version(__version__)
     given_version = parse_version(version)
+    # TODO(fhieber): temporarily maintain backwards compoatibility for 2.3.x models
+    if given_version[0] == '2' and given_version[1] == '3':
+        logger.info(f"Code version: {__version__}")
+        logger.warning(f"Given release version ({version}) does not match code version ({__version__}). "
+                       f"Models with version {version} should be compatible though.")
+        return
     check_condition(code_version[0] == given_version[0],
                     "Given release version (%s) does not match release code version (%s)" % (version, __version__))
     check_condition(code_version[1] == given_version[1],
@@ -97,11 +103,12 @@ def log_basic_info(args) -> None:
     """
     log_sockeye_version(logger)
     log_mxnet_version(logger)
+    log_torch_version(logger)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
 
 
-def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = None) -> None:
+def seed_rngs(seed: int, ctx: Optional[Union['mx.Context', List['mx.Context']]] = None) -> None:  # type: ignore
     """
     Seed the random number generators (Python, Numpy and MXNet).
 
@@ -112,16 +119,26 @@ def seed_rngs(seed: int, ctx: Optional[Union[mx.Context, List[mx.Context]]] = No
            device-specific generators with a fixed offset. E.g. for 2 devices and seed=13, seed for gpu(0) will be 13,
            14 for gpu(1). See https://beta.mxnet.io/api/gluon-related/_autogen/mxnet.random.seed.html.
     """
-    logger.info("Random seed: %d", seed)
+    logger.info(f"Random seed: {seed}")
     np.random.seed(seed)
     random.seed(seed)
-    if ctx is None:
-        mx.random.seed(seed, ctx='all')
-    else:
-        if isinstance(ctx, mx.Context):
-            ctx = [ctx]
-        for i, c in enumerate(ctx):
-            mx.random.seed(seed + i, ctx=c)
+    try:
+        import torch
+        torch.manual_seed(seed)
+        logger.info(f"PyTorch seed: {seed}")
+    except ImportError:
+        pass
+    try:
+        import mxnet as mx
+        if ctx is None:
+            mx.random.seed(seed, ctx='all')
+        else:
+            if isinstance(ctx, mx.Context):
+                ctx = [ctx]
+            for i, c in enumerate(ctx):
+                mx.random.seed(seed + i, ctx=c)
+    except:
+        pass
 
 
 def check_condition(condition: bool, error_message: str):
@@ -134,28 +151,6 @@ def check_condition(condition: bool, error_message: str):
     """
     if not condition:
         raise SockeyeError(error_message)
-
-
-def save_graph(symbol: mx.sym.Symbol, filename: str, hide_weights: bool = True):
-    """
-    Dumps computation graph visualization to .pdf and .dot file.
-
-    :param symbol: The symbol representing the computation graph.
-    :param filename: The filename to save the graphic to.
-    :param hide_weights: If true the weights will not be shown.
-    """
-    dot = mx.viz.plot_network(symbol, hide_weights=hide_weights)
-    dot.render(filename=filename)
-
-
-def compute_lengths(sequence_data: mx.sym.Symbol) -> mx.sym.Symbol:
-    """
-    Computes sequence lengths of PAD_ID-padded data in sequence_data.
-
-    :param sequence_data: Input data. Shape: (batch_size, seq_len).
-    :return: Length data. Shape: (batch_size,).
-    """
-    return mx.sym.sum(sequence_data != C.PAD_ID, axis=1)
 
 
 class OnlineMeanAndVariance:
@@ -262,7 +257,7 @@ def combine_means(means: List[Optional[float]], num_sents: List[int]) -> float:
 
 def combine_stds(stds: List[Optional[float]], means: List[Optional[float]], num_sents: List[int]) -> float:
     """
-    Takes a list of standard deviations, means and number of sentences of the same length and computes 
+    Takes a list of standard deviations, means and number of sentences of the same length and computes
     the combined standard deviation.
 
     :param stds: A list of standard deviations.
@@ -278,19 +273,35 @@ def combine_stds(stds: List[Optional[float]], means: List[Optional[float]], num_
                          if std is not None and mean is not None) / sum(num_sents))
 
 
-def average_arrays(arrays: List[mx.nd.NDArray]) -> mx.nd.NDArray:
+def average_arrays(arrays: List['np.ndarray']) -> 'np.ndarray':
     """
     Take a list of arrays of the same shape and take the element wise average.
 
-    :param arrays: A list of NDArrays with the same shape that will be averaged.
-    :return: The average of the NDArrays in the same context as arrays[0].
+    :param arrays: A list of ndarrays with the same shape that will be averaged.
+    :return: The average of the ndarrays in the same context as arrays[0].
     """
+    from mxnet import npx
     if not arrays:
         raise ValueError("arrays is empty.")
     if len(arrays) == 1:
         return arrays[0]
     check_condition(all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match")
-    return mx.nd.add_n(*arrays) / len(arrays)
+    return npx.add_n(*arrays) / len(arrays)
+
+
+def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
+    """
+    Compute the element-wise average of a list of tensors of the same shape.
+
+    :param tensors: A list of input tensors with the same shape.
+    :return: The average of the tensors on the same device as tensors[0].
+    """
+    if not tensors:
+        raise ValueError("tensors is empty.")
+    if len(tensors) == 1:
+        return tensors[0]
+    check_condition(all(tensors[0].shape == t.shape for t in tensors), "tensor shapes do not match")
+    return sum(tensors) / len(tensors)  # type: ignore
 
 
 def get_num_gpus() -> int:
@@ -300,21 +311,29 @@ def get_num_gpus() -> int:
     :return: The number of GPUs on the system.
     """
     try:
+        import mxnet as mx
+    except ImportError:
+        return 0
+    try:
         return mx.context.num_gpus()
-    except mx.MXNetError:
+    except:
         # Some builds of MXNet will raise a CUDA error when CUDA is not
         # installed on the host.  In this case, zero GPUs are available.
         return 0
 
 
-def get_gpu_memory_usage(ctx: Union[mx.context.Context, List[mx.context.Context]]) -> Dict[int, Tuple[int, int]]:
+def get_gpu_memory_usage(ctx: Union['mx.context.Context', List['mx.context.Context']]) -> Dict[int, Tuple[int, int]]:  # type: ignore
     """
     Returns used and total memory for GPUs identified by the given context list.
 
     :param ctx: List of MXNet context devices.
     :return: Dictionary of device id mapping to a tuple of (memory used, memory total).
     """
-    if isinstance(ctx, mx.context.Context):
+    try:
+        import mxnet as mx
+    except ImportError:
+        return {}
+    if not isinstance(ctx, List):
         ctx = [ctx]
     ctx = [c for c in ctx if c.device_type == 'gpu']
     if not ctx:
@@ -343,7 +362,7 @@ def determine_context(device_ids: List[int],
                       use_cpu: bool,
                       disable_device_locking: bool,
                       lock_dir: str,
-                      exit_stack: ExitStack) -> List[mx.Context]:
+                      exit_stack: ExitStack) -> List['mx.Context']:  # type: ignore
     """
     Determine the MXNet context to run on (CPU or GPU).
 
@@ -355,6 +374,10 @@ def determine_context(device_ids: List[int],
 
     :return: A list with the context(s) to run on.
     """
+    try:
+        import mxnet as mx
+    except ImportError:
+        return []
     if use_cpu:
         context = [mx.cpu()]
     else:
@@ -636,71 +659,6 @@ def get_validation_metric_points(model_path: str, metric: str):
     return [(d['%s-val' % metric], cp) for cp, d in enumerate(data, 1)]
 
 
-class PrintValue(mx.operator.CustomOp):
-    """
-    Custom operator that takes a symbol, prints its value to stdout and
-    propagates the value unchanged. Useful for debugging.
-
-    Use it as:
-    my_sym = mx.sym.Custom(op_type="PrintValue", data=my_sym, print_name="My symbol")
-
-    Additionally you can use the optional arguments 'use_logger=True' for using
-    the system logger and 'print_grad=True' for printing information about the
-    gradient (out_grad, i.e. "upper part" of the graph).
-    """
-
-    def __init__(self, print_name, print_grad: str, use_logger: str) -> None:
-        super().__init__()
-        self.print_name = print_name
-        # Note that all the parameters are serialized as strings
-        self.print_grad = (print_grad == "True")
-        self.use_logger = (use_logger == "True")
-
-    def __print_nd__(self, nd: mx.nd.array, label: str):
-        intro = "%s %s - shape %s" % (label, self.print_name, str(nd.shape))
-        if self.use_logger:
-            logger.info(intro)
-            logger.info(str(nd.asnumpy()))
-        else:
-            print(">>>>> ", intro)
-            print(nd.asnumpy())
-
-    def forward(self, is_train, req, in_data, out_data, aux):
-        self.__print_nd__(in_data[0], "Symbol")
-        self.assign(out_data[0], req[0], in_data[0])
-
-    def backward(self, req, out_grad, in_data, out_data, in_grad, aux):
-        if self.print_grad:
-            self.__print_nd__(out_grad[0], "Grad")
-        self.assign(in_grad[0], req[0], out_grad[0])
-
-
-@mx.operator.register("PrintValue")
-class PrintValueProp(mx.operator.CustomOpProp):
-    def __init__(self, print_name: str, print_grad: bool = False, use_logger: bool = False) -> None:
-        super().__init__(need_top_grad=True)
-        self.print_name = print_name
-        self.print_grad = print_grad
-        self.use_logger = use_logger
-
-    def list_arguments(self):
-        return ["data"]
-
-    def list_outputs(self):
-        return ["output"]
-
-    def infer_shape(self, in_shape):
-        return in_shape, in_shape, []
-
-    def infer_type(self, in_type):
-        return in_type, in_type, []
-
-    def create_operator(self, ctx, shapes, dtypes):
-        return PrintValue(self.print_name,
-                          print_grad=str(self.print_grad),
-                          use_logger=str(self.use_logger))
-
-
 def grouper(iterable: Iterable, size: int) -> Iterable:
     """
     Collect data into fixed-length chunks or blocks without discarding underfilled chunks or padding them.
@@ -727,36 +685,15 @@ def metric_value_is_better(new: float, old: float, metric: str) -> bool:
         return new < old
 
 
-def split(data: mx.nd.NDArray,
-          num_outputs: int,
-          axis: int = 1,
-          squeeze_axis: bool = False) -> List[mx.nd.NDArray]:
-    """
-    Version of mxnet.ndarray.split that always returns a list.  The original
-    implementation only returns a list if num_outputs > 1:
-    https://mxnet.incubator.apache.org/api/python/ndarray/ndarray.html#mxnet.ndarray.split
-
-    Splits an array along a particular axis into multiple sub-arrays.
-
-    :param data: The input.
-    :param num_outputs: Number of splits. Note that this should evenly divide
-                        the length of the axis.
-    :param axis: Axis along which to split.
-    :param squeeze_axis: If true, Removes the axis with length 1 from the shapes
-                         of the output arrays.
-    :return: List of NDArrays resulting from the split.
-    """
-    ndarray_or_list = data.split(num_outputs=num_outputs, axis=axis, squeeze_axis=squeeze_axis)
-    if num_outputs == 1:
-        return [ndarray_or_list]
-    return ndarray_or_list
-
-
 _DTYPE_TO_STRING = {
     np.float32: 'float32',
     np.float16: 'float16',
     np.int8: 'int8',
-    np.int32: 'int32'
+    np.int32: 'int32',
+    pt.float32: 'float32',
+    pt.float16: 'float16',
+    pt.int32: 'int32',
+    pt.int8: 'int8',
 }
 
 
@@ -764,7 +701,7 @@ def _print_dtype(dtype):
     return _DTYPE_TO_STRING.get(dtype, str(dtype))
 
 
-def log_parameters(params: mx.gluon.ParameterDict):
+def log_parameters(params: C.ParameterDict):
     """
     Logs information about model parameters.
     """
@@ -772,6 +709,7 @@ def log_parameters(params: mx.gluon.ParameterDict):
     learned_parameter_names = []
     total_learned = 0
     total_fixed = 0
+    visited = defaultdict(list)
     for name, param in sorted(params.items()):
         repr = "%s [%s, %s]" % (name, param.shape, _print_dtype(param.dtype))
         size = reduce(lambda x, y: x * y, param.shape)
@@ -781,14 +719,57 @@ def log_parameters(params: mx.gluon.ParameterDict):
             fixed_parameter_names.append(repr)
             total_fixed += size
         else:
-            total_learned += size
+            total_learned += size if param not in visited else 0
             learned_parameter_names.append(repr)
+        visited[param].append(name)
+    shared_parameter_names = []
+    for param, names in visited.items():
+        if len(names) > 1:
+            shared_parameter_names.append(" = ".join(names))
     total_parameters = total_learned + total_fixed
     logger.info("# of parameters: %d | trainable: %d (%.2f%%) | fixed: %d (%.2f%%)",
                 total_parameters,
                 total_learned, total_learned / total_parameters * 100,
                 total_fixed, total_fixed / total_parameters * 100)
     logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
+    logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names))
+    logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
+
+
+def log_parameters_pt(model: pt.nn.Module):
+    """
+    Logs information about model parameters.
+    """
+    fixed_parameter_names = []
+    learned_parameter_names = []
+    total_learned = 0
+    total_fixed = 0
+    visited = defaultdict(list)
+    for name, module in model.named_modules(remove_duplicate=False):
+        for param_name, param in module.named_parameters(prefix=name, recurse=False):
+            repr = "%s [%s, %s]" % (name, tuple(param.shape), _print_dtype(param.dtype))
+            size = param.shape.numel()
+            if not param.requires_grad:
+                fixed_parameter_names.append(repr)
+                total_fixed += size if param not in visited else 0
+            else:
+                total_learned += size if param not in visited else 0
+                learned_parameter_names.append(repr)
+            visited[param].append(param_name)
+    shared_parameter_names = []  # type: List[str]
+    total_shared = 0
+    for param, names in visited.items():
+        if len(names) > 1:
+            total_shared += param.shape.numel()
+            shared_parameter_names.append(" = ".join(names))
+    total_parameters = total_learned + total_fixed
+    logger.info("# of parameters: %d | trainable: %d (%.2f%%) | shared: %d (%.2f%%) | fixed: %d (%.2f%%)",
+                total_parameters,
+                total_learned, total_learned / total_parameters * 100,
+                total_shared, total_shared / total_parameters * 100,
+                total_fixed, total_fixed / total_parameters * 100)
+    logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
+    logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names, width=120))
     logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
 
 
@@ -820,3 +801,39 @@ def create_pool(max_processes):
         return SingleProcessPool()
     else:
         return multiprocessing.pool.Pool(processes=max_processes)
+
+
+def is_distributed() -> bool:
+    return torch.distributed.is_initialized()
+
+
+def is_primary_worker() -> bool:
+    """
+    True when current process is the primary worker (rank 0) or the only worker
+    (not running in distributed mode)
+    """
+    return not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+
+
+def get_local_rank() -> int:
+    return int(os.environ[C.DIST_ENV_LOCAL_RANK])
+
+
+T = TypeVar('T')
+
+
+def broadcast_object(obj: T, src: int = 0) -> T:
+    """
+    Broadcast a single Python object across workers (default source is primary
+    worker with rank 0)
+    """
+    obj_list = [obj]
+    torch.distributed.broadcast_object_list(obj_list, src=src)
+    return obj_list[0]
+
+
+def all_gather_object(obj: T) -> List[T]:
+    """Gather each worker's instance of an object, returned as a list"""
+    obj_list = [None] * torch.distributed.get_world_size()  # type: List[T]
+    torch.distributed.all_gather_object(obj_list, obj)
+    return obj_list

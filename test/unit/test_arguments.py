@@ -48,9 +48,8 @@ def test_simple_dict():
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], target_factor_vocabs=[],
           shared_vocab=False, num_words=(0, 0),
-          word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
-          no_bucketing=False, bucket_width=8, bucket_scaling=False, no_bucket_scaling=None, max_seq_len=(95, 95),
-          monitor_pattern=None, monitor_stat_func='mx_default')),
+          word_min_count=(1, 1), pad_vocab_to_multiple_of=8,
+          no_bucketing=False, bucket_width=8, bucket_scaling=False, max_seq_len=(95, 95))),
 
     # short parameters
     ('-s test_src -t test_tgt -d prep_data '
@@ -68,9 +67,8 @@ def test_simple_dict():
           output='test_output', overwrite_output=False,
           source_vocab=None, target_vocab=None, source_factor_vocabs=[], target_factor_vocabs=[],
           shared_vocab=False, num_words=(0, 0),
-          word_min_count=(1, 1), pad_vocab_to_multiple_of=None,
-          no_bucketing=False, bucket_width=8, bucket_scaling=False, no_bucket_scaling=None, max_seq_len=(95, 95),
-          monitor_pattern=None, monitor_stat_func='mx_default'))
+          word_min_count=(1, 1), pad_vocab_to_multiple_of=8,
+          no_bucketing=False, bucket_width=8, bucket_scaling=False, max_seq_len=(95, 95)))
 ])
 def test_io_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_io_args)
@@ -88,16 +86,16 @@ def test_logging_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize("test_params, expected_params", [
-    ('', dict(device_ids=[-1],
+    ('', dict(device_id=0,
+              device_ids=[-1],
               use_cpu=False,
-              omp_num_threads=None,
               env=None,
               disable_device_locking=False,
               lock_dir='/tmp')),
-    ('--device-ids 1 2 3 --use-cpu --disable-device-locking --lock-dir test_dir',
-     dict(device_ids=[1, 2, 3],
+    ('--device-id 1 --device-ids 1 2 3 --use-cpu --disable-device-locking --lock-dir test_dir',
+     dict(device_id=1,
+          device_ids=[1, 2, 3],
           use_cpu=True,
-          omp_num_threads=None,
           env=None,
           disable_device_locking=True,
           lock_dir='test_dir'))
@@ -132,7 +130,7 @@ def test_device_args(test_params, expected_params):
               decoder=C.TRANSFORMER_TYPE,
               dtype='float32',
               amp=False,
-              amp_scale_interval=2000))
+              apex_amp=False))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
@@ -181,9 +179,9 @@ def test_inference_args(test_params, expected_params):
     ('', dict(batch_size=4096,
               batch_type='word',
               batch_sentences_multiple_of=8,
-              round_batch_sizes_to_multiple_of=None,
               loss='cross-entropy-without-softmax-output',
               label_smoothing=0.1,
+              label_smoothing_impl='mxnet',
               length_task=None,
               length_task_layers=1,
               length_task_weight=1.0,
@@ -198,8 +196,11 @@ def test_inference_args(test_params, expected_params):
               transformer_dropout_act=(0.1, 0.1),
               transformer_dropout_prepost=(0.1, 0.1),
               optimizer='adam',
+              optimizer_betas=(0.9, 0.999),
+              optimizer_eps=1e-08,
               optimizer_params=None,
               horovod=False,
+              dist=False,
               kvstore='device',
               min_samples=None,
               max_samples=None,
@@ -211,7 +212,7 @@ def test_inference_args(test_params, expected_params):
               max_num_epochs=None,
               initial_learning_rate=0.0002,
               weight_decay=0.0,
-              momentum=None,
+              momentum=0.0,
               gradient_clipping_threshold=1.0,
               gradient_clipping_type='none',
               learning_rate_scheduler_type='plateau-reduce',
@@ -286,11 +287,10 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           shared_vocab=False,
           num_words=(0, 0),
           word_min_count=(1, 1),
-          pad_vocab_to_multiple_of=None,
+          pad_vocab_to_multiple_of=8,
           no_bucketing=False,
           bucket_width=8,
           bucket_scaling=False,
-          no_bucket_scaling=None,
           max_seq_len=(95, 95),
           min_num_shards=1,
           num_samples_per_shard=10000000,
@@ -301,8 +301,7 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
           loglevel='INFO',
           loglevel_secondary_workers='INFO',
           no_logfile=False,
-          max_processes=1
-          ))
+          max_processes=1))
 ])
 def test_tutorial_prepare_data_cli_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_prepare_data_cli_args)
@@ -322,11 +321,10 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           shared_vocab=False,
           num_words=(0, 0),
           word_min_count=(1, 1),
-          pad_vocab_to_multiple_of=None,
+          pad_vocab_to_multiple_of=8,
           no_bucketing=False,
           bucket_width=8,
           bucket_scaling=False,
-          no_bucket_scaling=None,
           max_seq_len=(95, 95),
           min_num_shards=1,
           num_samples_per_shard=10000000,
@@ -337,8 +335,7 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
           loglevel='INFO',
           loglevel_secondary_workers='INFO',
           no_logfile=False,
-          max_processes=1
-          ))
+          max_processes=1))
 ])
 def test_prepare_data_cli_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_prepare_data_cli_args)

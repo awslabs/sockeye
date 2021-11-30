@@ -46,7 +46,7 @@ Then [install the correct version of Sockeye](https://awslabs.github.io/sockeye/
 We also install several libraries for preprocessing, monitoring and evaluation:
 
 ```bash
-pip install matplotlib mxboard
+pip install matplotlib tensorboard
 
 # install BPE library
 

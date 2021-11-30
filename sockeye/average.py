@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -20,31 +20,37 @@ works well in practice.
 
 import argparse
 import itertools
-import os
 import logging
+import os
 from typing import Dict, Iterable, List
 
-import mxnet as mx
+import torch
 
-from sockeye.log import setup_main_logger, log_sockeye_version
 from . import arguments
 from . import constants as C
 from . import utils
+from .log import setup_main_logger, log_sockeye_version
 
 logger = logging.getLogger(__name__)
 
 
-def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
+def average(param_paths: Iterable[str]) -> Dict[str, torch.Tensor]:
     """
     Averages parameters from a list of .params file paths.
 
     :param param_paths: List of paths to parameter files.
     :return: Averaged parameter dictionary.
     """
-    all_params = []  # type: List[Dict[str, mx.nd.NDArray]]
+    all_params = []  # type: List[Dict[str, torch.Tensor]]
     for path in param_paths:
         logger.info("Loading parameters from '%s'", path)
-        params = mx.nd.load(path)
+        try:
+            params = torch.load(path)
+        except:
+            logger.info('Converting from MXNet')
+            from mxnet import npx
+            params = npx.load(path)
+            params = {k: torch.from_numpy(v.asnumpy()) for k, v in params.items()}
         all_params.append(params)
 
     logger.info("%d models loaded", len(all_params))
@@ -54,8 +60,8 @@ def average(param_paths: Iterable[str]) -> Dict[str, mx.nd.NDArray]:
     avg_params = {}
     # average arg_params
     for k in all_params[0]:
-        arrays = [p[k] for p in all_params]
-        avg_params[k] = utils.average_arrays(arrays)
+        tensors = [p[k] for p in all_params]
+        avg_params[k] = utils.average_tensors(tensors)
     return avg_params
 
 
@@ -159,7 +165,7 @@ def average_parameters(args: argparse.Namespace):
                                        metric=args.metric)
         avg_params = average(param_paths)
 
-    mx.nd.save(args.output, avg_params)
+    torch.save(avg_params, args.output)
     logger.info("Averaged parameters written to '%s'", args.output)
 
 

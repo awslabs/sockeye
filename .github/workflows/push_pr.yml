@@ -10,11 +10,12 @@ on:
 jobs:
   build:
     strategy:
-      max-parallel: 4
+      max-parallel: 8
       fail-fast: false
       matrix:
         python-version: [3.7, 3.8]
         platform: [ubuntu-latest, macos-latest]
+        use-mxnet: [mx-yes, mx-no]
 
     runs-on: ${{ matrix.platform }}
 
@@ -32,6 +33,9 @@ jobs:
       run: pip install -r requirements/requirements.txt
     - name: Development requirements
       run: pip install -r requirements/requirements.dev.txt
+    - name: Install MX2
+      if: ${{ matrix.use-mxnet == 'mx-yes' }}
+      run: pip install --pre -f https://dist.mxnet.io/python 'mxnet>=2.0.0b20210707,<=2.0.0b20210709' --upgrade 
     - name: Unit tests
       run: |
         pytest --version

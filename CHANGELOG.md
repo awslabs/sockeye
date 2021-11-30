@@ -9,8 +9,45 @@ Any bump in the second digit indicates a backwards-incompatible change,
 e.g. due to changing the architecture or simply modifying model parameter names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 
-Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.0] Sockeye 3: Fast Neural Machine Translation with PyTorch
+
+Sockeye is now based on PyTorch.
+We maintain backwards compatibility with MXNet models in version 2.3.x until 3.1.0.
+If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet is no longer strictly required.
+
+### Added
+
+- Added model converter CLI `sockeye.mx_to_pt` that converts MXNet models to PyTorch models.
+- Added `--apex-amp` training argument that runs entire model in FP16 mode, replaces `--dtype float16` (requires [Apex](https://github.com/NVIDIA/apex)).
+- Training automatically uses Apex fused optimizers if available (requires [Apex](https://github.com/NVIDIA/apex)).
+- Added training argument `--label-smoothing-impl` to choose label smoothing implementation (default of `mxnet` uses the same logic as MXNet Sockeye 2).
+
+### Changed
+
+- CLI names point to the PyTorch code base (e.g. `sockeye-train` etc.).
+- MXNet-based CLIs are now accessible via `sockeye-<name>-mx`.
+- MXNet code requires MXNet >= 2.0 since we adopted the new numpy interface.
+- `sockeye-train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --no_python --nproc_per_node N sockeye-train --dist ...`
+- Updated the [quickstart tutorial](docs/tutorials/wmt_large.md) to cover multi-device training with PyTorch Sockeye.
+- Changed `--device-ids` argument (plural) to `--device-id` (singular). For multi-GPU training, see distributed mode noted above.
+- Updated default value: `--pad-vocab-to-multiple-of 8`
+- Removed `--horovod` argument used with `horovodrun` (use `--dist` with `torchrun`).
+- Removed `--optimizer-params` argument (use `--optimizer-betas`, `--optimizer-eps`).
+- Removed `--no-hybridization` argument (use `PYTORCH_JIT=0`, see [Disable JIT for Debugging](https://pytorch.org/docs/stable/jit.html#disable-jit-for-debugging)).
+- Removed `--omp-num-threads` argument (use `--env=OMP_NUM_THREADS=N`).
+
+### Removed
+
+- Removed support for constrained decoding (both positive and negative lexical constraints)
+- Removed support for beam histories
+- Removed `--amp-scale-interval` argument.
+- Removed `--kvstore` argument.
+- Removed arguments: `--weight-init`, `--weight-init-scale` `--weight-init-xavier-factor-type`, `--weight-init-xavier-rand-type`
+- Removed `--decode-and-evaluate-device-id` argument.
+- Removed arguments: `--monitor-pattern'`, `--monitor-stat-func`
+- Removed CUDA-specific requirements files in `requirements/`
 
 ## [2.3.24]
 ### Added

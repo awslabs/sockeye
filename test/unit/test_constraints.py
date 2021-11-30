@@ -1,4 +1,4 @@
-# Copyright 2018--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -13,11 +13,11 @@
 
 from unittest.mock import Mock
 
-import mxnet as mx
+import numpy as np
 import pytest
 
-from sockeye.data_io import get_tokens, strids2ids
-from sockeye.inference import Translator
+from sockeye.data_io_pt import get_tokens, strids2ids
+from sockeye.inference_pt import Translator
 from sockeye.lexical_constraints import init_batch, get_bank_sizes, ConstrainedHypothesis, AvoidBatch, AvoidState, \
     AvoidTrie
 
@@ -279,7 +279,7 @@ def test_avoid_list_batch(global_raw_phrase_list, raw_phrase_list, batch_size, b
     avoid_batch = AvoidBatch(batch_size, beam_size, avoid_list=raw_phrase_list, global_avoid_trie=global_avoid_trie)
 
     for word_id in strids2ids(get_tokens(prefix)):
-        avoid_batch.consume(mx.nd.array([word_id] * (batch_size * beam_size)))
+        avoid_batch.consume(np.array([word_id] * (batch_size * beam_size)))
 
     avoid = [(x, y) for x, y in zip(*avoid_batch.avoid())]
     assert set(avoid) == set(expected_avoid)

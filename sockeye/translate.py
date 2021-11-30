@@ -14,14 +14,15 @@
 """
 Translation CLI.
 """
-from . import pre_mxnet
 # Called before importing mxnet or any module that imports mxnet
-pre_mxnet.init()
+from . import initial_setup
+initial_setup.handle_env_cli_arg()
 
 import argparse
 import logging
 import sys
 import time
+from . import inference
 from contextlib import ExitStack
 from typing import Dict, Generator, List, Optional, Union
 
@@ -32,9 +33,8 @@ from sockeye.utils import determine_context, log_basic_info, check_condition, gr
 from . import arguments
 from . import constants as C
 from . import data_io
-from . import inference
+
 from . import utils
-from .model import load_models
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def run_translate(args: argparse.Namespace):
                                     lock_dir=args.lock_dir,
                                     exit_stack=exit_stack)[0]
         logger.info("Translate Device: %s", context)
-
+        from sockeye.model import load_models
         models, source_vocabs, target_vocabs = load_models(context=context,
                                                            model_folders=args.models,
                                                            checkpoints=args.checkpoints,
@@ -121,11 +121,11 @@ def run_translate(args: argparse.Namespace):
         else:
             raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
+
         scorer = inference.CandidateScorer(
             length_penalty_alpha=args.length_penalty_alpha,
             length_penalty_beta=args.length_penalty_beta,
-            brevity_penalty_weight=brevity_penalty_weight,
-            prefix='scorer_')
+            brevity_penalty_weight=brevity_penalty_weight)
 
         translator = inference.Translator(context=context,
                                           ensemble_mode=args.ensemble_mode,
@@ -264,7 +264,7 @@ def translate(output_handler: OutputHandler,
     total_time = time.time() - tic
     batch_time = total_time / len(trans_inputs)
     for trans_input, trans_output in zip(trans_inputs, trans_outputs):
-        output_handler.handle(trans_input, trans_output, batch_time)
+        output_handler.handle(trans_input, trans_output, batch_time)  # type: ignore
     return total_time
 
 

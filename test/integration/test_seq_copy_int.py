@@ -13,21 +13,28 @@
 import logging
 import os
 import sys
+from itertools import product
 from tempfile import TemporaryDirectory
 from typing import List
 from unittest.mock import patch
 
-import mxnet as mx
-import numpy as np
 import pytest
+import torch as pt
+
+try:
+    import mxnet
+    # run integration tests with both MXNet and Pytorch
+    test_both_backends = [False, True]
+except ImportError:
+    # only run PyTorch-based tests
+    test_both_backends = [True]
 
 import sockeye.average
-import sockeye.checkpoint_decoder
+import sockeye.checkpoint_decoder_pt
 import sockeye.evaluate
-import sockeye.extract_parameters
 from sockeye import constants as C
 from sockeye.config import Config
-from sockeye.model import load_model
+from sockeye.model_pt import load_model
 from sockeye.test_utils import run_train_translate, tmp_digits_dataset
 from test.common import check_train_translate
 
@@ -81,7 +88,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --target-factors-num-embed 8",
      "--beam-size 2 --beam-search-stop first",
      True, 3, 1),
-    # Basic transformer with LHUC
+    # Basic transformer with LHUC DISABLE FOR MX2 FOR NOW (UNKNOWN FAILURE)
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
@@ -114,7 +121,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
-     " --length-task length --length-task-weight 1.0 --length-task-layers 2",
+     " --length-task length --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
      False, 0, 0),
@@ -132,14 +139,16 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      False, 0, 0),
 ]
 
-ENCODER_DECODER_SETTINGS = [(train_params.format(decoder=decoder), *other_params)
-                            for decoder in C.DECODERS
-                            for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
+# expand test cases across transformer & ssru, as well as use_pytorch true/false
+TEST_CASES = [(use_pytorch, train_params.format(decoder=decoder), *other_params)
+              for decoder, use_pytorch in product(C.DECODERS, test_both_backends)
+              for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
 
 
-@pytest.mark.parametrize("train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors",
-                         ENCODER_DECODER_SETTINGS)
-def test_seq_copy(train_params: str,
+@pytest.mark.parametrize("use_pytorch, train_params, translate_params, use_prepared_data,"
+                         "n_source_factors, n_target_factors", TEST_CASES)
+def test_seq_copy(use_pytorch: bool,
+                  train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
                   n_source_factors: int,
@@ -168,7 +177,8 @@ def test_seq_copy(train_params: str,
                               data=data,
                               use_prepared_data=use_prepared_data,
                               max_seq_len=_LINE_MAX_LENGTH,
-                              compare_output=False)
+                              compare_output=False,
+                              use_pytorch=use_pytorch)
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"
@@ -176,7 +186,6 @@ TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transform
                     " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 0"
                     " --checkpoint-interval 4",
                     "--beam-size 1")]
-
 
 @pytest.mark.parametrize("train_params, translate_params", TINY_TEST_MODEL)
 def test_other_clis(train_params: str, translate_params: str):
@@ -196,12 +205,12 @@ def test_other_clis(train_params: str, translate_params: str):
         data = run_train_translate(train_params=train_params,
                                    translate_params=translate_params,
                                    data=data,
-                                   max_seq_len=_LINE_MAX_LENGTH)
+                                   max_seq_len=_LINE_MAX_LENGTH,
+                                   use_pytorch=True)
 
         _test_checkpoint_decoder(data['dev_source'], data['dev_target'], data['model'])
         _test_mc_dropout(data['model'])
         _test_parameter_averaging(data['model'])
-        _test_extract_parameters_cli(data['model'])
         _test_evaluate_cli(data['test_outputs'], data['test_target'])
 
 
@@ -223,18 +232,6 @@ def _test_evaluate_cli(test_outputs: List[str], test_target_path: str):
             metrics="bleu chrf rouge1")
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
-
-
-def _test_extract_parameters_cli(model_path: str):
-    """
-    Runs parameter extraction CLI and asserts that the resulting numpy serialization contains a parameter key.
-    """
-    extract_params = "--input {input} --names output_layer.bias --list-all --output {output}".format(
-        output=os.path.join(model_path, "params.extracted"), input=model_path)
-    with patch.object(sys, "argv", extract_params.split()):
-        sockeye.extract_parameters.main()
-    with np.load(os.path.join(model_path, "params.extracted.npz")) as data:
-        assert "output_layer.bias" in data
 
 
 def _test_parameter_averaging(model_path: str):
@@ -259,18 +256,18 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
         num_dev_sent = sum(1 for _ in dev_fd)
     sample_size = min(1, int(num_dev_sent * 0.1))
 
-    model, source_vocabs, target_vocabs = load_model(model_folder=model_path, context=[mx.cpu()])
+    model, source_vocabs, target_vocabs = load_model(model_folder=model_path, device=pt.device('cpu'))
 
-    cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(context=mx.cpu(),
-                                                              inputs=[dev_source_path],
-                                                              references=[dev_target_path],
-                                                              source_vocabs=source_vocabs,
-                                                              target_vocabs=target_vocabs,
-                                                              model=model,
-                                                              model_folder=model_path,
-                                                              sample_size=sample_size,
-                                                              batch_size=2,
-                                                              beam_size=2)
+    cp_decoder = sockeye.checkpoint_decoder_pt.CheckpointDecoder(device=pt.device('cpu'),
+                                                                 inputs=[dev_source_path],
+                                                                 references=[dev_target_path],
+                                                                 source_vocabs=source_vocabs,
+                                                                 target_vocabs=target_vocabs,
+                                                                 model=model,
+                                                                 model_folder=model_path,
+                                                                 sample_size=sample_size,
+                                                                 batch_size=2,
+                                                                 beam_size=2)
     cp_metrics = cp_decoder.decode_and_evaluate()
     logger.info("Checkpoint decoder metrics: %s", cp_metrics)
     assert 'bleu' in cp_metrics
@@ -282,8 +279,7 @@ def _test_mc_dropout(model_path: str):
     """
     Check that loading a model with MC Dropoout returns a model with dropout layers.
     """
-    model, _, _ = load_model(model_folder=model_path, context=[mx.cpu()], mc_dropout=True,
-                             inference_only=True, hybridize=True)
+    model, _, _ = load_model(model_folder=model_path, device=pt.device('cpu'), mc_dropout=True, inference_only=True)
 
     # Ensure the model has some dropout turned on
     config_blocks = [block for _, block in model.config.__dict__.items() if isinstance(block, Config)]

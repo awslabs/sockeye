@@ -8,22 +8,18 @@ layout: default
 [![GitHub license](https://img.shields.io/github/license/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/blob/main/LICENSE)
 [![GitHub issues](https://img.shields.io/github/issues/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/issues)
 
-This is the documentation for Sockeye, a sequence-to-sequence framework for Neural Machine Translation based on Apache MXNet Incubating.
-It implements state-of-the-art encoder-decoder architectures, such as
 
-- Transformer Models with self-attention [[Vaswani et al, '17](https://arxiv.org/abs/1706.03762)]
+Sockeye is an open-source sequence-to-sequence framework for Neural Machine Translation built on [PyTorch](https://pytorch.org/).
+It implements distributed training and optimized inference for state-of-the-art models, powering [Amazon Translate](https://aws.amazon.com/translate/)
+and other MT applications.
 
 Recent developments and changes are tracked in our [CHANGELOG](https://github.com/awslabs/sockeye/blob/main/CHANGELOG.md).
+
+For a quickstart guide to training a standard NMT model on any size of data, see the [WMT 2014 English-German tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html).
 
 If you are interested in collaborating or have any questions, please submit a pull request or [issue](https://github.com/awslabs/sockeye/issues/new).
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
 Developers may be interested in [our developer guidelines](development.html).
-
-#### Version 2.0
-
-With version 2.0, we have updated the usage of MXNet by moving to the [Gluon API](https://mxnet.incubator.apache.org/api/python/docs/api/gluon/index.html) and adding support for several state-of-the-art features such as distributed training, low-precision training and decoding, as well as easier debugging of neural network architectures.
-In the context of this rewrite, we also trimmed down the large feature set of version 1.18.x to concentrate on the most important types of models and features, to provide a maintainable framework that is suitable for fast prototyping, research, and production.
-We welcome Pull Requests if you would like to help with adding back features when needed.
 
 ## Citation
 

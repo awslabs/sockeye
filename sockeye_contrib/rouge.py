@@ -14,7 +14,7 @@
 # limitations under the License.
 """ROUGE metric implementation.
 
-This is a modified and slightly extended verison of
+This is a modified and slightly extended version of
 https://github.com/miso-belica/sumy/blob/dev/sumy/evaluation/rouge.py.
 """
 

@@ -1,4 +1,4 @@
-# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -19,6 +19,7 @@ from typing import cast, Dict, Optional, Tuple, Union, List
 from functools import lru_cache
 
 import mxnet as mx
+from mxnet import gluon, np, npx
 from sockeye import __version__
 from sockeye.config import Config
 
@@ -31,6 +32,7 @@ from . import quantization
 from . import utils
 from . import vocab
 from dataclasses import dataclass
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,7 +71,7 @@ class ModelConfig(Config):
     intgemm_custom_lib: str = os.path.join(os.path.dirname(__file__), "libintgemm.so")
 
 
-class SockeyeModel(mx.gluon.Block):
+class SockeyeModel(gluon.Block):
     """
     SockeyeModel shares components needed for both training and inference.
     The main components of a Sockeye model are
@@ -94,10 +96,8 @@ class SockeyeModel(mx.gluon.Block):
                  inference_only: bool = False,
                  train_decoder_only: bool = False,
                  mc_dropout: bool = False,
-                 forward_pass_cache_size: int = 0,
-                 prefix: str = '',
-                 **kwargs) -> None:
-        super().__init__(prefix=prefix, **kwargs)
+                 forward_pass_cache_size: int = 0) -> None:
+        super().__init__()
         self.config = copy.deepcopy(config)
         logger.info("%s", self.config)
         self.dtype = config.dtype
@@ -109,46 +109,38 @@ class SockeyeModel(mx.gluon.Block):
         if self.forward_pass_cache_size > 0:
             self.embed_and_encode = self._cache_wrapper(self._embed_and_encode)
 
-        with self.name_scope():
-            # source & target embeddings
-            self.source_embed_weight, self.target_embed_weight, self.output_weight = self._get_embedding_weights()
+        # source & target embeddings, potentially shared/tied
+        source_embed_weight, target_embed_weight, output_weight = self._get_embedding_weights()
 
-            self.embedding_source = encoder.Embedding(config.config_embed_source,
-                                                      prefix=self.prefix + C.SOURCE_EMBEDDING_PREFIX,
-                                                      embed_weight=self.source_embed_weight)
-            self.embedding_target = encoder.Embedding(config.config_embed_target,
-                                                      prefix=self.prefix + C.TARGET_EMBEDDING_PREFIX,
-                                                      embed_weight=self.target_embed_weight)
+        self.embedding_source = encoder.Embedding(config.config_embed_source, embed_weight=source_embed_weight)
+        self.embedding_target = encoder.Embedding(config.config_embed_target, embed_weight=target_embed_weight)
 
-            # encoder & decoder first (to know the decoder depth)
-            self.encoder = encoder.get_encoder(self.config.config_encoder, prefix=self.prefix, dtype=config.dtype)
-            self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
-                                               prefix=self.prefix, dtype=config.dtype)
+        # encoder & decoder first (to know the decoder depth)
+        self.encoder = encoder.get_encoder(self.config.config_encoder, dtype=config.dtype)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
+                                           dtype=config.dtype)
 
-            self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                   vocab_size=self.config.vocab_target_size,
-                                                   weight=self.output_weight, dtype=config.dtype,
-                                                   prefix=self.prefix + C.DEFAULT_OUTPUT_LAYER_PREFIX)
+        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                               vocab_size=self.config.vocab_target_size,
+                                               weight=output_weight, dtype=config.dtype)
 
-            # Optional target factor output layers
-            for i, factor_config in enumerate(self.target_factor_configs, 1):
-                # Each target stream has its own, independent output layer
-                # TODO also consider weight tying with target factor input embeddings
-                output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                  vocab_size=factor_config.vocab_size,
-                                                  weight=None,
-                                                  dtype=config.dtype,
-                                                  prefix=self.prefix + C.TARGET_FACTOR_OUTPUT_LAYER_PREFIX % i)
-                # Register the layer as child block
-                setattr(self, self._output_layer_factor_format_string % i, output_layer)
+        # Optional target factor output layers
+        for i, factor_config in enumerate(self.target_factor_configs, 1):
+            # Each target stream has its own, independent output layer
+            # TODO also consider weight tying with target factor input embeddings
+            output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                              vocab_size=factor_config.vocab_size,
+                                              weight=None,
+                                              dtype=config.dtype)
+            # Register the layer as child block
+            setattr(self, self._output_layer_factor_format_string % i, output_layer)
 
-            self.length_ratio = None
-            if self.config.config_length_task is not None:
-                utils.check_condition(self.config.config_length_task.weight > 0.0,
-                                      'Auxiliary length task requested, but its loss weight is zero')
-                self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
-                                                       num_layers=self.config.config_length_task.num_layers,
-                                                       prefix=self.prefix + C.LENRATIOS_OUTPUT_LAYER_PREFIX)
+        self.length_ratio = None
+        if self.config.config_length_task is not None:
+            utils.check_condition(self.config.config_length_task.weight > 0.0,
+                                  'Auxiliary length task requested, but its loss weight is zero')
+            self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
+                                                   num_layers=self.config.config_length_task.num_layers)
 
     def cast(self, dtype):
         self.dtype = dtype
@@ -157,13 +149,13 @@ class SockeyeModel(mx.gluon.Block):
     def state_structure(self):
         return self.decoder.state_structure()
 
-    def encode(self, inputs, valid_length=None):
+    def encode(self, inputs: np.ndarray, valid_length: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
         """Encode the input sequence.
 
         Parameters
         ----------
-        inputs : NDArray
-        valid_length : NDArray or None, default None
+        inputs : ndarray
+        valid_length : ndarray or None, default None
 
         Returns
         -------
@@ -174,22 +166,23 @@ class SockeyeModel(mx.gluon.Block):
         source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
         return source_encoded, source_encoded_length
 
-    def encode_and_initialize(self, inputs, valid_length=None, constant_length_ratio=0.0):
+    def encode_and_initialize(self, inputs: np.ndarray, valid_length: Optional[np.ndarray] = None,
+                              constant_length_ratio: float = 0.0) -> Tuple[List[np.ndarray], np.ndarray]:
         """
         Encodes the input sequence and initializes decoder states (and predicted output lengths if available).
         Used for inference/decoding.
 
         Parameters
         ----------
-        inputs : NDArray
-        valid_length : NDArray or None, default None
+        inputs : ndarray
+        valid_length : ndarray or None, default None
         constant_length_ratio : float
 
         Returns
         -------
         states : list
             Initial states for the decoder.
-        predicted_output_length : NDArray
+        predicted_output_length : ndarray
             Predicted output length of shape (batch_size,), 0 if not available.
         """
         if self.mc_dropout:
@@ -207,7 +200,10 @@ class SockeyeModel(mx.gluon.Block):
 
         return states, predicted_output_length
 
-    def _embed_and_encode(self, source, source_length, target, target_length):
+    def _embed_and_encode(self,
+                          source: np.ndarray, source_length: np.ndarray,
+                          target: np.ndarray, target_length: np.ndarray) -> Tuple[np.ndarray, np.ndarray,
+                                                                                  np.ndarray, List[np.ndarray]]:
         """
         Encode the input sequence, embed the target sequence, and initialize the decoder.
         Used for training.
@@ -224,20 +220,25 @@ class SockeyeModel(mx.gluon.Block):
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         return source_encoded, source_encoded_length, target_embed, states
 
-    def decode_step(self, step_input, states, vocab_slice_ids=None):
+    def decode_step(self,
+                    step_input: np.ndarray,
+                    states: List[np.ndarray],
+                    vocab_slice_ids: Optional[np.ndarray] = None) -> Tuple[np.ndarray,
+                                                                           List[np.ndarray],
+                                                                           List[np.ndarray]]:
         """
         One step decoding of the translation model.
 
         Parameters
         ----------
-        step_input : NDArray
+        step_input : ndarray
             Shape (batch_size, num_target_factors)
-        states : list of NDArrays
-        vocab_slice_ids : NDArray or None
+        states : list of ndarrays
+        vocab_slice_ids : ndarray or None
 
         Returns
         -------
-        step_output : NDArray
+        step_output : ndarray
             Shape (batch_size, C_out)
         states : list
         target_factor_outputs : list
@@ -247,15 +248,15 @@ class SockeyeModel(mx.gluon.Block):
             # Turn on training mode so mxnet knows to add dropout
             _ = mx.autograd.set_training(True)
 
-        valid_length = mx.nd.ones(shape=(step_input.shape[0],), ctx=step_input.context)
-        target_embed, _ = self.embedding_target(step_input.reshape((0, 1, -1)), valid_length=valid_length)
+        valid_length = np.ones(shape=(step_input.shape[0],), ctx=step_input.ctx)
+        target_embed, _ = self.embedding_target(np.expand_dims(step_input, axis=1), valid_length=valid_length)
         decoder_out, new_states = self.decoder(target_embed, states)
-        decoder_out = decoder_out.squeeze(axis=1)
+        decoder_out = np.squeeze(decoder_out, axis=1)
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
 
         # Target factor outputs are currently stored in additional outputs.
-        target_factor_outputs = []
+        target_factor_outputs = []  # type: List[np.ndarray]
         # TODO: consider a dictionary mapping as return value
         for factor_output_layer in self.factor_output_layers:
             target_factor_outputs.append(factor_output_layer(decoder_out, None))
@@ -286,9 +287,9 @@ class SockeyeModel(mx.gluon.Block):
         return forward_output
 
     def predict_output_length(self,
-                              source_encoded: mx.nd.NDArray,
-                              source_encoded_length: mx.nd.NDArray,
-                              constant_length_ratio: float = 0.0):
+                              source_encoded: np.ndarray,
+                              source_encoded_length: np.ndarray,
+                              constant_length_ratio: float = 0.0) -> np.ndarray:
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)
             predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
@@ -298,7 +299,7 @@ class SockeyeModel(mx.gluon.Block):
             predicted_output_length = source_encoded_length * constant_length_ratio
         else:
             # (batch,)
-            predicted_output_length = mx.nd.zeros_like(source_encoded_length)
+            predicted_output_length = np.zeros_like(source_encoded_length)
 
         return predicted_output_length
 
@@ -353,7 +354,7 @@ class SockeyeModel(mx.gluon.Block):
             Whether to silently ignore parameters from the file that are not
             present in this Block.
         cast_dtype : bool, default False
-            Cast the data type of the NDArray loaded from the checkpoint to the dtype
+            Cast the data type of the ndarray loaded from the checkpoint to the dtype
             provided by the Parameter if any.
         dtype_source : str, default 'current'
             must be in {'current', 'saved'}
@@ -365,14 +366,14 @@ class SockeyeModel(mx.gluon.Block):
         <https://mxnet.incubator.apache.org/tutorials/gluon/save_load_params.html>`_
         """
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
-                                                     "This is either not a model directory or the first training "
-                                                     "checkpoint has not happened yet." % filename)
+                                                        "This is either not a model directory or the first training "
+                                                        "checkpoint has not happened yet." % filename)
         super().load_parameters(filename, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra,
                                 cast_dtype=cast_dtype, dtype_source=dtype_source)
         logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
 
     def set_parameters(self,
-                       new_params: Dict[str, mx.gluon.parameter.Parameter],
+                       new_params: Dict[str, gluon.Parameter],
                        allow_missing: bool = True,
                        ignore_extra: bool = False):
         """
@@ -411,7 +412,7 @@ class SockeyeModel(mx.gluon.Block):
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _get_embedding_weights(self) -> Tuple[mx.gluon.Parameter, mx.gluon.Parameter, mx.gluon.Parameter]:
+    def _get_embedding_weights(self) -> Tuple[gluon.Parameter, gluon.Parameter, gluon.Parameter]:
         """
         Returns embeddings for source, target, and output layer.
         When source and target embeddings are shared, they are created here and passed in to each side,
@@ -424,12 +425,13 @@ class SockeyeModel(mx.gluon.Block):
 
         tie_weights = C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type
 
-        source_embed_name = C.SOURCE_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
-        target_embed_name = C.TARGET_EMBEDDING_PREFIX + "weight" if not share_embed else C.SHARED_EMBEDDING_PREFIX + "weight"
-        output_embed_name = "target_output_weight" if not tie_weights else target_embed_name
-
         source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not tie_weights else 'default'
-        source_embed_weight = self.params.get(source_embed_name,
+        if source_grad_stype == 'row_sparse':
+            logger.warning(
+                "sparse gradient updates for source embeddings not supported yet with MXNet 2.0 & Numpy namespace. "
+                "Using 'default'")
+            source_grad_stype = 'default'
+        source_embed_weight = gluon.Parameter('weight',
                                               shape=(self.config.config_embed_source.vocab_size,
                                                      self.config.config_embed_source.num_embed),
                                               allow_deferred_init=True,
@@ -439,7 +441,12 @@ class SockeyeModel(mx.gluon.Block):
             target_embed_weight = source_embed_weight
         else:
             target_grad_stype = 'row_sparse' if self.config.config_embed_target.allow_sparse_grad and not tie_weights else 'default'
-            target_embed_weight = self.params.get(target_embed_name,
+            if target_grad_stype == 'row_sparse':
+                logger.warning(
+                    "sparse gradient updates for target embeddings not supported yet with MXNet 2.0 & Numpy namespace. "
+                    "Using 'default'")
+                target_grad_stype = 'default'
+            target_embed_weight = gluon.Parameter('weight',
                                                   shape=(self.config.config_embed_target.vocab_size,
                                                          self.config.config_embed_target.num_embed),
                                                   allow_deferred_init=True,
@@ -448,7 +455,7 @@ class SockeyeModel(mx.gluon.Block):
         if tie_weights:
             output_weight = target_embed_weight
         else:
-            output_weight = self.params.get(output_embed_name,
+            output_weight = gluon.Parameter('weight',
                                             shape=(self.config.config_embed_target.vocab_size,
                                                    self.config.config_decoder.model_size),
                                             allow_deferred_init=True)
@@ -515,6 +522,7 @@ class SockeyeModel(mx.gluon.Block):
         @lru_cache(maxsize=self.forward_pass_cache_size)
         def cache_func(*args):
             return class_func(*args)
+
         return cache_func
 
 
@@ -572,9 +580,15 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
+    if os.path.exists(params_fname + '.mx'):
+        logger.warning(f"!!!!! Found '{params_fname}.mx' file, indicating that {params_fname} has been converted to "
+                       "PyTorch."
+                       f"Using '{params_fname}.mx' because behavior when loading PyTorch files is undefined.!!!!!\n")
+        params_fname += '.mx'
+
     if (dtype == C.DTYPE_INT8 or
         model_config.dtype == C.DTYPE_INT8 or
-        for_disk_saving is not None) and "intgemm_fully_connected" not in dir(mx.nd.contrib):
+        for_disk_saving is not None) and "intgemm_fully_connected" not in dir(npx):
         # We're going to use int8 but it's not compiled into mxnet.
         path = os.path.abspath(model_config.intgemm_custom_lib)
         try:
@@ -587,7 +601,7 @@ def load_model(model_folder: str,
     # Are we converting the model to 8-bit?
     quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
     if quantizing:
-        model_config.dtype = C.DTYPE_INT8 # Ensure the scaling factor parameters are created.
+        model_config.dtype = C.DTYPE_INT8  # Ensure the scaling factor parameters are created.
 
     model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
                          mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)

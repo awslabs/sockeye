@@ -17,9 +17,9 @@ Decoders for sequence-to-sequence models.
 import logging
 from abc import abstractmethod
 from itertools import islice
-from typing import Dict, List, Optional, Tuple, Union, Type
+from typing import Dict, List, Optional, Union, Type, Tuple
 
-import mxnet as mx
+from mxnet import gluon, np, npx
 
 from . import constants as C
 from . import layers
@@ -29,12 +29,11 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False,
-                prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
-    return Decoder.get_decoder(config, inference_only, prefix, dtype)
+def get_decoder(config: DecoderConfig, inference_only: bool = False, dtype: str = C.DTYPE_FP32) -> 'Decoder':
+    return Decoder.get_decoder(config, inference_only, dtype)
 
 
-class Decoder(mx.gluon.Block):
+class Decoder(gluon.Block):
     """
     Generic decoder interface.
     A decoder needs to implement code to decode a target sequence known in advance (decode_sequence),
@@ -44,42 +43,39 @@ class Decoder(mx.gluon.Block):
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
 
-    __registry = {}  # type: Dict[Type[DecoderConfig], Tuple[Type['Decoder'], str]]
+    __registry = {}  # type: Dict[Type[DecoderConfig], Type['Decoder']]
 
     @classmethod
-    def register(cls, config_type: Type[DecoderConfig], suffix: str):
+    def register(cls, config_type: Type[DecoderConfig]):
         """
         Registers decoder type for configuration. Suffix is appended to decoder prefix.
 
         :param config_type: Configuration type for decoder.
-        :param suffix: String to append to decoder prefix.
 
         :return: Class decorator.
         """
         def wrapper(target_cls):
-            cls.__registry[config_type] = (target_cls, suffix)
+            cls.__registry[config_type] = target_cls
             return target_cls
 
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str, dtype: str) -> 'Decoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool, dtype: str) -> 'Decoder':
         """
         Creates decoder based on config type.
 
         :param config: Decoder config.
         :param inference_only: Create a decoder that is only used for inference.
-        :param prefix: Prefix to prepend for decoder.
         :param dtype: Data type for weights.
 
         :return: Decoder instance.
         """
         config_type = type(config)
-        if config_type not in cls.__registry:
-            raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
-        decoder_cls, suffix = cls.__registry[config_type]
-        # TODO: move final suffix/prefix construction logic into config builder
-        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix, dtype=dtype)  # type: ignore
+        #if config_type not in cls.__registry:
+        #    raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
+        decoder_cls = TransformerDecoder
+        return decoder_cls(config=config, inference_only=inference_only, dtype=dtype)  # type: ignore
 
     @abstractmethod
     def __init__(self):
@@ -91,13 +87,13 @@ class Decoder(mx.gluon.Block):
 
     @abstractmethod
     def init_state_from_encoder(self,
-                                encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None,
-                                target_embed: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
+                                encoder_outputs: np.ndarray,
+                                encoder_valid_length: Optional[np.ndarray] = None,
+                                target_embed: Optional[np.ndarray] = None) -> List[np.ndarray]:
         raise NotImplementedError()
 
     @abstractmethod
-    def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
+    def decode_seq(self, inputs: np.ndarray, states: List[np.ndarray]) -> np.ndarray:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -113,8 +109,8 @@ class Decoder(mx.gluon.Block):
         raise NotImplementedError()
 
 
-@Decoder.register(transformer.TransformerConfig, C.TRANSFORMER_DECODER_PREFIX)
-class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
+@Decoder.register(transformer.TransformerConfig)
+class TransformerDecoder(Decoder, gluon.HybridBlock):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
     In training, computation scores for each position of the known target sequence are computed in parallel,
@@ -124,38 +120,33 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     time-step ensures correct self-attention scores and is updated with every step.
 
     :param config: Transformer configuration.
-    :param prefix: Name prefix for symbols of this decoder.
     :param inference_only: Only use the model for inference enabling some optimizations,
                            such as disabling the auto-regressive mask.
     """
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_DECODER_PREFIX,
                  inference_only: bool = False,
                  dtype: str = C.DTYPE_FP32) -> None:
         Decoder.__init__(self)
-        mx.gluon.HybridBlock.__init__(self, prefix=prefix)
+        gluon.HybridBlock.__init__(self)
         self.config = config
         self.inference_only = inference_only
-        with self.name_scope():
-            self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                             num_embed=self.config.model_size,
-                                                             max_seq_len=self.config.max_seq_len_target,
-                                                             prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX,
-                                                             scale_up_input=True,
-                                                             scale_down_positions=False)
-            self.autoregressive_bias = transformer.AutoRegressiveBias(prefix="autoregressive_bias_")
+        self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                         num_embed=self.config.model_size,
+                                                         max_seq_len=self.config.max_seq_len_target,
+                                                         scale_up_input=True,
+                                                         scale_down_positions=False)
+        self.autoregressive_bias = transformer.AutoRegressiveBias()
 
-            self.layers = mx.gluon.nn.HybridSequential()
-            for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i, dtype=dtype,
-                                                                    inference_only=self.inference_only))
+        self.layers = gluon.nn.HybridSequential()
+        for i in range(config.num_layers):
+            self.layers.add(transformer.TransformerDecoderBlock(config, dtype=dtype,
+                                                                inference_only=self.inference_only))
 
-            self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                     dropout=config.dropout_prepost,
-                                                                     prefix="final_process_",
-                                                                     num_hidden=self.config.model_size)
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=self.config.model_size)
 
     def state_structure(self) -> str:
         """
@@ -164,9 +155,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         """
         structure = ''
         if self.inference_only:
-            structure += C.STEP_STATE + C.BIAS_STATE + C.ENCODER_STATE * self.config.num_layers
+            structure += C.STEP_STATE + C.MASK_STATE + C.ENCODER_STATE * self.config.num_layers
         else:
-            structure += C.STEP_STATE + C.ENCODER_STATE + C.BIAS_STATE
+            structure += C.STEP_STATE + C.ENCODER_STATE + C.MASK_STATE
 
         total_num_states = sum(layer.num_state_tensors for layer in self.layers)
         structure += C.DECODER_STATE * total_num_states
@@ -174,9 +165,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         return structure
 
     def init_state_from_encoder(self,
-                                encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None,
-                                target_embed: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
+                                encoder_outputs: np.ndarray,
+                                encoder_valid_length: Optional[np.ndarray] = None,
+                                target_embed: Optional[np.ndarray] = None) -> List[np.ndarray]:
         """
         Returns the initial states given encoder output. States for teacher-forced training are encoder outputs
         and a valid length mask for encoder outputs.
@@ -191,9 +182,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         :return: Initial states.
         """
         if target_embed is None:  # Inference: initial step = 0. Shape: (batch_size, 1)
-            steps = mx.nd.zeros_like(encoder_valid_length).expand_dims(axis=1, inplace=True)
+            steps = np.expand_dims(np.zeros_like(encoder_valid_length), axis=1)
         else:  # Training: steps up to target length. Shape: (1, target_length)
-            steps = mx.nd.contrib.arange_like(target_embed, axis=1).expand_dims(axis=0, inplace=True)
+            steps = np.expand_dims(npx.arange_like(target_embed, axis=1), axis=0)
 
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
@@ -201,22 +192,22 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
             for layer in self.layers:
                 enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs)
-                states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
+                states.append(np.transpose(enc_att_kv, axes=(1, 0, 2)))
         else:
             # NO encoder projection caching
-            states = [steps, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
+            states = [steps, np.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
 
         _batch_size = encoder_outputs.shape[0]
-        _ctx = encoder_outputs.context
+        _ctx = encoder_outputs.ctx
         _dtype = encoder_outputs.dtype
-        dummy_autoregr_states = [mx.nd.zeros(layer.get_states_shape(_batch_size), ctx=_ctx, dtype=_dtype)
+        dummy_autoregr_states = [np.zeros(layer.get_states_shape(_batch_size), ctx=_ctx, dtype=_dtype)
                                  for layer in self.layers
                                  for _ in range(layer.num_state_tensors)]
 
         states += dummy_autoregr_states
         return states
 
-    def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
+    def decode_seq(self, inputs: np.ndarray, states: List[np.ndarray]) -> np.ndarray:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -228,7 +219,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         outputs, _ = self.forward(inputs, states)
         return outputs
 
-    def hybrid_forward(self, F, step_input, states):
+    def forward(self, step_input: np.ndarray, states: List[np.ndarray]) -> Tuple[np.ndarray, List[np.ndarray]]:
         mask = None
         if self.inference_only:
             steps, source_valid_length, *other = states
@@ -247,16 +238,16 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
 
         # (batch_size * heads, query_length)
-        source_valid_length = layers.prepare_source_valid_lengths(F, source_valid_length, step_input,
+        source_valid_length = layers.prepare_source_valid_lengths(source_valid_length, step_input,
                                                                   num_heads=self.config.attention_heads)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
         # (length, batch_size, model_size)
-        target = F.transpose(target, axes=(1, 0, 2))
+        target = np.transpose(target, axes=(1, 0, 2))
 
         if self.config.dropout_prepost > 0.0:
-            target = F.Dropout(data=target, p=self.config.dropout_prepost)
+            target = npx.dropout(data=target, p=self.config.dropout_prepost)
 
         new_autoregr_states = []
         for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
@@ -270,7 +261,7 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
             new_autoregr_states += [*new_layer_autoregr_state]
 
         target = self.final_process(target, None)
-        target = F.transpose(target, axes=(1, 0, 2))
+        target = np.transpose(target, axes=(1, 0, 2))
 
         # Inference: increment steps by 1 (discarded in training)
         steps = steps + 1

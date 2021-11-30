@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,9 +17,9 @@ import os
 import re
 from tempfile import TemporaryDirectory
 
-import mxnet as mx
-import numpy as np
 import pytest
+import numpy as np
+import torch as pt
 
 from sockeye import __version__
 from sockeye import constants as C
@@ -276,53 +276,18 @@ def test_combine_stds(samples, sample_means, sample_stds, expected_std):
 def test_average_arrays():
     n = 4
     shape = (12, 14)
-    arrays = [np.random.uniform(0, 1, (12, 14)) for _ in range(n)]
-    expected_average = np.zeros(shape)
+    arrays = [pt.rand(12, 14) for _ in range(n)]
+    expected_average = pt.zeros(*shape)
     for array in arrays:
         expected_average += array
     expected_average /= 4
 
-    mx_arrays = [mx.nd.array(a) for a in arrays]
-    assert np.allclose(utils.average_arrays(mx_arrays).asnumpy(), expected_average)
+    pt.testing.assert_allclose(utils.average_tensors(arrays), expected_average)
 
     with pytest.raises(utils.SockeyeError) as e:
         other_shape = (12, 13)
-        utils.average_arrays(mx_arrays + [mx.nd.zeros(other_shape)])
-    assert "nd array shapes do not match" == str(e.value)
-
-
-def test_print_value():
-    data = mx.sym.Variable("data")
-    weights = mx.sym.Variable("weights")
-    softmax_label = mx.sym.Variable("softmax_label")
-
-    fc = mx.sym.FullyConnected(data=data, num_hidden=128, weight=weights, no_bias=True)
-    out = mx.sym.SoftmaxOutput(data=fc, label=softmax_label, name="softmax")
-
-    fc_print = mx.sym.Custom(op_type="PrintValue", data=fc, print_name="FullyConnected")
-    out_print = mx.sym.SoftmaxOutput(data=fc_print, label=softmax_label, name="softmax")
-
-    data_np = np.random.rand(1, 256)
-    weights_np = np.random.rand(128, 256)
-    label_np = np.random.rand(1, 128)
-
-    executor_base = out.simple_bind(mx.cpu(), data=(1, 256), softmax_label=(1, 128), weights=(128, 256))
-    executor_base.arg_dict["data"][:] = data_np
-    executor_base.arg_dict["weights"][:] = weights_np
-    executor_base.arg_dict["softmax_label"][:] = label_np
-
-    executor_print = out_print.simple_bind(mx.cpu(), data=(1, 256), softmax_label=(1, 128), weights=(128, 256))
-    executor_print.arg_dict["data"][:] = data_np
-    executor_print.arg_dict["weights"][:] = weights_np
-    executor_print.arg_dict["softmax_label"][:] = label_np
-
-    output_base = executor_base.forward(is_train=True)[0]
-    output_print = executor_print.forward(is_train=True)[0]
-    assert np.isclose(output_base.asnumpy(), output_print.asnumpy()).all()
-
-    executor_base.backward()
-    executor_print.backward()
-    assert np.isclose(executor_base.grad_arrays[1].asnumpy(), executor_print.grad_arrays[1].asnumpy()).all()
+        utils.average_tensors(arrays + [pt.zeros(*other_shape)])
+    assert "tensor shapes do not match" == str(e.value)
 
 
 @pytest.mark.parametrize("new, old, metric, result",
@@ -339,17 +304,6 @@ def test_print_value():
                          ])
 def test_metric_value_is_better(new, old, metric, result):
     assert utils.metric_value_is_better(new, old, metric) == result
-
-
-@pytest.mark.parametrize("num_factors", [1, 2, 3])
-def test_split(num_factors):
-    batch_size = 4
-    bucket_key = 10
-    # Simulates splitting factored input
-    data = mx.nd.random.normal(shape=(batch_size, bucket_key, num_factors))
-    result = utils.split(data, num_outputs=num_factors, axis=2, squeeze_axis=True)
-    assert isinstance(result, list)
-    assert result[0].shape == (batch_size, bucket_key)
 
 
 def test_get_num_gpus():
@@ -386,14 +340,6 @@ def test_smart_open_without_suffix():
         _touch_file(fname, compressed=False, empty=False)
         with utils.smart_open(fname) as fin:
             assert len(fin.readlines()) == 10
-
-
-@pytest.mark.parametrize("data,expected_lengths", [
-    (mx.nd.array([[1, 2, 0], [1, 0, 0], [0, 0, 0]]), mx.nd.array([2, 1, 0]))
-])
-def test_compute_lengths(data, expected_lengths):
-    lengths = utils.compute_lengths(mx.sym.Variable('data')).eval(data=data)[0]
-    assert np.allclose(lengths.asnumpy(), expected_lengths.asnumpy())
 
 
 @pytest.mark.parametrize("line_num,line,expected_metrics", [

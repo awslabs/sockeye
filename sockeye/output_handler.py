@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -18,8 +18,8 @@ from itertools import chain
 from typing import Optional
 
 import sockeye.constants as C
-from . import data_io
-from . import inference
+from sockeye.utils import smart_open
+from . import inference_pt
 
 
 def get_output_handler(output_type: str,
@@ -31,7 +31,7 @@ def get_output_handler(output_type: str,
     :raises: ValueError for unknown output_type.
     :return: Output handler.
     """
-    output_stream = sys.stdout if output_fname is None else data_io.smart_open(output_fname, mode='w')
+    output_stream = sys.stdout if output_fname is None else smart_open(output_fname, mode='w')
     if output_type == C.OUTPUT_HANDLER_TRANSLATION:
         return StringOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_SCORE:
@@ -57,8 +57,8 @@ class OutputHandler(ABC):
 
     @abstractmethod
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -87,8 +87,8 @@ class StringOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -113,8 +113,8 @@ class StringWithScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -138,8 +138,8 @@ class ScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -163,8 +163,8 @@ class PairWithScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -185,8 +185,8 @@ class BenchmarkOutputHandler(StringOutputHandler):
     """
 
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -205,38 +205,6 @@ class BenchmarkOutputHandler(StringOutputHandler):
         return False
 
 
-class BeamStoringHandler(OutputHandler):
-    """
-    Output handler to store beam histories in JSON format.
-
-    :param stream: Stream to write translations to (e.g. sys.stdout).
-    """
-
-    def __init__(self, stream):
-        self.stream = stream
-
-    def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
-               t_walltime: float = 0.):
-        """
-        :param t_input: Translator input.
-        :param t_output: Translator output.
-        :param t_walltime: Total wall-clock time for translation.
-        """
-        assert len(t_output.beam_histories) >= 1, "Translator output should contain beam histories."
-        # If the sentence was max_len split, we may have more than one history
-        for h in t_output.beam_histories:
-            # Add the number of steps in each beam
-            h["number_steps"] = len(h["predicted_tokens"])  # type: ignore
-            # Some outputs can have more than one beam, add the id for bookkeeping
-            h["id"] = t_output.sentence_id  # type: ignore
-            print(json.dumps(h, sort_keys=True), file=self.stream, flush=True)
-
-    def reports_score(self) -> bool:
-        return False
-
-
 class JSONOutputHandler(OutputHandler):
     """
     Output single-line JSON objects.
@@ -246,8 +214,8 @@ class JSONOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         Outputs a JSON object of the fields in the `TranslatorOutput` object.
@@ -268,8 +236,8 @@ class FactoredStringOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
+               t_input: inference_pt.TranslatorInput,
+               t_output: inference_pt.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.

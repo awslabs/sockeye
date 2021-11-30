@@ -1,2 +1,0 @@
-horovod==0.19.1
-mpi4py

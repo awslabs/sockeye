@@ -17,10 +17,9 @@ Code for scoring.
 import logging
 import math
 import time
-from typing import cast, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
-import mxnet as mx
-import numpy as np
+from mxnet import context, gluon, np, npx
 
 from . import constants as C
 from . import data_io
@@ -33,24 +32,21 @@ from .output_handler import OutputHandler
 logger = logging.getLogger(__name__)
 
 
-class BatchScorer(mx.gluon.HybridBlock):
+class BatchScorer(gluon.HybridBlock):
 
     def __init__(self,
                  scorer: CandidateScorer,
                  score_type: str = C.SCORING_TYPE_DEFAULT,
                  constant_length_ratio: Optional[float] = None,
-                 prefix='BatchScorer_',
                  softmax_temperature: Optional[float] = None) -> None:
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.score_type = score_type
         self.scorer = scorer
         self.constant_length_ratio = constant_length_ratio
         self.softmax_temperature = softmax_temperature
 
-    def hybrid_forward(self, F, logits, labels, length_ratio, source_length, target_length):
+    def forward(self, logits, labels, length_ratio, source_length, target_length):
         """
-
-        :param F: MXNet Namespace
         :param logits: Model logits. Shape: (batch, length, vocab_size).
         :param labels: Gold targets. Shape: (batch, length).
         :param length_ratio: Length Ratios. Shape: (batch,).
@@ -58,17 +54,17 @@ class BatchScorer(mx.gluon.HybridBlock):
         :param target_length: Target lengths. Shape: (batch,).
         :return: Sequence scores. Shape: (batch,).
         """
-        logprobs = F.log_softmax(logits, axis=-1, temperature=self.softmax_temperature)
+        logprobs = npx.log_softmax(logits, axis=-1, temperature=self.softmax_temperature)
 
         # Select the label probability, then take their logs.
         # probs and scores: (batch_size, target_seq_len)
-        token_scores = F.pick(logprobs, labels, axis=-1)
+        token_scores = npx.pick(logprobs, labels, axis=-1)
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
             token_scores = token_scores * -1
 
-        # Sum, then apply length penalty. The call to `mx.sym.where` masks out invalid values from scores.
+        # Sum, then apply length penalty. The call to `np.where` masks out invalid values from scores.
         # zeros and sums: (batch_size,)
-        scores = F.sum(F.where(labels != 0, token_scores, F.zeros_like(token_scores)), axis=1)
+        scores = np.sum(np.where(labels != 0, token_scores, np.zeros_like(token_scores)), axis=1)
 
         if self.constant_length_ratio is not None and self.constant_length_ratio > 0.0:
             predicted_output_length = source_length * self.constant_length_ratio
@@ -96,7 +92,7 @@ class Scorer:
                  batch_scorer: BatchScorer,
                  source_vocabs: List[vocab.Vocab],
                  target_vocabs: List[vocab.Vocab],
-                 context: Union[List[mx.context.Context], mx.context.Context]) -> None:
+                 context: Union[List[context.Context], context.Context]) -> None:
         self.source_vocab_inv = vocab.reverse_vocab(source_vocabs[0])
         self.target_vocab_inv = vocab.reverse_vocab(target_vocabs[0])
         self.model = model
@@ -104,21 +100,20 @@ class Scorer:
         self.context = context
         self.exclude_list = {C.BOS_ID, C.EOS_ID, C.PAD_ID}
 
-    def score_batch(self, batch: data_io.Batch) -> mx.nd.NDArray:
+    def score_batch(self, batch: data_io.Batch) -> np.ndarray:
         batch = batch.split_and_load(ctx=self.context)
-        batch_scores = []  # type: List[mx.nd.NDArray]
+        batch_scores = []  # type: List[np.ndarray]
         for inputs, labels in batch.shards():
             source, source_length, target, target_length = inputs
-            outputs = self.model(*inputs)  # type: Dict[str, mx.nd.NDArray]
-            logits = outputs[C.LOGITS_NAME]  # type: mx.nd.NDArray
+            outputs = self.model(*inputs)  # type: Dict[str, np.ndarray]
+            logits = outputs[C.LOGITS_NAME]  # type: np.ndarray
             label = labels[C.TARGET_LABEL_NAME]
-            length_ratio = outputs.get(C.LENRATIO_NAME, mx.nd.zeros_like(source_length))
+            length_ratio = outputs.get(C.LENRATIO_NAME, np.zeros_like(source_length))
             scores = self.batch_scorer(logits, label, length_ratio, source_length, target_length)
             batch_scores.append(scores)
 
         # shape: (batch_size,).
-        batch_scores = mx.nd.concat(*batch_scores, dim=0)
-        return cast(mx.nd.NDArray, batch_scores)
+        return np.concatenate(batch_scores, axis=0)
 
     def score(self, score_iter: data_io.BaseParallelSampleIter, output_handler: OutputHandler):
         total_time = 0.
@@ -130,9 +125,9 @@ class Scorer:
             batch_time = time.time() - batch_tic
             total_time += batch_time
 
-            for sentno, (source, target, score) in enumerate(zip(batch.source.astype('int32')[:, :, 0].asnumpy(),
-                                                                 batch.target.astype('int32')[:, :, 0].asnumpy(),
-                                                                 scores.asnumpy()), 1):
+            for sentno, (source, target, score) in enumerate(zip(batch.source.astype('int32', copy=False)[:, :, 0],
+                                                                 batch.target.astype('int32', copy=False)[:, :, 0],
+                                                                 scores), 1):
                 sentence_no += 1
 
                 # Transform arguments in preparation for printing
@@ -147,8 +142,8 @@ class Scorer:
                     score = -np.inf
 
                 # Output handling routines require us to make use of inference classes.
-                output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),
-                                      inference.TranslatorOutput(sentence_no, target_string,
+                output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),  # type: ignore
+                                      inference.TranslatorOutput(sentence_no, target_string,  # type: ignore
                                                                  target_tokens, score),
                                       batch_time)
 

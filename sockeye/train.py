@@ -14,9 +14,9 @@
 """
 Simple Training CLI.
 """
-from . import pre_mxnet
 # Called before importing mxnet or any module that imports mxnet
-pre_mxnet.init()
+from . import initial_setup
+initial_setup.handle_env_cli_arg()
 
 import argparse
 import logging
@@ -25,11 +25,11 @@ import shutil
 import sys
 import tempfile
 from contextlib import ExitStack
-from typing import cast, Callable, Optional, Dict, List, Tuple, Union
+from typing import cast, Callable, Optional, Dict, List, Tuple
 
 import mxnet as mx
 from mxnet import gluon
-from mxnet.contrib import amp
+from mxnet import amp
 
 from . import arguments
 from . import checkpoint_decoder
@@ -471,6 +471,7 @@ def create_encoder_config(args: argparse.Namespace,
         postprocess_sequence=encoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
+        depth_key_value=encoder_transformer_model_size,
         use_lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         decoder_type=args.decoder,
         use_glu=args.transformer_feed_forward_use_glu)
@@ -729,14 +730,10 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         label_smoothing = args.label_smoothing if i == 0 else .0  # Note: No label smoothing for target factor losses.
 
         if args.loss == C.CROSS_ENTROPY:
-            losses.append(loss.CrossEntropyLoss(name=name,
-                                                weight=weight,
-                                                label_smoothing=label_smoothing,
-                                                dtype=args.dtype,
-                                                output_name=output_name,
-                                                label_name=label_name,
-                                                metric_prefix=metric_prefix))
-        elif args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT:
+            logger.warning("cross-entropy with SoftmaxOutput is deprecated with MXNet 2.0. "
+                           "Using 'cross-entropy-without-softmax-output'")
+
+        if args.loss == C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT or args.loss == C.CROSS_ENTROPY:
             losses.append(loss.CrossEntropyLossWithoutSoftmaxOutput(name=name,
                                                                     weight=weight,
                                                                     label_smoothing=label_smoothing,
@@ -788,7 +785,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
     # inside the TrainingModel.
     if gradient_clipping_threshold is not None and gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
         optimizer_params["clip_gradient"] = gradient_clipping_threshold
-    if args.momentum is not None:
+    if args.momentum > 0:
         optimizer_params["momentum"] = args.momentum
     # We normalize by the number of non-PAD symbols in a batch we need to disable rescale_grad.
     optimizer_params["rescale_grad"] = 1.0
@@ -810,6 +807,7 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
         raise ValueError("Invalid weight initialization type: %s" % args.weight_init)
 
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                             args.initial_learning_rate,
                                              args.learning_rate_t_scale,
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
@@ -831,14 +829,14 @@ def create_optimizer_config(args: argparse.Namespace) -> OptimizerConfig:
 
 
 def set_grad_req_for_fixed_params(config: model.ModelConfig,
-                                  params: mx.gluon.ParameterDict,
+                                  params: C.ParameterDict,
                                   fixed_param_names: List[str],
                                   fixed_param_strategy: Optional[str] = None):
     utils.check_condition(not config.lhuc or fixed_param_strategy is None,
                           "LHUC fixes all other parameters and is thus not compatible with other fixing strategies.")
     if config.lhuc:
         # fix everything except LHUC-related parameters
-        fixed_param_names += [name for name in params if not name.endswith(C.LHUC_PREFIX + "weight")]
+        fixed_param_names += [name for name in params if not name.endswith("lhuc.weight")]
         logger.info("LHUC enabled, fixing all non-LHUC parameters")
     elif fixed_param_strategy is not None:
         fixed_param_names += fixed_param_names_from_stragegy(config, params, fixed_param_strategy)
@@ -855,7 +853,7 @@ def set_grad_req_for_fixed_params(config: model.ModelConfig,
 
 
 def fixed_param_names_from_stragegy(config: model.ModelConfig,
-                                    params: Union[Dict, mx.gluon.ParameterDict],
+                                    params: C.ParameterDict,
                                     strategy: str) -> List[str]:
     """
     Generate a fixed parameter list given a list of all parameter names and
@@ -871,27 +869,29 @@ def fixed_param_names_from_stragegy(config: model.ModelConfig,
             return not name.startswith(C.DECODER_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
             # First and last encoder and decoder layers.
-            return not (name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, 0)) or
-                        name.startswith("{}{}".format(C.TRANSFORMER_ENCODER_PREFIX, num_encoder_layers - 1)) or
-                        name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, 0)) or
-                        name.startswith("{}{}".format(C.TRANSFORMER_DECODER_PREFIX, num_decoder_layers - 1)))
+            first_encoder_prefix = f'{C.ENCODER_PREFIX}.layers.{0}'
+            last_encoder_prefix = f'{C.ENCODER_PREFIX}.layers.{num_encoder_layers - 1}'
+            first_decoder_prefix = f'{C.DECODER_PREFIX}.layers.{0}'
+            last_decoder_prefix = f'{C.DECODER_PREFIX}.layers.{num_decoder_layers - 1}'
+            return not (name.startswith(first_encoder_prefix) or
+                        name.startswith(last_encoder_prefix) or
+                        name.startswith(first_decoder_prefix) or
+                        name.startswith(last_decoder_prefix))
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_EMBEDDINGS:
             # Any type of learned embedding.
-            return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or
-                        name.startswith(C.TARGET_EMBEDDING_PREFIX) or
-                        name.startswith(C.SHARED_EMBEDDING_PREFIX))
+            return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or name.startswith(C.TARGET_EMBEDDING_PREFIX))
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
             # Target output projection.
             return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_FEED_FORWARD:
-            return not (name.endswith("_ff_h2o_bias") or name.endswith("_ff_h2o_weight") or
-                        name.endswith("_ff_i2h_bias") or name.endswith("_ff_i2h_weight"))
+            return not (name.endswith("ff.ff1.bias") or name.endswith("ff.ff1.weight") or
+                        name.endswith("ff.ff2.bias") or name.endswith("ff.ff2.weight"))
         if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_AND_SOURCE_EMBEDDINGS:
             return name.startswith(C.ENCODER_PREFIX) or name.startswith(C.SOURCE_EMBEDDING_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_HALF_AND_SOURCE_EMBEDDINGS:
             if name.startswith(C.ENCODER_PREFIX):
                 for i in range(num_encoder_layers // 2):
-                    if name.startswith("{}{}_".format(C.TRANSFORMER_ENCODER_PREFIX, i)):
+                    if name.startswith(f"{C.ENCODER_PREFIX}.layers.{i}"):
                         return True
             return name.startswith(C.SOURCE_EMBEDDING_PREFIX)
         raise ValueError("Unknown fixed parameter strategy: %s" % strategy)
@@ -1059,6 +1059,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
         optimizer_config = create_optimizer_config(args)
         training_model.initialize(optimizer_config.initializer, ctx=context)
+        #training_model.save_parameters(os.path.join(args.output, 'params.init'))
+
         if args.params is not None:  # load existing parameters if present
             training_model.load_parameters(filename=args.params,
                                            ctx=context,
@@ -1112,7 +1114,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             amp.init_trainer(gluon_trainer)
             # AMP does not allow passing args when creating the loss scaler, so
             # we set them immediately after calling init.
-            gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval
+            gluon_trainer._amp_loss_scaler._scale_seq_len = args.amp_scale_interval  # pylint: disable=no-member
 
         losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
@@ -1141,7 +1143,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         )
 
         cp_decoder = create_checkpoint_decoder(args, exit_stack, context,
-                                               training_model, source_vocabs, target_vocabs, hybridize=hybridize)
+                                            training_model, source_vocabs, target_vocabs, hybridize=hybridize)
 
         training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter, checkpoint_decoder=cp_decoder)
         return training_state

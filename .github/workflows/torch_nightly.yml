@@ -1,5 +1,5 @@
-# Runs unit & system tests with mxnet nightly builds (both mxnet and mxnet-mkl)
-name: MXNet Nightly
+# Runs unit & system tests with torch nightly builds
+name: Torch Nightly
 
 on:
   schedule:
@@ -36,9 +36,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements/requirements.txt
         pip install -r requirements/requirements.dev.txt
-        pip install --upgrade --pre "mxnet<2" -f https://dist.mxnet.io/python
-    - name: Print mxnet build
-      run: pip list | grep mxnet
+        pip3 install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --upgrade
+    - name: Print torch build
+      run: pip list | grep torch
     - name: Unit tests
       run: pytest 
     - name: System tests

@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -15,15 +15,14 @@
 Command-line tool to inspect model embeddings.
 """
 import argparse
-import sys
 import logging
+import sys
 from typing import Iterable, Tuple
 
-import mxnet as mx
-import numpy as np
+import torch as pt
 
-from . import constants as C
-from . import model
+import sockeye.constants as C
+from . import model_pt
 from . import utils
 from .data_io import tokens2ids
 from .log import setup_main_logger
@@ -33,27 +32,25 @@ from .vocab import reverse_vocab
 logger = logging.getLogger(__name__)
 
 
-def compute_sims(inputs: mx.nd.NDArray, normalize: bool) -> mx.nd.NDArray:
+def compute_sims(inputs: pt.Tensor, normalize: bool) -> pt.Tensor:
     """
     Returns a matrix with pair-wise similarity scores between inputs.
     Similarity score is (normalized) Euclidean distance. 'Similarity with self' is masked
     to large negative value.
 
-    :param inputs: NDArray of inputs.
+    :param inputs: tensor of inputs.
     :param normalize: Whether to normalize to unit-length.
-    :return: NDArray with pairwise similarities of same shape as inputs.
+    :return: tensor with pairwise similarities of same shape as inputs.
     """
     if normalize:
         logger.info("Normalizing embeddings to unit length")
-        inputs = mx.nd.L2Normalization(inputs, mode='instance')
-    sims = mx.nd.dot(inputs, inputs, transpose_b=True)
-    sims_np = sims.asnumpy()
-    np.fill_diagonal(sims_np, -9999999.)
-    sims = mx.nd.array(sims_np)
+        inputs = inputs / pt.linalg.norm(inputs, dim=-1, keepdim=True)
+    sims = pt.mm(inputs, inputs.transpose(0, 1))
+    sims.fill_diagonal_(-9999999.)
     return sims
 
 
-def nearest_k(similarity_matrix: mx.nd.NDArray,
+def nearest_k(similarity_matrix: pt.Tensor,
               query_word_id: int,
               k: int,
               gamma: float = 1.0) -> Iterable[Tuple[int, float]]:
@@ -67,15 +64,8 @@ def nearest_k(similarity_matrix: mx.nd.NDArray,
     :return: List of indices and values of k nearest elements.
     """
     # pylint: disable=unbalanced-tuple-unpacking
-    values, indices = mx.nd.topk(mx.nd.softmax(similarity_matrix[query_word_id] / gamma), k=k, ret_typ='both')
-    return zip(indices.asnumpy(), values.asnumpy())
-
-
-def get_embedding_parameter_names(config: model.ModelConfig) -> Tuple[str, str]:
-    if C.WEIGHT_TYING_SRC in config.weight_tying_type and C.WEIGHT_TYING_SRC_TRG_SOFTMAX in config.weight_tying_type:
-        name = "%sweight" % C.SHARED_EMBEDDING_PREFIX
-        return name, name
-    return "%sweight" % C.SOURCE_EMBEDDING_PREFIX, "%sweight" % C.TARGET_EMBEDDING_PREFIX
+    values, indices = pt.topk((similarity_matrix[query_word_id] / gamma).softmax(0), k=k)
+    return zip(indices.tolist(), values.tolist())
 
 
 def main():
@@ -99,9 +89,10 @@ def main():
 def embeddings(args: argparse.Namespace):
     logger.info("Arguments: %s", args)
 
-    sockeye_model, source_vocabs, target_vocabs = model.load_model(args.model,
-                                                                   checkpoint=args.checkpoint,
-                                                                   hybridize=False)
+    sockeye_model, source_vocabs, target_vocabs = model_pt.load_model(args.model,
+                                                                      checkpoint=args.checkpoint,
+                                                                      device=pt.device('cpu'))
+    sockeye_model.eval()
 
     if args.side == "source":
         vocab = source_vocabs[0]
@@ -109,13 +100,10 @@ def embeddings(args: argparse.Namespace):
         vocab = target_vocabs[0]
     vocab_inv = reverse_vocab(vocab)
 
-    params = sockeye_model.collect_params()
     if args.side == "source":
-        logger.info("Loading %s", sockeye_model.source_embed_weight.name)
-        weights = params[sockeye_model.source_embed_weight.name].data()
+        weights = sockeye_model.embedding_source.embedding.weight.data
     else:
-        logger.info("Loading %s", sockeye_model.target_embed_weight.name)
-        weights = params[sockeye_model.target_embed_weight.name].data()
+        weights = sockeye_model.embedding_target.embedding.weight.data
     logger.info("Embedding size: %d", weights.shape[1])
 
     logger.info("Computing pairwise similarities...")
@@ -133,6 +121,7 @@ def embeddings(args: argparse.Namespace):
         print("Input:", line.rstrip())
         ids = tokens2ids(tokens, vocab)
         for token, token_id in zip(tokens, ids):
+            token = C.UNK_SYMBOL if token_id == C.UNK_ID else token
             print("%s id=%d" % (token, token_id))
             neighbours = nearest_k(sims, token_id, args.k, args.gamma)
             for i, (neighbour_id, score) in enumerate(neighbours, 1):

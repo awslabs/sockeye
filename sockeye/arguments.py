@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -22,8 +22,8 @@ from typing import Any, Callable, Dict, List, Tuple, Optional
 
 import yaml
 
+from sockeye.utils import smart_open
 from . import constants as C
-from . import data_io
 
 
 class ConfigArgumentParser(argparse.ArgumentParser):
@@ -101,15 +101,6 @@ def save_args(args: argparse.Namespace, fname: str):
 def load_args(fname: str) -> argparse.Namespace:
     with open(fname, 'r') as inp:
         return argparse.Namespace(**yaml.safe_load(inp))
-
-
-class Removed(argparse.Action):
-    """
-    When this argument is specified, raise an error with the argument's help
-    message.  This is used to notify users when arguments are removed.
-    """
-    def __call__(self, parser, namespace, values, option_string=None):
-        raise RuntimeError(self.help)
 
 
 def regular_file() -> Callable:
@@ -271,7 +262,7 @@ def file_or_stdin() -> Callable:
         if path is None or path == "-":
             return sys.stdin
         else:
-            return data_io.smart_open(path)
+            return smart_open(path)
 
     return parse
 
@@ -302,24 +293,6 @@ def add_average_args(params):
         choices=C.AVERAGE_CHOICES,
         default=C.AVERAGE_BEST,
         help="selection method. Default: %(default)s.")
-
-
-def add_extract_args(params):
-    extract_params = params.add_argument_group("Extracting")
-    extract_params.add_argument("input",
-                                metavar="INPUT",
-                                type=str,
-                                help="Either a model directory (using its %s) or a specific params.x file." % C.PARAMS_BEST_NAME)
-    extract_params.add_argument('--names', '-n',
-                                nargs='*',
-                                default=[],
-                                help='Names of parameters to be extracted.')
-    extract_params.add_argument('--list-all', '-l',
-                                action='store_true',
-                                help='List names of all available parameters.')
-    extract_params.add_argument('--output', '-o',
-                                type=str,
-                                help="File to write extracted parameters to (in .npz format).")
 
 
 def add_rerank_args(params):
@@ -382,13 +355,13 @@ def add_logging_args(params):
     logging_params.add_argument('--quiet-secondary-workers', '-qsw',
                                 default=False,
                                 action="store_true",
-                                help='Suppress console logging for secondary workers when training with Horovod/MPI.')
+                                help='Suppress console logging for secondary workers in distributed training.')
     logging_params.add_argument('--no-logfile',
                                 default=False,
                                 action="store_true",
                                 help='Suppress file logging')
     log_levels = ['INFO', 'DEBUG', 'ERROR']
-    logging_params.add_argument('--loglevel',
+    logging_params.add_argument('--loglevel', '--log-level',
                                 default='INFO',
                                 choices=log_levels,
                                 help='Log level. Default: %(default)s.')
@@ -466,20 +439,6 @@ def add_prepared_data_args(params):
                         help='Prepared training data directory created through python -m sockeye.prepare_data.')
 
 
-def add_monitoring_args(params):
-    params.add_argument('--monitor-pattern',
-                        default=None,
-                        type=str,
-                        help="Pattern to match outputs/weights/gradients to monitor. '.*' monitors everything. "
-                             "Default: %(default)s.")
-
-    params.add_argument('--monitor-stat-func',
-                        default=C.STAT_FUNC_DEFAULT,
-                        choices=list(C.MONITOR_STAT_FUNCS.keys()),
-                        help="Statistics function to run on monitored outputs/weights/gradients. "
-                             "Default: %(default)s.")
-
-
 def add_training_output_args(params):
     params.add_argument('--output', '-o',
                         required=True,
@@ -500,7 +459,6 @@ def add_training_io_args(params):
     add_bucketing_args(params)
     add_vocab_args(params)
     add_training_output_args(params)
-    add_monitoring_args(params)
 
 
 def add_bucketing_args(params):
@@ -517,11 +475,6 @@ def add_bucketing_args(params):
                         action='store_true',
                         help='Scale source/target buckets based on length ratio to reduce padding. Default: '
                              '%(default)s.')
-    params.add_argument('--no-bucket-scaling',
-                        action=Removed,
-                        nargs=0,
-                        help='Removed: The argument "--no-bucket-scaling" has been removed because this is now the '
-                             'default behavior. To activate bucket scaling, use the argument "--bucket-scaling".')
 
     params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
                         type=multiple_values(num_values=2, greater_or_equal=1),
@@ -569,6 +522,12 @@ def add_prepare_data_cli_args(params):
 def add_device_args(params):
     device_params = params.add_argument_group("Device parameters")
 
+    device_params.add_argument('--device-id',
+                               type=int_greater_or_equal(0),
+                               default=0,
+                               help='GPU to use. 0 translates to "cuda:0", etc. When running in distributed mode '
+                                    '(--dist), each process\'s device is set automatically. Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     device_params.add_argument('--device-ids', default=[-1],
                                help='List or number of GPUs ids to use. Default: %(default)s. '
                                     'Use negative numbers to automatically acquire a certain number of GPUs, e.g. -5 '
@@ -580,14 +539,9 @@ def add_device_args(params):
     device_params.add_argument('--use-cpu',
                                action='store_true',
                                help='Use CPU device instead of GPU.')
-    device_params.add_argument('--omp-num-threads',
-                               type=int,
-                               help='Set the OMP_NUM_THREADS environment variable (CPU threads). Recommended: set to '
-                                    'number of GPUs for training, number of physical CPU cores for inference. Default: '
-                                    '%(default)s.')
     device_params.add_argument('--env',
-                               help='List of environment variables to be set before importing MXNet. Separated by ",", '
-                                    'e.g. --env=OMP_NUM_THREADS=4,MXNET_GPU_WORKER_NTHREADS=3 etc.')
+                               help='List of environment variables to be set before importing PyTorch. Separated by '
+                                    '",", e.g. --env=OMP_NUM_THREADS=1,PYTORCH_JIT=0 etc.')
     device_params.add_argument('--disable-device-locking',
                                action='store_true',
                                help='Just use the specified device ids without locking.')
@@ -639,7 +593,7 @@ def add_vocab_args(params):
                         help='Minimum frequency of words to be included in vocabularies. Default: %(default)s.')
     params.add_argument('--pad-vocab-to-multiple-of',
                         type=int,
-                        default=None,
+                        default=8,
                         help='Pad vocabulary to a multiple of this integer. Default: %(default)s.')
 
 
@@ -797,10 +751,16 @@ def add_model_parameters(params):
     model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
                               help="Data type.")
 
-    model_params.add_argument('--amp', action='store_true', help='Use MXNet\'s automatic mixed precision (AMP).')
-    model_params.add_argument('--amp-scale-interval', type=int, default=2000,
-                              help='Attempt to increase loss scale after this many updates without overflow. '
-                                   'Default: %(default)s.')
+    model_params.add_argument('--amp',
+                              action='store_true',
+                              help='Use PyTorch automatic mixed precision (AMP) to run compatible operations in '
+                                   'float16 mode instead of float32.')
+    model_params.add_argument('--apex-amp',
+                              action='store_true',
+                              help='Use NVIDIA Apex automatic mixed precision (AMP) to run the entire model in float16 '
+                                   'mode with float32 master weights and dynamic loss scaling. This is faster than '
+                                   'PyTorch AMP with some additional risk and requires installing Apex: '
+                                   'https://github.com/NVIDIA/apex')
 
 def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',
@@ -823,10 +783,6 @@ def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_T
                         help='For word and max-word batching, guarantee that each batch contains a multiple of X '
                              'sentences. For word batching, round up or down to nearest multiple. For max-word '
                              'batching, always round down. Default: %(default)s.')
-    params.add_argument('--round-batch-sizes-to-multiple-of',
-                        action=Removed,
-                        help='Removed: The argument "--round-batch-sizes-to-multiple-of" has been renamed to '
-                             '"--batch-sentences-multiple-of".')
     params.add_argument('--update-interval',
                         type=int,
                         default=1,
@@ -834,6 +790,7 @@ def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_T
                              'simulate large batches (ex: batch_size 2560 with update_interval 4 gives effective batch '
                              'size 10240). Default: %(default)s.')
 
+# TODO(migration): Remove after removing MXNet code
 def add_hybridization_arg(params):
     params.add_argument('--no-hybridization',
                         action='store_true',
@@ -846,6 +803,7 @@ def add_training_args(params):
 
     add_batch_args(train_params)
 
+    # TODO(migration): Update after removing MXNet code
     train_params.add_argument('--loss',
                               default=C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT,
                               choices=[C.CROSS_ENTROPY, C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT],
@@ -854,6 +812,11 @@ def add_training_args(params):
                               default=0.1,
                               type=float,
                               help='Smoothing constant for label smoothing. Default: %(default)s.')
+    train_params.add_argument('--label-smoothing-impl',
+                              default='mxnet',
+                              choices=['mxnet', 'fairseq', 'torch'],
+                              help='Choose label smoothing implementation. Default: %(default)s. '
+                                   '`torch` requires PyTorch 1.10.')
 
     train_params.add_argument('--length-task',
                               type=str,
@@ -963,11 +926,21 @@ def add_training_args(params):
                               default=C.OPTIMIZER_ADAM,
                               choices=C.OPTIMIZERS,
                               help='SGD update rule. Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--optimizer-params',
                               type=simple_dict(),
                               default=None,
                               help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
+    train_params.add_argument('--optimizer-betas',
+                              type=multiple_values(2, data_type=float),
+                              default=(0.9, 0.999),
+                              help='Beta1 and beta2 for Adam-like optimizers, specified "x:x". Default: %(default)s.')
+    train_params.add_argument('--optimizer-eps',
+                              type=float_greater_or_equal(0),
+                              default=1e-08,
+                              help='Optimizer epsilon. Default: %(default)s.')
 
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--horovod',
                               action='store_true',
                               help='Use Horovod/MPI for distributed training (Sergeev and Del Balso 2018, '
@@ -975,7 +948,14 @@ def add_training_args(params):
                                    '-np X python3 -m sockeye.train` where X is the number of processes. Increasing '
                                    'the number of processes multiplies the effective batch size (ex: batch_size 2560 '
                                    'with `-np 4` gives effective batch size 10240).')
+    train_params.add_argument('--dist',
+                              action='store_true',
+                              help='Run in distributed training mode. When using this option, launch training with '
+                                   '`torchrun --nproc_per_node N -m sockeye.train`. Increasing the number of processes '
+                                   'multiplies the effective batch size (ex: batch_size 2560 with `--nproc_per_node 4` '
+                                   'gives effective batch size 10240).')
 
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument("--kvstore",
                               type=str,
                               default=C.KVSTORE_DEVICE,
@@ -984,21 +964,25 @@ def add_training_args(params):
                                    "Use any of 'dist_sync', 'dist_device_sync' and 'dist_async' for distributed "
                                    "training. Default: %(default)s.")
 
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--weight-init',
                               type=str,
                               default=C.INIT_XAVIER,
                               choices=C.INIT_TYPES,
                               help='Type of base weight initialization. Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--weight-init-scale',
                               type=float,
                               default=3.0,
                               help='Weight initialization scale. Applies to uniform (scale) and xavier (magnitude). '
                                    'Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--weight-init-xavier-factor-type',
                               type=str,
                               default=C.INIT_XAVIER_FACTOR_TYPE_AVG,
                               choices=C.INIT_XAVIER_FACTOR_TYPES,
                               help='Xavier factor type. Default: %(default)s.')
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--weight-init-xavier-rand-type',
                               type=str,
                               default=C.RAND_TYPE_UNIFORM,
@@ -1014,7 +998,7 @@ def add_training_args(params):
                               help='Weight decay constant. Default: %(default)s.')
     train_params.add_argument('--momentum',
                               type=float,
-                              default=None,
+                              default=0.0,
                               help='Momentum constant. Default: %(default)s.')
     train_params.add_argument('--gradient-clipping-threshold',
                               type=float,
@@ -1068,6 +1052,7 @@ def add_training_args(params):
                               help='x>0: decode x sampled sentences from validation data and '
                                    'compute evaluation metrics. x==-1: use full validation data. Default: %(default)s.')
 
+    # TODO(migration): Remove after removing MXNet code
     train_params.add_argument('--decode-and-evaluate-device-id',
                               default=None,
                               type=int,
@@ -1238,7 +1223,7 @@ def add_inference_args(params):
                                action="store_true",
                                default=False,
                                help='Enables an alternative, faster greedy decoding implementation. It does not '
-                                    'support batch decoding, ensembles, or lexical constraints, and hypothesis scores '
+                                    'support batch decoding, ensembles, and hypothesis scores '
                                     'are not normalized. Default: %(default)s.')
 
     decode_params.add_argument('--beam-search-stop',
@@ -1322,6 +1307,7 @@ def add_inference_args(params):
                                default=None,
                                help="Specify the number of translations to load for each source word from the lexicon "
                                     "given with --restrict-lexicon. Default: Load all entries from the lexicon.")
+    # TODO(migration): remove once MXNet is removed
     decode_params.add_argument('--avoid-list',
                                type=str,
                                default=None,
@@ -1417,19 +1403,3 @@ def add_build_vocab_args(params):
     params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
     add_vocab_args(params)
     add_process_pool_args(params)
-
-
-def add_init_embedding_args(params):
-    params.add_argument('--weight-files', '-w', required=True, nargs='+',
-                        help='List of input weight files in .npy, .npz or Sockeye parameter format.')
-    params.add_argument('--vocabularies-in', '-i', required=True, nargs='+',
-                        help='List of input vocabularies as token-index dictionaries in .json format.')
-    params.add_argument('--vocabularies-out', '-o', required=True, nargs='+',
-                        help='List of output vocabularies as token-index dictionaries in .json format.')
-    params.add_argument('--names', '-n', nargs='+',
-                        help='List of Sockeye parameter names for (embedding) weights. Default: %(default)s.',
-                        default=[n + "weight" for n in [C.SOURCE_EMBEDDING_PREFIX, C.TARGET_EMBEDDING_PREFIX]])
-    params.add_argument('--file', '-f', required=True,
-                        help='File to write initialized parameters to.')
-    params.add_argument('--encoding', '-c', type=str, default=C.VOCAB_ENCODING,
-                        help='Open input vocabularies with specified encoding. Default: %(default)s.')

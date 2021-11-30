@@ -12,14 +12,14 @@
 # permissions and limitations under the License.
 
 """
-Functions to generate loss symbols for sequence-to-sequence models.
+Functions to generate loss blocks for sequence-to-sequence models.
 """
 import logging
 import math
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
-import mxnet as mx
+from mxnet import gluon, np, npx
 
 from . import constants as C
 from . import utils
@@ -27,7 +27,7 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-class Loss(mx.gluon.HybridBlock):
+class Loss(gluon.HybridBlock):
     """
     Generic Loss interface.
     A loss has a name, a configuration, and stores information about the output and label it requires from the model(s),
@@ -40,7 +40,7 @@ class Loss(mx.gluon.HybridBlock):
                  label_name: str,
                  weight: float = 1.0,
                  metric_prefix: str = '') -> None:
-        super().__init__(prefix=name)
+        super().__init__()
         self._name = name
         self._output_name = output_name
         self._label_name = label_name
@@ -51,7 +51,7 @@ class Loss(mx.gluon.HybridBlock):
                     self._name, self.weight, self.metric.name, self.metric.short_name,
                     self.output_name, self.label_name)
 
-    def forward(self, outputs: Dict[str, Any], labels: Dict[str, Any]):
+    def __call__(self, outputs: Dict[str, Any], labels: Dict[str, Any]):
         """
         Loss retrieves the required output and label.
         """
@@ -61,13 +61,7 @@ class Loss(mx.gluon.HybridBlock):
                               "label '%s' not found. Loss requires this label key" % self.output_name)
         output = outputs[self.output_name]
         label = labels[self.label_name]
-        return super().forward(output.astype(label, copy=False), label)
-
-    def hybrid_forward(self, F, outputs, labels):
-        """
-        Given outputs and labels, the loss returns two scalars: the loss value and a normalizer for that loss value.
-        """
-        raise NotImplementedError()
+        return super().__call__(output.astype(label, copy=False), label)
 
     @abstractmethod
     def create_metric(self) -> 'LossMetric':
@@ -132,64 +126,6 @@ class LossMetric(ABC):
         self._num_inst = 0.0
 
 
-class CrossEntropyLoss(Loss):
-    """
-    Computes the cross-entropy loss.
-    Uses F.SoftmaxOutput to efficiently backpropagate cross-entropy gradients and do label smoothing.
-    """
-
-    def __init__(self,
-                 name: str = C.CROSS_ENTROPY,
-                 weight: float = 1.0,
-                 label_smoothing: float = 0.0,
-                 dtype: str = C.DTYPE_FP32,
-                 output_name: str = C.LOGITS_NAME,
-                 label_name: str = C.TARGET_LABEL_NAME,
-                 ignore_label: int = C.PAD_ID,
-                 metric_prefix: str = '') -> None:
-        super().__init__(name=name, output_name=output_name, label_name=label_name,
-                         weight=weight, metric_prefix=metric_prefix)
-        self.ignore_label = ignore_label
-        self._alpha = label_smoothing
-        self._normalization = "valid"
-        self._dtype = dtype
-
-    def hybrid_forward(self, F, logits, labels):
-        """
-        Returns unnormalized cross-entropy loss of the batch.
-
-        :param F: MXNet API namespace.
-        :param logits: Logits. Shape: (batch_size, sequence_length, output_dim).
-        :param labels: Sparse labels. Shape: (batch_size, sequence_length)
-        :return: Cross-entropy loss (1,), and number of valid tokens for normalization.
-        """
-        # computes softmax over the last axis, backpropagates ce gradients. Shape: (batch, len, vocab)
-        softmax_out = F.SoftmaxOutput(data=logits,
-                                      label=labels,
-                                      ignore_label=self.ignore_label,
-                                      use_ignore=True,
-                                      normalization=self._normalization,
-                                      smooth_alpha=self._alpha,
-                                      # see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
-                                      grad_scale=self.weight,
-                                      preserve_shape=True)
-        # (batch, len)
-        pred = F.log(F.pick(F.BlockGrad(softmax_out), labels, axis=-1, keepdims=False))
-        # (batch, len,)
-        valid_mask = labels != self.ignore_label
-        # (batch, len)
-        pred = pred * valid_mask
-        # (1,)
-        ce = -F.sum(pred)
-        return ce, F.sum(valid_mask)
-
-    def create_metric(self) -> 'LossMetric':
-        """
-        Create an instance of the EvalMetric that corresponds to this Loss function.
-        """
-        return PerplexityMetric(prefix=self._metric_prefix)
-
-
 class CrossEntropyLossWithoutSoftmaxOutput(Loss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
@@ -211,18 +147,19 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._dtype = dtype
-        self._num_labels = num_labels
+        self._num_labels = float(num_labels)
 
-    def hybrid_forward(self, F, logits, labels):
-        pred = F.log_softmax(logits, axis=-1)
+    def forward(self, logits: np.ndarray, labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        pred = npx.log_softmax(logits, axis=-1)
 
         # (batch, len)
-        neg_log_likelihood = - F.pick(pred, labels, axis=-1, keepdims=False)
+        neg_log_likelihood = - npx.pick(pred,  # pylint: disable=invalid-unary-operand-type
+                                        labels, axis=-1, keepdims=False)
 
         # label smoothing as in
         # https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4
         if self._alpha > 0:
-            all_scores = pred.sum(axis=-1)
+            all_scores = np.sum(pred, axis=-1)
             neg_log_likelihood = (1 - self._alpha) * neg_log_likelihood - self._alpha / self._num_labels * all_scores
 
         # (batch, len,)
@@ -232,13 +169,13 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
         loss = neg_log_likelihood * valid_mask
 
         # (1,)
-        num_valid = F.sum(valid_mask)
+        num_valid = np.sum(valid_mask)
 
         # (1,)
-        ce = F.sum(loss) * self.weight
+        ce = np.sum(loss) * self.weight
 
         # we need to divide by num_valid here to backpropagate a 'valid' normalized loss value like in SoftmaxOutput.
-        return ce / num_valid, F.ones((1,))
+        return ce / num_valid, np.ones((1,))
 
     def create_metric(self) -> 'LossMetric':
         """
@@ -274,19 +211,19 @@ class PoissonLoss(Loss):
                  label_name: str = C.LENRATIO_LABEL_NAME) -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
 
-    def hybrid_forward(self, F, length_predictions, labels):
+    def forward(self, length_predictions, labels):
         """
-        Returns Poisson loss and output symbol given data and expected integers as labels.
+        Returns Poisson loss and output given data and expected integers as labels.
 
         :param length_predictions: Length predictions. Shape: (batch_size,).
         :param labels: Targets. Shape: (batch_size,).
         :return: Poisson loss of length predictions of the batch, and number of samples (batch size).
         """
         # (batch_size,)
-        loss = length_predictions - labels * F.log(F.maximum(1e-10, length_predictions))
+        loss = length_predictions - labels * np.log(np.maximum(1e-10, length_predictions))
         # (1,)
-        loss = F.sum(loss * self.weight)
-        num_samples = F.sum(F.ones_like(length_predictions))
+        loss = np.sum(loss * self.weight)
+        num_samples = np.sum(np.ones_like(length_predictions))
         return loss, num_samples
 
     def create_metric(self) -> 'LossMetric':
@@ -306,7 +243,7 @@ class MSELoss(Loss):
                  label_name: str = C.LENRATIO_LABEL_NAME) -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
 
-    def hybrid_forward(self, F, length_predictions, labels):
+    def forward(self, length_predictions, labels):
         """
         Returns MSE loss.
 
@@ -315,10 +252,10 @@ class MSELoss(Loss):
         :return: MSE loss of length predictions of the batch.
         """
         # (batch_size,)
-        loss = (self.weight / 2) * F.square(length_predictions - labels)
+        loss = (self.weight / 2) * np.square(length_predictions - labels)
         # (1,)
-        loss = F.sum(loss)
-        num_samples = F.sum(F.ones_like(length_predictions))
+        loss = np.sum(loss)
+        num_samples = np.sum(np.ones_like(length_predictions))
         return loss, num_samples
 
     def create_metric(self) -> 'LossMetric':

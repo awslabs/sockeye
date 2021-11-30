@@ -20,13 +20,12 @@ from itertools import groupby
 from operator import itemgetter
 from typing import Dict, Generator, Tuple, Optional
 
-import mxnet as mx
 import numpy as np
 
 from . import arguments
 from . import constants as C
 from . import vocab
-from .data_io import smart_open, get_tokens, tokens2ids
+from .utils import smart_open, get_tokens
 from .log import setup_main_logger, log_sockeye_version
 
 logger = logging.getLogger(__name__)
@@ -85,24 +84,6 @@ def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str
     return lexicon
 
 
-class LexiconInitializer(mx.initializer.Initializer):
-    """
-    Given a lexicon NDArray, initialize the variable named C.LEXICON_NAME with it.
-
-    :param lexicon: Lexicon array.
-    """
-
-    def __init__(self, lexicon: mx.nd.NDArray) -> None:
-        super().__init__()
-        self.lexicon = lexicon
-
-    def _init_default(self, sym_name, arr):
-        assert sym_name == C.LEXICON_NAME, "This initializer should only be used for a lexicon parameter variable"
-        logger.info("Initializing '%s' with lexicon.", sym_name)
-        assert len(arr.shape) == 2, "Only 2d weight matrices supported."
-        self.lexicon.copyto(arr)
-
-
 class TopKLexicon:
     """
     Lexicon component that stores the k most likely target words for each source word.  Used during
@@ -118,7 +99,7 @@ class TopKLexicon:
         self.vocab_source = vocab_source
         self.vocab_target = vocab_target
         # Shape: (vocab_source_size, k), k determined at create() or load()
-        self.lex = None  # type: np.ndarray
+        self.lex = None  # type: Optional[np.ndarray]
         # Always allow special vocab symbols in target vocab
         self.always_allow = np.array([vocab_target[symbol] for symbol in C.VOCAB_SYMBOLS], dtype='int32')
 
@@ -191,7 +172,6 @@ class TopKLexicon:
         :param src_ids: Sequence(s) of source ids (any shape).
         :return: Possible target ids for source (unique sorted, always includes special symbols).
         """
-        # TODO: When MXNet adds support for set operations, we can migrate to avoid conversions to/from NumPy.
         unique_src_ids = np.lib.arraysetops.unique(src_ids)  # type: ignore
         trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))  # type: ignore
         logger.debug(f"lookup: {trg_ids.shape[0]} unique targets for {unique_src_ids.shape[0]} unique sources")
@@ -214,6 +194,7 @@ def create(args):
 
 
 def inspect(args):
+    from .data_io import tokens2ids
     setup_main_logger(console=True, file_logging=False)
     global logger
     logger = logging.getLogger('inspect')
