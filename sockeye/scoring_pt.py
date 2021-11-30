@@ -17,7 +17,7 @@ Code for scoring.
 import logging
 import math
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import torch as pt
@@ -46,25 +46,38 @@ class BatchScorer(pt.nn.Module):
         self.constant_length_ratio = constant_length_ratio
         assert softmax_temperature is None, 'not implemented'
 
-    def forward(self, logits, labels, length_ratio, source_length, target_length):
+    def forward(self,
+                logits, labels,
+                length_ratio, source_length, target_length,
+                factor_logits_and_labels: Optional[List[Tuple[pt.Tensor, pt.Tensor]]] = None):
         """
-        :param logits: Model logits. Shape: (batch, length, vocab_size).
+        :param logits: Model logits for primary output words. Shape: (batch, length, vocab_size).
         :param labels: Gold targets. Shape: (batch, length).
         :param length_ratio: Length Ratios. Shape: (batch,).
         :param source_length: Source lengths. Shape: (batch,).
         :param target_length: Target lengths. Shape: (batch,).
+        :param factor_logits_and_labels: List of target factor logits and corresponding labels.
+               Shape: (batch, length, factor_vocab_size).
         :return: Sequence scores. Shape: (batch,).
         """
-        logprobs = pt.log_softmax(logits, dim=-1)
+        logprobs = logits.log_softmax(dim=-1)
 
         # Select the label log probability
         # logprobs and scores: (batch_size, target_seq_len)
         token_scores = logprobs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze()
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
-            token_scores = token_scores * -1
+            token_scores *= -1
+
+        if factor_logits_and_labels is not None:
+            for factor_logit, factor_label in factor_logits_and_labels:
+                factor_logprobs = factor_logit.log_softmax(dim=-1)
+                factor_scores = factor_logprobs.gather(dim=-1, index=factor_label.unsqueeze(-1)).squeeze()
+                if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
+                    factor_scores *= -1
+                token_scores += factor_scores
 
         # Sum, then apply length penalty. The call to `pt.where` masks out invalid values from scores.
-        # zeros and sums: (batch_size,)
+        # zeros and sums: (batch_size, 1)
         scores = token_scores.where(labels.not_equal(0), pt.zeros_like(token_scores)).sum(dim=1, keepdims=True)
 
         if self.constant_length_ratio is not None and self.constant_length_ratio > 0.0:
@@ -102,6 +115,7 @@ class Scorer:
         self.traced_batch_scorer = None  # type: Optional[pt.jit.ScriptModule]
         self.device = device
         self.exclude_list = {C.BOS_ID, C.EOS_ID, C.PAD_ID}
+        self.num_target_factors = self.model.num_target_factors
 
     def score_batch(self, batch: data_io_pt.Batch):
         # TODO: scoring should support multiple devices
@@ -112,13 +126,21 @@ class Scorer:
             self.traced_model = pt.jit.trace(self.model, model_inputs, strict=False)
         outputs = self.traced_model(*model_inputs)  # type: Dict[str, pt.Tensor]
 
-        scorer_inputs = (outputs[C.LOGITS_NAME],
+        scorer_inputs = [outputs[C.LOGITS_NAME],
                          batch.labels[C.TARGET_LABEL_NAME].long(),
                          outputs.get(C.LENRATIO_NAME, pt.zeros_like(batch.source_length)),
                          batch.source_length,
-                         batch.target_length)
+                         batch.target_length]
+
+        if self.num_target_factors > 1:
+            factor_logits_and_labels = [(outputs[C.FACTOR_LOGITS_NAME % i],
+                                         batch.labels[C.TARGET_FACTOR_LABEL_NAME % i].long())
+                                        for i in range(1, self.num_target_factors)]
+            scorer_inputs.append(factor_logits_and_labels)
+
         if self.traced_batch_scorer is None:
-            self.traced_batch_scorer = pt.jit.trace(self.batch_scorer, scorer_inputs, strict=True)
+            logger.debug("Tracing batch_scorer")
+            self.traced_batch_scorer = pt.jit.trace(self.batch_scorer, scorer_inputs, strict=False)
         scores = self.traced_batch_scorer(*scorer_inputs)
 
         return scores.squeeze(1).numpy()

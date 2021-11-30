@@ -77,13 +77,19 @@ class _SingleModelInference(_Inference):
         logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             logits = pt.log_softmax(logits, dim=-1)
-        scores = -logits
+        scores = -logits  # shape: (batch, output_vocab_size/len(vocab_slice_ids))
 
         target_factors = None  # type: Optional[pt.Tensor]
         if target_factor_outputs:
-            # target factors are greedily 'decoded'.
-            factor_predictions = [tfo.argmax(dim=1).unsqueeze(1).int() for tfo in target_factor_outputs]
+            if not self._skip_softmax:
+                target_factor_outputs = [tfo.log_softmax(dim=-1) for tfo in target_factor_outputs]
+            # shape: (batch, num_classes)
+            # target factors are greedily chosen, shape: (batch, 1)
+            factor_logits, factor_predictions = zip(*[tfo.max(dim=-1, keepdim=True) for tfo in target_factor_outputs])
             target_factors = factor_predictions[0] if len(factor_predictions) == 1 else pt.cat(factor_predictions, 1)
+            # top-1 negative factor logits are broadcast-added to output word scores
+            scores = scores - sum(factor_logits)
+
         return scores, states, target_factors
 
 
@@ -140,7 +146,7 @@ class _EnsembleInference(_Inference):
         target_factors = None  # type: Optional[pt.Tensor]
         if factor_outputs:
             # target factors are greedily 'decoded'.
-            factor_predictions = [self._interpolation(fs).argmin(dim=-1).unsqueeze(1).int() for fs in zip(*factor_outputs)]
+            factor_predictions = [self._interpolation(fs).argmin(dim=-1, keepdim=True).int() for fs in zip(*factor_outputs)]
             if factor_predictions:
                 target_factors = factor_predictions[0] if len(factor_predictions) == 1 else pt.cat(factor_predictions, 1)
         return scores, new_states, target_factors

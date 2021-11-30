@@ -56,7 +56,7 @@ def score(args: argparse.Namespace):
         logger.info("CUDA not available, using cpu")
         use_cpu = True
     device = pt.device('cpu') if use_cpu else pt.device('cuda', args.device_id)
-    logger.info("Scoring device: {device}")
+    logger.info(f"Scoring device: {device}")
 
     model, source_vocabs, target_vocabs = load_model(args.model, device=device, dtype=args.dtype)
     model.eval()

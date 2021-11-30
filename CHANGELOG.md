@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.1]
+
+### Changed
+
+- The score of the greedily selected target factor for models using target factors is now added to the model score for 
+  an hypothesis in decoding. This enables proper scoring of data with target factors using `sockeye.score`.
+
 ## [3.0.0] Sockeye 3: Fast Neural Machine Translation with PyTorch
 
 Sockeye is now based on PyTorch.
