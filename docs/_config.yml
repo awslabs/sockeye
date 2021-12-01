@@ -6,3 +6,7 @@ markdown: kramdown
 highlighter: rouge
 url: https://awslabs.github.io
 base_url: /sockeye
+relative-links:
+  enabled: true
+  include:
+    - tutorials

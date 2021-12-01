@@ -1,7 +1,3 @@
----
-layout: default
----
-
 # Sockeye
 
 [![PyPI version](https://badge.fury.io/py/sockeye.svg)](https://badge.fury.io/py/sockeye)
@@ -19,7 +15,7 @@ For a quickstart guide to training a standard NMT model on any size of data, see
 
 If you are interested in collaborating or have any questions, please submit a pull request or [issue](https://github.com/awslabs/sockeye/issues/new).
 You can also send questions to *sockeye-dev-at-amazon-dot-com*.
-Developers may be interested in [our developer guidelines](development.html).
+Developers may be interested in [our developer guidelines](development.md).
 
 ## Citation
 

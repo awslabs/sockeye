@@ -1,7 +1,3 @@
----
-layout: default
----
-
 # Scoring existing translations
 
 Sockeye provides a fast scoring module that permits the scoring of existing translations.

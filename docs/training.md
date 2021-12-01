@@ -1,7 +1,3 @@
----
-layout: default
----
-
 # Training
 
 ## Data preparation
@@ -110,7 +106,7 @@ In this case a drop in training throughput is expected.
 #### Multi-GPU training
 
 Training can be carried out on multiple GPUs. See the
-[WMT 2014 English-German tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html) for more information.
+[WMT 2014 English-German tutorial](tutorials/wmt_large.md) for more information.
 
 
 ### Checkpoint averaging
@@ -152,7 +148,7 @@ Since these embeddings concatenated to those of the word embeddings, the total s
 You can also sum the embeddings (`--source-factors-combine sum`).
 In this case, you do not need to specify `--source-factors-num-embed`, since they are automatically all set to the size of the word embeddings (`--num-embed`).
 
-You then also have to apply factors for the source side [at inference time](inference.html#source-factors).
+You then also have to apply factors for the source side [at inference time](inference.md#source-factors).
 
 ## Target factors
 

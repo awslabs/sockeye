@@ -26,7 +26,7 @@ pip install tensorboard
 
 All of the commands below assume you're running on a CPU.
 If you have a GPU available you can simply remove `--use-cpu`.
-With multiple GPUs you can use `torchrun` to spawn multiple training processes (see [WMT 2014 English-German tutorial](https://awslabs.github.io/sockeye/tutorials/wmt_large.html)).
+With multiple GPUs you can use `torchrun` to spawn multiple training processes (see [WMT 2014 English-German tutorial](wmt_large.md)).
 
 ## Data
 
