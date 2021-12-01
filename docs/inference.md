@@ -1,7 +1,3 @@
----
-layout: default
----
-
 # Translation
 
 Decoding (a.k.a. inference or translation) in sockeye is made available through the `sockeye.translate` module.
@@ -41,12 +37,12 @@ The PNG files will be written to files beginning with the prefix given by the `-
 
 ## Source factors
 
-If your [model was trained with source factors](training.html#source-factors), you will need to supply them at test-time, too.
+If your [model was trained with source factors](training.md#source-factors), you will need to supply them at test-time, too.
 Factors can be provided in three formats: (a) separate, token-parallel files (as in training), (b) direct annotations on words, or (c) in a JSON object.
 
 ### Parallel files
 
-You can also provide parallel files, [in the same style as training](training.html#source-factors).
+You can also provide parallel files, [in the same style as training](training.md#source-factors).
 Factor files are token-parallel to the source and are passed in to `sockeye.translate` via the `--input-factors` flag.
 (In this scenario, the source is another file, passed via `--input`).
 

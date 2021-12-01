@@ -4,7 +4,7 @@ Although the quality of machine translation systems is nowadays remarkably good,
 These customizations may include preferring some word translation over others or adapting the style of the text, among others.
 In this tutorial, we show two methods on how to perform domain adaptation of a general translation system using Sockeye.
 
-We assume you already have a trained Sockeye model, for example the one trained from the [WMT tutorial tutorial](wmt.html).
+We assume you already have a trained Sockeye model, for example the one trained from the [WMT tutorial](wmt.md).
 We also assume that you have two training sets, one composed of general or out-of-domain (OOD) data, and one composed of in-domain (ID) data on which you want to adapt your system.
 Note that both datasets need to be pre-processed in the same way.
 
