@@ -17,7 +17,7 @@ Code for scoring.
 import logging
 import math
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as pt
@@ -130,7 +130,7 @@ class Scorer:
                          batch.labels[C.TARGET_LABEL_NAME].long(),
                          outputs.get(C.LENRATIO_NAME, pt.zeros_like(batch.source_length)),
                          batch.source_length,
-                         batch.target_length]
+                         batch.target_length]  # type: List[Union[pt.Tensor, List[Tuple[pt.Tensor, pt.Tensor]]]]
 
         if self.num_target_factors > 1:
             factor_logits_and_labels = [(outputs[C.FACTOR_LOGITS_NAME % i],
