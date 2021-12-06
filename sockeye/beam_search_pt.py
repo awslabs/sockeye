@@ -554,8 +554,7 @@ class GreedySearch(pt.nn.Module):
                 source: pt.Tensor,
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
-                max_output_lengths: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor,
-                                                        List[Optional[pt.Tensor]]]:
+                max_output_lengths: pt.Tensor) -> SearchResult:
         """
         Translates a single sentence (batch_size=1) using greedy search.
 
@@ -564,9 +563,7 @@ class GreedySearch(pt.nn.Module):
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param max_output_lengths: ndarray of maximum output lengths per input in source.
                 Shape: (batch_size=1,). Dtype: int32.
-        :return List of best hypotheses indices, list of best word indices,
-                array of accumulated length-normalized negative log-probs, hypotheses lengths,
-                predicted lengths of references (if any).
+        :return SearchResult.
         """
         batch_size = source.size()[0]
         assert batch_size == 1, "Greedy Search does not support batch_size != 1"
