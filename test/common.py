@@ -248,7 +248,7 @@ def _translate_output_is_valid(translate_outputs: List[str]) -> bool:
 def test_odd_even_target_factors(data: Dict):
     num_target_factors = len(data['train_target_factors'])
     for json in data['test_outputs']:
-        factor_keys = [k for k in json.keys() if k.startswith("factor")]
+        factor_keys = [k for k in json.keys() if k.startswith("factor") and not k.endswith("score")]
         assert len(factor_keys) == num_target_factors
         primary_tokens = json['translation'].split()
         secondary_factor_tokens = [json[factor_key].split() for factor_key in factor_keys]
