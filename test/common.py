@@ -210,12 +210,13 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
 
     # Collect scores from output file
     with open(out_path) as score_out:
-        score_scores = [float(line.strip()) for line in score_out]
+        data_scoring = [[float(x) for x in line.strip().split('\t')] for line in score_out]
 
     if test_similar_scores:
-        for inp, translate_json, score_score in zip(data['test_inputs'],
-                                                    data['test_outputs'],
-                                                    score_scores):
+        for inp, translate_json, score_scores in zip(data['test_inputs'],
+                                                     data['test_outputs'],
+                                                     data_scoring):
+            score_score, *factor_scores = score_scores
             translate_tokens = translate_json['translation'].split()
             translate_score = translate_json['score']
             logger.info("tokens: %s || translate score: %.4f || score score: %.4f",

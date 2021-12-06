@@ -15,8 +15,12 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Changed
 
-- The score of the greedily selected target factor for models using target factors is now added to the model score for 
-  an hypothesis in decoding. This enables proper scoring of data with target factors using `sockeye.score`.
+- `sockeye-translate`: Beam search now computes and returns secondary target factor scores. Secondary target factors 
+  do not participate in beam search, but are greedily chosen at every time step. Accumulated scores for secondary factors
+  are not normalized by length. Factor scores are included in JSON output (``--output-type json``).
+- `sockeye-score` now returns tab-separated scores for each target factor. Users can decide how to combine factor scores
+  depending on the downstream application. Score for the first, primary factor (i.e. output words) are normalized,
+  other factors are not.
 
 ## [3.0.0] Sockeye 3: Fast Neural Machine Translation with PyTorch
 

@@ -66,26 +66,27 @@ class BatchScorer(pt.nn.Module):
         # logprobs and scores: (batch_size, target_seq_len)
         token_scores = logprobs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze()
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
-            token_scores *= -1
+            token_scores = -token_scores
 
-        if factor_logits_and_labels is not None:
-            for factor_logit, factor_label in factor_logits_and_labels:
-                factor_logprobs = factor_logit.log_softmax(dim=-1)
-                factor_scores = factor_logprobs.gather(dim=-1, index=factor_label.unsqueeze(-1)).squeeze()
-                if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
-                    factor_scores *= -1
-                token_scores += factor_scores
-
-        # Sum, then apply length penalty. The call to `pt.where` masks out invalid values from scores.
-        # zeros and sums: (batch_size, 1)
-        scores = token_scores.where(labels.not_equal(0), pt.zeros_like(token_scores)).sum(dim=1, keepdims=True)
-
+        # Mask pad positions, sum, then apply length penalty. Shape: (batch_size, 1)
+        scores = token_scores.masked_fill_(labels == C.PAD_ID, .0).sum(dim=-1, keepdims=True)
         if self.constant_length_ratio is not None and self.constant_length_ratio > 0.0:
             predicted_output_length = source_length * self.constant_length_ratio
         else:
             predicted_output_length = source_length * length_ratio
-
         scores = self.scorer(scores, target_length, predicted_output_length)
+
+        if factor_logits_and_labels is not None:
+            factor_scores = []  # type: List[pt.Tensor]
+            for factor_logit, factor_label in factor_logits_and_labels:
+                factor_logprobs = factor_logit.log_softmax(dim=-1)
+                factor_token_scores = factor_logprobs.gather(dim=-1, index=factor_label.unsqueeze(-1)).squeeze()
+                if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
+                    factor_token_scores = -factor_token_scores
+                fs = factor_token_scores.masked_fill_(factor_label == C.PAD_ID, .0).sum(dim=-1, keepdims=True)  # type: ignore
+                # Note: factor_scores are not normalized by length
+                factor_scores.append(fs)
+            scores = pt.cat([scores] + factor_scores, dim=1)
 
         return scores
 
@@ -141,9 +142,9 @@ class Scorer:
         if self.traced_batch_scorer is None:
             logger.debug("Tracing batch_scorer")
             self.traced_batch_scorer = pt.jit.trace(self.batch_scorer, scorer_inputs, strict=False)
-        scores = self.traced_batch_scorer(*scorer_inputs)
+        scores = self.traced_batch_scorer(*scorer_inputs)  # (batch, num_target_factors)
 
-        return scores.squeeze(1).numpy()
+        return scores.numpy()
 
     @pt.inference_mode(True)
     def score(self, score_iter: data_io_pt.BaseParallelSampleIter, output_handler: OutputHandler):
@@ -152,12 +153,12 @@ class Scorer:
         batch_no = 0
         for batch_no, batch in enumerate(score_iter, 1):
             batch_tic = time.time()
-            scores = self.score_batch(batch)
+            batch_scores = self.score_batch(batch)
             batch_time = time.time() - batch_tic
             total_time += batch_time
-            for sentno, (source, target, score) in enumerate(zip(batch.source[:, :, 0],
-                                                                 batch.target[:, :, 0],
-                                                                 scores), 1):
+            for sentno, (source, target, scores) in enumerate(zip(batch.source[:, :, 0],
+                                                                  batch.target[:, :, 0],
+                                                                  batch_scores), 1):
                 sentence_no += 1
 
                 # Transform arguments in preparation for printing
@@ -169,12 +170,14 @@ class Scorer:
 
                 # Report a score of -inf for invalid sentence pairs (empty source and/or target)
                 if source[0] == C.PAD_ID or target[0] == C.PAD_ID:
-                    score = -np.inf
+                    scores = [-np.inf] * self.num_target_factors
 
                 # Output handling routines require us to make use of inference classes.
                 output_handler.handle(inference_pt.TranslatorInput(sentence_no, source_tokens),
                                       inference_pt.TranslatorOutput(sentence_no, target_string,
-                                                                    target_tokens, score),
+                                                                    target_tokens,
+                                                                    score=scores[0],
+                                                                    factor_scores=scores[1:]),
                                       batch_time)
 
         if sentence_no != 0:
