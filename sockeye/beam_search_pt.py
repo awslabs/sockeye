@@ -91,6 +91,7 @@ class _SingleModelInference(_Inference):
                 # Shape per factor: (batch/beam, 1, 2), where last dimension holds values and indices.
                 tf_prediction = pt.cat(tf_scores.min(dim=-1, keepdim=True), dim=1).unsqueeze(1)
                 predictions.append(tf_prediction)
+            # Shape: (batch*beam, num_secondary_factors, 2)
             target_factors = pt.cat(predictions, dim=1) if len(predictions) > 1 else predictions[0]
 
         return scores, states, target_factors

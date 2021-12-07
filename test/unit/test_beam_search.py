@@ -342,11 +342,11 @@ def test_pytorch_greedytop1(target_vocab_size):
     assert best_word_index.shape == (1, 1)
     assert best_word_index[0, 0] == expected_word_index[0]
 
-    target_factors = pt.ones(1, 1, dtype=pt.int32)
+    target_factors = pt.ones(1, 1, 2, dtype=pt.int32)
     best_word_index_with_factors = greedy_top1(pt.tensor(scores), None, target_factors).detach().numpy()
     assert best_word_index_with_factors.shape == (1, 2)
     assert best_word_index_with_factors[0, 0] == expected_word_index[0]
-    assert best_word_index_with_factors[0, 1] == target_factors.item()
+    assert best_word_index_with_factors[0, 1] == target_factors[:, :, 1].item()
 
 
 @pytest.mark.parametrize("batch_size, beam_size, target_vocab_size, top_n",
