@@ -597,7 +597,8 @@ class GreedySearch(pt.nn.Module):
             best_word_index = self.work_block(scores, vocab_slice_ids, target_factors)
             outputs.append(best_word_index)
 
-            if best_word_index == self.eos_id or best_word_index == C.PAD_ID:
+            _best_word_index = best_word_index[:, 0]
+            if _best_word_index == self.eos_id or _best_word_index == C.PAD_ID:
                 break
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
@@ -606,7 +607,6 @@ class GreedySearch(pt.nn.Module):
         stacked_outputs = pt.stack(outputs, dim=2)
         length = pt.tensor([t], dtype=pt.int32)  # shape (1,)
         hyp_indices = pt.zeros(1, t + 1, dtype=pt.int32)
-        score = pt.tensor([-1.])
         # TODO: return unnormalized proper score
         scores = pt.zeros(1, self.num_target_factors) - 1
 
@@ -627,13 +627,14 @@ class GreedyTop1(pt.nn.Module):
                 vocab_slice_ids: Optional[pt.Tensor] = None,
                 target_factors: Optional[pt.Tensor] = None) -> pt.Tensor:
         # shape: (batch*beam=1, 1)
-        # argmin has trouble with fp16 inputs on GPUs, using top1 instead
         best_word_index = pt.argmin(scores, dim=-1, keepdim=True)
         # Map from restricted to full vocab ids if needed
         if vocab_slice_ids is not None:
             best_word_index = vocab_slice_ids.index_select(0, best_word_index.squeeze(1)).unsqueeze(1)
         if target_factors is not None:
-            best_word_index = pt.cat((best_word_index, target_factors), dim=1)
+            factor_index = target_factors[:, :, 1].int()
+            best_word_index = pt.cat((best_word_index, factor_index), dim=1)
+
         return best_word_index
 
 
