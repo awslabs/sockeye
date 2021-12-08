@@ -332,7 +332,6 @@ class PyTorchMultiHeadAttentionBase(pt.nn.Module):
         :param queries: Query tensor. Shape: (queries_length, batch_size, depth).
         :param key_values: Keys/Values. Shape: (keys_values_length, batch_size, depth * 2).
         :param mask: Optional boolean attention mask. See DotAttentionCell for shape requirements.
-        :param bias: Optional 3d bias.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
 
@@ -479,7 +478,6 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
         :param queries: Query tensor. Shape: (queries_length, batch, input_depth).
         :param key_values: Memory data to attend to. Shape: (key_values_length, batch, input_depth).
         :param mask: Optional attention mask. See DotAttentionCell for shape information.
-        :param bias: Optional 3d bias tensor to mask attention scores.
         :param projected_memory_kv: Optional previously projected memory keys and values.
         :return: tensor of shape (query_seq_len, batch, output_depth).
         """
