@@ -195,7 +195,7 @@ After that we can just provide these models to the Sockeye translation CLI:
 echo "er ist so ein toller Kerl und ein Familienvater ." | \
   python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
                                    --vocabulary-threshold 50 | \
-  python -m sockeye.translate -m wmt_model wmt_model_seed2 wmt_model_seed3 2>/dev/null | \
+  python -m sockeye.translate --use-cpu -m wmt_model wmt_model_seed2 wmt_model_seed3 2>/dev/null | \
   sed -r 's/@@( |$)//g'
 
 he is a great guy and a family father .
@@ -206,7 +206,7 @@ As we haven't trained multiple models yet we can simply feed in the same model m
 echo "er ist so ein toller Kerl und ein Familienvater ." | \
   python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
                                    --vocabulary-threshold 50 | \
-  python -m sockeye.translate -m wmt_model wmt_model wmt_model 2>/dev/null | \
+  python -m sockeye.translate --use-cpu -m wmt_model wmt_model wmt_model 2>/dev/null | \
   sed -r 's/@@( |$)//g'
 
 he is a great guy and a family father .
