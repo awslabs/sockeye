@@ -252,7 +252,12 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
 
         batch, heads, source_max_len = source_mask.size()
         source_mask_view = source_mask.view(batch * heads, 1, source_max_len)
-        source_mask_view = source_mask_view.repeat_interleave(step_input.size()[1], dim=1)
+        _, target_length, __  = step_input.size()
+        # Workaround for PyTorch tracing: size() sometimes returns Tensors on
+        # the cpu device instead of ints.
+        if isinstance(target_length, pt.Tensor):
+            target_length = target_length.to(step_input.device)
+        source_mask_view = source_mask_view.repeat_interleave(target_length, dim=1)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
