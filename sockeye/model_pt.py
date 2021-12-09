@@ -359,7 +359,9 @@ class PyTorchSockeyeModel(pt.nn.Module):
         :param fname: Path to save parameters to.
         See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
         """
+        self.apply(layers_pt.interleave_kv)
         pt.save(self.state_dict(), fname)
+        self.apply(layers_pt.separate_kv)
         logging.info('Saved params/state_dict to "%s"', fname)
 
     def load_parameters(self,

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import torch as pt
+import torch.nn.functional as F
 
 from sockeye import constants as C, utils
 from . import config
@@ -73,7 +74,7 @@ class PyTorchWeightNormalization(pt.nn.Module):
         self._axis_arg = tuple(range(1, ndim))
 
     def forward(self, weight: pt.Tensor) -> pt.Tensor:
-        return pt.nn.functional.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale  # type: ignore
+        return F.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale  # type: ignore
 
 
 class PyTorchOutputLayer(pt.nn.Module):
@@ -133,7 +134,7 @@ class PyTorchOutputLayer(pt.nn.Module):
         else:
             weight, bias = self.weight, self.bias
 
-        return pt.nn.functional.linear(data, weight, bias)
+        return F.linear(data, weight, bias)
 
     def weights_from_mxnet_block(self, block_mx: 'OutputLayer'):  # type: ignore
         self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
@@ -214,11 +215,10 @@ def pytorch_interleaved_matmul_encdec_qk(q: pt.Tensor,
     q = q.contiguous().view(qlen, batch * heads, head_dim).transpose(0, 1)
     q = q * head_dim ** -0.5
 
-    kvlen, batch, hidden2 = kv.size()
-    tmp = kv.reshape(kvlen, batch, heads, 2, head_dim)
+    tmp = kv.reshape(-1, batch, heads, 2, head_dim)
     k = tmp[:, :, :, 0, :]  # pick keys
     k = k.permute(1, 2, 3, 0)  # (batch, heads, head_dim, kvlen)
-    k = k.reshape(batch * heads, head_dim, kvlen)  # (batch * heads, head_dim, kvlen)
+    k = k.reshape(batch * heads, head_dim, -1)  # (batch * heads, head_dim, kvlen)
 
     return pt.bmm(q, k)  # (batch * heads, qlen, klen)
 
@@ -239,9 +239,6 @@ def pytorch_interleaved_matmul_encdec_valatt(kv: pt.Tensor,
     :return: (qlen, batch, hidden)
     """
     kvlen, batch, hidden2 = kv.size()
-    batch_heads, qlen, kvlen_ = att.size()
-    assert kvlen == kvlen_
-    assert batch_heads // heads == batch
     hidden = hidden2 // 2
     head_dim = hidden // heads
 
@@ -251,7 +248,7 @@ def pytorch_interleaved_matmul_encdec_valatt(kv: pt.Tensor,
     v = v.reshape(-1, kvlen, head_dim)  # bsz * heads, kvlen, head_dim
 
     output = pt.bmm(att, v)  # bsz * heads, qlen, head_dim
-    output = output.transpose(0, 1).contiguous().view(qlen, batch, hidden)
+    output = output.transpose(0, 1).contiguous().view(-1, batch, hidden)
     return output
 
 
@@ -281,7 +278,7 @@ class PyTorchDotAttentionCell(pt.nn.Module):
         if mask is not None:
             logits = logits.masked_fill(mask, -C.LARGE_VALUES[logits.dtype])
 
-        probs = pt.nn.functional.softmax(logits, dim=-1)
+        probs = F.softmax(logits, dim=-1)
 
         probs = self.dropout(probs) if self.dropout is not None else probs
 
@@ -460,9 +457,42 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
                  dropout: float = 0.0,
                  depth_key_value: int = 512) -> None:
         super().__init__(depth_att, heads, depth_out, dropout)
-
         self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False)
         self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False)
+        self.kv_interleaved = False  # indicates whether self.ff_kv.weight is in interleaved format or not
+        self._drop_p = dropout
+        # interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
+
+    def separate_kv(self):
+        assert self.kv_interleaved
+        with pt.no_grad():
+            k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self.depth).split(self.depth_per_head, dim=1)
+            k = k.reshape(self.depth, self.depth)
+            v = v.reshape(self.depth, self.depth)
+        self.ff_kv.weight.data[:] = pt.cat((k, v), dim=0)
+        self.kv_interleaved = False
+
+    def interleave_kv(self):
+        assert not self.kv_interleaved
+        with pt.no_grad():
+            k, v = self.ff_kv.weight.data.split(self.depth, dim=0)
+            k = k.reshape(self.heads, -1, self.depth)
+            v = v.reshape(self.heads, -1, self.depth)
+        self.ff_kv.weight.data[:] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self.depth)
+        self.kv_interleaved = True
+
+    def train(self, mode: bool = True):
+        if mode and self.kv_interleaved:
+            # training operates with non-interleaved format
+            self.separate_kv()
+        elif not mode and not self.kv_interleaved:
+            # eval/inference operates in interleaved format
+            self.interleave_kv()
+        return super().train(mode)
+
+    def _load_from_state_dict(self, *args):
+        self.kv_interleaved = True  # see SockeyeModel.save_parameters(): models store kv weight in interleaved format
+        super()._load_from_state_dict(*args)
 
     def forward(self,
                 queries: pt.Tensor,
@@ -481,15 +511,47 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
         :param projected_memory_kv: Optional previously projected memory keys and values.
         :return: tensor of shape (query_seq_len, batch, output_depth).
         """
-
-        queries = self.ff_q(queries)
-        key_values = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(key_values)
-        return self._attend(queries=queries, key_values=key_values, mask=mask)
+        if self.training:
+            assert not self.kv_interleaved
+            assert projected_memory_kv is None, "caching not supported in training"
+            contexts, _ = F.multi_head_attention_forward(query=queries, key=key_values, value=key_values,
+                                                         embed_dim_to_check=self.depth, num_heads=self.heads,
+                                                         in_proj_weight=None,
+                                                         in_proj_bias=None,
+                                                         bias_k=None, bias_v=None, add_zero_attn=False,
+                                                         dropout_p=self._drop_p,
+                                                         out_proj_weight=self.ff_out.weight,
+                                                         out_proj_bias=self.ff_out.bias,
+                                                         training=self.training,
+                                                         key_padding_mask=None,
+                                                         need_weights=False,
+                                                         attn_mask=mask,
+                                                         use_separate_proj_weight=True,
+                                                         q_proj_weight=self.ff_q.weight,
+                                                         k_proj_weight=self.ff_kv.weight[:self.depth, :],
+                                                         v_proj_weight=self.ff_kv.weight[self.depth:, :])
+            return contexts
+        else:
+            queries = self.ff_q(queries)
+            key_values = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(key_values)
+            return self._attend(queries=queries, key_values=key_values, mask=mask)
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):  # type: ignore
         self.ff_q.weight.data[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
         self.ff_kv.weight.data[:] = pt.as_tensor(block_mx.ff_kv.weight.data().asnumpy())
         self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
+
+
+def interleave_kv(module: pt.nn.Module):
+    if isinstance(module, PyTorchMultiHeadAttention):
+        if not module.kv_interleaved:
+            module.interleave_kv()
+
+
+def separate_kv(module: pt.nn.Module):
+    if isinstance(module, PyTorchMultiHeadAttention):
+        if module.kv_interleaved:
+            module.separate_kv()
 
 
 @pt.jit.script
@@ -564,7 +626,7 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
             # (batch_size or 1, seq_len, num_embed)
             # NOTE: temporary fix until we decide how to handle output steps > max_supported_seq_len_target
             steps = pt.clip(steps, max=self.max_seq_len - 1)
-            pos_embedding = pt.nn.functional.embedding(steps, self.weight)
+            pos_embedding = F.embedding(steps, self.weight)
 
         if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
             pos_embedding = pos_embedding.detach()
