@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.1]
+
+### Fixed
+
+- Parameter averaging (`sockeye-average`) now always uses the CPU, which enables averaging parameters from GPU-trained models on CPU-only hosts.
+
 ## [3.0.0] Sockeye 3: Fast Neural Machine Translation with PyTorch
 
 Sockeye is now based on PyTorch.
