@@ -394,11 +394,13 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
 
         self.depth_att = depth_att
         self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False)
-        self.kv_interleaved = False  # indicates whether self.ff_kv.weight is in interleaved format or not
         self._drop_p = dropout
-        # interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
+        # indicates whether self.ff_in.weight of shape (depth_att * 3, depth_key_value) is in interleaved format or not.
+        # Interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
+        self.kv_interleaved = False
 
     def separate_kv(self):
+        """ write kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention) """
         assert self.kv_interleaved
         with pt.no_grad():
             kv = self.ff_in.weight.data[self.depth:, :]
@@ -410,6 +412,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         self.kv_interleaved = False
 
     def interleave_kv(self):
+        """ write kv input projection parameters in interleaved format (compatible with interleaved matmul) """
         assert not self.kv_interleaved
         with pt.no_grad():
             _, k, v = self.ff_in.weight.data.split(self.depth, dim=0)
@@ -419,6 +422,10 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         self.kv_interleaved = True
 
     def train(self, mode: bool = True):
+        """
+        Overrides super().train() to ensure key-value parameters are stored in non-interleaved format during training
+        and interleaved format during inference (mod.eval()).
+        """
         if mode and self.kv_interleaved:
             # training operates with non-interleaved format
             self.separate_kv()
@@ -463,7 +470,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :return: tensor of shape (max_length, batch, output_depth).
         """
-        if self.training:
+        if self.training:  # use fused multi-head attention op during training
             assert not self.kv_interleaved
             contexts, _ = F.multi_head_attention_forward(query=inputs, key=inputs, value=inputs,
                                                          embed_dim_to_check=self.depth, num_heads=self.heads,
@@ -482,7 +489,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
                                                          k_proj_weight=None,
                                                          v_proj_weight=None)
             return contexts, contexts  # dummy return
-        else:
+        else:  # during inference multi-head attention with interleaved key-value parameters is used
             proj = self.ff_in(inputs)
             queries, states = proj.split((self.depth_att, 2 * self.depth_att), dim=2)
 
@@ -521,30 +528,38 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
         super().__init__(depth_att, heads, depth_out, dropout)
         self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False)
         self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False)
-        self.kv_interleaved = False  # indicates whether self.ff_kv.weight is in interleaved format or not
         self._drop_p = dropout
-        # interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
+        self._depth_key_value = depth_key_value
+        # indicates whether self.ff_kv.weight of shape (depth_att * 2, depth_key_value) is in interleaved format or not.
+        # Interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
+        self.kv_interleaved = False
 
     def separate_kv(self):
+        """ Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
         assert self.kv_interleaved
         with pt.no_grad():
-            k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self.depth).split(
+            k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self._depth_key_value).split(
                 self.depth_per_head, dim=1)
-            k = k.reshape(self.depth, self.depth)
-            v = v.reshape(self.depth, self.depth)
+            k = k.reshape(self.depth, self._depth_key_value)
+            v = v.reshape(self.depth, self._depth_key_value)
         self.ff_kv.weight.data[:] = pt.cat((k, v), dim=0)
         self.kv_interleaved = False
 
     def interleave_kv(self):
+        """ Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
         assert not self.kv_interleaved
         with pt.no_grad():
             k, v = self.ff_kv.weight.data.split(self.depth, dim=0)
             k = k.reshape(self.heads, -1, self.depth)
             v = v.reshape(self.heads, -1, self.depth)
-        self.ff_kv.weight.data[:] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self.depth)
+        self.ff_kv.weight.data[:] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self._depth_key_value)
         self.kv_interleaved = True
 
     def train(self, mode: bool = True):
+        """
+        Overrides super().train() to ensure key-value parameters are stored in non-interleaved format during training
+        and interleaved format during inference (mod.eval()).
+        """
         if mode and self.kv_interleaved:
             # training operates with non-interleaved format
             self.separate_kv()
@@ -574,7 +589,7 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
         :param projected_memory_kv: Optional previously projected memory keys and values.
         :return: tensor of shape (query_seq_len, batch, output_depth).
         """
-        if self.training:
+        if self.training:  # use fused multi-head attention op during training
             assert not self.kv_interleaved
             assert projected_memory_kv is None, "caching not supported in training"
             contexts, _ = F.multi_head_attention_forward(query=queries, key=key_values, value=key_values,
@@ -594,7 +609,7 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
                                                          k_proj_weight=self.ff_kv.weight[:self.depth, :],
                                                          v_proj_weight=self.ff_kv.weight[self.depth:, :])
             return contexts
-        else:
+        else:  # during inference multi-head attention with interleaved key-value parameters is used
             queries = self.ff_q(queries)
             key_values = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(key_values)
             return self._attend(queries=queries, key_values=key_values, mask=mask)
@@ -611,12 +626,14 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
 
 
 def interleave_kv(module: pt.nn.Module):
+    """ Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
     if isinstance(module, PyTorchMultiHeadAttention) or isinstance(module, PyTorchMultiHeadSelfAttention):
         if not module.kv_interleaved:
             module.interleave_kv()
 
 
 def separate_kv(module: pt.nn.Module):
+    """ Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
     if isinstance(module, PyTorchMultiHeadAttention) or isinstance(module, PyTorchMultiHeadSelfAttention):
         if module.kv_interleaved:
             module.separate_kv()
