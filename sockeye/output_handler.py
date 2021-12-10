@@ -146,7 +146,11 @@ class ScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        print("{:.6f}".format(t_output.score), file=self.stream, flush=True)
+        result = "{:.6f}".format(t_output.score)
+        if hasattr(t_output, 'factor_scores') and t_output.factor_scores:
+            factor_scores = "\t".join("{:.6f}".format(fs) for fs in t_output.factor_scores)
+            result = f"{result}\t{factor_scores}"
+        print(result, file=self.stream, flush=True)
 
     def reports_score(self) -> bool:
         return True

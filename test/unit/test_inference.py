@@ -84,26 +84,26 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     raw_score = (1 + 2 + 3)
     length = len(expected_target_ids)
     reference_length = (10 + 11 + 12)
-    expected_score = scorer(raw_score, length, reference_length)
+    expected_score = [scorer(raw_score, length, reference_length)]
     # expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids)) - \
     #                  brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
     translations = [sockeye.inference_pt.Translation([[0], [1], [2], [-1]],
-                                                     scorer(1.0, 4, 10),
+                                                     [scorer(1.0, 4, 10)],
                                                      None,
                                                      10),
                     # Translation without EOS
                     sockeye.inference_pt.Translation([[0], [8], [9]],
-                                                     scorer(2.0, 3, 11),
+                                                     [scorer(2.0, 3, 11)],
                                                      None,
                                                      11),
                     sockeye.inference_pt.Translation([[0], [3], [4], [5], [-1]],
-                                                     scorer(3.0, 5, 12),
+                                                     [scorer(3.0, 5, 12)],
                                                      None,
                                                      12)]
     combined = sockeye.inference_pt._concat_translations(translations, stop_ids={_EOS}, scorer=scorer)
 
     assert combined.target_ids == expected_target_ids
-    assert np.isclose(combined.score, expected_score)
+    assert np.isclose(combined.scores, expected_score)
 
 
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
@@ -409,16 +409,16 @@ def test_get_best_translations(expected_best_ids, expected_best_indices):
         seq_scores[expected_best_ids],
         itertools.repeat(None))]
 
-    actual_result = sockeye.inference_pt.Translator._get_best_translations(translator,
-                                                                           best_hyp_indices,
-                                                                           best_word_indices,
-                                                                           seq_scores,
-                                                                           lengths,
-                                                                           None)
+    search_result = sockeye.beam_search_pt.SearchResult(best_hyp_indices=best_hyp_indices,
+                                                        best_word_indices=best_word_indices,
+                                                        accumulated_scores=seq_scores,
+                                                        lengths=lengths,
+                                                        estimated_reference_lengths=None)
+    actual_result = sockeye.inference_pt.Translator._get_best_translations(translator, search_result)
 
     for expected_translation, actual_translation in zip(expected_result, actual_result):
         assert expected_translation.target_ids == actual_translation.target_ids
-        assert expected_translation.score == actual_translation.score
+        assert expected_translation.scores == actual_translation.scores
 
 
 @pytest.mark.parametrize("sequence, fill_with, expected_sequence",

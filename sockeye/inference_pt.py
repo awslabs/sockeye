@@ -30,7 +30,7 @@ from . import constants as C
 from . import lexicon
 from . import utils
 from . import vocab
-from .beam_search_pt import CandidateScorer, get_search_algorithm, GreedySearch
+from .beam_search_pt import CandidateScorer, get_search_algorithm, GreedySearch, SearchResult
 from .data_io_pt import tokens2ids
 from .model_pt import PyTorchSockeyeModel
 
@@ -384,6 +384,7 @@ class TranslatorOutput:
     nbest_scores: List of nbest scores, one for each nbest translation.
     factor_translations: List of factor outputs.
     factor_tokens: List of list of secondary factor tokens.
+    factor_scores: List of secondary factor scores.
     """
     sentence_id: SentenceId
     translation: str
@@ -392,9 +393,10 @@ class TranslatorOutput:
     pass_through_dict: Optional[Dict[str, Any]] = None
     nbest_translations: Optional[List[str]] = None
     nbest_tokens: Optional[List[Tokens]] = None
-    nbest_scores: Optional[List[float]] = None
+    nbest_scores: Optional[List[List[float]]] = None
     factor_translations: Optional[List[str]] = None
     factor_tokens: Optional[List[Tokens]] = None
+    factor_scores: Optional[List[float]] = None
     nbest_factor_translations: Optional[List[List[str]]] = None
     nbest_factor_tokens: Optional[List[List[Tokens]]] = None
 
@@ -421,6 +423,10 @@ class TranslatorOutput:
             for i, factor in enumerate(self.factor_translations, 1):
                 _d[f'factor{i}'] = factor
 
+        if self.factor_scores is not None:
+            for i, score in enumerate(self.factor_scores, 1):
+                _d[f'factor{i}_score'] = score
+
         if self.nbest_factor_translations is not None and len(self.nbest_factor_translations) > 1:
             _d['translations_factors'] = []
             for factor_translations in self.nbest_factor_translations:
@@ -433,13 +439,13 @@ class TranslatorOutput:
 @dataclass
 class NBestTranslations:
     target_ids_list: List[TokenIds]
-    scores: List[float]
+    scores: List[List[float]]
 
 
 @dataclass
 class Translation:
     target_ids: TokenIds
-    score: float
+    scores: List[float]
     nbest_translations: Optional[NBestTranslations] = None
     estimated_reference_length: Optional[float] = None
 
@@ -451,7 +457,7 @@ def empty_translation(add_nbest: bool = False) -> Translation:
     :param add_nbest: Include (empty) nbest_translations in the translation object.
     """
     return Translation(target_ids=[],
-                       score=-onp.inf,
+                       scores=[-onp.inf],
                        nbest_translations=NBestTranslations([], []) if add_nbest else None)
 
 
@@ -517,12 +523,12 @@ def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Tr
     best_translation = nbest_translations_list[0]
 
     sequences = [translation.target_ids for translation in nbest_translations_list]
-    scores = [translation.score for translation in nbest_translations_list]
+    scores = [translation.scores for translation in nbest_translations_list]
 
     nbest_translations = NBestTranslations(sequences, scores)
 
     return Translation(best_translation.target_ids,
-                       best_translation.score,
+                       best_translation.scores,
                        nbest_translations,
                        best_translation.estimated_reference_length)
 
@@ -560,6 +566,7 @@ def _concat_translations(translations: List[Translation],
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
     estimated_reference_length = None  # type: Optional[float]
+    scores = onp.zeros_like(translations[0].scores)
 
     for idx, translation in enumerate(translations):
         if idx == len(translations) - 1:
@@ -575,11 +582,16 @@ def _concat_translations(translations: List[Translation],
             else:
                 estimated_reference_length += translation.estimated_reference_length
 
-    # Unnormalize + sum and renormalize the score:
-    raw_score = sum(scorer.unnormalize(t.score, len(t.target_ids), t.estimated_reference_length) for t in translations)
-    score = scorer(raw_score, len(target_ids), estimated_reference_length)
-    return Translation(target_ids, score,
-                       estimated_reference_length=estimated_reference_length)
+        score, *factor_scores = translation.scores
+        # Unnormalize the primary score:
+        raw_score = scorer.unnormalize(score, len(translation.target_ids), translation.estimated_reference_length)
+        # Accumulate scores element-wise
+        scores = onp.add(scores, [raw_score, *factor_scores])
+
+    # Re-normalize the primary score
+    scores[0] = scorer(scores[0], len(target_ids), estimated_reference_length)
+
+    return Translation(target_ids, scores.tolist(), estimated_reference_length=estimated_reference_length)
 
 
 class Translator:
@@ -955,13 +967,14 @@ class Translator:
         return TranslatorOutput(sentence_id=trans_input.sentence_id,
                                 translation=primary_translation,
                                 tokens=primary_tokens,
-                                score=translation.score,
+                                score=translation.scores[0],
                                 pass_through_dict=trans_input.pass_through_dict,
                                 nbest_translations=nbest_translations,
                                 nbest_tokens=nbest_tokens,
                                 nbest_scores=nbest_scores,
                                 factor_translations=factor_translations,
                                 factor_tokens=factor_tokens,
+                                factor_scores=translation.scores[1:],
                                 nbest_factor_translations=nbest_factor_translations,
                                 nbest_factor_tokens=nbest_factor_tokens)
 
@@ -979,33 +992,25 @@ class Translator:
 
         :return: List of translations.
         """
-        return self._get_best_translations(*self._search(source,
-                                                         source_length,
-                                                         restrict_lexicon,
-                                                         max_output_lengths))
+        return self._get_best_translations(self._search(source,
+                                                        source_length,
+                                                        restrict_lexicon,
+                                                        max_output_lengths))
 
-    def _get_best_translations(self,
-                               best_hyp_indices: pt.Tensor,
-                               best_word_indices: pt.Tensor,
-                               seq_scores: pt.Tensor,
-                               lengths: pt.Tensor,
-                               estimated_reference_lengths: Optional[pt.Tensor] = None) -> List[Translation]:
+    def _get_best_translations(self, result: SearchResult) -> List[Translation]:
         """
         Return the nbest (aka n top) entries from the n-best list.
 
-        :param best_hyp_indices: Array of best hypotheses indices ids. Shape: (batch * beam, num_beam_search_steps + 1).
-        :param best_word_indices: Array of best hypotheses indices ids.
-                                  Shape: (batch * beam, num_target_factors, num_beam_search_steps).
-        :param seq_scores: Array of length-normalized negative log-probs. Shape: (batch * beam, 1)
-        :param lengths: The lengths of all items in the beam. Shape: (batch * beam). Dtype: int32.
-        :param estimated_reference_lengths: Predicted reference lengths.
+        :param result: SearchResult from Beam or Greedy search.
         :return: List of Translation objects containing all relevant information.
         """
-        best_hyp_indices = best_hyp_indices.cpu().numpy()
-        best_word_indices = best_word_indices.cpu().numpy()
-        seq_scores = seq_scores.cpu().numpy()
-        lengths = lengths.cpu().numpy()
-        estimated_reference_lengths = estimated_reference_lengths.cpu().numpy() if estimated_reference_lengths is not None else None
+        best_hyp_indices = result.best_hyp_indices.cpu().numpy()
+        best_word_indices = result.best_word_indices.cpu().numpy()
+        accumulated_scores = result.accumulated_scores.cpu().numpy()
+        lengths = result.lengths.cpu().numpy()
+        estimated_reference_lengths = None
+        if result.estimated_reference_lengths is not None:
+            estimated_reference_lengths = result.estimated_reference_lengths.cpu().numpy()
         batch_size = best_hyp_indices.shape[0] // self.beam_size
         nbest_translations = []  # type: List[List[Translation]]
         reference_lengths = estimated_reference_lengths if estimated_reference_lengths is not None \
@@ -1023,7 +1028,7 @@ class Translator:
                                            :,  # get all factors
                                            onp.arange(indices_shape_1)],
                          lengths[best_ids],
-                         seq_scores[best_ids],
+                         accumulated_scores[best_ids],
                          reference_lengths[best_ids])])  # type: ignore
 
         # reorder and regroup lists
@@ -1057,7 +1062,7 @@ class Translator:
     @staticmethod
     def _assemble_translation(sequence: onp.ndarray,
                               length: onp.ndarray,
-                              seq_score: onp.ndarray,
+                              seq_scores: onp.ndarray,
                               estimated_reference_length: Optional[float],
                               unshift_target_factors: bool = False) -> Translation:
         """
@@ -1065,7 +1070,7 @@ class Translator:
         processing on each, and merges it into a Translation object.
         :param sequence: Array of word ids. Shape: (bucketed_length, num_target_factors).
         :param length: The length of the translated segment.
-        :param seq_score: Array of length-normalized negative log-probs.
+        :param seq_scores: Array of length-normalized negative log-probs, one for each factor.
         :param estimated_reference_length: Estimated reference length (if any).
         :return: A Translation object.
         """
@@ -1075,9 +1080,9 @@ class Translator:
             sequence = sequence.tolist()
         length = int(length)  # type: ignore
         sequence = sequence[:length]  # type: ignore
-        score = float(seq_score)
+        scores = seq_scores.tolist()
         estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
-        return Translation(sequence, score,  # type: ignore
+        return Translation(sequence, scores,  # type: ignore
                            nbest_translations=None,
                            estimated_reference_length=estimated_reference_length)
 

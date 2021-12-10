@@ -342,11 +342,11 @@ def test_pytorch_greedytop1(target_vocab_size):
     assert best_word_index.shape == (1, 1)
     assert best_word_index[0, 0] == expected_word_index[0]
 
-    target_factors = pt.ones(1, 1, dtype=pt.int32)
+    target_factors = pt.ones(1, 1, 2, dtype=pt.int32)
     best_word_index_with_factors = greedy_top1(pt.tensor(scores), None, target_factors).detach().numpy()
     assert best_word_index_with_factors.shape == (1, 2)
     assert best_word_index_with_factors[0, 0] == expected_word_index[0]
-    assert best_word_index_with_factors[0, 1] == target_factors.item()
+    assert best_word_index_with_factors[0, 1] == target_factors[:, :, 1].item()
 
 
 @pytest.mark.parametrize("batch_size, beam_size, target_vocab_size, top_n",
@@ -615,9 +615,9 @@ def test_beam_search():
     max_output_lengths = pt.tensor([max_length], dtype=pt.int)
 
     bs_out = bs(source, source_length, restrict_lexicon, max_output_lengths)
-    best_hyp_indices, best_word_indices, scores, lengths, estimated_ref_lengths = bs_out
+    r = bs_out
 
-    print('beam search lengths', lengths)
+    print('beam search lengths', r.lengths)
     print('internal lengths', inference.states[0])
-    pt.testing.assert_allclose(lengths, inference.states[0].squeeze(1))
+    pt.testing.assert_allclose(r.lengths, inference.states[0].squeeze(1))
     assert inference.states[1] == max_length

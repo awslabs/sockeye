@@ -13,18 +13,18 @@
 
 import functools
 import logging
-
 import operator
 from abc import abstractmethod, ABC
+from dataclasses import dataclass
 from typing import Optional, Tuple, List, Union
 
-import torch as pt
 import numpy as onp
+import torch as pt
 
-from .model_pt import PyTorchSockeyeModel
 import sockeye.constants as C
-from . import utils
 from . import lexicon
+from . import utils
+from .model_pt import PyTorchSockeyeModel
 
 logger = logging.getLogger(__name__)
 
@@ -77,13 +77,22 @@ class _SingleModelInference(_Inference):
         logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             logits = pt.log_softmax(logits, dim=-1)
-        scores = -logits
+        scores = -logits  # shape: (batch, output_vocab_size/len(vocab_slice_ids))
 
         target_factors = None  # type: Optional[pt.Tensor]
         if target_factor_outputs:
-            # target factors are greedily 'decoded'.
-            factor_predictions = [tfo.argmax(dim=1).unsqueeze(1).int() for tfo in target_factor_outputs]
-            target_factors = factor_predictions[0] if len(factor_predictions) == 1 else pt.cat(factor_predictions, 1)
+            predictions = []  # type: List[pt.Tensor]
+            for tf_logits in target_factor_outputs:
+                if not self._skip_softmax:
+                    tf_logits = pt.log_softmax(tf_logits, dim=-1)
+                tf_scores = -tf_logits
+                # target factors are greedily chosen, and score and index are collected via torch.min.
+                # Shape per factor: (batch*beam, 1, 2), where last dimension holds values and indices.
+                tf_prediction = pt.cat(tf_scores.min(dim=-1, keepdim=True), dim=1).unsqueeze(1)
+                predictions.append(tf_prediction)
+            # Shape: (batch*beam, num_secondary_factors, 2)
+            target_factors = pt.cat(predictions, dim=1) if len(predictions) > 1 else predictions[0]
+
         return scores, states, target_factors
 
 
@@ -139,10 +148,11 @@ class _EnsembleInference(_Inference):
 
         target_factors = None  # type: Optional[pt.Tensor]
         if factor_outputs:
-            # target factors are greedily 'decoded'.
-            factor_predictions = [self._interpolation(fs).argmin(dim=-1).unsqueeze(1).int() for fs in zip(*factor_outputs)]
-            if factor_predictions:
-                target_factors = factor_predictions[0] if len(factor_predictions) == 1 else pt.cat(factor_predictions, 1)
+            predictions = []  # type: List[pt.Tensor]
+            for model_tf_logits in zip(*factor_outputs):
+                tf_prediction = pt.cat(self._interpolation(model_tf_logits).min(dim=-1, keepdim=True), dim=1).unsqueeze(1)
+                predictions.append(tf_prediction)
+            target_factors = pt.cat(predictions, dim=1) if len(predictions) > 1 else predictions[0]
         return scores, new_states, target_factors
 
     @staticmethod
@@ -153,6 +163,18 @@ class _EnsembleInference(_Inference):
     def log_linear_interpolation(predictions):
         log_probs = utils.average_tensors([p.log() for p in predictions])
         return -(log_probs.log_softmax())
+
+
+@dataclass
+class SearchResult:
+    """
+    Holds return values from Search algorithms
+    """
+    best_hyp_indices: pt.Tensor
+    best_word_indices: pt.Tensor
+    accumulated_scores: pt.Tensor
+    lengths: pt.Tensor
+    estimated_reference_lengths: pt.Tensor
 
 
 class UpdateScores(pt.nn.Module):
@@ -295,15 +317,17 @@ class SortNormalizeAndUpdateFinished(pt.nn.Module):
     def __init__(self,
                  pad_id: int,
                  eos_id: int,
-                 scorer: CandidateScorer) -> None:
+                 scorer: CandidateScorer,
+                 expect_factors: bool) -> None:
         super().__init__()
         self.pad_id = pad_id
         self.eos_id = eos_id
         self._scorer = scorer
+        self.expect_factors = expect_factors
 
     def forward(self, best_hyp_indices, best_word_indices,
                 finished, scores_accumulated, lengths, reference_lengths,
-                factors=None):
+                *factor_args):
 
         # Reorder fixed-size beam data according to best_hyp_indices (ascending)
         finished = finished.index_select(0, best_hyp_indices)
@@ -314,22 +338,29 @@ class SortNormalizeAndUpdateFinished(pt.nn.Module):
         all_finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
         newly_finished = pt.logical_xor(all_finished, finished).unsqueeze(1)
         scores_accumulated = pt.where(newly_finished,
-                                      self._scorer(scores_accumulated,
-                                                   lengths,
-                                                   reference_lengths),
+                                      self._scorer(scores_accumulated, lengths, reference_lengths),
                                       scores_accumulated)
 
         # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
         finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
 
-        # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
         best_word_indices = best_word_indices.unsqueeze(1)
 
-        if factors is not None:
-            secondary_factors = factors.index_select(0, best_hyp_indices)
-            best_word_indices = pt.cat((best_word_indices, secondary_factors), dim=1)
+        # Traced modules do not allow optional return values or None, but lists. We return
+        # primary scores and optional factor scores therefore in a list.
+        scores = [scores_accumulated]  # type: List[pt.Tensor]
+        if self.expect_factors:
+            factors, factor_scores_accumulated = factor_args
+            # factors: (batch*beam, num_secondary_factors, 2)
+            f_sorted = factors.index_select(0, best_hyp_indices)
+            factor_scores, factor_indices = f_sorted[:, :, 0], f_sorted[:, :, 1]
+            # updated_factor_scores: (batch*beam, num_secondary_factors)
+            updated_factor_scores = factor_scores_accumulated.index_select(0, best_hyp_indices) + factor_scores
+            # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
+            best_word_indices = pt.cat((best_word_indices, factor_indices.int()), dim=1)
+            scores.append(updated_factor_scores)
 
-        return best_word_indices, finished, scores_accumulated, lengths, reference_lengths
+        return best_word_indices, finished, scores, lengths, reference_lengths
 
 
 class TopK(pt.nn.Module):
@@ -523,8 +554,7 @@ class GreedySearch(pt.nn.Module):
                 source: pt.Tensor,
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
-                max_output_lengths: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor,
-                                                        List[Optional[pt.Tensor]]]:
+                max_output_lengths: pt.Tensor) -> SearchResult:
         """
         Translates a single sentence (batch_size=1) using greedy search.
 
@@ -533,9 +563,7 @@ class GreedySearch(pt.nn.Module):
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param max_output_lengths: ndarray of maximum output lengths per input in source.
                 Shape: (batch_size=1,). Dtype: int32.
-        :return List of best hypotheses indices, list of best word indices,
-                array of accumulated length-normalized negative log-probs, hypotheses lengths,
-                predicted lengths of references (if any).
+        :return SearchResult.
         """
         batch_size = source.size()[0]
         assert batch_size == 1, "Greedy Search does not support batch_size != 1"
@@ -569,7 +597,8 @@ class GreedySearch(pt.nn.Module):
             best_word_index = self.work_block(scores, vocab_slice_ids, target_factors)
             outputs.append(best_word_index)
 
-            if best_word_index == self.eos_id or best_word_index == C.PAD_ID:
+            _best_word_index = best_word_index[:, 0]
+            if _best_word_index == self.eos_id or _best_word_index == C.PAD_ID:
                 break
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
@@ -578,9 +607,14 @@ class GreedySearch(pt.nn.Module):
         stacked_outputs = pt.stack(outputs, dim=2)
         length = pt.tensor([t], dtype=pt.int32)  # shape (1,)
         hyp_indices = pt.zeros(1, t + 1, dtype=pt.int32)
-        score = pt.tensor([-1.])  # TODO: return unnormalized proper score
+        # TODO: return unnormalized proper score
+        scores = pt.zeros(1, self.num_target_factors) - 1
 
-        return hyp_indices, stacked_outputs, score, length, None  # type: ignore
+        return SearchResult(best_hyp_indices=hyp_indices,
+                            best_word_indices=stacked_outputs,
+                            accumulated_scores=scores,
+                            lengths=length,
+                            estimated_reference_lengths=None)  # type: ignore
 
 
 class GreedyTop1(pt.nn.Module):
@@ -593,13 +627,14 @@ class GreedyTop1(pt.nn.Module):
                 vocab_slice_ids: Optional[pt.Tensor] = None,
                 target_factors: Optional[pt.Tensor] = None) -> pt.Tensor:
         # shape: (batch*beam=1, 1)
-        # argmin has trouble with fp16 inputs on GPUs, using top1 instead
         best_word_index = pt.argmin(scores, dim=-1, keepdim=True)
         # Map from restricted to full vocab ids if needed
         if vocab_slice_ids is not None:
             best_word_index = vocab_slice_ids.index_select(0, best_word_index.squeeze(1)).unsqueeze(1)
         if target_factors is not None:
-            best_word_index = pt.cat((best_word_index, target_factors), dim=1)
+            factor_index = target_factors[:, :, 1].int()
+            best_word_index = pt.cat((best_word_index, factor_index), dim=1)
+
         return best_word_index
 
 
@@ -651,7 +686,8 @@ class BeamSearch(pt.nn.Module):
         self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
             pad_id=C.PAD_ID,
             eos_id=eos_id,
-            scorer=scorer)
+            scorer=scorer,
+            expect_factors=self.num_target_factors > 1)
         self._traced_sort_norm_and_update_finished = None  # type: Optional[pt.jit.ScriptModule]
 
         self._sample = None  # type: Optional[pt.nn.Module]
@@ -666,8 +702,7 @@ class BeamSearch(pt.nn.Module):
                 source: pt.Tensor,
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
-                max_output_lengths: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, pt.Tensor,
-                                                        List[Optional[pt.Tensor]]]:
+                max_output_lengths: pt.Tensor) -> SearchResult:
         """
         Translates multiple sentences using beam search.
 
@@ -676,9 +711,7 @@ class BeamSearch(pt.nn.Module):
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param max_output_lengths: Tensor of maximum output lengths per input in source.
                 Shape: (batch_size,). Dtype: int32.
-        :return List of best hypotheses indices, list of best word indices,
-                array of accumulated length-normalized negative log-probs, hypotheses lengths,
-                predicted lengths of references (if any).
+        :return SearchResult.
         """
         batch_size = source.size()[0]
         logger.debug("beam_search batch size: %d", batch_size)
@@ -718,6 +751,11 @@ class BeamSearch(pt.nn.Module):
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = pt.zeros(batch_size * self.beam_size, 1, device=self.device, dtype=self.dtype)
+        # Accumulated (greedily chosen) factor scores. Factor scores are not normalized by length.
+        # TODO: Consider joint tensor for all target factors
+        # Embedded in a list to efficiently assign return values and avoid if-branching
+        factor_scores_accumulated = [pt.zeros(batch_size * self.beam_size, self.num_target_factors - 1,
+                                              device=self.device, dtype=self.dtype)]
 
         output_vocab_size = self.output_vocab_size
 
@@ -749,6 +787,8 @@ class BeamSearch(pt.nn.Module):
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
+            # target_factors: (batch_size * beam_size, num_secondary_factors, 2),
+            # where last dimension holds indices and scores
             target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
                                                                                      model_states,
                                                                                      vocab_slice_ids)
@@ -782,13 +822,14 @@ class BeamSearch(pt.nn.Module):
             # next call to topk(), hypotheses may not be in sorted order.
             _sort_inputs = [best_hyp_indices, best_word_indices, finished, scores_accumulated, lengths,
                             estimated_reference_lengths]
-            if target_factors is not None:
-                _sort_inputs.append(target_factors)
+            if self.num_target_factors > 1:
+                _sort_inputs += [target_factors, *factor_scores_accumulated]
             if self._traced_sort_norm_and_update_finished is None:
                 self._traced_sort_norm_and_update_finished = pt.jit.trace(self._sort_norm_and_update_finished,
                                                                           _sort_inputs)
-            best_word_indices, finished, scores_accumulated, lengths, estimated_reference_lengths = \
-                self._traced_sort_norm_and_update_finished(*_sort_inputs)
+            best_word_indices, finished, \
+            (scores_accumulated, *factor_scores_accumulated), \
+            lengths, estimated_reference_lengths = self._traced_sort_norm_and_update_finished(*_sort_inputs)
 
             # Collect best hypotheses, best word indices
             best_word_indices_list.append(best_word_indices)
@@ -811,16 +852,21 @@ class BeamSearch(pt.nn.Module):
         # 1 = scores_accumulated.size()[1]
         best_hyp_indices = indices.div(1, rounding_mode='floor').int() + offset
         scores_accumulated = scores_accumulated.index_select(0, best_hyp_indices)
+        if self.num_target_factors > 1:
+            accumulated_factor_scores = factor_scores_accumulated[0].index_select(0, best_hyp_indices)
+            # (batch*beam, num_target_factors)
+            scores_accumulated = pt.cat((scores_accumulated, accumulated_factor_scores), dim=1)
+
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.index_select(0, best_hyp_indices)
         all_best_hyp_indices = pt.stack(best_hyp_indices_list, dim=1)
         all_best_word_indices = pt.stack(best_word_indices_list, dim=2)
 
-        return all_best_hyp_indices, \
-               all_best_word_indices, \
-               scores_accumulated, \
-               lengths, \
-               estimated_reference_lengths
+        return SearchResult(best_hyp_indices=all_best_hyp_indices,
+                            best_word_indices=all_best_word_indices,
+                            accumulated_scores=scores_accumulated,
+                            lengths=lengths,
+                            estimated_reference_lengths=estimated_reference_lengths)
 
     def _should_stop(self, finished: pt.Tensor, batch_size: int) -> bool:
         if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
