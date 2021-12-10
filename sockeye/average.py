@@ -45,7 +45,7 @@ def average(param_paths: Iterable[str]) -> Dict[str, torch.Tensor]:
     for path in param_paths:
         logger.info("Loading parameters from '%s'", path)
         try:
-            params = torch.load(path)
+            params = torch.load(path, map_location=torch.device('cpu'))
         except:
             logger.info('Converting from MXNet')
             from mxnet import npx
