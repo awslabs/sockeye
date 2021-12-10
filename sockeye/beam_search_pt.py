@@ -86,9 +86,8 @@ class _SingleModelInference(_Inference):
                 if not self._skip_softmax:
                     tf_logits = pt.log_softmax(tf_logits, dim=-1)
                 tf_scores = -tf_logits
-                # shape: (batch, num_classes)
-                # target factors are greedily chosen, and score and index are collected via torch.max.
-                # Shape per factor: (batch/beam, 1, 2), where last dimension holds values and indices.
+                # target factors are greedily chosen, and score and index are collected via torch.min.
+                # Shape per factor: (batch*beam, 1, 2), where last dimension holds values and indices.
                 tf_prediction = pt.cat(tf_scores.min(dim=-1, keepdim=True), dim=1).unsqueeze(1)
                 predictions.append(tf_prediction)
             # Shape: (batch*beam, num_secondary_factors, 2)
