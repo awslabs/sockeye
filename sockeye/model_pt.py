@@ -557,8 +557,10 @@ def initialize_parameters(module: pt.nn.Module):
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
     https: // jamesmccaffrey.wordpress.com / 2020 / 11 / 20 / the - gain - parameter -
     """
+    import math
     if isinstance(module, pt.nn.Linear) or isinstance(module, layers_pt.PyTorchOutputLayer):
-        pt.nn.init.xavier_uniform_(module.weight, gain=1.0)
+        # TODO: consider using gain=1 / math.sqrt(2)
+        pt.nn.init.xavier_uniform_(module.weight, gain=1)
         if module.bias is not None:
             pt.nn.init.zeros_(module.bias)
     elif isinstance(module, pt.nn.Embedding):

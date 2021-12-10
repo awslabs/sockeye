@@ -186,19 +186,24 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         :param target_embed: Target-side embedding layer output. Shape: (batch, target_length, target_embedding_dim).
         :return: Initial states.
         """
+        source_max_len = encoder_outputs.size()[1]
         if target_embed is None:  # Inference: initial step = 0. Shape: (batch_size, 1)
             steps = pt.zeros_like(encoder_valid_length).unsqueeze(1)
+            # (batch * heads, 1, source_max_len)
+            source_mask = layers_pt.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
+                                                               source_max_len)
+            # Shape: (batch, heads, 1, src_max_len)
+            source_mask = source_mask.view(-1, self.config.attention_heads, 1, source_max_len)
         else:  # Training: steps up to target length. Shape: (1, target_length)
             target_length = target_embed.size()[1]
             steps = pt.arange(0, target_length, device=target_embed.device).unsqueeze(0)
+            # (batch * heads, 1, source_max_len)
+            source_mask = layers_pt.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
+                                                               source_max_len)
+            source_mask = source_mask.repeat(1, target_length, 1)  # Shape: (batch * heads, trg_max_len, src_max_len)
 
-        # inverted source_length_mask for attention masking, (batch_size * heads, 1, source_max_len)
-        source_max_len = encoder_outputs.size()[1]
-        source_mask = layers_pt.prepare_source_length_mask(encoder_valid_length,
-                                                           self.config.attention_heads,
-                                                           source_max_len).view(-1,
-                                                                                self.config.attention_heads,
-                                                                                source_max_len)
+            # Shape: (batch, heads, trg_max_len, src_max_len)
+            source_mask = source_mask.view(-1, self.config.attention_heads, target_length, source_max_len)
 
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
@@ -241,7 +246,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             autoregr_states = other[self.config.num_layers:]
         else:
             if any(layer.needs_mask for layer in self.layers):
-                target_mask = self.autoregressive_mask(step_input)  # mask: (1, length, length)
+                target_mask = self.autoregressive_mask(step_input)  # mask: (length, length)
             steps, source_encoded, source_mask, *autoregr_states = states
             enc_att_kv = [None for _ in range(self.config.num_layers)]
 
@@ -250,14 +255,8 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             states_iter = iter(autoregr_states)
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]  # type: ignore
 
-        batch, heads, source_max_len = source_mask.size()
-        source_mask_view = source_mask.view(batch * heads, 1, source_max_len)
-        _, target_length, __  = step_input.size()
-        # Workaround for PyTorch tracing: size() sometimes returns Tensors on
-        # the cpu device instead of ints.
-        if isinstance(target_length, pt.Tensor):
-            target_length = target_length.to(step_input.device)
-        source_mask_view = source_mask_view.repeat_interleave(target_length, dim=1)
+        batch, heads, target_max_len, source_max_len = source_mask.size()
+        source_mask_view = source_mask.view(batch * heads, target_max_len, source_max_len)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)

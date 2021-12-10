@@ -268,9 +268,10 @@ class PyTorchDotAttentionCell(pt.nn.Module):
         :param key_values: Interleaved Key & value tensor of shape (key/value_length, batch_size, hidden * 2)
         :param mask: Optional boolean tensor for attention masking of shape (batch * heads, <qlen>, <kvlen>).
                      If this is cross-attention, <qlen> dimension can be 1 for broadcasting,
-                     i.e. (batch * heads, 1, kvlen). For self-attention an autoregressive mask should be provided of
-                     shape (1, len, len). Value of this mask is True for positions that should be masked out
-                     (padding positions), False for valid positions.
+                     i.e. (batch * heads, 1, kvlen). For self-attention on the decoder side an autoregressive mask
+                     should be provided of shape (1, len, len) or (len, len).
+                     Value of this mask is True for positions that should be masked out (padding positions),
+                     False for valid positions.
         """
         # (batch * heads, qlen, klen)
         logits = pytorch_interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
@@ -393,6 +394,42 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
 
         self.depth_att = depth_att
         self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False)
+        self.kv_interleaved = False  # indicates whether self.ff_kv.weight is in interleaved format or not
+        self._drop_p = dropout
+        # interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
+
+    def separate_kv(self):
+        assert self.kv_interleaved
+        with pt.no_grad():
+            kv = self.ff_in.weight.data[self.depth:, :]
+            k, v = kv.view(self.heads, 2 * self.depth_per_head, self.depth).split(
+                self.depth_per_head, dim=1)
+            k = k.reshape(self.depth, self.depth)
+            v = v.reshape(self.depth, self.depth)
+        self.ff_in.weight.data[self.depth:, :] = pt.cat((k, v), dim=0)
+        self.kv_interleaved = False
+
+    def interleave_kv(self):
+        assert not self.kv_interleaved
+        with pt.no_grad():
+            _, k, v = self.ff_in.weight.data.split(self.depth, dim=0)
+            k = k.reshape(self.heads, -1, self.depth)
+            v = v.reshape(self.heads, -1, self.depth)
+        self.ff_in.weight.data[self.depth:, :] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self.depth)
+        self.kv_interleaved = True
+
+    def train(self, mode: bool = True):
+        if mode and self.kv_interleaved:
+            # training operates with non-interleaved format
+            self.separate_kv()
+        elif not mode and not self.kv_interleaved:
+            # eval/inference operates in interleaved format
+            self.interleave_kv()
+        return super().train(mode)
+
+    def _load_from_state_dict(self, *args):
+        self.kv_interleaved = True  # see SockeyeModel.save_parameters(): models store kv weight in interleaved format
+        super()._load_from_state_dict(*args)
 
     @property
     def num_state_tensors(self) -> int:
@@ -426,13 +463,33 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :return: tensor of shape (max_length, batch, output_depth).
         """
-        proj = self.ff_in(inputs)
-        queries, states = proj.split((self.depth_att, 2 * self.depth_att), dim=2)
+        if self.training:
+            assert not self.kv_interleaved
+            contexts, _ = F.multi_head_attention_forward(query=inputs, key=inputs, value=inputs,
+                                                         embed_dim_to_check=self.depth, num_heads=self.heads,
+                                                         in_proj_weight=self.ff_in.weight,
+                                                         in_proj_bias=None,
+                                                         bias_k=None, bias_v=None, add_zero_attn=False,
+                                                         dropout_p=self._drop_p,
+                                                         out_proj_weight=self.ff_out.weight,
+                                                         out_proj_bias=self.ff_out.bias,
+                                                         training=self.training,
+                                                         key_padding_mask=None,
+                                                         need_weights=False,
+                                                         attn_mask=mask,
+                                                         use_separate_proj_weight=False,
+                                                         q_proj_weight=None,
+                                                         k_proj_weight=None,
+                                                         v_proj_weight=None)
+            return contexts, contexts  # dummy return
+        else:
+            proj = self.ff_in(inputs)
+            queries, states = proj.split((self.depth_att, 2 * self.depth_att), dim=2)
 
-        if previous_states is not None:
-            states = pt.cat((previous_states, states), dim=0)
+            if previous_states is not None:
+                states = pt.cat((previous_states, states), dim=0)
 
-        return self._attend(queries=queries, key_values=states, mask=mask), states
+            return self._attend(queries=queries, key_values=states, mask=mask), states
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadSelfAttention'):  # type: ignore
         self.ff_in.weight.data[:] = pt.as_tensor(block_mx.ff_in.weight.data().asnumpy())
@@ -466,7 +523,8 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
     def separate_kv(self):
         assert self.kv_interleaved
         with pt.no_grad():
-            k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self.depth).split(self.depth_per_head, dim=1)
+            k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self.depth).split(
+                self.depth_per_head, dim=1)
             k = k.reshape(self.depth, self.depth)
             v = v.reshape(self.depth, self.depth)
         self.ff_kv.weight.data[:] = pt.cat((k, v), dim=0)
@@ -543,13 +601,13 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
 
 
 def interleave_kv(module: pt.nn.Module):
-    if isinstance(module, PyTorchMultiHeadAttention):
+    if isinstance(module, PyTorchMultiHeadAttention) or isinstance(module, PyTorchMultiHeadSelfAttention):
         if not module.kv_interleaved:
             module.interleave_kv()
 
 
 def separate_kv(module: pt.nn.Module):
-    if isinstance(module, PyTorchMultiHeadAttention):
+    if isinstance(module, PyTorchMultiHeadAttention) or isinstance(module, PyTorchMultiHeadSelfAttention):
         if module.kv_interleaved:
             module.separate_kv()
 

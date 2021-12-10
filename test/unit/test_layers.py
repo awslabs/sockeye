@@ -16,6 +16,7 @@ import pytest
 import torch as pt
 
 import sockeye.layers_pt
+import sockeye.transformer_pt
 
 
 def test_lhuc():
@@ -381,11 +382,13 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
 
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
-                         [(10, 9, 1, 12, 4), (1, 1, 2, 4, 1), (3, 32, 15, 64, 8)])
+                         [(10, 9, 1, 12, 4), (1, 1, 2, 4, 1), (3, 32, 15, 64, 8),
+                          (10, 32, 15, 32, 8), (1, 1, 1, 1, 1)])
 def test_interleaved_multihead_attention(qlen, kvlen, batch_size, hidden, heads):
     queries_pt = pt.rand((qlen, batch_size, hidden))
     memory_pt = pt.rand((kvlen, batch_size, hidden))
 
+    # test without mask
     mha = sockeye.layers_pt.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden)
     mha.train()
     assert not mha.kv_interleaved
@@ -394,6 +397,60 @@ def test_interleaved_multihead_attention(qlen, kvlen, batch_size, hidden, heads)
     assert mha.kv_interleaved
     r_test = mha(queries_pt, memory_pt, mask=None, projected_memory_kv=None)
     assert pt.allclose(r_train, r_test, atol=1e-06)
+
+    # test with mask
+    valid_length = pt.randint(1, kvlen + 1, (batch_size,))
+    mask = sockeye.layers_pt.prepare_source_length_mask(valid_length, heads, kvlen)
+    mask = mask.repeat(1, qlen, 1)  # Shape: (batch *h heads, qlen, kvlen)
+    mha.train()
+    assert not mha.kv_interleaved
+    r_train = mha(queries_pt, memory_pt, mask=mask, projected_memory_kv=None)
+    mha.eval()
+    assert mha.kv_interleaved
+    r_test = mha(queries_pt, memory_pt, mask=mask, projected_memory_kv=None)
+    assert pt.allclose(r_train, r_test, atol=1e-06)
+
+
+@pytest.mark.parametrize('seq_len, batch_size, hidden, heads, side',
+                         [(10, 1, 12, 4, 'decoder'), (1, 2, 4, 1, 'decoder'), (3, 15, 64, 8, 'decoder'),
+                          (10, 1, 12, 4, 'encoder'), (1, 2, 4, 1, 'encoder'), (3, 15, 64, 8, 'encoder'),
+                          (96, 32, 32, 8, 'encoder'), (96, 32, 32, 8, 'decoder')])
+def test_interleaved_multihead_self_attention(seq_len, batch_size, hidden, heads, side):
+    inputs = pt.rand((seq_len, batch_size, hidden))
+
+    # test without attention masking
+    mha = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
+    mha.train()
+    assert not mha.kv_interleaved
+    r_train, _ = mha(inputs, previous_states=None, mask=None)
+    mha.eval()
+    assert mha.kv_interleaved
+    r_test, _ = mha(inputs, previous_states=None, mask=None)
+    assert pt.allclose(r_train, r_test, atol=1e-06)
+
+    # test with two types of attention masks (autoregressive, and valid_length based)
+    if side == 'decoder':
+        # autoregressive mask. Shape: (len, len)
+        mask = sockeye.transformer_pt.AutoRegressiveMask()(inputs.transpose(0, 1))
+        mha.train()
+        assert not mha.kv_interleaved
+        r_train, _ = mha(inputs, previous_states=None, mask=mask)
+        mha.eval()
+        assert mha.kv_interleaved
+        r_test, _ = mha(inputs, previous_states=None, mask=mask)
+        assert pt.allclose(r_train, r_test, atol=1e-06)
+    elif side == 'encoder':
+        valid_length = pt.randint(1, seq_len+1, (batch_size,))
+        # source attention mask. Shape: (batch * heads, 1, seq_len)
+        mask = sockeye.layers_pt.prepare_source_length_mask(valid_length, heads, seq_len)
+        mask = mask.repeat(1, seq_len, 1)  # Shape: (batch * heads, seq_len, seq_len)
+        mha.train()
+        assert not mha.kv_interleaved
+        r_train, _ = mha(inputs, previous_states=None, mask=mask)
+        mha.eval()
+        assert mha.kv_interleaved
+        r_test, _ = mha(inputs, previous_states=None, mask=mask)  # Note: can also handle the mask repated on the qlen axis
+        assert pt.allclose(r_train, r_test, atol=1e-06)
 
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
