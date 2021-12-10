@@ -492,8 +492,13 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
             return self._attend(queries=queries, key_values=states, mask=mask), states
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadSelfAttention'):  # type: ignore
+        was_train = self.training
+        if was_train:
+            self.eval()
         self.ff_in.weight.data[:] = pt.as_tensor(block_mx.ff_in.weight.data().asnumpy())
         self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
+        if was_train:
+            self.train()
 
 
 class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
@@ -595,9 +600,14 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
             return self._attend(queries=queries, key_values=key_values, mask=mask)
 
     def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):  # type: ignore
+        was_train = self.training
+        if was_train:
+            self.eval()
         self.ff_q.weight.data[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
         self.ff_kv.weight.data[:] = pt.as_tensor(block_mx.ff_kv.weight.data().asnumpy())
         self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
+        if was_train:
+            self.train()
 
 
 def interleave_kv(module: pt.nn.Module):

@@ -213,6 +213,7 @@ def test_mx_pt_eq_sockeye_model():
             assert np.allclose(s_mx.asnumpy(), s_pt.detach().numpy(), atol=1e-05)
 
     # test decode_step()
+    b_pt.eval()
     states_mx = init_states_mx
     states_pt = init_states_pt
     step_output_mx, states_mx, factor_outputs_mx = b_mx.decode_step(step_inputs_mx, states_mx,

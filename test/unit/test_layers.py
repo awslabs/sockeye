@@ -367,6 +367,7 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
     b_mx = sockeye.layers.MultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
     b_mx.initialize()
     b_pt = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
+    b_pt.eval()
     b_pt.weights_from_mxnet_block(b_mx)
 
     r_mx, states_mx = b_mx(inputs_mx, None, None, None)
