@@ -141,8 +141,9 @@ class _EnsembleInference(_Inference):
             logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
             probs = logits.softmax(dim=-1)
             outputs.append(probs)
-            target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
-            factor_outputs.append(target_factor_probs)
+            if target_factor_outputs:
+                target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
+                factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
 
