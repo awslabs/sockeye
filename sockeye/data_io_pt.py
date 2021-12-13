@@ -1496,7 +1496,7 @@ def get_permutations(bucket_counts: List[int]) -> Tuple[List[torch.Tensor], List
         if num_samples == 0:
             num_samples = 1
         # new random order:
-        data_permutation = torch.from_numpy(np.random.permutation(num_samples))
+        data_permutation = torch.from_numpy(np.random.permutation(num_samples)).long()
         inverse_data_permutation = torch.empty(num_samples, dtype=torch.int64)
         inverse_data_permutation[data_permutation] = torch.arange(num_samples)
         data_permutations.append(data_permutation)
@@ -1880,9 +1880,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "rb") as fp:
             self.batch_indices = pickle.load(fp)
             self.curr_batch_index = pickle.load(fp)
-            inverse_data_permutations = [torch.from_numpy(a) for a in
+            inverse_data_permutations = [torch.from_numpy(a).long() for a in
                                          np.load(fp, allow_pickle=True)]  # pylint: disable=unexpected-keyword-arg
-            data_permutations = [torch.from_numpy(a) for a in
+            data_permutations = [torch.from_numpy(a).long() for a in
                                  np.load(fp, allow_pickle=True)]  # pylint: disable=unexpected-keyword-arg
 
         # Right after loading the iterator state, next() should be called
