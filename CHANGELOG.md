@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.4]
+
+###
+
+- Make sure data permutation indices are in int64 format (doesn't seem to be the case by default on all platforms).
+
 ## [3.0.3]
 
 ### Fixed
