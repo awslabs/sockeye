@@ -115,11 +115,13 @@ class PyTorchEmbedding(PyTorchEncoder):
         concat_factors_embeds = []  # type: List[pt.Tensor]
         sum_factors_embeds = []  # type: List[pt.Tensor]
 
+        primary_data = data[:, :, 0]
+        embedded = self.embedding(primary_data)
+
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
-            data, *factor_datas = (x.squeeze(2) for x in data.split(1, dim=2))
-            for i, (factor_data, factor_embedding, factor_config) in enumerate(zip(factor_datas,
-                                                                               self.factor_embeds,
-                                                                               self.config.factor_configs)):
+            for i, (factor_embedding, factor_config) in enumerate(zip(self.factor_embeds,
+                                                                      self.config.factor_configs), 1):
+                factor_data = data[:, :, i]
                 factor_embedded = factor_embedding(factor_data)
                 if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
                     concat_factors_embeds.append(factor_embedded)
@@ -129,10 +131,6 @@ class PyTorchEmbedding(PyTorchEncoder):
                     average_factors_embeds.append(factor_embedded)
                 else:
                     raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
-        else:
-            data = data.squeeze(2)
-
-        embedded = self.embedding(data)
 
         if self.config.num_factors > 1 and self.config.factor_configs is not None:
             if average_factors_embeds:
