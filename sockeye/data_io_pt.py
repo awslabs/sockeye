@@ -1938,9 +1938,9 @@ def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor
     :param target: Target tensor. Shape: (batch, target_length, num_target_factors).
     :param label: Time-shifted label tensor. Shape: (batch, target_length, num_target_factors).
     """
-    source_words = source[:, :, 0:1].squeeze(dim=2)
+    source_words = source[:, :, 0]
     source_length = (source_words != C.PAD_ID).sum(dim=1)
-    target_words = target[:, :, 0:1].squeeze(dim=2)
+    target_words = target[:, :, 0]
     target_length = (target_words != C.PAD_ID).sum(dim=1)
     length_ratio = source_length / target_length
 
