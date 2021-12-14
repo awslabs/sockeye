@@ -62,6 +62,10 @@ mkdir -p tools
 
 git clone https://github.com/bricksdont/moses-scripts tools/moses-scripts
 
+# install library to download Google drive files
+
+pip install gdown
+
 # download helper scripts
 
 wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
