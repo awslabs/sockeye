@@ -502,7 +502,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
                          eos_id: int,
                          beam_size: int) -> Tuple[pt.Tensor, int]:
     device = source_words.device
-    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.int().cpu().numpy())
+    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.cpu().int().numpy())
     # Pad to a multiple of 8.
     vocab_slice_ids = pt.nn.functional.pad(pt.tensor(vocab_slice_ids, device=source_words.device, dtype=pt.int64),  # type: ignore
                                            pad=(0, 7 - ((vocab_slice_ids.size - 1) % 8)),
@@ -582,7 +582,7 @@ class GreedySearch(pt.nn.Module):
         # If using a top-k lexicon, select param rows for logit computation that correspond to the
         # target vocab for this sentence.
         if restrict_lexicon:
-            source_words = pt.split(source, 1, dim=2)[0].squeeze(2)
+            source_words = source[:, :, 0]
             vocab_slice_ids, _ = _get_vocab_slice_ids(restrict_lexicon, source_words, self.eos_id, beam_size=1)
 
         # (0) encode source sentence, returns a list
@@ -764,7 +764,7 @@ class BeamSearch(pt.nn.Module):
         # target vocab for this sentence.
         vocab_slice_ids = None  # type: Optional[pt.Tensor]
         if restrict_lexicon:
-            source_words = pt.split(source, 1, dim=2)[0].squeeze(2)
+            source_words = source[:, :, 0]
             vocab_slice_ids, output_vocab_size = _get_vocab_slice_ids(restrict_lexicon, source_words, self.eos_id,
                                                                       beam_size=1)
 
