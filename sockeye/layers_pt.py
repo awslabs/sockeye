@@ -471,7 +471,10 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
         :return: tensor of shape (max_length, batch, output_depth).
         """
         if self.training:  # use fused multi-head attention op during training
-            assert not self.kv_interleaved
+            assert not self.kv_interleaved, 'Cannot run PyTorch multi-head attention with interleaved key-value ' \
+                                            'parameters. Please separate these parameters by calling ' \
+                                            '`module.train()` for the top-level module before starting training ' \
+                                            '(likely an instance of PyTorchSockeyeModel).'
             contexts, _ = F.multi_head_attention_forward(query=inputs, key=inputs, value=inputs,
                                                          embed_dim_to_check=self.depth, num_heads=self.heads,
                                                          in_proj_weight=self.ff_in.weight,
