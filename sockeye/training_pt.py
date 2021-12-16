@@ -180,7 +180,7 @@ class PyTorchEarlyStoppingTrainer:
             checkpoint_decoder: Optional[checkpoint_decoder_pt.CheckpointDecoder] = None):
         logger.info("Early stopping by optimizing '%s'", self.config.early_stopping_metric)
 
-        if self.config.early_stopping_metric in C.METRICS_REQUIRING_DECODER:
+        if utils.is_primary_worker() and self.config.early_stopping_metric in C.METRICS_REQUIRING_DECODER:
             utils.check_condition(checkpoint_decoder is not None,
                                   "%s requires CheckpointDecoder" % self.config.early_stopping_metric)
 
@@ -406,14 +406,20 @@ class PyTorchEarlyStoppingTrainer:
                 loss_metric.update(loss_value.item(), num_samples.item())
 
         # Optionally run the checkpoint decoder
+        decoder_metrics = {}  # type: Dict[str, float]
         if checkpoint_decoder is not None:
             output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
             decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
-            for metric_name, metric_value in decoder_metrics.items():
-                assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
-                metric = loss_pt.LossMetric(name=metric_name)
-                metric.update(metric_value, num_samples=1)
-                val_metrics.append(metric)
+        # Broadcast decoder metrics (if any) from primary worker to secondary
+        # workers
+        if utils.is_distributed():
+            decoder_metrics = utils.broadcast_object(decoder_metrics)
+        # Add decoder metrics (if any) to validation metrics
+        for metric_name, metric_value in decoder_metrics.items():
+            assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
+            metric = loss_pt.LossMetric(name=metric_name)
+            metric.update(metric_value, num_samples=1)
+            val_metrics.append(metric)
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
