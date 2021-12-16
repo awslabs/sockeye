@@ -397,6 +397,11 @@ class PyTorchSockeyeModel(pt.nn.Module):
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:
             utils.check_condition(not unexpected, f"extra keys: {unexpected}")
+        # Models are saved with interleaved key-value params. If the current
+        # model is in training mode, separate the loaded params to match the
+        # format used during training.
+        if self.training:
+            self.apply(layers_pt.separate_kv)
         logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
     def set_parameters(self,
