@@ -997,10 +997,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     utils.log_parameters_pt(sockeye_model)
 
-    # Guarantee special implementations of `train()` run for all layers before
-    # starting training
-    sockeye_model.train()
-
     optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
 
     # This starts as a reference to the original Sockeye model. It is
