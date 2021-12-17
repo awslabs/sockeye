@@ -68,9 +68,9 @@ pip install gdown
 
 # download helper scripts
 
-wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
-wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
-wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/main/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/main/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/main/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
 ```
 
 
