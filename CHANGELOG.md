@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.6]
+
+### Fixed
+
+- Fixed checkpoint decoder issue that prevented using `bleu` as `--optimized-metric` for distributed training ([#995](https://github.com/awslabs/sockeye/issues/995)).
+
 ## [3.0.5]
 
 ### Fixed
@@ -33,7 +39,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Changed
 
-- `sockeye-translate`: Beam search now computes and returns secondary target factor scores. Secondary target factors 
+- `sockeye-translate`: Beam search now computes and returns secondary target factor scores. Secondary target factors
   do not participate in beam search, but are greedily chosen at every time step. Accumulated scores for secondary factors
   are not normalized by length. Factor scores are included in JSON output (``--output-type json``).
 - `sockeye-score` now returns tab-separated scores for each target factor. Users can decide how to combine factor scores
