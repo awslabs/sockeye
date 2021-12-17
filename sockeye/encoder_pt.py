@@ -90,14 +90,17 @@ class PyTorchEmbedding(PyTorchEncoder):
     def __init__(self, config: EmbeddingConfig, embedding: Optional[pt.nn.Embedding] = None) -> None:
         super().__init__()
         self.config = config
-
         if embedding is not None:
             self.embedding = embedding
         else:
             self.embedding = pt.nn.Embedding(self.config.vocab_size, self.config.num_embed,
                                              sparse=self.config.allow_sparse_grad)
 
+        self.num_factors = self.config.num_factors
+        if self.num_factors > 1:
+            assert len(self.config.factor_configs) == self.num_factors - 1
         self.factor_embeds = pt.nn.ModuleList()
+        self.factor_combinations = []  # type: List[str]
         if self.config.factor_configs is not None:
             for i, fc in enumerate(self.config.factor_configs, 1):
                 if fc.share_embedding:
@@ -106,33 +109,31 @@ class PyTorchEmbedding(PyTorchEncoder):
                     factor_embed = pt.nn.Embedding(fc.vocab_size, fc.num_embed,
                                                    sparse=self.config.allow_sparse_grad)
                 self.factor_embeds.append(factor_embed)
+                self.factor_combinations.append(fc.combine)
 
         self.dropout = pt.nn.Dropout(p=self.config.dropout) if self.config.dropout > 0.0 else None
 
-    def forward(self, data: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:  # pylint: disable=arguments-differ
-        # We will catch the optional factor weights in kwargs
-        average_factors_embeds = []  # type: List[pt.Tensor]
-        concat_factors_embeds = []  # type: List[pt.Tensor]
-        sum_factors_embeds = []  # type: List[pt.Tensor]
-
+    def forward(self, data: pt.Tensor) -> pt.Tensor:
         primary_data = data[:, :, 0]
         embedded = self.embedding(primary_data)
 
-        if self.config.num_factors > 1 and self.config.factor_configs is not None:
-            for i, (factor_embedding, factor_config) in enumerate(zip(self.factor_embeds,
-                                                                      self.config.factor_configs), 1):
+        if self.num_factors > 1:
+            average_factors_embeds = []
+            concat_factors_embeds = []
+            sum_factors_embeds = []
+            for i, (factor_embedding, factor_combination) in enumerate(zip(self.factor_embeds,
+                                                                           self.factor_combinations), 1):
                 factor_data = data[:, :, i]
                 factor_embedded = factor_embedding(factor_data)
-                if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
+                if factor_combination == C.FACTORS_COMBINE_CONCAT:
                     concat_factors_embeds.append(factor_embedded)
-                elif factor_config.combine == C.FACTORS_COMBINE_SUM:
+                elif factor_combination == C.FACTORS_COMBINE_SUM:
                     sum_factors_embeds.append(factor_embedded)
-                elif factor_config.combine == C.FACTORS_COMBINE_AVERAGE:
+                elif factor_combination == C.FACTORS_COMBINE_AVERAGE:
                     average_factors_embeds.append(factor_embedded)
                 else:
-                    raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
+                    raise ValueError(f"Unknown combine value for factors: {factor_combination}")
 
-        if self.config.num_factors > 1 and self.config.factor_configs is not None:
             if average_factors_embeds:
                 embedded = pt.mean(pt.stack([embedded] + average_factors_embeds, dim=0), dim=0)
             if sum_factors_embeds:
