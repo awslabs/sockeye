@@ -405,9 +405,9 @@ class PyTorchEarlyStoppingTrainer:
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
                 loss_metric.update(loss_value.item(), num_samples.item())
 
-        # Optionally run the checkpoint decoder
+        # Primary worker optionally runs the checkpoint decoder
         decoder_metrics = {}  # type: Dict[str, float]
-        if checkpoint_decoder is not None:
+        if utils.is_primary_worker() and checkpoint_decoder is not None:
             output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
             decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
         # Broadcast decoder metrics (if any) from primary worker to secondary
