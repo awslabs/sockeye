@@ -336,7 +336,8 @@ class PyTorchTransformerFeedForward(pt.nn.Module):
 
 class AutoRegressiveMask(pt.nn.Module):
 
-    def forward(self, x):
+    def forward(self, x: pt.Tensor) -> pt.Tensor:
+        """ Input tensor with length on dimension 1 """
         mask = pt.full((x.shape[1], x.shape[1]), fill_value=1, device=x.device, dtype=pt.bool)
-        mask = pt.triu(mask, diagonal=1).unsqueeze(0)
-        return mask.detach()
+        mask = pt.triu(mask, diagonal=1)
+        return mask.detach()  # Shape: (len, len)

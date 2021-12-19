@@ -359,7 +359,9 @@ class PyTorchSockeyeModel(pt.nn.Module):
         :param fname: Path to save parameters to.
         See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
         """
+        self.apply(layers_pt.interleave_kv)
         pt.save(self.state_dict(), fname)
+        self.apply(layers_pt.separate_kv)
         logging.info('Saved params/state_dict to "%s"', fname)
 
     def load_parameters(self,
@@ -395,6 +397,11 @@ class PyTorchSockeyeModel(pt.nn.Module):
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:
             utils.check_condition(not unexpected, f"extra keys: {unexpected}")
+        # Models are saved with interleaved key-value params. If the current
+        # model is in training mode, separate the loaded params to match the
+        # format used during training.
+        if self.training:
+            self.apply(layers_pt.separate_kv)
         logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
     def set_parameters(self,
@@ -555,8 +562,10 @@ def initialize_parameters(module: pt.nn.Module):
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
     https: // jamesmccaffrey.wordpress.com / 2020 / 11 / 20 / the - gain - parameter -
     """
+    import math
     if isinstance(module, pt.nn.Linear) or isinstance(module, layers_pt.PyTorchOutputLayer):
-        pt.nn.init.xavier_uniform_(module.weight, gain=1.0)
+        # TODO: consider using gain=1 / math.sqrt(2)
+        pt.nn.init.xavier_uniform_(module.weight, gain=1)
         if module.bias is not None:
             pt.nn.init.zeros_(module.bias)
     elif isinstance(module, pt.nn.Embedding):

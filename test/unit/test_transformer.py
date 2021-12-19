@@ -119,7 +119,7 @@ def test_pt_autoregressive_mask(length):
     result_pt = b_pt(x_pt).detach()
 
     assert result_pt.dtype == pt.bool
-    assert result_pt.size() == (1, length, length)
+    assert result_pt.size() == (length, length)
 
 
 @pytest.mark.parametrize('sequence', ['rn', 'nr', 'r', 'n', ''])  # not testing dropout
@@ -179,12 +179,13 @@ def test_mx_pt_eq_transformer_encoder_block(batch_size, input_len, model_size, h
 
     data_mx = np.random.uniform(0, 1, (batch_size, input_len, model_size))
     data_pt = pt.as_tensor(data_mx.asnumpy())
-    valid_lengths_mx = np.random.randint(0, input_len, (batch_size,))
+    valid_lengths_mx = np.random.randint(1, input_len, (batch_size,))
     valid_lengths_pt = pt.as_tensor(valid_lengths_mx.asnumpy())
 
     att_valid_lengths_mx = sockeye.layers.prepare_source_valid_lengths(valid_lengths_mx, data_mx, num_heads=heads)
     source_length_mask_pt = sockeye.layers_pt.prepare_source_length_mask(valid_lengths_pt,
                                                                          heads=heads, max_length=data_pt.size()[1])
+    source_length_mask_pt = source_length_mask_pt.repeat(1, input_len, 1)
 
     # time-major as done in the Transformer encoder
     data_mx = np.transpose(data_mx, axes=(1, 0, 2))
@@ -196,6 +197,7 @@ def test_mx_pt_eq_transformer_encoder_block(batch_size, input_len, model_size, h
 
     b_pt = sockeye.transformer_pt.PyTorchTransformerEncoderBlock(config)
     b_pt.weights_from_mxnet_block(b_mx)
+
     r_pt = b_pt(data_pt, source_length_mask_pt).detach().numpy()
 
     assert np.allclose(r_mx, r_pt, atol=1e-05)
@@ -269,6 +271,7 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
     new_states_mx = [s.asnumpy() for s in new_states_mx]
 
     b_pt = sockeye.transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only)
+    b_pt.eval()
     autoregr_states_pt = pt.zeros(*b_pt.get_states_shape(batch_size))
     b_pt.weights_from_mxnet_block(b_mx)
     new_target_pt, new_states_pt = b_pt(target_pt, target_bias_pt, source_pt, source_length_mask_pt, autoregr_states_pt)
