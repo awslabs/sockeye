@@ -196,8 +196,10 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
         if self.dropout is not None:
             data = self.dropout(data)
 
-        # inverted length_mask for attention masking, (batch_size * heads, 1, max_len)
-        att_mask = layers_pt.prepare_source_length_mask(valid_length, self.config.attention_heads, data.size()[1])
+        _, max_len, __ = data.size()
+        # length_mask for source attention masking. Shape: (batch_size * heads, 1, max_len)
+        att_mask = layers_pt.prepare_source_length_mask(valid_length, self.config.attention_heads, max_length=max_len)
+        att_mask = att_mask.repeat(1, max_len, 1)
 
         data = data.transpose(1, 0)  # batch to time major
         for layer in self.layers:
