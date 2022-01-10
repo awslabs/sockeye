@@ -102,9 +102,9 @@ class PyTorchOutputLayer(pt.nn.Module):
             self.weight = weight
         self.bias = pt.nn.Parameter(pt.Tensor(vocab_size))
 
-        self.previous_slice_ids: Optional[pt.Tensor] = pt.empty(0)
-        self.reduced_weight: Optional[pt.Tensor] = pt.empty(0)
-        self.reduced_bias: Optional[pt.Tensor] = pt.empty(0)
+        self.previous_slice_ids = pt.empty(0)
+        self.reduced_weight = pt.empty(0)
+        self.reduced_bias = pt.empty(0)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={} dtype={}'.format(
