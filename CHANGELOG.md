@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.8]
+
+## Changed
+
+- Add support for JIT tracing source/target embeddings and JIT scripting the output layer during inference. 
+
 ## [3.0.7]
 
 ## Changed
