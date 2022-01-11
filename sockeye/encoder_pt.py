@@ -97,8 +97,6 @@ class PyTorchEmbedding(PyTorchEncoder):
                                              sparse=self.config.allow_sparse_grad)
 
         self.num_factors = self.config.num_factors
-        if self.num_factors > 1:
-            assert len(self.config.factor_configs) == self.num_factors - 1
         self.factor_embeds = pt.nn.ModuleList()
         self.factor_combinations = []  # type: List[str]
         if self.config.factor_configs is not None:
