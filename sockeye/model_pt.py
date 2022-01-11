@@ -111,13 +111,13 @@ class PyTorchSockeyeModel(pt.nn.Module):
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder,
                                                                   inference_only=inference_only)
-        self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
         self.decoder = decoder_pt.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
-        self.traced_decoder = None  # type: Optional[pt.jit.ScriptModule]
 
         self.output_layer = layers_pt.PyTorchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                          vocab_size=self.config.vocab_target_size,
                                                          weight=output_weight)
+        if self.inference_only:
+            self.output_layer = pt.jit.script(self.output_layer)
 
         self.factor_output_layers = pt.nn.ModuleList()
         # Optional target factor output layers
@@ -137,6 +137,13 @@ class PyTorchSockeyeModel(pt.nn.Module):
                                                              num_layers=self.config.config_length_task.num_layers)
         self.dtype = pt.float32
         self.cast(config.dtype)
+
+        # traced components (for inference)
+        self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
+        self.traced_embedding_target = None  # type: Optional[pt.jit.ScriptModule]
+        self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
+        self.traced_decoder = None  # type: Optional[pt.jit.ScriptModule]
+        self.traced_factor_output_layers = None  # type: Optional[List[pt.jit.ScriptModule]]
 
     def weights_from_mxnet_block(self, block_mx: 'SockeyeModel'):  # type: ignore
         self.embedding_source.weights_from_mxnet_block(block_mx.embedding_source)
@@ -179,13 +186,18 @@ class PyTorchSockeyeModel(pt.nn.Module):
         outputs : list
             Outputs of the encoder.
         """
-        source_embed = self.embedding_source(inputs)
+
         if self.inference_only:
+            if self.traced_embedding_source is None:
+                logger.debug("Tracing embedding_source")
+                self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
+            source_embed = self.traced_embedding_source(inputs)
             if self.traced_encoder is None:
                 logger.debug("Tracing encoder")
                 self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
             source_encoded, source_encoded_length = self.traced_encoder(source_embed, valid_length)
         else:
+            source_embed = self.embedding_source(inputs)
             source_encoded, source_encoded_length = self.encoder(source_embed, valid_length)
         return source_encoded, source_encoded_length
 
@@ -267,27 +279,33 @@ class PyTorchSockeyeModel(pt.nn.Module):
             Optional target factor predictions.
         """
         if self.mc_dropout:
-            raise NotImplementedError('mc dropout not implented yet')
+            raise NotImplementedError('mc dropout not implemented')
             # Turn on training mode so PyTorch knows to add dropout
             # self.train()
 
-        target_embed = self.embedding_target(step_input.unsqueeze(1))
         if self.inference_only:
+            if self.traced_embedding_target is None:
+                logger.debug("Tracing target embedding")
+                self.traced_embedding_target = pt.jit.trace(self.embedding_target, step_input.unsqueeze(1))
+            target_embed = self.embedding_target(step_input.unsqueeze(1))
             if self.traced_decoder is None:
                 logger.debug("Tracing decoder step")
                 self.traced_decoder = pt.jit.trace(self.decoder, (target_embed, states))
             decoder_out, new_states = self.traced_decoder(target_embed, states)
         else:
+            target_embed = self.embedding_target(step_input.unsqueeze(1))
             decoder_out, new_states = self.decoder(target_embed, states)
         decoder_out = decoder_out.squeeze(1)
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
 
-        # Target factor outputs are currently stored in additional outputs.
-        target_factor_outputs = []  # type: List[pt.Tensor]
-        # TODO: consider a dictionary mapping as return value
-        for factor_output_layer in self.factor_output_layers:
-            target_factor_outputs.append(factor_output_layer(decoder_out))
+        if self.inference_only:
+            if self.traced_factor_output_layers is None:
+                logger.debug("Tracing target factor output layers")
+                self.traced_factor_output_layers = [pt.jit.trace(fol, decoder_out) for fol in self.factor_output_layers]
+            target_factor_outputs = [fol(decoder_out) for fol in self.traced_factor_output_layers]
+        else:
+            target_factor_outputs = [fol(decoder_out) for fol in self.factor_output_layers]
 
         return step_output, new_states, target_factor_outputs
 

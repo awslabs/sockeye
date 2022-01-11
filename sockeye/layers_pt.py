@@ -79,7 +79,8 @@ class PyTorchWeightNormalization(pt.nn.Module):
 
 class PyTorchOutputLayer(pt.nn.Module):
     """
-    Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
+    Final output layer of seq2seq models. Supports vocabulary selection that caches reduced weight/bias
+    across multiple invocations if selected vocabulary ids do not change.
 
     :param hidden_size: Input hidden size.
     :param vocab_size: Target vocabulary size.
@@ -101,17 +102,16 @@ class PyTorchOutputLayer(pt.nn.Module):
             self.weight = weight
         self.bias = pt.nn.Parameter(pt.Tensor(vocab_size))
 
-        self.previous_slice_ids = None  # type: Optional[pt.Tensor]
-        self.reduced_weight_bias = None  # type: Optional[Tuple[pt.Tensor, pt.Tensor]]
+        self.previous_slice_ids = pt.empty(0)
+        self.reduced_weight = pt.empty(0)
+        self.reduced_bias = pt.empty(0)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={} dtype={}'.format(
             self.in_features, self.out_features, self.bias is not None, self.weight.dtype)
 
     def _is_new_slice(self, x: pt.Tensor) -> bool:
-        if self.previous_slice_ids is None or \
-                x.size() != self.previous_slice_ids.size() or \
-                pt.any(x != self.previous_slice_ids):
+        if x.size() != self.previous_slice_ids.size() or pt.any(x != self.previous_slice_ids):
             return True
         return False
 
@@ -128,9 +128,9 @@ class PyTorchOutputLayer(pt.nn.Module):
             # This significantly reduces latency for CPU decoding.
             if self._is_new_slice(vocab_slice_ids):
                 self.previous_slice_ids = vocab_slice_ids
-                weight, bias = self.reduced_weight_bias = self._take_slice(vocab_slice_ids)
+                weight, bias = self.reduced_weight, self.reduced_bias = self._take_slice(vocab_slice_ids)
             else:
-                weight, bias = self.reduced_weight_bias
+                weight, bias = self.reduced_weight, self.reduced_bias
         else:
             weight, bias = self.weight, self.bias
 
