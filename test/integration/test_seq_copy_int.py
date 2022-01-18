@@ -209,7 +209,7 @@ def test_other_clis(train_params: str, translate_params: str):
                                    use_pytorch=True)
 
         _test_checkpoint_decoder(data['dev_source'], data['dev_target'], data['model'])
-        _test_mc_dropout(data['model'])
+        #_test_mc_dropout(data['model'])  # mc dropout not implemented yet in Sockeye 3
         _test_parameter_averaging(data['model'])
         _test_evaluate_cli(data['test_outputs'], data['test_target'])
 

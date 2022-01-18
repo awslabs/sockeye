@@ -135,7 +135,8 @@ class PyTorchEmbedding(PyTorchEncoder):
             if average_factors_embeds:
                 embedded = pt.mean(pt.stack([embedded] + average_factors_embeds, dim=0), dim=0)
             if sum_factors_embeds:
-                embedded = pt.sum(pt.stack([embedded] + sum_factors_embeds, dim=0), dim=0)
+                for sum_factor_embed in sum_factors_embeds:
+                    embedded = embedded + sum_factor_embed
             if concat_factors_embeds:
                 embedded = pt.cat([embedded] + concat_factors_embeds, dim=2)
 
