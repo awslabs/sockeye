@@ -97,6 +97,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
         self.mc_dropout = mc_dropout
+        if self.mc_dropout:
+            raise NotImplementedError('mc dropout not implemented yet')
         self.forward_pass_cache_size = forward_pass_cache_size
         self.embed_and_encode = self._embed_and_encode
         if self.forward_pass_cache_size > 0:
@@ -144,6 +146,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_decoder = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_factor_output_layers = None  # type: Optional[List[pt.jit.ScriptModule]]
+        self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
+
 
     def weights_from_mxnet_block(self, block_mx: 'SockeyeModel'):  # type: ignore
         self.embedding_source.weights_from_mxnet_block(block_mx.embedding_source)
@@ -220,11 +224,6 @@ class PyTorchSockeyeModel(pt.nn.Module):
         predicted_output_length : tensor
             Predicted output length of shape (batch_size,), 0 if not available.
         """
-        if self.mc_dropout:
-            raise NotImplementedError('mc dropout not implemented yet')
-            # Turn on training mode so PyTorch knows to add dropout
-            # self.train()
-
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
 
@@ -263,48 +262,34 @@ class PyTorchSockeyeModel(pt.nn.Module):
         """
         One step decoding of the translation model.
 
-        Parameters
-        ----------
-        step_input : tensor
-            Shape (batch_size, num_target_factors)
-        states : list of tensors
-        vocab_slice_ids : tensor or None
+        :param step_input: Input to a single decoder step. Shape: (batch_size, num_target_factors).
+        :param states: List of previous or initial model states. Shape of state tensors and length of states list
+                       determined by self.decoder.state_structure().
+        :vocab_slice_ids: Optional list of vocabulary ids to use for reduced matrix multiplication at the output layer.
 
-        Returns
-        -------
-        step_output : tensor
-            Shape (batch_size, C_out)
-        states : list
-        target_factor_outputs : list
-            Optional target factor predictions.
+        :return: logits, list of new model states, other target factor logits.
         """
-        if self.mc_dropout:
-            raise NotImplementedError('mc dropout not implemented')
-            # Turn on training mode so PyTorch knows to add dropout
-            # self.train()
-
         if self.inference_only:
-            if self.traced_embedding_target is None:
-                logger.debug("Tracing target embedding")
-                self.traced_embedding_target = pt.jit.trace(self.embedding_target, step_input.unsqueeze(1))
-            target_embed = self.traced_embedding_target(step_input.unsqueeze(1))
-            if self.traced_decoder is None:
-                logger.debug("Tracing decoder step")
-                self.traced_decoder = pt.jit.trace(self.decoder, (target_embed, states))
-            decoder_out, new_states = self.traced_decoder(target_embed, states)
+            decode_step_inputs = [step_input, states]
+            if vocab_slice_ids is not None:
+                decode_step_inputs.append(vocab_slice_ids)
+            if self.traced_decode_step is None:
+                logger.info("Tracing decode step")
+                decode_step_module = _DecodeStep(self.embedding_target,
+                                                 self.decoder,
+                                                 self.output_layer,
+                                                 self.factor_output_layers)
+                self.traced_decode_step = pt.jit.trace(decode_step_module, decode_step_inputs)
+            # the traced module returns a flat list of tensors
+            decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
+            step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
+            new_states = decode_step_outputs[self.num_target_factors:]
         else:
             target_embed = self.embedding_target(step_input.unsqueeze(1))
             decoder_out, new_states = self.decoder(target_embed, states)
-        decoder_out = decoder_out.squeeze(1)
-        # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
-        step_output = self.output_layer(decoder_out, vocab_slice_ids)
-
-        if self.inference_only:
-            if self.traced_factor_output_layers is None:
-                logger.debug("Tracing target factor output layers")
-                self.traced_factor_output_layers = [pt.jit.trace(fol, decoder_out) for fol in self.factor_output_layers]
-            target_factor_outputs = [fol(decoder_out) for fol in self.traced_factor_output_layers]
-        else:
+            decoder_out = decoder_out.squeeze(1)
+            # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
+            step_output = self.output_layer(decoder_out, vocab_slice_ids)
             target_factor_outputs = [fol(decoder_out) for fol in self.factor_output_layers]
 
         return step_output, new_states, target_factor_outputs
@@ -544,6 +529,46 @@ class PyTorchSockeyeModel(pt.nn.Module):
             return class_func(*args)
 
         return cache_func
+
+
+class _DecodeStep(pt.nn.Module):
+    """
+    Auxiliary module that wraps computation for a single decode step for a SockeyeModel.
+    End-to-end traceable. Return values are put into a flat list to avoid return type constraints
+    for traced modules.
+    """
+
+    def __init__(self,
+                 embedding_target: encoder_pt.PyTorchEmbedding,
+                 decoder: decoder_pt.PyTorchDecoder,
+                 output_layer: layers_pt.PyTorchOutputLayer,
+                 factor_output_layers: pt.nn.ModuleList):
+        super().__init__()
+        self.embedding_target = embedding_target
+        self.decoder = decoder
+        self.output_layer = pt.jit.script(output_layer)
+        self.factor_output_layers = factor_output_layers
+        self.has_target_factors = bool(factor_output_layers)
+
+    def forward(self,
+                step_input,
+                states: List[pt.Tensor],
+                vocab_slice_ids: Optional[pt.Tensor] = None) -> List[pt.Tensor]:
+
+        target_embed = self.embedding_target(step_input.unsqueeze(1))
+        decoder_out, new_states = self.decoder(target_embed, states)
+        decoder_out = decoder_out.squeeze(1)
+
+        # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
+        step_output = self.output_layer(decoder_out, vocab_slice_ids)
+
+        # return values are collected in a flat list due to constraints in mixed return types in traced modules
+        # (can only by tensors, or lists of tensors or dicts of tensors, but no mix of them).
+        outputs = [step_output]
+        if self.has_target_factors:
+            outputs += [fol(decoder_out) for fol in self.factor_output_layers]
+        outputs += new_states
+        return outputs
 
 
 def make_pytorch_model_from_mxnet_model(mx_model: 'SockeyeModel') -> PyTorchSockeyeModel:  # type: ignore

@@ -11,21 +11,27 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.10]
+
+### Changed
+
+- End-to-end trace decode_step of the Sockeye model. Creates less overhead during decoding and a small speedup.
+
 ## [3.0.9]
 
-## Fixed
+### Fixed
 
 - Fixed not calling the traced target embedding module during inference.
 
 ## [3.0.8]
 
-## Changed
+### Changed
 
 - Add support for JIT tracing source/target embeddings and JIT scripting the output layer during inference. 
 
 ## [3.0.7]
 
-## Changed
+### Changed
 
 - Improve training speed by using`torch.nn.functional.multi_head_attention_forward` for self- and encoder-attention
   during training. Requires reorganization of the parameter layout of the key-value input projections,
