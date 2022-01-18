@@ -287,7 +287,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
             if self.traced_embedding_target is None:
                 logger.debug("Tracing target embedding")
                 self.traced_embedding_target = pt.jit.trace(self.embedding_target, step_input.unsqueeze(1))
-            target_embed = self.embedding_target(step_input.unsqueeze(1))
+            target_embed = self.traced_embedding_target(step_input.unsqueeze(1))
             if self.traced_decoder is None:
                 logger.debug("Tracing decoder step")
                 self.traced_decoder = pt.jit.trace(self.decoder, (target_embed, states))
