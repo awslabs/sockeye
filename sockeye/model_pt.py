@@ -195,6 +195,11 @@ class PyTorchSockeyeModel(pt.nn.Module):
             if self.traced_encoder is None:
                 logger.debug("Tracing encoder")
                 self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
+                # Now compile traced encoder module with Torch-TensorRT
+                import torch_tensorrt
+                self.traced_encoder = torch_tensorrt.compile(self.traced_encoder,
+                                                             inputs=(source_embed, valid_length),
+                                                             truncate_long_and_double=True)
             source_encoded, source_encoded_length = self.traced_encoder(source_embed, valid_length)
         else:
             source_embed = self.embedding_source(inputs)

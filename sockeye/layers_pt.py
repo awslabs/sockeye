@@ -248,7 +248,7 @@ def pytorch_interleaved_matmul_encdec_valatt(kv: pt.Tensor,
     v = v.reshape(-1, kvlen, head_dim)  # bsz * heads, kvlen, head_dim
 
     output = pt.bmm(att, v)  # bsz * heads, qlen, head_dim
-    output = output.transpose(0, 1).contiguous().view(-1, batch, hidden)
+    output = output.transpose(0, 1).contiguous().reshape(-1, batch, hidden)
     return output
 
 

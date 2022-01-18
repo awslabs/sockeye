@@ -36,7 +36,7 @@ import torch as pt
 import torch.distributed
 
 import numpy as np
-import portalocker
+#import portalocker
 
 from . import __version__, constants as C
 from . import horovod_mpi
