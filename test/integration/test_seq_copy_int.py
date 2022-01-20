@@ -50,7 +50,7 @@ _TEST_MAX_LENGTH = 20
 
 # tuple format: (train_params, translate_params, use_prepared_data, use_source_factors)
 ENCODER_DECODER_SETTINGS_TEMPLATE = [
-    # Basic transformer, nbest=2 decoding
+    # Basic transformer, nbest=2 decoding, no learning rate scheduler
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
@@ -60,7 +60,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching
      # max updates independent of the checkpoint interval
-     " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01",
+     " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none",
      "--beam-size 2 --nbest-size 2",
      False, 0, 0),
     # Basic transformer w/ prepared data & greedy decoding
