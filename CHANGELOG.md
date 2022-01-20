@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.11]
+
+### Fixed
+
+- Fixed training with a single, fixed learning rate instead of a rate scheduler (`--learning-rate-scheduler none --initial-learning-rate ...`).
+
 ## [3.0.10]
 
 ### Changed
@@ -27,7 +33,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Changed
 
-- Add support for JIT tracing source/target embeddings and JIT scripting the output layer during inference. 
+- Add support for JIT tracing source/target embeddings and JIT scripting the output layer during inference.
 
 ## [3.0.7]
 
