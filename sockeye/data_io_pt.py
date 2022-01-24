@@ -789,7 +789,7 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
     logger.info("Creating training data iterator")
     logger.info("===============================")
 
-    train_iters = []  # type: List[ShardedParallelSampleIter]
+    train_iters = []  # type: List[BaseParallelSampleIter]
     config_data_per_iter = []  # type: List[DataConfig]
     source_vocabs_per_iter = []  # type: List[List[vocab.Vocab]]
     target_vocabs_per_iter = []  # type: List[List[vocab.Vocab]]
@@ -868,10 +868,10 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
     if len(train_iters) > 1:
         # Multiple data dirs: wrap multiple iterators with a single multi-data
         # iterator
-        train_iter = train_iters[0]
+        train_iter = MultiParallelSampleIter(iters=train_iters)
     else:
         # Single data dir: use single iterator directly
-        train_iter = train_iters[0]
+        train_iter = train_iters[0]  # type: ignore
     # In either case, use information from first data dir to create the
     # validation iterator
     source_vocabs = source_vocabs_per_iter[0]
@@ -1809,6 +1809,51 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
             self.shard_index = pickle.load(fp)
         self._load_shard()
         self.shard_iter.load_state(fname + ".sharditer")
+
+
+class MultiParallelSampleIter(BaseParallelSampleIter):
+    """
+    Wraps multiple parallel sample iterators in a single iterator.
+    """
+
+    def __init__(self,
+                 iters: List[BaseParallelSampleIter],
+                 sync_size: int = 50) -> None:
+        self.iters = iters
+        self.sync_size = sync_size
+        self.iter_call_order = []  # type: List[int]
+
+    def reset(self):
+        # This iterator type never needs to be reset. Sub-iterators are reset as
+        # needed.
+        raise RuntimeError('Reset is undefined for MultiParallelSampleIter')
+
+    def iter_next(self) -> bool:
+        # Because sub-iterators are reset as needed, this iterator type can
+        # always yield a next batch.
+        return True
+
+    def next(self) -> 'Batch':
+        # When the iter call queue is empty, decide which iter to call for the
+        # next N=sync_size batches.
+        if not self.iter_call_order:
+            self.iter_call_order = [random.randint(0, len(self.iters) - 1) for _ in range(self.sync_size)]
+            if utils.is_distributed():
+                # Synchronize order of iter calls across workers
+                self.iter_call_order = utils.broadcast_object(self.iter_call_order)
+        next_iter = self.iters[self.iter_call_order.pop()]
+        # Reset sub-iterator as needed
+        if not next_iter.iter_next():
+            next_iter.reset()
+        return next_iter.next()
+
+    def save_state(self, fname: str):
+        # TODO: Save all
+        pass
+
+    def load_state(self, fname: str):
+        # TODO: Load all
+        pass
 
 
 class ParallelSampleIter(BaseParallelSampleIter):
