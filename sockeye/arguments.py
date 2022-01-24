@@ -435,8 +435,11 @@ def add_validation_data_params(params):
 
 def add_prepared_data_args(params):
     params.add_argument(C.TRAINING_ARG_PREPARED_DATA, '-d',
+                        nargs='+',
                         type=regular_folder(),
-                        help='Prepared training data directory created through python -m sockeye.prepare_data.')
+                        default=None,
+                        help='One or more prepared training data directories created through python -m '
+                             'sockeye.prepare_data.')
 
 
 def add_training_output_args(params):

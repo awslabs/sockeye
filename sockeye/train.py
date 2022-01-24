@@ -300,8 +300,10 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
+        utils.check_condition(len(args.prepared_data) == 1,
+                              'MXNet Sockeye does not support training with multiple prepared data directories')
         train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io.get_prepared_data_iters(
-            prepared_data_dir=args.prepared_data,
+            prepared_data_dir=args.prepared_data[0],  # MXNet
             validation_sources=validation_sources,
             validation_targets=validation_targets,
             shared_vocab=shared_vocab,

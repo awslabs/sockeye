@@ -280,7 +280,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
         train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io_pt.get_prepared_data_iters(
-            prepared_data_dir=args.prepared_data,
+            prepared_data_dirs=args.prepared_data,
             validation_sources=validation_sources,
             validation_targets=validation_targets,
             shared_vocab=shared_vocab,

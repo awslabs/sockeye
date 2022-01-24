@@ -900,15 +900,26 @@ def test_mx_pt_eq_prepared_data():
                                             shards=shards)
 
                 # Create iterators
-                train_iter, val_iter, _, _, _ = data_io_module.get_prepared_data_iters(
-                    prepared_data_dir=output_folder,
-                    validation_sources=[data['dev_source']],
-                    validation_targets=[data['dev_target']],
-                    shared_vocab=True,
-                    batch_size=batch_size,
-                    batch_type=C.BATCH_TYPE_SENTENCE,
-                    batch_sentences_multiple_of=batch_sentences_multiple_of,
-                    permute=False)
+                if key == 'mx':
+                    train_iter, val_iter, _, _, _ = data_io.get_prepared_data_iters(
+                        prepared_data_dir=output_folder,
+                        validation_sources=[data['dev_source']],
+                        validation_targets=[data['dev_target']],
+                        shared_vocab=True,
+                        batch_size=batch_size,
+                        batch_type=C.BATCH_TYPE_SENTENCE,
+                        batch_sentences_multiple_of=batch_sentences_multiple_of,
+                        permute=False)
+                else:
+                    train_iter, val_iter, _, _, _ = data_io_pt.get_prepared_data_iters(
+                        prepared_data_dirs=[output_folder],
+                        validation_sources=[data['dev_source']],
+                        validation_targets=[data['dev_target']],
+                        shared_vocab=True,
+                        batch_size=batch_size,
+                        batch_type=C.BATCH_TYPE_SENTENCE,
+                        batch_sentences_multiple_of=batch_sentences_multiple_of,
+                        permute=False)
 
                 train_iters[key] = train_iter
                 val_iters[key] = val_iter

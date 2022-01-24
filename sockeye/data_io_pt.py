@@ -775,7 +775,7 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                               permute=permute)
 
 
-def get_prepared_data_iters(prepared_data_dir: str,
+def get_prepared_data_iters(prepared_data_dirs: List[str],
                             validation_sources: List[str],
                             validation_targets: List[str],
                             shared_vocab: bool,
@@ -785,10 +785,11 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
                                                            'BaseParallelSampleIter',
                                                            'DataConfig', List[vocab.Vocab], List[vocab.Vocab]]:
+    prepared_data_dir = prepared_data_dirs[0]
+
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
-
     version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
     with open(version_file) as version_in:
         version = int(version_in.read())
