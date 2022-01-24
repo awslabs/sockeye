@@ -785,68 +785,101 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
                             permute: bool = True) -> Tuple['BaseParallelSampleIter',
                                                            'BaseParallelSampleIter',
                                                            'DataConfig', List[vocab.Vocab], List[vocab.Vocab]]:
-    prepared_data_dir = prepared_data_dirs[0]
-
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
-    version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
-    with open(version_file) as version_in:
-        version = int(version_in.read())
-        check_condition(version == C.PREPARED_DATA_VERSION,
-                        "The dataset %s was written in an old and incompatible format. Please rerun data "
-                        "preparation with a current version of Sockeye." % prepared_data_dir)
-    info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
-    check_condition(os.path.exists(info_file),
-                    "Could not find data info %s. Are you sure %s is a directory created with "
-                    "sockeye-prepare-data?" % (info_file, prepared_data_dir))
-    data_info = cast(DataInfo, DataInfo.load(info_file))
-    config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
-    check_condition(os.path.exists(config_file),
-                    "Could not find data config %s. Are you sure %s is a directory created with "
-                    "sockeye-prepare-data?" % (config_file, prepared_data_dir))
-    config_data = cast(DataConfig, DataConfig.load(config_file))
-    shard_fnames = [os.path.join(prepared_data_dir,
-                                 C.SHARD_NAME % shard_idx) for shard_idx in range(data_info.num_shards)]
-    for shard_fname in shard_fnames:
-        check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    check_condition(shared_vocab == data_info.shared_vocab, "Shared vocabulary settings need to match these "
-                                                            "of the prepared data (e.g. for weight tying). "
-                                                            "Specify or omit %s consistently when training "
-                                                            "and preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
+    train_iters = []  # type: List[ShardedParallelSampleIter]
+    config_data_per_iter = []  # type: List[DataConfig]
+    source_vocabs_per_iter = []  # type: List[List[vocab.Vocab]]
+    target_vocabs_per_iter = []  # type: List[List[vocab.Vocab]]
+    bucket_batch_sizes_per_iter = []  # type: List[List[BucketBatchSize]]
 
-    source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
-    target_vocabs = vocab.load_target_vocabs(prepared_data_dir)
+    # Create a separate iterator for each prepared data dir
+    for i, prepared_data_dir in enumerate(prepared_data_dirs):
+        version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
+        with open(version_file) as version_in:
+            version = int(version_in.read())
+            check_condition(version == C.PREPARED_DATA_VERSION,
+                            "The dataset %s was written in an old and incompatible format. Please rerun data "
+                            "preparation with a current version of Sockeye." % prepared_data_dir)
+        info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
+        check_condition(os.path.exists(info_file),
+                        "Could not find data info %s. Are you sure %s is a directory created with "
+                        "sockeye-prepare-data?" % (info_file, prepared_data_dir))
+        data_info = cast(DataInfo, DataInfo.load(info_file))
+        config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
+        check_condition(os.path.exists(config_file),
+                        "Could not find data config %s. Are you sure %s is a directory created with "
+                        "sockeye-prepare-data?" % (config_file, prepared_data_dir))
+        config_data = cast(DataConfig, DataConfig.load(config_file))
+        config_data_per_iter.append(config_data)
+        shard_fnames = [os.path.join(prepared_data_dir,
+                                     C.SHARD_NAME % shard_idx) for shard_idx in range(data_info.num_shards)]
+        for shard_fname in shard_fnames:
+            check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    check_condition(len(source_vocabs) == len(data_info.sources),
-                    "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
-                                                                                 len(data_info.sources)))
-    check_condition(len(target_vocabs) == len(data_info.targets),
-                    "Wrong number of target vocabularies. Found %d, need %d." % (len(target_vocabs),
-                                                                                 len(data_info.targets)))
+        check_condition(shared_vocab == data_info.shared_vocab, "Shared vocabulary settings need to match these "
+                                                                "of the prepared data (e.g. for weight tying). "
+                                                                "Specify or omit %s consistently when training "
+                                                                "and preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
-    buckets = config_data.data_statistics.buckets
-    max_seq_len_source = config_data.max_seq_len_source
-    max_seq_len_target = config_data.max_seq_len_target
+        source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
+        source_vocabs_per_iter.append(source_vocabs)
+        target_vocabs = vocab.load_target_vocabs(prepared_data_dir)
+        target_vocabs_per_iter.append(target_vocabs)
 
-    bucket_batch_sizes = define_bucket_batch_sizes(buckets,
-                                                   batch_size,
-                                                   batch_type,
-                                                   config_data.data_statistics.average_len_target_per_bucket,
-                                                   batch_sentences_multiple_of)
+        check_condition(len(source_vocabs) == len(data_info.sources),
+                        "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
+                                                                                     len(data_info.sources)))
+        check_condition(len(target_vocabs) == len(data_info.targets),
+                        "Wrong number of target vocabularies. Found %d, need %d." % (len(target_vocabs),
+                                                                                     len(data_info.targets)))
 
-    config_data.data_statistics.log(bucket_batch_sizes)
+        # Multiple data dirs: verify that each additional data dir uses the same
+        # vocabularies as the first
+        if i > 0:
+            for v1, v2 in zip(source_vocabs, source_vocabs_per_iter[0]):
+                check_condition(v1 == v2, 'All prepared data directories must use the same source vocabulary '
+                                          '(specify `sockeye-prepare-data --source-vocab ...`)')
+            for v1, v2 in zip(target_vocabs, target_vocabs_per_iter[0]):
+                check_condition(v1 == v2, 'All prepared data directories must use the same target vocabulary '
+                                          '(specify `sockeye-prepare-data --target-vocab ...`)')
 
-    train_iter = ShardedParallelSampleIter(shard_fnames,
-                                           buckets,
-                                           batch_size,
-                                           bucket_batch_sizes,
-                                           num_source_factors=len(data_info.sources),
-                                           num_target_factors=len(data_info.targets),
-                                           permute=permute)
+        buckets = config_data.data_statistics.buckets
 
-    data_loader = RawParallelDatasetLoader(buckets=buckets,
+        bucket_batch_sizes = define_bucket_batch_sizes(buckets,
+                                                       batch_size,
+                                                       batch_type,
+                                                       config_data.data_statistics.average_len_target_per_bucket,
+                                                       batch_sentences_multiple_of)
+        bucket_batch_sizes_per_iter.append(bucket_batch_sizes)
+
+        config_data.data_statistics.log(bucket_batch_sizes)
+
+        train_iters.append(ShardedParallelSampleIter(shard_fnames,
+                                                     buckets,
+                                                     batch_size,
+                                                     bucket_batch_sizes,
+                                                     num_source_factors=len(data_info.sources),
+                                                     num_target_factors=len(data_info.targets),
+                                                     permute=permute))
+
+    if len(train_iters) > 1:
+        # Multiple data dirs: wrap multiple iterators with a single multi-data
+        # iterator
+        train_iter = train_iters[0]
+    else:
+        # Single data dir: use single iterator directly
+        train_iter = train_iters[0]
+    # In either case, use information from first data dir to create the
+    # validation iterator
+    source_vocabs = source_vocabs_per_iter[0]
+    target_vocabs = target_vocabs_per_iter[0]
+    config_data = config_data_per_iter[0]
+    bucket_batch_sizes = bucket_batch_sizes_per_iter[0]
+
+    data_loader = RawParallelDatasetLoader(buckets=config_data.data_statistics.buckets,
                                            eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
 
@@ -855,12 +888,12 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
                                                validation_targets=validation_targets,
-                                               buckets=buckets,
+                                               buckets=config_data.data_statistics.buckets,
                                                bucket_batch_sizes=bucket_batch_sizes,
                                                source_vocabs=source_vocabs,
                                                target_vocabs=target_vocabs,
-                                               max_seq_len_source=max_seq_len_source,
-                                               max_seq_len_target=max_seq_len_target,
+                                               max_seq_len_source=config_data.max_seq_len_source,
+                                               max_seq_len_target=config_data.max_seq_len_target,
                                                batch_size=batch_size,
                                                permute=False)
 
