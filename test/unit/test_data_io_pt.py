@@ -675,6 +675,31 @@ def test_sharded_parallel_sample_iter():
             it_loaded.next()
         assert not it_loaded.iter_next()
 
+        # Test 4: Multi-data iterator
+
+        sync_size = 2
+        fname = os.path.join(work_dir, 'saved_multi_iter')
+        iter1 = data_io_pt.ShardedParallelSampleIter([shard1_fname], buckets, batch_size, bucket_batch_sizes)
+        iter2 = data_io_pt.ShardedParallelSampleIter([shard2_fname], buckets, batch_size, bucket_batch_sizes)
+        it = data_io_pt.MultiParallelSampleIter(iters=[iter1, iter2],
+                                                config_data_per_iter=[],  # Not used for uniform sampling
+                                                method=C.DATA_SAMPLING_UNIFORM,
+                                                sync_size=sync_size)
+
+        it.save_state(fname)
+        it.load_state(fname)
+
+        assert len(it.iters) == 2
+        assert isinstance(it.iters[0], data_io_pt.ShardedParallelSampleIter)
+        assert isinstance(it.iters[1], data_io_pt.ShardedParallelSampleIter)
+        assert it.iters[0] is not it.iters[1]
+        assert len(it.iter_weights) == 2
+
+        it.next()  # Regenerates call queue, consumes one entry, resets one sub-iterator
+        assert len(it.iter_call_queue) == sync_size - 1
+        for _ in range(sync_size):  # First batch empties call queue, next regenerates it
+            it.next()
+
 
 def test_sharded_parallel_sample_iter_num_batches():
     num_shards = 2
