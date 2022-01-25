@@ -286,7 +286,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_type=args.batch_type,
-            batch_sentences_multiple_of=args.batch_sentences_multiple_of)
+            batch_sentences_multiple_of=args.batch_sentences_multiple_of,
+            sampling_method=args.data_sampling_method,
+            sampling_temperature=args.data_sampling_temperature)
 
         check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])

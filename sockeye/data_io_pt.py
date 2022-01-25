@@ -782,9 +782,12 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
                             batch_size: int,
                             batch_type: str,
                             batch_sentences_multiple_of: int = 1,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
-                                                           'BaseParallelSampleIter',
-                                                           'DataConfig', List[vocab.Vocab], List[vocab.Vocab]]:
+                            permute: bool = True,
+                            sampling_method: str = C.DATA_SAMPLING_UNIFORM,
+                            sampling_temperature: float = 1.) -> Tuple['BaseParallelSampleIter',
+                                                                       'BaseParallelSampleIter',
+                                                                       'DataConfig', List[vocab.Vocab],
+                                                                                          List[vocab.Vocab]]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -868,7 +871,10 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
     if len(train_iters) > 1:
         # Multiple data dirs: wrap multiple iterators with a single multi-data
         # iterator
-        train_iter = MultiParallelSampleIter(iters=train_iters)
+        train_iter = MultiParallelSampleIter(iters=train_iters,
+                                             config_data_per_iter=config_data_per_iter,
+                                             method=sampling_method,
+                                             temperature=sampling_temperature)
     else:
         # Single data dir: use single iterator directly
         train_iter = train_iters[0]  # type: ignore
@@ -1818,10 +1824,27 @@ class MultiParallelSampleIter(BaseParallelSampleIter):
 
     def __init__(self,
                  iters: List[BaseParallelSampleIter],
-                 sync_size: int = 50) -> None:
+                 config_data_per_iter: List[DataConfig],
+                 method: str = C.DATA_SAMPLING_UNIFORM,
+                 temperature: float = 1.,
+                 sync_size: int = 8192) -> None:
         self.iters = iters
+        self.config_data_per_iter = config_data_per_iter
+        self.method = method
+        self.temperature = temperature
         self.sync_size = sync_size
-        self.iter_call_order = []  # type: List[int]
+        self.iter_call_queue = []  # type: List[int]
+        if self.method == C.DATA_SAMPLING_UNIFORM:
+            self.iter_weights = np.full(len(self.iters), 1 / len(self.iters))
+        elif self.method == C.DATA_SAMPLING_TEMPERATURE:
+            total_num_sents = sum(config.data_statistics.num_sents for config in self.config_data_per_iter)
+            self.iter_weights = np.array([config.data_statistics.num_sents / total_num_sents
+                                          for config in self.config_data_per_iter])
+            self.iter_weights **= (1 / self.temperature)
+            self.iter_weights /= self.iter_weights.sum()
+        else:
+            raise ValueError(f'Unknown data sampling method: {self.method}')
+        logger.info(f'MultiParallelSampleIter initialized with data weights: {self.iter_weights}')
 
     def reset(self):
         # This iterator type never needs to be reset. Sub-iterators are reset as
@@ -1834,26 +1857,33 @@ class MultiParallelSampleIter(BaseParallelSampleIter):
         return True
 
     def next(self) -> 'Batch':
-        # When the iter call queue is empty, decide which iter to call for the
-        # next N=sync_size batches.
-        if not self.iter_call_order:
-            self.iter_call_order = [random.randint(0, len(self.iters) - 1) for _ in range(self.sync_size)]
+        # When the iterator call queue is empty, decide which iterators to call
+        # for the next N=sync_size batches.
+        if not self.iter_call_queue:
+            self.iter_call_queue = list(np.random.choice(range(len(self.iters)),
+                                                         size=self.sync_size, p=self.iter_weights))
             if utils.is_distributed():
-                # Synchronize order of iter calls across workers
-                self.iter_call_order = utils.broadcast_object(self.iter_call_order)
-        next_iter = self.iters[self.iter_call_order.pop()]
-        # Reset sub-iterator as needed
+                # Synchronize order of iterator calls across workers
+                self.iter_call_queue = utils.broadcast_object(self.iter_call_queue)
+        next_iter = self.iters[self.iter_call_queue.pop()]
+        # Reset sub-iterators as needed
         if not next_iter.iter_next():
             next_iter.reset()
         return next_iter.next()
 
     def save_state(self, fname: str):
-        # TODO: Save all
-        pass
+        if not os.path.exists(fname):
+            os.mkdir(fname)
+        with open(os.path.join(fname, 'queue'), 'wb') as fp:
+            pickle.dump(self.iter_call_queue, fp)
+        for i, _iter in enumerate(self.iters):
+            _iter.save_state(os.path.join(fname, str(i)))
 
     def load_state(self, fname: str):
-        # TODO: Load all
-        pass
+        with open(os.path.join(fname, 'queue'), 'rb') as fp:
+            self.iter_call_queue = pickle.load(fp)
+        for i, _iter in enumerate(self.iters):
+            _iter.load_state(os.path.join(fname, str(i)))
 
 
 class ParallelSampleIter(BaseParallelSampleIter):

@@ -440,6 +440,19 @@ def add_prepared_data_args(params):
                         default=None,
                         help='One or more prepared training data directories created through python -m '
                              'sockeye.prepare_data.')
+    params.add_argument('--data-sampling-method',
+                        choices=C.DATA_SAMPLING_METHODS,
+                        default=C.DATA_SAMPLING_UNIFORM,
+                        help='Method for setting the weights used to sample batches from multiple prepared data '
+                             'sources. uniform: all sources have equal weight. temperature: sources are weighted by '
+                             'their sizes (number of sequences) and the specified sampling temperature (Arivazhagan et '
+                             'al. 2019, aclanthology.org/N19-1388). Default: %(default)s.')
+    params.add_argument('--data-sampling-temperature',
+                        type=float,
+                        default=1.,
+                        help='Temperature parameter for the "temperature" data sampling method. The default value of '
+                             'T=1 corresponds to weighting data sources by size while larger values push the weights '
+                             'toward uniform. Default: %(default)s.')
 
 
 def add_training_output_args(params):
