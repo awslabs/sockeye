@@ -675,31 +675,6 @@ def test_sharded_parallel_sample_iter():
             it_loaded.next()
         assert not it_loaded.iter_next()
 
-        # Test 4: Multi-data iterator
-
-        sync_size = 2
-        fname = os.path.join(work_dir, 'saved_multi_iter')
-        iter1 = data_io_pt.ShardedParallelSampleIter([shard1_fname], buckets, batch_size, bucket_batch_sizes)
-        iter2 = data_io_pt.ShardedParallelSampleIter([shard2_fname], buckets, batch_size, bucket_batch_sizes)
-        it = data_io_pt.MultiParallelSampleIter(iters=[iter1, iter2],
-                                                config_data_per_iter=[],  # Not used for uniform sampling
-                                                method=C.DATA_SAMPLING_UNIFORM,
-                                                sync_size=sync_size)
-
-        it.save_state(fname)
-        it.load_state(fname)
-
-        assert len(it.iters) == 2
-        assert isinstance(it.iters[0], data_io_pt.ShardedParallelSampleIter)
-        assert isinstance(it.iters[1], data_io_pt.ShardedParallelSampleIter)
-        assert it.iters[0] is not it.iters[1]
-        assert len(it.iter_weights) == 2
-
-        it.next()  # Regenerates call queue, consumes one entry, resets one sub-iterator
-        assert len(it.iter_call_queue) == sync_size - 1
-        for _ in range(sync_size):  # First batch empties call queue, next regenerates it
-            it.next()
-
 
 def test_sharded_parallel_sample_iter_num_batches():
     num_shards = 2
@@ -780,6 +755,52 @@ def test_sharded_and_parallel_iter_same_num_batches():
             num_batches_seen += 1
 
         assert num_batches_seen == num_batches
+
+
+def test_multi_parallel_sample_iter():
+    # Each data set has 1 bucket with 1 batch
+    batch_size = 1
+    buckets = data_io_pt.define_parallel_buckets(10, 10, 10, True, 1.0)
+    bucket_batch_sizes = data_io_pt.define_bucket_batch_sizes(buckets,
+                                                              batch_size,
+                                                              batch_type=C.BATCH_TYPE_SENTENCE,
+                                                              data_target_average_len=[None] * len(buckets))
+    dataset1 = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=1))
+    dataset2 = data_io_pt.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=1))
+
+    with TemporaryDirectory() as work_dir:
+        # Create 2 iterators
+        shard1_fname = os.path.join(work_dir, 'shard1')
+        shard2_fname = os.path.join(work_dir, 'shard2')
+        dataset1.save(shard1_fname)
+        dataset2.save(shard2_fname)
+        iter1 = data_io_pt.ShardedParallelSampleIter([shard1_fname], buckets, batch_size, bucket_batch_sizes)
+        iter2 = data_io_pt.ShardedParallelSampleIter([shard2_fname], buckets, batch_size, bucket_batch_sizes)
+
+        # Create a multi-data iterator that wraps the above 2 iterators
+        it = data_io_pt.MultiParallelSampleIter(iters=[iter1, iter2],
+                                                config_data_per_iter=[],  # Not used for uniform sampling
+                                                method=C.DATA_SAMPLING_UNIFORM,
+                                                sync_size=2)
+
+        # Test save/load
+        fname = os.path.join(work_dir, 'saved_multi_iter')
+        it.save_state(fname)
+        it.load_state(fname)
+
+        assert len(it.iters) == 2
+        assert isinstance(it.iters[0], data_io_pt.ShardedParallelSampleIter)
+        assert isinstance(it.iters[1], data_io_pt.ShardedParallelSampleIter)
+        assert it.iters[0] is not it.iters[1]
+        assert len(it.iter_weights) == 2
+
+        # Yield 3 batches to guarantee one of the sub-iterators is automatically
+        # reset at least once
+        for _ in range(3):
+            it.next()
+
+        # 3 batches with a sync_size of 2 leaves a queue of length 1
+        assert len(it.iter_call_queue) == 1
 
 
 def test_create_target_and_shifted_label_sequences():
