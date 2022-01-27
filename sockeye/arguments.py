@@ -453,6 +453,11 @@ def add_prepared_data_args(params):
                         help='Temperature parameter for the "temperature" data sampling method. The default value of '
                              'T=1 corresponds to weighting data sources by size while larger values push the weights '
                              'toward uniform. Default: %(default)s.')
+    params.add_argument('--data-sampling-custom',
+                        type=multiple_values(greater_or_equal=0, data_type=float),
+                        default=[],
+                        help='Weights for the "custom" data sampling method. Specify one per prepared data directory '
+                             'in the form "x:x:...". Default: %(default)s.')
 
 
 def add_training_output_args(params):

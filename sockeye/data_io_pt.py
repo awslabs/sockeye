@@ -784,10 +784,12 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
                             batch_sentences_multiple_of: int = 1,
                             permute: bool = True,
                             sampling_method: str = C.DATA_SAMPLING_UNIFORM,
-                            sampling_temperature: float = 1.) -> Tuple['BaseParallelSampleIter',
-                                                                       'BaseParallelSampleIter',
-                                                                       'DataConfig', List[vocab.Vocab],
-                                                                                          List[vocab.Vocab]]:
+                            sampling_temperature: float = 1.,
+                            sampling_custom: List[float] = []) -> Tuple['BaseParallelSampleIter',
+                                                                        'BaseParallelSampleIter',
+                                                                        'DataConfig',
+                                                                        List[vocab.Vocab],
+                                                                        List[vocab.Vocab]]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -872,9 +874,11 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
         # Multiple data dirs: wrap multiple iterators with a single multi-data
         # iterator
         train_iter = MultiParallelSampleIter(iters=train_iters,
-                                             config_data_per_iter=config_data_per_iter,
+                                             num_sents_per_iter=[config.data_statistics.num_sents
+                                                                 for config in config_data_per_iter],
                                              method=sampling_method,
-                                             temperature=sampling_temperature)
+                                             temperature=sampling_temperature,
+                                             custom=sampling_custom)
     else:
         # Single data dir: use single iterator directly
         train_iter = train_iters[0]  # type: ignore
@@ -1819,42 +1823,57 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
 
 class MultiParallelSampleIter(BaseParallelSampleIter):
     """
-    Wraps multiple parallel sample iterators in a single iterator.
+    Wraps multiple parallel sample iterators in a single iterator. Each time
+    `next()` is called, one of the sub-iterators is selected by weighted random
+    choice to yield a batch.
     """
 
     def __init__(self,
                  iters: List[BaseParallelSampleIter],
-                 config_data_per_iter: List[DataConfig],
+                 num_sents_per_iter: List[int],
                  method: str = C.DATA_SAMPLING_UNIFORM,
                  temperature: float = 1.,
+                 custom: List[float] = [],
                  sync_size: int = 8192) -> None:
         self.iters = iters
-        self.config_data_per_iter = config_data_per_iter
+        self.num_sents_per_iter = num_sents_per_iter
+        self.total_num_sents = sum(num_sents_per_iter)
+        if utils.is_distributed():
+            self.total_num_sents /= torch.distributed.get_world_size()
+        self.num_sents_this_epoch = 0
         self.method = method
         self.temperature = temperature
+        self.custom = custom
         self.sync_size = sync_size
         self.iter_call_queue = []  # type: List[int]
         if self.method == C.DATA_SAMPLING_UNIFORM:
             self.iter_weights = np.full(len(self.iters), 1 / len(self.iters))
         elif self.method == C.DATA_SAMPLING_TEMPERATURE:
-            total_num_sents = sum(config.data_statistics.num_sents for config in self.config_data_per_iter)
-            self.iter_weights = np.array([config.data_statistics.num_sents / total_num_sents
-                                          for config in self.config_data_per_iter])
+            self.iter_weights = np.array([num_sents / self.total_num_sents for num_sents in self.num_sents_per_iter])
             self.iter_weights **= (1 / self.temperature)
+            self.iter_weights /= self.iter_weights.sum()
+        elif self.method == C.DATA_SAMPLING_CUSTOM:
+            check_condition(len(custom) == len(iters),
+                            'Number of custom data sampling weights must match number of prepared data directories: '
+                            f'{len(custom)} != {len(iters)}')
+            self.iter_weights = np.array(custom)
             self.iter_weights /= self.iter_weights.sum()
         else:
             raise ValueError(f'Unknown data sampling method: {self.method}')
         logger.info(f'MultiParallelSampleIter initialized with data weights: {self.iter_weights}')
 
     def reset(self):
-        # This iterator type never needs to be reset. Sub-iterators are reset as
-        # needed.
-        raise RuntimeError('Reset is undefined for MultiParallelSampleIter')
+        # This method only resets the sentence counter for epoch reporting. Sub-
+        # iterators are reset as needed in the `next()` method.
+        self.num_sents_this_epoch = 0
 
     def iter_next(self) -> bool:
-        # Because sub-iterators are reset as needed, this iterator type can
-        # always yield a next batch.
-        return True
+        # This method could always return true since sub-iterators are reset as
+        # needed. However, the model training loop defines an epoch boundary as
+        # the step in which `iter_next()` returns False. We return False when
+        # we've yielded enough sentences to cover the summed size of all
+        # prepared data sources (one approximate epoch).
+        return self.num_sents_this_epoch < self.total_num_sents
 
     def next(self) -> 'Batch':
         # When the iterator call queue is empty, decide which iterators to call
@@ -1869,19 +1888,21 @@ class MultiParallelSampleIter(BaseParallelSampleIter):
         # Reset sub-iterators as needed
         if not next_iter.iter_next():
             next_iter.reset()
-        return next_iter.next()
+        batch = next_iter.next()
+        self.num_sents_this_epoch += batch.samples
+        return batch
 
     def save_state(self, fname: str):
         if not os.path.exists(fname):
             os.mkdir(fname)
         with open(os.path.join(fname, 'queue'), 'wb') as fp:
-            pickle.dump(self.iter_call_queue, fp)
+            pickle.dump((self.num_sents_this_epoch, self.iter_call_queue), fp)
         for i, _iter in enumerate(self.iters):
             _iter.save_state(os.path.join(fname, str(i)))
 
     def load_state(self, fname: str):
         with open(os.path.join(fname, 'queue'), 'rb') as fp:
-            self.iter_call_queue = pickle.load(fp)
+            self.num_sents_this_epoch, self.iter_call_queue = pickle.load(fp)
         for i, _iter in enumerate(self.iters):
             _iter.load_state(os.path.join(fname, str(i)))
 
