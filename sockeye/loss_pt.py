@@ -125,7 +125,6 @@ class LossMetric(ABC):
         self._num_inst = 0.0
 
 
-# TODO(fhieber): should be scriptable/traceable
 class PyTorchCrossEntropyLoss(Loss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.

@@ -142,12 +142,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
 
         # traced components (for inference)
         self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_embedding_target = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_decoder = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_factor_output_layers = None  # type: Optional[List[pt.jit.ScriptModule]]
         self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
-
 
     def weights_from_mxnet_block(self, block_mx: 'SockeyeModel'):  # type: ignore
         self.embedding_source.weights_from_mxnet_block(block_mx.embedding_source)
@@ -607,7 +603,6 @@ def initialize_parameters(module: pt.nn.Module):
     """
     import math
     if isinstance(module, pt.nn.Linear) or isinstance(module, layers_pt.PyTorchOutputLayer):
-        # TODO: consider using gain=1 / math.sqrt(2)
         pt.nn.init.xavier_uniform_(module.weight, gain=1)
         if module.bias is not None:
             pt.nn.init.zeros_(module.bias)

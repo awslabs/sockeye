@@ -65,33 +65,6 @@ def test_mx_pt_eq_lhuc():
     assert onp.allclose(out_mx, out_pt)
 
 
-def test_weight_normalization():
-    expected_norm = onp.array([1., 1.])
-    weight = pt.tensor([[1., 2.],
-                        [3., 4.]])
-    weight_norm = sockeye.layers_pt.PyTorchWeightNormalization(num_hidden=2)
-    norm_weight = weight_norm(weight).detach().numpy()
-    assert onp.allclose(onp.linalg.norm(norm_weight, axis=1), expected_norm)
-
-
-def test_mx_pt_eq_weight_normalization():
-    pytest.importorskip("mxnet")
-    from mxnet import np
-    import sockeye.layers
-
-    num_hidden = 3
-    weight_mx = np.random.uniform(0, 1, size=(num_hidden, 4))
-    weight_pt = pt.as_tensor(weight_mx.asnumpy())
-    b_mx = sockeye.layers.WeightNormalization(num_hidden=num_hidden)
-    b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchWeightNormalization(num_hidden=num_hidden)
-
-    result_mx = b_mx(weight_mx).asnumpy()
-    result_pt = b_pt(weight_pt).detach().numpy()
-
-    assert np.allclose(result_mx, result_pt)
-
-
 def test_positional_embeddings():
     num_embed = 32
     max_seq_len = 10

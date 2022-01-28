@@ -659,6 +659,7 @@ class Translator:
         self.vocab_targets_inv = [vocab.reverse_vocab(v) for v in self.vocab_targets]
         self.restrict_lexicon = restrict_lexicon
         assert C.PAD_ID == 0, "pad id should be 0"
+        assert softmax_temperature is None, "softmax temperature not implemented"
         self.stop_ids = {C.EOS_ID, C.PAD_ID}  # type: Set[int]
         self.strip_ids = self.stop_ids.copy()  # ids to strip from the output
         self.unk_id = C.UNK_ID
@@ -690,7 +691,6 @@ class Translator:
             beam_search_stop=beam_search_stop,
             scorer=self._scorer,
             constant_length_ratio=constant_length_ratio,
-            softmax_temperature=softmax_temperature,
             prevent_unk=prevent_unk,
             greedy=greedy)
 
