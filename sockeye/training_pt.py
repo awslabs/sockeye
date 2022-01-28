@@ -366,7 +366,8 @@ class PyTorchEarlyStoppingTrainer:
                                                          self.optimizer_config.gradient_clipping_threshold)
             # Set learning rate for current step
             for param_group in self.optimizer.param_groups:
-                param_group['lr'] = self.optimizer_config.lr_scheduler(self.state.updates)
+                param_group['lr'] = self.optimizer_config.lr_scheduler(self.state.updates) \
+                                    if self.optimizer_config.lr_scheduler is not None else self.optimizer_config.lr
             # Update weights and reset gradients
             if self.using_amp:
                 self._scaler.step(self.optimizer)
