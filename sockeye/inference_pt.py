@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -698,7 +698,7 @@ class Translator:
                                             stop_ids=self.stop_ids,
                                             scorer=self._scorer)  # type: Callable
 
-        logger.info("PyTorchTranslator (%d model(s) beam_size=%d algorithm=%s, beam_search_stop=%s max_input_length=%s "
+        logger.info("Translator (%d model(s) beam_size=%d algorithm=%s, beam_search_stop=%s max_input_length=%s "
                     "nbest_size=%s ensemble_mode=%s max_batch_size=%d dtype=%s softmax_temperature=%s)",
                     len(self.models),
                     self.beam_size,
