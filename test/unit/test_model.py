@@ -19,7 +19,7 @@ import torch as pt
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.model_pt
-import sockeye.transformer_pt
+import sockeye.transformer
 
 
 def test_mx_pt_eq_sockeye_model():

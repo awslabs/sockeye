@@ -20,7 +20,7 @@ import torch as pt
 import sockeye.constants as C
 from . import config
 from . import layers_pt
-from . import transformer_pt
+from . import transformer
 
 
 def pytorch_get_transformer_encoder(config: transformer_pt.TransformerConfig, inference_only: bool = False):

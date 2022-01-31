@@ -16,7 +16,7 @@ import pytest
 import torch as pt
 
 import sockeye.constants as C
-import sockeye.transformer_pt
+import sockeye.transformer
 from sockeye.layers_pt import prepare_source_length_mask
 
 

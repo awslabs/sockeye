@@ -16,7 +16,7 @@ import pytest
 import torch as pt
 
 import sockeye.layers_pt
-import sockeye.transformer_pt
+import sockeye.transformer
 
 
 def test_lhuc():
@@ -296,7 +296,7 @@ def test_mx_pt_eq_dot_attention_cell(qlen, kvlen, batch_size, hidden, heads):
     from mxnet import np
     import sockeye.layers
     import sockeye.transformer
-    import sockeye.transformer_pt
+    import sockeye.transformer
 
     q_mx = np.random.uniform(0, 1, (qlen, batch_size, hidden))
     kv_mx = np.random.uniform(0, 1, (kvlen, batch_size, hidden * 2))

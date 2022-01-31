@@ -42,7 +42,7 @@ from . import lr_scheduler
 from . import model_pt
 from . import optimizers
 from . import training
-from . import transformer_pt
+from . import transformer
 from . import utils
 from . import vocab
 from .config import Config

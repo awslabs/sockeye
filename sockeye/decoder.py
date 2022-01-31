@@ -23,8 +23,8 @@ import torch as pt
 
 from . import constants as C
 from . import layers_pt
-from . import transformer_pt
-from .transformer_pt import TransformerConfig
+from . import transformer
+from .transformer import TransformerConfig
 
 logger = logging.getLogger(__name__)
 DecoderConfig = Union[TransformerConfig]  # type: ignore

@@ -21,7 +21,7 @@ from typing import cast, Dict, Optional, Tuple, List
 
 import torch as pt
 
-from sockeye import __version__, transformer_pt
+from sockeye import __version__, transformer
 from . import constants as C
 from . import data_io
 from . import decoder

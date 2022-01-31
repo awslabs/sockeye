@@ -17,7 +17,7 @@ import torch as pt
 
 import sockeye.constants as C
 import sockeye.decoder
-import sockeye.transformer_pt
+import sockeye.transformer
 
 
 @pytest.mark.parametrize('lhuc', [
