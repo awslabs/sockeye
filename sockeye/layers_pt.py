@@ -58,25 +58,6 @@ class PyTorchLHUC(pt.nn.Module):
         self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
 
 
-class PyTorchWeightNormalization(pt.nn.Module):
-    """
-    Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).
-    For a given tensor the normalization is done per hidden dimension.
-
-    :param num_hidden: Size of the first dimension.
-    :param ndim: The total number of dimensions of the weight tensor.
-    """
-
-    def __init__(self, num_hidden: int, ndim: int = 2) -> None:
-        super().__init__()
-        _shape = tuple([num_hidden] + [1] * (ndim - 1))
-        self.scale = pt.ones(*_shape)
-        self._axis_arg = tuple(range(1, ndim))
-
-    def forward(self, weight: pt.Tensor) -> pt.Tensor:
-        return F.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale  # type: ignore
-
-
 class PyTorchOutputLayer(pt.nn.Module):
     """
     Final output layer of seq2seq models. Supports vocabulary selection that caches reduced weight/bias
