@@ -89,8 +89,8 @@ class CheckpointDecoder:
         self.model = model
 
         with ExitStack() as exit_stack:
-            inputs_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in inputs]
-            references_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in references]
+            inputs_fins = [exit_stack.enter_context(utils.smart_open(f)) for f in inputs]
+            references_fins = [exit_stack.enter_context(utils.smart_open(f)) for f in references]
 
             inputs_sentences = [f.readlines() for f in inputs_fins]
             targets_sentences = [f.readlines() for f in references_fins]
