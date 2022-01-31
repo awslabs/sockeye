@@ -209,7 +209,7 @@ def run_train_translate(train_params: str,
     """
     if use_pytorch:
         import sockeye.prepare_data
-        import sockeye.train_pt
+        import sockeye.train
         import sockeye.translate_pt
         prepare_data_mod = sockeye.prepare_data_pt
         train_mod = sockeye.train_pt
