@@ -147,11 +147,11 @@ class EarlyStoppingTrainer:
     def __init__(self,
                  config: TrainerConfig,
                  optimizer_config: optimizers.OptimizerConfig,
-                 sockeye_model: model_pt.SockeyeModel,
+                 sockeye_model: model.SockeyeModel,
                  training_model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
                  zero_grad_kwargs: Dict[str, Any],
-                 loss_functions: List[loss_pt.Loss],
+                 loss_functions: List[loss.Loss],
                  device: torch.device,
                  using_amp: bool = False,
                  using_apex_amp: bool = False,
@@ -383,7 +383,7 @@ class EarlyStoppingTrainer:
         return did_grad_step
 
     def _evaluate(self, checkpoint: int, data_iter,
-                  checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss_pt.LossMetric]:
+                  checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss.LossMetric]:
         """
         Computes loss(es) on validation data and returns their metrics.
         :param data_iter: Validation data iterator.
@@ -419,7 +419,7 @@ class EarlyStoppingTrainer:
         # Add decoder metrics (if any) to validation metrics
         for metric_name, metric_value in decoder_metrics.items():
             assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
-            metric = loss_pt.LossMetric(name=metric_name)
+            metric = loss.LossMetric(name=metric_name)
             metric.update(metric_value, num_samples=1)
             val_metrics.append(metric)
 
@@ -430,7 +430,7 @@ class EarlyStoppingTrainer:
         self.sockeye_model.train()
         return val_metrics
 
-    def _determine_improvement(self, val_metrics: List[loss_pt.LossMetric]) -> bool:
+    def _determine_improvement(self, val_metrics: List[loss.LossMetric]) -> bool:
         """
         Determines whether early stopping metric on validation data improved and updates best value and checkpoint in
         the state.
@@ -520,7 +520,7 @@ class EarlyStoppingTrainer:
 
         return False
 
-    def _determine_divergence(self, val_metrics: List[loss_pt.LossMetric]) -> bool:
+    def _determine_divergence(self, val_metrics: List[loss.LossMetric]) -> bool:
         """
         True if last perplexity is infinite or >2*target_vocab_size.
         """
@@ -558,8 +558,8 @@ class EarlyStoppingTrainer:
         logger.info("Checkpoint [%d]\tLearning-rate=%.6f", self.state.checkpoint, lr)
 
     def _write_and_log_metrics(self,
-                               train_metrics: Iterable[loss_pt.LossMetric],
-                               val_metrics: Iterable[loss_pt.LossMetric]):
+                               train_metrics: Iterable[loss.LossMetric],
+                               val_metrics: Iterable[loss.LossMetric]):
         """
         Updates metrics for current checkpoint.
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
@@ -827,7 +827,7 @@ class Speedometer:
         self.msg = 'E=%d B=%d\ts/sec=%.2f tok/sec=%.2f u/sec=%.2f\t'
 
     def __call__(self, epoch: int, batches: int, updates: int, samples: int,
-                 tokens: int, metrics: Optional[Iterable[loss_pt.LossMetric]] = None):
+                 tokens: int, metrics: Optional[Iterable[loss.LossMetric]] = None):
         count = batches
         if self.last_count > count:
             self.init = False

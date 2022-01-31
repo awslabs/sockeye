@@ -183,7 +183,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
 def create_checkpoint_decoder(
         args: argparse.Namespace,
         device: torch.device,
-        sockeye_model: model_pt.SockeyeModel,
+        sockeye_model: model.SockeyeModel,
         source_vocabs: List[vocab.Vocab],
         target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
     """
@@ -410,7 +410,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 def create_encoder_config(args: argparse.Namespace,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          num_embed_source: int) -> Tuple[transformer_pt.TransformerConfig, int]:
+                          num_embed_source: int) -> Tuple[transformer.TransformerConfig, int]:
     """
     Create the encoder config.
 
@@ -435,7 +435,7 @@ def create_encoder_config(args: argparse.Namespace,
             encoder_transformer_model_size, num_embed_source + total_source_factor_size))
         encoder_transformer_model_size = num_embed_source + total_source_factor_size
 
-    config_encoder = transformer_pt.TransformerConfig(
+    config_encoder = transformer.TransformerConfig(
         model_size=encoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[0],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[0],
@@ -462,7 +462,7 @@ def create_decoder_config(args: argparse.Namespace,
                           encoder_num_hidden: int,
                           max_seq_len_source: int,
                           max_seq_len_target: int,
-                          num_embed_target: int) -> transformer_pt.TransformerConfig:
+                          num_embed_target: int) -> transformer.TransformerConfig:
     """
     Create the config for the decoder.
 
@@ -488,7 +488,7 @@ def create_decoder_config(args: argparse.Namespace,
             decoder_transformer_model_size, num_embed_target + total_target_factor_size))
         decoder_transformer_model_size = num_embed_target + total_target_factor_size
 
-    config_decoder = transformer_pt.TransformerConfig(
+    config_decoder = transformer.TransformerConfig(
         model_size=decoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[1],
         feed_forward_num_hidden=args.transformer_feed_forward_num_hidden[1],
@@ -581,7 +581,7 @@ def create_model_config(args: argparse.Namespace,
                         target_vocab_sizes: List[int],
                         max_seq_len_source: int,
                         max_seq_len_target: int,
-                        config_data: data_io.DataConfig) -> model_pt.ModelConfig:
+                        config_data: data_io.DataConfig) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -622,7 +622,7 @@ def create_model_config(args: argparse.Namespace,
                                 "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     source_factors_num_embed[i] = num_embed_source
 
-        source_factor_configs = [encoder_pt.FactorConfig(size, dim, combine, share) \
+        source_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
                                  for size, dim, combine, share in zip(source_factor_vocab_sizes,
                                                                       source_factors_num_embed,
                                                                       args.source_factors_combine,
@@ -646,44 +646,44 @@ def create_model_config(args: argparse.Namespace,
                                 "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     target_factors_num_embed[i] = num_embed_target
 
-        target_factor_configs = [encoder_pt.FactorConfig(size, dim, combine, share) \
+        target_factor_configs = [encoder.FactorConfig(size, dim, combine, share) \
                                  for size, dim, combine, share in zip(target_factor_vocab_sizes,
                                                                       target_factors_num_embed,
                                                                       args.target_factors_combine,
                                                                       args.target_factors_share_embedding)]
 
-    config_embed_source = encoder_pt.EmbeddingConfig(vocab_size=source_vocab_size,
-                                                     num_embed=num_embed_source,
-                                                     dropout=embed_dropout_source,
-                                                     factor_configs=source_factor_configs,
-                                                     allow_sparse_grad=False)
+    config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
+                                                  num_embed=num_embed_source,
+                                                  dropout=embed_dropout_source,
+                                                  factor_configs=source_factor_configs,
+                                                  allow_sparse_grad=False)
 
-    config_embed_target = encoder_pt.EmbeddingConfig(vocab_size=target_vocab_size,
-                                                     num_embed=num_embed_target,
-                                                     dropout=embed_dropout_target,
-                                                     factor_configs=target_factor_configs,
-                                                     allow_sparse_grad=False)
+    config_embed_target = encoder.EmbeddingConfig(vocab_size=target_vocab_size,
+                                                  num_embed=num_embed_target,
+                                                  dropout=embed_dropout_target,
+                                                  factor_configs=target_factor_configs,
+                                                  allow_sparse_grad=False)
 
     config_length_task = None
     if args.length_task is not None:
-        config_length_task = layers_pt.LengthRatioConfig(num_layers=args.length_task_layers,
-                                                         weight=args.length_task_weight)
+        config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers,
+                                                      weight=args.length_task_weight)
 
-    model_config = model_pt.ModelConfig(config_data=config_data,
-                                        vocab_source_size=source_vocab_size,
-                                        vocab_target_size=target_vocab_size,
-                                        config_embed_source=config_embed_source,
-                                        config_embed_target=config_embed_target,
-                                        config_encoder=config_encoder,
-                                        config_decoder=config_decoder,
-                                        config_length_task=config_length_task,
-                                        weight_tying_type=args.weight_tying_type,
-                                        lhuc=args.lhuc is not None,
-                                        dtype=C.DTYPE_FP32)
+    model_config = model.ModelConfig(config_data=config_data,
+                                     vocab_source_size=source_vocab_size,
+                                     vocab_target_size=target_vocab_size,
+                                     config_embed_source=config_embed_source,
+                                     config_embed_target=config_embed_target,
+                                     config_encoder=config_encoder,
+                                     config_decoder=config_decoder,
+                                     config_length_task=config_length_task,
+                                     weight_tying_type=args.weight_tying_type,
+                                     lhuc=args.lhuc is not None,
+                                     dtype=C.DTYPE_FP32)
     return model_config
 
 
-def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss_pt.Loss]:
+def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss.Loss]:
     # loss weights per factor
     if len(args.target_factors_weight) != len(all_num_classes) - 1:
         check_condition(len(args.target_factors_weight) == 1,
@@ -693,7 +693,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         factor_weights = args.target_factors_weight
     loss_weights = [1.0] + factor_weights
 
-    losses = []  # type: List[loss_pt.Loss]
+    losses = []  # type: List[loss.Loss]
 
     # Cross-Entropy losses for all target streams/factors
     for i, (num_classes, weight) in enumerate(zip(all_num_classes, loss_weights)):
@@ -703,27 +703,27 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         label_name = C.TARGET_LABEL_NAME if i == 0 else C.TARGET_FACTOR_LABEL_NAME % i
         label_smoothing = args.label_smoothing if i == 0 else .0  # Note: No label smoothing for target factor losses.
 
-        losses.append(loss_pt.CrossEntropyLoss(name=name,
-                                               weight=weight,
-                                               label_smoothing=label_smoothing,
-                                               dtype=C.DTYPE_FP32,
-                                               output_name=output_name,
-                                               label_name=label_name,
-                                               metric_prefix=metric_prefix,
-                                               label_smoothing_impl=args.label_smoothing_impl))
+        losses.append(loss.CrossEntropyLoss(name=name,
+                                            weight=weight,
+                                            label_smoothing=label_smoothing,
+                                            dtype=C.DTYPE_FP32,
+                                            output_name=output_name,
+                                            label_name=label_name,
+                                            metric_prefix=metric_prefix,
+                                            label_smoothing_impl=args.label_smoothing_impl))
 
     if args.length_task is not None:
         weight = args.length_task_weight
         if args.length_task == C.LENGTH_TASK_RATIO:
-            losses.append(loss_pt.MSELoss(name=f'{C.LENRATIO_NAME}_{C.LINK_NORMAL}',
-                                          weight=weight,
-                                          output_name=C.LENRATIO_NAME,
-                                          label_name=C.LENRATIO_LABEL_NAME))
+            losses.append(loss.MSELoss(name=f'{C.LENRATIO_NAME}_{C.LINK_NORMAL}',
+                                       weight=weight,
+                                       output_name=C.LENRATIO_NAME,
+                                       label_name=C.LENRATIO_LABEL_NAME))
         else:
-            losses.append(loss_pt.PoissonLoss(name=f'{C.LENRATIO_NAME}_{C.LINK_POISSON}',
-                                              weight=weight,
-                                              output_name=C.LENRATIO_NAME,
-                                              label_name=C.LENRATIO_LABEL_NAME))
+            losses.append(loss.PoissonLoss(name=f'{C.LENRATIO_NAME}_{C.LINK_POISSON}',
+                                           weight=weight,
+                                           output_name=C.LENRATIO_NAME,
+                                           label_name=C.LENRATIO_LABEL_NAME))
     return losses
 
 
@@ -770,7 +770,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
     return config
 
 
-def unset_requires_grad_for_fixed_params(config: model_pt.ModelConfig,
+def unset_requires_grad_for_fixed_params(config: model.ModelConfig,
                                          params: Dict[str, torch.nn.parameter.Parameter],
                                          fixed_param_names: List[str],
                                          fixed_param_strategy: Optional[str] = None):
@@ -791,7 +791,7 @@ def unset_requires_grad_for_fixed_params(config: model_pt.ModelConfig,
         params[name].requires_grad = False
 
 
-def fixed_param_names_from_strategy(config: model_pt.ModelConfig,
+def fixed_param_names_from_strategy(config: model.ModelConfig,
                                     params: Dict[str, torch.nn.parameter.Parameter],
                                     strategy: str) -> List[str]:
     """
@@ -847,7 +847,7 @@ def main():
 
 @torch.distributed.elastic.multiprocessing.errors.record
 def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = None,
-          checkpoint_callback: Optional[Callable] = None) -> training_pt.TrainState:
+          checkpoint_callback: Optional[Callable] = None) -> training.TrainState:
     """
     :param custom_metrics_logger: Optional custom metrics logging function. If supplied, takes care of metrics produced
                                   during training in a custom way. It should accept a list or a dictionary of
@@ -948,37 +948,37 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                        config_data=config_data)
 
     # Handle options that override training settings
-    trainer_config = training_pt.TrainerConfig(output_dir=args.output,
-                                               early_stopping_metric=args.optimized_metric,
-                                               max_params_files_to_keep=args.keep_last_params,
-                                               keep_initializations=args.keep_initializations,
-                                               max_params_files_to_cache=args.cache_last_best_params,
-                                               cache_strategy=args.cache_strategy,
-                                               cache_metric=args.cache_metric,
-                                               checkpoint_interval=args.checkpoint_interval,
-                                               max_num_checkpoint_not_improved=args.max_num_checkpoint_not_improved,
-                                               checkpoint_improvement_threshold=args.checkpoint_improvement_threshold,
-                                               max_checkpoints=args.max_checkpoints,
-                                               min_samples=args.min_samples,
-                                               max_samples=args.max_samples,
-                                               min_updates=args.min_updates,
-                                               max_updates=args.max_updates,
-                                               min_epochs=args.min_num_epochs,
-                                               max_epochs=args.max_num_epochs,
-                                               max_seconds=args.max_seconds,
-                                               update_interval=args.update_interval,
-                                               stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
+    trainer_config = training.TrainerConfig(output_dir=args.output,
+                                            early_stopping_metric=args.optimized_metric,
+                                            max_params_files_to_keep=args.keep_last_params,
+                                            keep_initializations=args.keep_initializations,
+                                            max_params_files_to_cache=args.cache_last_best_params,
+                                            cache_strategy=args.cache_strategy,
+                                            cache_metric=args.cache_metric,
+                                            checkpoint_interval=args.checkpoint_interval,
+                                            max_num_checkpoint_not_improved=args.max_num_checkpoint_not_improved,
+                                            checkpoint_improvement_threshold=args.checkpoint_improvement_threshold,
+                                            max_checkpoints=args.max_checkpoints,
+                                            min_samples=args.min_samples,
+                                            max_samples=args.max_samples,
+                                            min_updates=args.min_updates,
+                                            max_updates=args.max_updates,
+                                            min_epochs=args.min_num_epochs,
+                                            max_epochs=args.max_num_epochs,
+                                            max_seconds=args.max_seconds,
+                                            update_interval=args.update_interval,
+                                            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
     if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
         check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
                         "Minimum number of epochs must be smaller than maximum number of epochs")
 
     optimizer_config = create_optimizer_config(args)
 
-    sockeye_model = model_pt.SockeyeModel(
+    sockeye_model = model.SockeyeModel(
         model_config,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
     sockeye_model.to(device)
-    sockeye_model.apply(model_pt.initialize_parameters)
+    sockeye_model.apply(model.initialize_parameters)
 
     # Load starting parameters if specified
     if args.params is not None:
@@ -1033,7 +1033,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
-    trainer = training_pt.EarlyStoppingTrainer(
+    trainer = training.EarlyStoppingTrainer(
         config=trainer_config,
         optimizer_config=optimizer_config,
         sockeye_model=sockeye_model,

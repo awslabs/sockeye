@@ -59,8 +59,8 @@ class ModelConfig(Config):
     config_data: data_io.DataConfig
     vocab_source_size: int
     vocab_target_size: int
-    config_embed_source: encoder_pt.EmbeddingConfig
-    config_embed_target: encoder_pt.EmbeddingConfig
+    config_embed_source: encoder.EmbeddingConfig
+    config_embed_target: encoder.EmbeddingConfig
     config_encoder: transformer.TransformerConfig
     config_decoder: transformer.TransformerConfig
     config_length_task: Optional[LengthRatioConfig] = None
@@ -108,17 +108,17 @@ class SockeyeModel(pt.nn.Module):
         # source & target embeddings, potentially shared/tied
         source_embedding, target_embedding, output_weight = self._get_embeddings()
 
-        self.embedding_source = encoder_pt.Embedding(config.config_embed_source, embedding=source_embedding)
-        self.embedding_target = encoder_pt.Embedding(config.config_embed_target, embedding=target_embedding)
+        self.embedding_source = encoder.Embedding(config.config_embed_source, embedding=source_embedding)
+        self.embedding_target = encoder.Embedding(config.config_embed_target, embedding=target_embedding)
 
         # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder,
-                                                                  inference_only=inference_only)
+        self.encoder = encoder.get_transformer_encoder(self.config.config_encoder,
+                                                       inference_only=inference_only)
         self.decoder = decoder.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
 
-        self.output_layer = layers_pt.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                  vocab_size=self.config.vocab_target_size,
-                                                  weight=output_weight)
+        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                               vocab_size=self.config.vocab_target_size,
+                                               weight=output_weight)
         if self.inference_only:
             self.output_layer = pt.jit.script(self.output_layer)
 
@@ -132,12 +132,12 @@ class SockeyeModel(pt.nn.Module):
                                         bias=True)
             self.factor_output_layers.append(output_layer)
 
-        self.length_ratio = None  # type: Optional[layers_pt.LengthRatio]
+        self.length_ratio = None  # type: Optional[layers.LengthRatio]
         if self.config.config_length_task is not None:
             utils.check_condition(self.config.config_length_task.weight > 0.0,
                                   'Auxiliary length task requested, but its loss weight is zero')
-            self.length_ratio = layers_pt.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
-                                                      num_layers=self.config.config_length_task.num_layers)
+            self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
+                                                   num_layers=self.config.config_length_task.num_layers)
         self.dtype = pt.float32
         self.cast(config.dtype)
 
@@ -350,9 +350,9 @@ class SockeyeModel(pt.nn.Module):
         :param fname: Path to save parameters to.
         See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
         """
-        self.apply(layers_pt.interleave_kv)
+        self.apply(layers.interleave_kv)
         pt.save(self.state_dict(), fname)
-        self.apply(layers_pt.separate_kv)
+        self.apply(layers.separate_kv)
         logging.info('Saved params/state_dict to "%s"', fname)
 
     def load_parameters(self,
@@ -392,7 +392,7 @@ class SockeyeModel(pt.nn.Module):
         # model is in training mode, separate the loaded params to match the
         # format used during training.
         if self.training:
-            self.apply(layers_pt.separate_kv)
+            self.apply(layers.separate_kv)
         logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
     def set_parameters(self,
@@ -527,9 +527,9 @@ class _DecodeStep(pt.nn.Module):
     """
 
     def __init__(self,
-                 embedding_target: encoder_pt.Embedding,
+                 embedding_target: encoder.Embedding,
                  decoder: decoder.Decoder,
-                 output_layer: layers_pt.OutputLayer,
+                 output_layer: layers.OutputLayer,
                  factor_output_layers: pt.nn.ModuleList):
         super().__init__()
         self.embedding_target = embedding_target
@@ -542,7 +542,6 @@ class _DecodeStep(pt.nn.Module):
                 step_input,
                 states: List[pt.Tensor],
                 vocab_slice_ids: Optional[pt.Tensor] = None) -> List[pt.Tensor]:
-
         target_embed = self.embedding_target(step_input.unsqueeze(1))
         decoder_out, new_states = self.decoder(target_embed, states)
         decoder_out = decoder_out.squeeze(1)
@@ -581,7 +580,7 @@ def initialize_parameters(module: pt.nn.Module):
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
     https: // jamesmccaffrey.wordpress.com / 2020 / 11 / 20 / the - gain - parameter -
     """
-    if isinstance(module, pt.nn.Linear) or isinstance(module, layers_pt.OutputLayer):
+    if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
         # TODO: consider using gain=1 / math.sqrt(2)
         pt.nn.init.xavier_uniform_(module.weight, gain=1)
         if module.bias is not None:
@@ -592,9 +591,9 @@ def initialize_parameters(module: pt.nn.Module):
         if module.elementwise_affine:
             pt.nn.init.ones_(module.weight)
             pt.nn.init.zeros_(module.bias)
-    elif isinstance(module, layers_pt.LHUC):
+    elif isinstance(module, layers.LHUC):
         pt.nn.init.uniform_(module.weight, a=0.1)
-    elif isinstance(module, layers_pt.PositionalEmbeddings):
+    elif isinstance(module, layers.PositionalEmbeddings):
         if module.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
             pt.nn.init.xavier_uniform(module.weight, gain=1.0)
 

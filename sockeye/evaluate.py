@@ -120,7 +120,7 @@ def main():
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
 
-    references = [' '.join(e) for e in data_io_pt.read_content(args.references)]
+    references = [' '.join(e) for e in data_io.read_content(args.references)]
     all_hypotheses = [[h.strip() for h in hypotheses] for hypotheses in args.hypotheses]
     if not args.not_strict:
         for hypotheses in all_hypotheses:

@@ -23,12 +23,12 @@ from . import layers
 from . import transformer
 
 
-def pytorch_get_transformer_encoder(config: transformer_pt.TransformerConfig, inference_only: bool = False):
+def get_transformer_encoder(config: transformer.TransformerConfig, inference_only: bool = False):
     return TransformerEncoder(config=config, inference_only=inference_only)
 
 
-get_encoder = pytorch_get_transformer_encoder
-EncoderConfig = Union[transformer_pt.TransformerConfig]
+get_encoder = get_transformer_encoder
+EncoderConfig = Union[transformer.TransformerConfig]
 
 
 class Encoder(pt.nn.Module):
@@ -162,25 +162,25 @@ class TransformerEncoder(Encoder):
     :param config: Configuration for transformer encoder.
     """
 
-    def __init__(self, config: transformer_pt.TransformerConfig, inference_only: bool = False) -> None:
+    def __init__(self, config: transformer.TransformerConfig, inference_only: bool = False) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
 
         self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
 
-        self.pos_embedding = layers_pt.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                            num_embed=self.config.model_size,
-                                                            max_seq_len=self.config.max_seq_len_source,
-                                                            scale_up_input=True,
-                                                            scale_down_positions=False)
+        self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                         num_embed=self.config.model_size,
+                                                         max_seq_len=self.config.max_seq_len_source,
+                                                         scale_up_input=True,
+                                                         scale_down_positions=False)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.TransformerEncoderBlock(config, inference_only=inference_only)
+            transformer.TransformerEncoderBlock(config, inference_only=inference_only)
             for _ in range(config.num_layers))
 
-        self.final_process = transformer_pt.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                    dropout=config.dropout_prepost,
-                                                                    num_hidden=self.config.model_size)
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=self.config.model_size)
 
     def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         # positional embedding
@@ -191,7 +191,7 @@ class TransformerEncoder(Encoder):
 
         _, max_len, __ = data.size()
         # length_mask for source attention masking. Shape: (batch_size * heads, 1, max_len)
-        att_mask = layers_pt.prepare_source_length_mask(valid_length, self.config.attention_heads, max_length=max_len)
+        att_mask = layers.prepare_source_length_mask(valid_length, self.config.attention_heads, max_length=max_len)
         att_mask = att_mask.repeat(1, max_len, 1)
 
         data = data.transpose(1, 0)  # batch to time major

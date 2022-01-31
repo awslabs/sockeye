@@ -175,11 +175,11 @@ class Scorer:
                     scores = [-np.inf] * self.num_target_factors
 
                 # Output handling routines require us to make use of inference classes.
-                output_handler.handle(inference_pt.TranslatorInput(sentence_no, source_tokens),
-                                      inference_pt.TranslatorOutput(sentence_no, target_string,
-                                                                    target_tokens,
-                                                                    score=scores[0],
-                                                                    factor_scores=scores[1:]),
+                output_handler.handle(inference.TranslatorInput(sentence_no, source_tokens),
+                                      inference.TranslatorOutput(sentence_no, target_string,
+                                                                 target_tokens,
+                                                                 score=scores[0],
+                                                                 factor_scores=scores[1:]),
                                       batch_time)
 
         if sentence_no != 0:

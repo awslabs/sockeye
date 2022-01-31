@@ -25,7 +25,6 @@ from typing import Any, Dict, Optional, List
 import torch
 
 from . import constants as C
-from . import data_io
 from . import evaluate
 from . import inference
 from . import model
@@ -64,7 +63,7 @@ class CheckpointDecoder:
                  references: List[str],
                  source_vocabs: List[vocab.Vocab],
                  target_vocabs: List[vocab.Vocab],
-                 model: model_pt.SockeyeModel,
+                 model: model.SockeyeModel,
                  device: torch.device,
                  max_input_len: Optional[int] = None,
                  batch_size: int = 16,
@@ -90,8 +89,8 @@ class CheckpointDecoder:
         self.model = model
 
         with ExitStack() as exit_stack:
-            inputs_fins = [exit_stack.enter_context(data_io_pt.smart_open(f)) for f in inputs]
-            references_fins = [exit_stack.enter_context(data_io_pt.smart_open(f)) for f in references]
+            inputs_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in inputs]
+            references_fins = [exit_stack.enter_context(data_io.smart_open(f)) for f in references]
 
             inputs_sentences = [f.readlines() for f in inputs_fins]
             targets_sentences = [f.readlines() for f in references_fins]
@@ -121,12 +120,12 @@ class CheckpointDecoder:
 
         self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: ignore
 
-        scorer = inference_pt.CandidateScorer(
+        scorer = inference.CandidateScorer(
             length_penalty_alpha=length_penalty_alpha,
             length_penalty_beta=length_penalty_beta,
             brevity_penalty_weight=0.0)
 
-        self.translator = inference_pt.Translator(
+        self.translator = inference.Translator(
             batch_size=self.batch_size,
             device=device,
             ensemble_mode=self.ensemble_mode,
@@ -153,13 +152,13 @@ class CheckpointDecoder:
         trans_wall_time = 0.0
         translations = []  # type: List[List[str]]
         with ExitStack() as exit_stack:
-            outputs = [exit_stack.enter_context(data_io_pt.smart_open(output_name.format(factor=idx), 'w'))
+            outputs = [exit_stack.enter_context(utils.smart_open(output_name.format(factor=idx), 'w'))
                        if output_name is not None else None for idx in range(self.model.num_target_factors)]
 
             tic = time.time()
-            trans_inputs = []  # type: List[inference_pt.TranslatorInput]
+            trans_inputs = []  # type: List[inference.TranslatorInput]
             for i, inputs in enumerate(self.inputs_sentences):
-                trans_inputs.append(inference_pt.make_input_from_multiple_strings(i, inputs))
+                trans_inputs.append(inference.make_input_from_multiple_strings(i, inputs))
             trans_outputs = self.translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
@@ -202,7 +201,7 @@ class CheckpointDecoder:
 
     def warmup(self):
         """Translate a single sentence to warm up the model"""
-        one_sentence = [inference_pt.make_input_from_multiple_strings(0, self.inputs_sentences[0])]
+        one_sentence = [inference.make_input_from_multiple_strings(0, self.inputs_sentences[0])]
         _ = self.translator.translate(one_sentence)
 
 
@@ -215,6 +214,6 @@ def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, se
 
 
 def write_to_file(data: List[str], fname: str):
-    with data_io_pt.smart_open(fname, 'w') as f:
+    with utils.smart_open(fname, 'w') as f:
         for x in data:
             print(x.rstrip(), file=f)

@@ -116,33 +116,33 @@ def run_translate(args: argparse.Namespace):
     for model in models:
         model.eval()
 
-    scorer = inference_pt.CandidateScorer(
+    scorer = inference.CandidateScorer(
         length_penalty_alpha=args.length_penalty_alpha,
         length_penalty_beta=args.length_penalty_beta,
         brevity_penalty_weight=brevity_penalty_weight)
     scorer.to(models[0].dtype)
 
-    translator = inference_pt.Translator(device=device,
-                                         ensemble_mode=args.ensemble_mode,
-                                         scorer=scorer,
-                                         batch_size=args.batch_size,
-                                         beam_size=args.beam_size,
-                                         beam_search_stop=args.beam_search_stop,
-                                         nbest_size=args.nbest_size,
-                                         models=models,
-                                         source_vocabs=source_vocabs,
-                                         target_vocabs=target_vocabs,
-                                         restrict_lexicon=restrict_lexicon,
-                                         strip_unknown_words=args.strip_unknown_words,
-                                         sample=args.sample,
-                                         output_scores=output_handler.reports_score(),
-                                         constant_length_ratio=constant_length_ratio,
-                                         max_output_length_num_stds=args.max_output_length_num_stds,
-                                         max_input_length=args.max_input_length,
-                                         max_output_length=args.max_output_length,
-                                         softmax_temperature=args.softmax_temperature,
-                                         prevent_unk=args.prevent_unk,
-                                         greedy=args.greedy)
+    translator = inference.Translator(device=device,
+                                      ensemble_mode=args.ensemble_mode,
+                                      scorer=scorer,
+                                      batch_size=args.batch_size,
+                                      beam_size=args.beam_size,
+                                      beam_search_stop=args.beam_search_stop,
+                                      nbest_size=args.nbest_size,
+                                      models=models,
+                                      source_vocabs=source_vocabs,
+                                      target_vocabs=target_vocabs,
+                                      restrict_lexicon=restrict_lexicon,
+                                      strip_unknown_words=args.strip_unknown_words,
+                                      sample=args.sample,
+                                      output_scores=output_handler.reports_score(),
+                                      constant_length_ratio=constant_length_ratio,
+                                      max_output_length_num_stds=args.max_output_length_num_stds,
+                                      max_input_length=args.max_input_length,
+                                      max_output_length=args.max_output_length,
+                                      softmax_temperature=args.softmax_temperature,
+                                      prevent_unk=args.prevent_unk,
+                                      greedy=args.greedy)
 
     read_and_translate(translator=translator,
                        output_handler=output_handler,
@@ -153,9 +153,9 @@ def run_translate(args: argparse.Namespace):
 
 
 def make_inputs(input_file: Optional[str],
-                translator: inference_pt.Translator,
+                translator: inference.Translator,
                 input_is_json: bool,
-                input_factors: Optional[List[str]] = None) -> Generator[inference_pt.TranslatorInput, None, None]:
+                input_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
     """
     Generates TranslatorInput instances from input. If input is None, reads from stdin. If num_input_factors > 1,
     the function will look for factors attached to each token, separated by '|'.
@@ -172,13 +172,13 @@ def make_inputs(input_file: Optional[str],
         check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if input_is_json:
-                yield inference_pt.make_input_from_json_string(sentence_id=sentence_id,
-                                                               json_string=line,
-                                                               translator=translator)
+                yield inference.make_input_from_json_string(sentence_id=sentence_id,
+                                                            json_string=line,
+                                                            translator=translator)
             else:
-                yield inference_pt.make_input_from_factored_string(sentence_id=sentence_id,
-                                                                   factored_string=line,
-                                                                   translator=translator)
+                yield inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                                factored_string=line,
+                                                                translator=translator)
     else:
         input_factors = [] if input_factors is None else input_factors
         inputs = [input_file] + input_factors
@@ -190,14 +190,14 @@ def make_inputs(input_file: Optional[str],
             streams = [exit_stack.enter_context(smart_open(i)) for i in inputs]
             for sentence_id, inputs in enumerate(zip(*streams), 1):
                 if input_is_json:
-                    yield inference_pt.make_input_from_json_string(sentence_id=sentence_id,
-                                                                   json_string=inputs[0],
-                                                                   translator=translator)
+                    yield inference.make_input_from_json_string(sentence_id=sentence_id,
+                                                                json_string=inputs[0],
+                                                                translator=translator)
                 else:
-                    yield inference_pt.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
+                    yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
 
 
-def read_and_translate(translator: inference_pt.Translator,
+def read_and_translate(translator: inference.Translator,
                        output_handler: OutputHandler,
                        chunk_size: Optional[int],
                        input_file: Optional[str] = None,
@@ -243,8 +243,8 @@ def read_and_translate(translator: inference_pt.Translator,
 
 
 def translate(output_handler: OutputHandler,
-              trans_inputs: List[inference_pt.TranslatorInput],
-              translator: inference_pt.Translator) -> float:
+              trans_inputs: List[inference.TranslatorInput],
+              translator: inference.Translator) -> float:
     """
     Translates each line from source_data, calling output handler after translating a batch.
 

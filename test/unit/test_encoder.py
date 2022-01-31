@@ -53,7 +53,7 @@ def test_get_transformer_encoder(lhuc):
                                                       max_seq_len_source=50,
                                                       max_seq_len_target=60,
                                                       use_lhuc=lhuc)
-    encoder = sockeye.encoder_pt.pytorch_get_transformer_encoder(config)
+    encoder = sockeye.encoder_pt.get_transformer_encoder(config)
     assert type(encoder) == sockeye.encoder_pt.TransformerEncoder
 
 
@@ -83,7 +83,7 @@ def test_mx_pt_eq_transformer_encoder():
     encoder_mx = sockeye.encoder.get_transformer_encoder(config, dtype=C.DTYPE_FP32)
     encoder_mx.initialize()
 
-    encoder_pt = sockeye.encoder_pt.pytorch_get_transformer_encoder(config)
+    encoder_pt = sockeye.encoder_pt.get_transformer_encoder(config)
     encoder_pt.weights_from_mxnet_block(encoder_mx)
 
     batch = 12

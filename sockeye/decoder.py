@@ -55,6 +55,7 @@ class Decoder(pt.nn.Module):
 
         :return: Class decorator.
         """
+
         def wrapper(target_cls):
             cls.__registry[config_type] = target_cls
             return target_cls
@@ -129,20 +130,20 @@ class TransformerDecoder(Decoder):
         pt.nn.Module.__init__(self)
         self.config = config
         self.inference_only = inference_only
-        self.pos_embedding = layers_pt.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                            num_embed=self.config.model_size,
-                                                            max_seq_len=self.config.max_seq_len_target,
-                                                            scale_up_input=True,
-                                                            scale_down_positions=False)
-        self.autoregressive_mask = transformer_pt.AutoRegressiveMask()
+        self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                         num_embed=self.config.model_size,
+                                                         max_seq_len=self.config.max_seq_len_target,
+                                                         scale_up_input=True,
+                                                         scale_down_positions=False)
+        self.autoregressive_mask = transformer.AutoRegressiveMask()
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.TransformerDecoderBlock(config, inference_only=self.inference_only)
+            transformer.TransformerDecoderBlock(config, inference_only=self.inference_only)
             for _ in range(config.num_layers))
 
-        self.final_process = transformer_pt.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                    dropout=config.dropout_prepost,
-                                                                    num_hidden=self.config.model_size)
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=self.config.model_size)
         if self.config.dropout_prepost > 0.0:
             self.dropout = pt.nn.Dropout(p=self.config.dropout_prepost, inplace=inference_only)
 
@@ -183,16 +184,16 @@ class TransformerDecoder(Decoder):
         if target_embed is None:  # Inference: initial step = 0. Shape: (batch_size, 1)
             steps = pt.zeros_like(encoder_valid_length).unsqueeze(1)
             # (batch * heads, 1, source_max_len)
-            source_mask = layers_pt.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
-                                                               source_max_len)
+            source_mask = layers.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
+                                                            source_max_len)
             # Shape: (batch, heads, 1, src_max_len)
             source_mask = source_mask.view(-1, self.config.attention_heads, 1, source_max_len)
         else:  # Training: steps up to target length. Shape: (1, target_length)
             target_length = target_embed.size()[1]
             steps = pt.arange(0, target_length, device=target_embed.device).unsqueeze(0)
             # (batch * heads, 1, source_max_len)
-            source_mask = layers_pt.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
-                                                               source_max_len)
+            source_mask = layers.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
+                                                            source_max_len)
             source_mask = source_mask.repeat(1, target_length, 1)  # Shape: (batch * heads, trg_max_len, src_max_len)
 
             # Shape: (batch, heads, trg_max_len, src_max_len)
@@ -246,7 +247,8 @@ class TransformerDecoder(Decoder):
         if any(layer.num_state_tensors > 1 for layer in self.layers):
             # separates autoregressive states by layer
             states_iter = iter(autoregr_states)
-            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]  # type: ignore
+            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in
+                               self.layers]  # type: ignore
 
         batch, heads, target_max_len, source_max_len = source_mask.size()
         source_mask_view = source_mask.view(batch * heads, target_max_len, source_max_len)
