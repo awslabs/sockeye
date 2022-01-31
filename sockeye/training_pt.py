@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Iterable, Tuple, Union, 
 import numpy as np
 import torch
 import torch.distributed
+
 try:
     import apex.amp
 except ImportError:
@@ -141,7 +142,7 @@ class TrainState:
             setattr(self, k, v)
 
 
-class PyTorchEarlyStoppingTrainer:
+class EarlyStoppingTrainer:
 
     def __init__(self,
                  config: TrainerConfig,
@@ -175,9 +176,9 @@ class PyTorchEarlyStoppingTrainer:
         self.checkpoint_callback = checkpoint_callback
 
     def fit(self,
-            train_iter: data_io_pt.BaseParallelSampleIter,
-            validation_iter: data_io_pt.BaseParallelSampleIter,
-            checkpoint_decoder: Optional[checkpoint_decoder_pt.CheckpointDecoder] = None):
+            train_iter: data_io.BaseParallelSampleIter,
+            validation_iter: data_io.BaseParallelSampleIter,
+            checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None):
         logger.info("Early stopping by optimizing '%s'", self.config.early_stopping_metric)
 
         if utils.is_primary_worker() and self.config.early_stopping_metric in C.METRICS_REQUIRING_DECODER:
@@ -265,9 +266,9 @@ class PyTorchEarlyStoppingTrainer:
 
         return self.state
 
-    def _create_checkpoint(self, checkpoint_decoder: checkpoint_decoder_pt.CheckpointDecoder, time_cost: float,
-                           train_iter: data_io_pt.BaseParallelSampleIter,
-                           validation_iter: data_io_pt.BaseParallelSampleIter):
+    def _create_checkpoint(self, checkpoint_decoder: checkpoint_decoder.CheckpointDecoder, time_cost: float,
+                           train_iter: data_io.BaseParallelSampleIter,
+                           validation_iter: data_io.BaseParallelSampleIter):
         """
         Creates a checkpoint, which will update self.state.converged/self.state.diverged, evaluate validation
         metrics and update the best known parameters accordingly.
@@ -301,7 +302,7 @@ class PyTorchEarlyStoppingTrainer:
         if self.checkpoint_callback:
             self.checkpoint_callback(self.state.checkpoint)
 
-    def _forward_backward(self, batch: data_io_pt.Batch, is_update_batch: bool = True):
+    def _forward_backward(self, batch: data_io.Batch, is_update_batch: bool = True):
         """
         Performs forward-backward pass on a batch.
 
@@ -333,7 +334,7 @@ class PyTorchEarlyStoppingTrainer:
             sum_losses.backward()  # type: ignore
         return loss_outputs
 
-    def _step(self, batch: data_io_pt.Batch) -> bool:
+    def _step(self, batch: data_io.Batch) -> bool:
         self.state.batches += 1
         self.state.samples += batch.samples
         # We accumulate gradients over N=update_interval batches before running
@@ -346,7 +347,7 @@ class PyTorchEarlyStoppingTrainer:
         # average the accumulated gradients across workers during the update
         # batch.
         with (self.training_model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
-              else utils.no_context()):
+        else utils.no_context()):
             loss_outputs = self._forward_backward(batch, is_update_batch)
 
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
@@ -367,7 +368,7 @@ class PyTorchEarlyStoppingTrainer:
             # Set learning rate for current step
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = self.optimizer_config.lr_scheduler(self.state.updates) \
-                                    if self.optimizer_config.lr_scheduler is not None else self.optimizer_config.lr
+                    if self.optimizer_config.lr_scheduler is not None else self.optimizer_config.lr
             # Update weights and reset gradients
             if self.using_amp:
                 self._scaler.step(self.optimizer)
@@ -382,7 +383,7 @@ class PyTorchEarlyStoppingTrainer:
         return did_grad_step
 
     def _evaluate(self, checkpoint: int, data_iter,
-                  checkpoint_decoder: Optional[checkpoint_decoder_pt.CheckpointDecoder]) -> List[loss_pt.LossMetric]:
+                  checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss_pt.LossMetric]:
         """
         Computes loss(es) on validation data and returns their metrics.
         :param data_iter: Validation data iterator.
@@ -601,7 +602,8 @@ class PyTorchEarlyStoppingTrainer:
         self.sockeye_model.save_parameters(self.current_params_fname)
         cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
                              self.state.best_checkpoint, self.config.keep_initializations,
-                             self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
+                             self.config.max_params_files_to_cache, self.config.cache_metric,
+                             self.config.cache_strategy)
 
     def _save_optimizer_state(self, fname):
         torch.save(self.optimizer.state_dict(), fname)
@@ -623,7 +625,7 @@ class PyTorchEarlyStoppingTrainer:
                 self.optimizer_config.lr_scheduler = pickle.load(fp)
             logger.info("Loaded '%s' from '%s'", self.optimizer_config.lr_scheduler, fname)
 
-    def _save_training_state(self, train_iter: data_io_pt.BaseParallelSampleIter):
+    def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
         Saves current training state.
         """
@@ -683,7 +685,7 @@ class PyTorchEarlyStoppingTrainer:
                 # during training is usually fine.
                 logger.warning('Directory has already been removed: %s', delete_training_state_dirname)
 
-    def _load_training_state(self, train_iter: data_io_pt.BaseParallelSampleIter):
+    def _load_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
         Loads the full training state from disk.
         :param train_iter: training data iterator.
@@ -715,7 +717,8 @@ class PyTorchEarlyStoppingTrainer:
 
         # (6) AMP grad scaler state
         if self.using_amp:
-            self._scaler.load_state_dict(torch.load(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME)))
+            self._scaler.load_state_dict(
+                torch.load(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME)))
         if self.using_apex_amp:
             apex.amp.load_state_dict(torch.load(os.path.join(self.training_state_dirname, C.APEX_AMP_STATE_NAME)))
 
@@ -730,7 +733,8 @@ class PyTorchEarlyStoppingTrainer:
         """
         cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep,
                              self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations,
-                             self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
+                             self.config.max_params_files_to_cache, self.config.cache_metric,
+                             self.config.cache_strategy)
 
         if not keep_training_state:
             if os.path.exists(self.training_state_dirname):

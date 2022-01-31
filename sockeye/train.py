@@ -1033,7 +1033,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
-    trainer = training_pt.PyTorchEarlyStoppingTrainer(
+    trainer = training_pt.EarlyStoppingTrainer(
         config=trainer_config,
         optimizer_config=optimizer_config,
         sockeye_model=sockeye_model,
