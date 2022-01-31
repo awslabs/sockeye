@@ -148,19 +148,6 @@ class PyTorchSockeyeModel(pt.nn.Module):
         self.traced_factor_output_layers = None  # type: Optional[List[pt.jit.ScriptModule]]
         self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
 
-
-    def weights_from_mxnet_block(self, block_mx: 'SockeyeModel'):  # type: ignore
-        self.embedding_source.weights_from_mxnet_block(block_mx.embedding_source)
-        self.embedding_target.weights_from_mxnet_block(block_mx.embedding_target)
-        self.encoder.weights_from_mxnet_block(block_mx.encoder)
-        self.decoder.weights_from_mxnet_block(block_mx.decoder)
-        self.output_layer.weights_from_mxnet_block(block_mx.output_layer)
-        for i, factor_output_layer in enumerate(self.factor_output_layers):
-            factor_output_layer.weight.data[:] = pt.as_tensor(block_mx.factor_output_layers[i].weight.data().asnumpy())
-            factor_output_layer.bias.data[:] = pt.as_tensor(block_mx.factor_output_layers[i].bias.data().asnumpy())
-        if self.config.config_length_task is not None:
-            self.length_ratio.weights_from_mxnet_block(block_mx.length_ratio)
-
     def cast(self, dtype: str):
         if dtype == C.DTYPE_FP16:
             self.half()
@@ -571,18 +558,6 @@ class _DecodeStep(pt.nn.Module):
         return outputs
 
 
-def make_pytorch_model_from_mxnet_model(mx_model: 'SockeyeModel') -> PyTorchSockeyeModel:  # type: ignore
-    """
-    Constructs a PyTorchSockeyeModel from a given SockeyeModel and copies its parameters in-memory.
-    """
-    model = PyTorchSockeyeModel(config=mx_model.config,
-                                inference_only=mx_model.decoder.inference_only,
-                                mc_dropout=mx_model.mc_dropout,
-                                forward_pass_cache_size=mx_model.forward_pass_cache_size)
-    model.weights_from_mxnet_block(mx_model)
-    return model
-
-
 def initialize_parameters(module: pt.nn.Module):
     """
     Can be applied to a SockeyeModel (via `model.apply(initialize_parameters)`)
@@ -605,7 +580,6 @@ def initialize_parameters(module: pt.nn.Module):
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
     https: // jamesmccaffrey.wordpress.com / 2020 / 11 / 20 / the - gain - parameter -
     """
-    import math
     if isinstance(module, pt.nn.Linear) or isinstance(module, layers_pt.PyTorchOutputLayer):
         # TODO: consider using gain=1 / math.sqrt(2)
         pt.nn.init.xavier_uniform_(module.weight, gain=1)

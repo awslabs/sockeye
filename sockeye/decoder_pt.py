@@ -111,10 +111,6 @@ class PyTorchDecoder(pt.nn.Module):
     def get_num_hidden(self):
         raise NotImplementedError()
 
-    @abstractmethod
-    def weights_from_mxnet_block(self, block_mx):
-        raise NotImplementedError()
-
 
 @PyTorchDecoder.register(TransformerConfig)
 class PyTorchTransformerDecoder(PyTorchDecoder):
@@ -294,10 +290,3 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
 
     def get_num_hidden(self):
         return self.config.model_size
-
-    def weights_from_mxnet_block(self, block_mx: 'TransformerDecoder'):  # type: ignore
-        self.pos_embedding.weights_from_mxnet_block(block_mx.pos_embedding)
-        for i, l in enumerate(self.layers):
-            l.weights_from_mxnet_block(block_mx.layers[i])
-        self.final_process.weights_from_mxnet_block(block_mx.final_process)
-

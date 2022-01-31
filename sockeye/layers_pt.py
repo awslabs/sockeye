@@ -54,9 +54,6 @@ class PyTorchLHUC(pt.nn.Module):
         weight = 2 * pt.sigmoid(self.weight)
         return weight * data
 
-    def weights_from_mxnet_block(self, block_mx: 'LHUC'):  # type: ignore
-        self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
-
 
 class PyTorchWeightNormalization(pt.nn.Module):
     """
@@ -136,10 +133,6 @@ class PyTorchOutputLayer(pt.nn.Module):
 
         return F.linear(data, weight, bias)
 
-    def weights_from_mxnet_block(self, block_mx: 'OutputLayer'):  # type: ignore
-        self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
-        self.bias.data[:] = pt.as_tensor(block_mx.bias.data().asnumpy())
-
 
 @dataclass
 class LengthRatioConfig(config.Config):
@@ -187,12 +180,6 @@ class PyTorchLengthRatio(pt.nn.Module):
         data = source_masked.sum(dim=1, keepdim=False) / source_encoded_length.unsqueeze(1)
         data = self.layers(data).squeeze(1)  # (n, 1)
         return data
-
-    def weights_from_mxnet_block(self, block_mx: 'LengthRatio'):  # type: ignore
-        for l_pt, l_mx in zip(self.layers, block_mx.layers):
-            if isinstance(l_pt, pt.nn.Linear):
-                l_pt.weight.data[:] = pt.as_tensor(l_mx.weight.data().asnumpy())
-                l_pt.bias.data[:] = pt.as_tensor(l_mx.bias.data().asnumpy())
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
@@ -498,15 +485,6 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
 
             return self._attend(queries=queries, key_values=states, mask=mask), states
 
-    def weights_from_mxnet_block(self, block_mx: 'MultiHeadSelfAttention'):  # type: ignore
-        was_train = self.training
-        if was_train:
-            self.eval()
-        self.ff_in.weight.data[:] = pt.as_tensor(block_mx.ff_in.weight.data().asnumpy())
-        self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
-        if was_train:
-            self.train()
-
 
 class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
     """
@@ -614,16 +592,6 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
             key_values = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(key_values)
             return self._attend(queries=queries, key_values=key_values, mask=mask)
 
-    def weights_from_mxnet_block(self, block_mx: 'MultiHeadAttention'):  # type: ignore
-        was_train = self.training
-        if was_train:
-            self.eval()
-        self.ff_q.weight.data[:] = pt.as_tensor(block_mx.ff_q.weight.data().asnumpy())
-        self.ff_kv.weight.data[:] = pt.as_tensor(block_mx.ff_kv.weight.data().asnumpy())
-        self.ff_out.weight.data[:] = pt.as_tensor(block_mx.ff_out.weight.data().asnumpy())
-        if was_train:
-            self.train()
-
 
 def interleave_kv(module: pt.nn.Module):
     """ Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
@@ -721,10 +689,6 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
 
         return data + pos_embedding
 
-    def weights_from_mxnet_block(self, block_mx: 'PositionalEmbeddings'):  # type: ignore
-        if self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-            self.weight.data[:] = pt.as_tensor(block_mx.weight.data().asnumpy())
-
 
 class PyTorchSSRU(AutoregressiveLayer):
     """
@@ -815,10 +779,3 @@ class PyTorchSSRU(AutoregressiveLayer):
         cell_state, last_step_state = self.cell_state_transform(previous_states, weighted_inputs, forget_rates)
 
         return self.relu(cell_state), last_step_state
-
-    def weights_from_mxnet_block(self, block_mx: 'SSRU'):  # type: ignore
-        self.forget_gate.weight.data[:] = pt.as_tensor(block_mx.forget_gate.weight.data().asnumpy())
-        self.forget_gate.bias.data[:] = pt.as_tensor(block_mx.forget_gate.bias.data().asnumpy())
-        self.linear.weight.data[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())
-
-

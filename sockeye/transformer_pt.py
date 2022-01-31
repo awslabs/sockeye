@@ -102,16 +102,6 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
 
         return data
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerEncoderBlock'):  # type: ignore
-        self.pre_self_attention.weights_from_mxnet_block(block_mx.pre_self_attention)
-        self.self_attention.weights_from_mxnet_block(block_mx.self_attention)
-        self.post_self_attention.weights_from_mxnet_block(block_mx.post_self_attention)
-        self.pre_ff.weights_from_mxnet_block(block_mx.pre_ff)
-        self.ff.weights_from_mxnet_block(block_mx.ff)
-        self.post_ff.weights_from_mxnet_block(block_mx.post_ff)
-        if self.lhuc is not None:
-            self.lhuc.weights_from_mxnet_block(block_mx.lhuc)
-
 
 class PyTorchTransformerDecoderBlock(pt.nn.Module):
     """
@@ -219,19 +209,6 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
 
         return target, new_autoregr_states
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerDecoderBlock'):  # type: ignore
-        self.pre_autoregr_layer.weights_from_mxnet_block(block_mx.pre_autoregr_layer)
-        self.autoregr_layer.weights_from_mxnet_block(block_mx.autoregr_layer)
-        self.post_autoregr_layer.weights_from_mxnet_block(block_mx.post_autoregr_layer)
-        self.pre_enc_attention.weights_from_mxnet_block(block_mx.pre_enc_attention)
-        self.enc_attention.weights_from_mxnet_block(block_mx.enc_attention)
-        self.post_enc_attention.weights_from_mxnet_block(block_mx.post_enc_attention)
-        self.pre_ff.weights_from_mxnet_block(block_mx.pre_ff)
-        self.ff.weights_from_mxnet_block(block_mx.ff)
-        self.post_ff.weights_from_mxnet_block(block_mx.post_ff)
-        if self.lhuc is not None:
-            self.lhuc.weights_from_mxnet_block(block_mx.lhuc)
-
 
 class PyTorchTransformerProcessBlock(pt.nn.Module):
     """
@@ -287,12 +264,6 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
 
         return data
 
-    def weights_from_mxnet_block(self, block_mx: 'TransformerProcessBlock'):  # type: ignore
-        if 'n' in self.sequence:
-            assert 'n' in block_mx.sequence
-            self.layer_norm.bias.data[:] = pt.as_tensor(block_mx.layer_norm.beta.data().asnumpy())
-            self.layer_norm.weight.data[:] = pt.as_tensor(block_mx.layer_norm.gamma.data().asnumpy())
-
 
 class PyTorchTransformerFeedForward(pt.nn.Module):
 
@@ -323,15 +294,6 @@ class PyTorchTransformerFeedForward(pt.nn.Module):
             h = self.drop(h)
         y = self.ff2(h)
         return y
-
-    def weights_from_mxnet_block(self, block_mx: 'TransformerFeedForward'):  # type: ignore
-        self.ff1.weight.data[:] = pt.as_tensor(block_mx.ff1.weight.data().asnumpy())
-        self.ff2.weight.data[:] = pt.as_tensor(block_mx.ff2.weight.data().asnumpy())
-        self.ff1.bias.data[:] = pt.as_tensor(block_mx.ff1.bias.data().asnumpy())
-        self.ff2.bias.data[:] = pt.as_tensor(block_mx.ff2.bias.data().asnumpy())
-        if self.use_glu:
-            self.linear.weight.data[:] = pt.as_tensor(block_mx.linear.weight.data().asnumpy())
-            self.linear.bias.data[:] = pt.as_tensor(block_mx.linear.bias.data().asnumpy())
 
 
 class AutoRegressiveMask(pt.nn.Module):
