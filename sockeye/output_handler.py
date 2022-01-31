@@ -19,7 +19,7 @@ from typing import Optional
 
 import sockeye.constants as C
 from sockeye.utils import smart_open
-from . import inference_pt
+from . import inference
 
 
 def get_output_handler(output_type: str,

@@ -17,7 +17,7 @@ import unittest.mock
 from tempfile import TemporaryDirectory
 
 import sockeye.constants
-import sockeye.inference_pt
+import sockeye.inference
 import sockeye.output_handler
 import sockeye.translate
 

@@ -24,7 +24,7 @@ import torch as pt
 
 from . import constants as C
 from . import data_io
-from . import inference_pt
+from . import inference
 from . import vocab
 from .beam_search import CandidateScorer
 from .model_pt import SockeyeModel

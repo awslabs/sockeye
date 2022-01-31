@@ -23,7 +23,7 @@ import torch as pt
 import sockeye.beam_search
 import sockeye.constants as C
 import sockeye.data_io
-import sockeye.inference_pt
+import sockeye.inference
 import sockeye.lexicon
 import sockeye.model_pt
 import sockeye.utils

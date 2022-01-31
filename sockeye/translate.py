@@ -31,7 +31,7 @@ from sockeye.output_handler import get_output_handler, OutputHandler
 from sockeye.utils import log_basic_info, check_condition, grouper, smart_open, seed_rngs
 from . import arguments
 from . import constants as C
-from . import inference_pt
+from . import inference
 
 logger = logging.getLogger(__name__)
 
