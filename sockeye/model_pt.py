@@ -115,9 +115,9 @@ class PyTorchSockeyeModel(pt.nn.Module):
                                                                   inference_only=inference_only)
         self.decoder = decoder_pt.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
 
-        self.output_layer = layers_pt.PyTorchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                         vocab_size=self.config.vocab_target_size,
-                                                         weight=output_weight)
+        self.output_layer = layers_pt.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                  vocab_size=self.config.vocab_target_size,
+                                                  weight=output_weight)
         if self.inference_only:
             self.output_layer = pt.jit.script(self.output_layer)
 
@@ -131,12 +131,12 @@ class PyTorchSockeyeModel(pt.nn.Module):
                                         bias=True)
             self.factor_output_layers.append(output_layer)
 
-        self.length_ratio = None  # type: Optional[layers_pt.PyTorchLengthRatio]
+        self.length_ratio = None  # type: Optional[layers_pt.LengthRatio]
         if self.config.config_length_task is not None:
             utils.check_condition(self.config.config_length_task.weight > 0.0,
                                   'Auxiliary length task requested, but its loss weight is zero')
-            self.length_ratio = layers_pt.PyTorchLengthRatio(hidden_size=self.encoder.get_num_hidden(),
-                                                             num_layers=self.config.config_length_task.num_layers)
+            self.length_ratio = layers_pt.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
+                                                      num_layers=self.config.config_length_task.num_layers)
         self.dtype = pt.float32
         self.cast(config.dtype)
 
@@ -528,7 +528,7 @@ class _DecodeStep(pt.nn.Module):
     def __init__(self,
                  embedding_target: encoder_pt.Embedding,
                  decoder: decoder_pt.Decoder,
-                 output_layer: layers_pt.PyTorchOutputLayer,
+                 output_layer: layers_pt.OutputLayer,
                  factor_output_layers: pt.nn.ModuleList):
         super().__init__()
         self.embedding_target = embedding_target
@@ -580,7 +580,7 @@ def initialize_parameters(module: pt.nn.Module):
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
     https: // jamesmccaffrey.wordpress.com / 2020 / 11 / 20 / the - gain - parameter -
     """
-    if isinstance(module, pt.nn.Linear) or isinstance(module, layers_pt.PyTorchOutputLayer):
+    if isinstance(module, pt.nn.Linear) or isinstance(module, layers_pt.OutputLayer):
         # TODO: consider using gain=1 / math.sqrt(2)
         pt.nn.init.xavier_uniform_(module.weight, gain=1)
         if module.bias is not None:
@@ -591,9 +591,9 @@ def initialize_parameters(module: pt.nn.Module):
         if module.elementwise_affine:
             pt.nn.init.ones_(module.weight)
             pt.nn.init.zeros_(module.bias)
-    elif isinstance(module, layers_pt.PyTorchLHUC):
+    elif isinstance(module, layers_pt.LHUC):
         pt.nn.init.uniform_(module.weight, a=0.1)
-    elif isinstance(module, layers_pt.PyTorchPositionalEmbeddings):
+    elif isinstance(module, layers_pt.PositionalEmbeddings):
         if module.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
             pt.nn.init.xavier_uniform(module.weight, gain=1.0)
 

@@ -24,12 +24,12 @@ def test_lhuc():
     batch_size = 10
     inp = pt.rand(batch_size, num_hidden)
 
-    lhuc = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
+    lhuc = sockeye.layers_pt.LHUC(num_hidden=num_hidden)
     pt.nn.init.zeros_(lhuc.weight)
     out = lhuc(inp)
     pt.testing.assert_allclose(inp, out)
 
-    lhuc = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
+    lhuc = sockeye.layers_pt.LHUC(num_hidden=num_hidden)
     pt.nn.init.constant_(lhuc.weight, 20.0)
     out = lhuc(inp)
     pt.testing.assert_allclose(2 * inp, out)
@@ -46,7 +46,7 @@ def test_mx_pt_eq_lhuc():
     inp_pt = pt.as_tensor(inp_mx.asnumpy())
     b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init='zeros')
     b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
+    b_pt = sockeye.layers_pt.LHUC(num_hidden=num_hidden)
     pt.nn.init.zeros_(b_pt.weight)
 
     out_mx = b_mx(inp_mx).asnumpy()
@@ -56,7 +56,7 @@ def test_mx_pt_eq_lhuc():
 
     b_mx = sockeye.layers.LHUC(num_hidden=num_hidden, weight_init=mxnet.init.Constant(value=20.0))
     b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchLHUC(num_hidden=num_hidden)
+    b_pt = sockeye.layers_pt.LHUC(num_hidden=num_hidden)
     pt.nn.init.constant_(b_pt.weight, 20.0)
 
     out_mx = b_mx(inp_mx).asnumpy()
@@ -101,12 +101,12 @@ def test_positional_embeddings():
     data = pt.zeros(2, data_len, num_embed)
 
     # fixed embeddings
-    expected_fixed_embedding = sockeye.layers_pt.pytorch_get_positional_embeddings(data_len, num_embed)
-    b = sockeye.layers_pt.PyTorchPositionalEmbeddings(weight_type='fixed',
-                                                      num_embed=num_embed,
-                                                      max_seq_len=max_seq_len,
-                                                      scale_up_input=scale_up_input,
-                                                      scale_down_positions=scale_down_positions)
+    expected_fixed_embedding = sockeye.layers_pt.get_positional_embeddings(data_len, num_embed)
+    b = sockeye.layers_pt.PositionalEmbeddings(weight_type='fixed',
+                                               num_embed=num_embed,
+                                               max_seq_len=max_seq_len,
+                                               scale_up_input=scale_up_input,
+                                               scale_down_positions=scale_down_positions)
     # no steps
     out = b(data, None)
     pt.testing.assert_allclose(out[0], expected_fixed_embedding)
@@ -123,11 +123,11 @@ def test_positional_embeddings():
     pt.testing.assert_allclose(out[1, 2], expected_fixed_embedding[1])
 
     # learned embeddings
-    b = sockeye.layers_pt.PyTorchPositionalEmbeddings(weight_type='learned',
-                                                      num_embed=num_embed,
-                                                      max_seq_len=max_seq_len,
-                                                      scale_up_input=scale_up_input,
-                                                      scale_down_positions=scale_down_positions)
+    b = sockeye.layers_pt.PositionalEmbeddings(weight_type='learned',
+                                               num_embed=num_embed,
+                                               max_seq_len=max_seq_len,
+                                               scale_up_input=scale_up_input,
+                                               scale_down_positions=scale_down_positions)
     pt.nn.init.constant_(b.weight, val=1.0)
     expected_learned_embeddings = pt.ones(data_len, num_embed)
     out = b(data, None)
@@ -162,11 +162,11 @@ def test_mx_pt_eq_positional_embeddings(data_len, num_embed, scale_up_input, sca
     b_mx.initialize()
     r_mx = b_mx(data_mx, steps_mx).asnumpy()
 
-    b_pt = sockeye.layers_pt.PyTorchPositionalEmbeddings(weight_type='fixed',
-                                                         num_embed=num_embed,
-                                                         max_seq_len=max_seq_len,
-                                                         scale_up_input=scale_up_input,
-                                                         scale_down_positions=scale_down_positions)
+    b_pt = sockeye.layers_pt.PositionalEmbeddings(weight_type='fixed',
+                                                  num_embed=num_embed,
+                                                  max_seq_len=max_seq_len,
+                                                  scale_up_input=scale_up_input,
+                                                  scale_down_positions=scale_down_positions)
     b_pt.weights_from_mxnet_block(b_mx)
     r_pt = b_pt(data_pt, steps_pt).detach().numpy()
 
@@ -181,7 +181,7 @@ def test_mx_pt_eq_get_positional_embeddings():
     num_embed = 32
 
     embed_mx = sockeye.layers.get_positional_embeddings(data_len, num_embed).asnumpy()
-    embed_pt = sockeye.layers_pt.pytorch_get_positional_embeddings(data_len, num_embed).detach().numpy()
+    embed_pt = sockeye.layers_pt.get_positional_embeddings(data_len, num_embed).detach().numpy()
 
     assert onp.allclose(embed_mx, embed_pt)
 
@@ -192,7 +192,7 @@ def test_output_layer():
     data = pt.ones(2, 10, num_hidden)
     vocab_slice_ids = pt.tensor([4, 7, 23])
 
-    b = sockeye.layers_pt.PyTorchOutputLayer(num_hidden, vocab_size)
+    b = sockeye.layers_pt.OutputLayer(num_hidden, vocab_size)
     assert b.weight.data.shape == (vocab_size, num_hidden)
 
     output = b(data, None)
@@ -220,7 +220,7 @@ def test_mx_pt_eq_output_layer():
     b_mx = sockeye.layers.OutputLayer(num_hidden, vocab_size)
     b_mx.initialize()
 
-    b_pt = sockeye.layers_pt.PyTorchOutputLayer(num_hidden, vocab_size)
+    b_pt = sockeye.layers_pt.OutputLayer(num_hidden, vocab_size)
     b_pt.weights_from_mxnet_block(b_mx)
     assert b_pt.weight.size() == (vocab_size, num_hidden)
 
@@ -262,7 +262,7 @@ def test_mx_pt_eq_interleaved_matmul_encdec_qk(qlen, kvlen, batch_size):
     assert np.allclose(kv_pt.numpy(), kv_mx.asnumpy())
 
     r0 = npx.interleaved_matmul_encdec_qk(q_mx, kv_mx, heads=heads).asnumpy()
-    r1 = sockeye.layers_pt.pytorch_interleaved_matmul_encdec_qk(q_pt, kv_pt, heads=heads).detach().numpy()
+    r1 = sockeye.layers_pt.interleaved_matmul_encdec_qk(q_pt, kv_pt, heads=heads).detach().numpy()
     assert np.allclose(r0, r1)
 
 
@@ -280,7 +280,7 @@ def test_mx_pt_eq_interleaved_matmul_encdec_valatt(qlen, kvlen, batch_size):
     att = np.random.uniform(0, 1, (batch_size * heads, qlen, kvlen))
     attpt = pt.as_tensor(att.asnumpy())
     r0 = npx.interleaved_matmul_encdec_valatt(kv_mx, att, heads=heads).asnumpy()
-    r1 = sockeye.layers_pt.pytorch_interleaved_matmul_encdec_valatt(kv_pt, attpt, heads=heads).numpy()
+    r1 = sockeye.layers_pt.interleaved_matmul_encdec_valatt(kv_pt, attpt, heads=heads).numpy()
     assert np.allclose(r0, r1)
 
 
@@ -344,7 +344,7 @@ def test_mx_pt_eq_multi_head_attention_base(qlen, kvlen, batch_size, hidden, hea
 
     b_mx = sockeye.layers.MultiHeadAttentionBase(hidden, heads, hidden)
     b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchMultiHeadAttentionBase(hidden, heads, hidden)
+    b_pt = sockeye.layers_pt.MultiHeadAttentionBase(hidden, heads, hidden)
     # use mxnet parameter initializations for pytorch block
     b_pt.ff_out.weight.data[:] = pt.as_tensor(b_mx.ff_out.weight.data().asnumpy())
 
@@ -366,7 +366,7 @@ def test_mx_pt_eq_multi_head_self_attention(seq_len, batch_size, hidden, heads):
 
     b_mx = sockeye.layers.MultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
     b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
+    b_pt = sockeye.layers_pt.MultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
     b_pt.eval()
     b_pt.weights_from_mxnet_block(b_mx)
 
@@ -390,7 +390,7 @@ def test_interleaved_multihead_attention(qlen, kvlen, batch_size, hidden, heads)
     memory_pt = pt.rand((kvlen, batch_size, hidden))
 
     # test without mask
-    mha = sockeye.layers_pt.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden)
+    mha = sockeye.layers_pt.MultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden)
     mha.train()
     assert not mha.kv_interleaved
     r_train = mha(queries_pt, memory_pt, mask=None, projected_memory_kv=None)
@@ -420,7 +420,7 @@ def test_interleaved_multihead_self_attention(seq_len, batch_size, hidden, heads
     inputs = pt.rand((seq_len, batch_size, hidden))
 
     # test without attention masking
-    mha = sockeye.layers_pt.PyTorchMultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
+    mha = sockeye.layers_pt.MultiHeadSelfAttention(hidden, heads, hidden, dropout=0.0)
     mha.train()
     assert not mha.kv_interleaved
     r_train, _ = mha(inputs, previous_states=None, mask=None)
@@ -470,7 +470,7 @@ def test_mx_pt_eq_multi_head_attention(qlen, kvlen, batch_size, hidden, heads):
     b_mx.initialize()
     r_mx = b_mx(queries_mx, memory_mx, None, None, None)
 
-    b_pt = sockeye.layers_pt.PyTorchMultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden)
+    b_pt = sockeye.layers_pt.MultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden)
     b_pt.weights_from_mxnet_block(b_mx)
     r_pt = b_pt(queries_pt, memory_pt, mask=None, projected_memory_kv=None)
 
@@ -494,7 +494,7 @@ def test_mx_pt_eq_ssru(hidden, inference_only, seq_len, batch):
 
     b_mx = sockeye.layers.SSRU(hidden, inference_only)
     b_mx.initialize()
-    b_pt = sockeye.layers_pt.PyTorchSSRU(hidden, inference_only)
+    b_pt = sockeye.layers_pt.SSRU(hidden, inference_only)
     b_pt.weights_from_mxnet_block(b_mx)
 
     inputs_mx = np.random.uniform(0, 1, (seq_len, batch, hidden))
@@ -533,7 +533,7 @@ def test_mx_pt_eq_length_ratio():
     b_mx.initialize()
     r_mx = b_mx(source_encoded_mx, source_lengths_mx).asnumpy()
 
-    b_pt = sockeye.layers_pt.PyTorchLengthRatio(hidden_size=hidden_size, num_layers=num_layers)
+    b_pt = sockeye.layers_pt.LengthRatio(hidden_size=hidden_size, num_layers=num_layers)
     b_pt.weights_from_mxnet_block(b_mx)
     r_pt = b_pt(source_encoded_pt, source_lengths_pt).detach().numpy()
 

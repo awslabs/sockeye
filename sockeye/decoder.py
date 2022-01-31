@@ -129,11 +129,11 @@ class TransformerDecoder(Decoder):
         pt.nn.Module.__init__(self)
         self.config = config
         self.inference_only = inference_only
-        self.pos_embedding = layers_pt.PyTorchPositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                                   num_embed=self.config.model_size,
-                                                                   max_seq_len=self.config.max_seq_len_target,
-                                                                   scale_up_input=True,
-                                                                   scale_down_positions=False)
+        self.pos_embedding = layers_pt.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                            num_embed=self.config.model_size,
+                                                            max_seq_len=self.config.max_seq_len_target,
+                                                            scale_up_input=True,
+                                                            scale_down_positions=False)
         self.autoregressive_mask = transformer_pt.AutoRegressiveMask()
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs

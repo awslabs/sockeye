@@ -168,11 +168,11 @@ class TransformerEncoder(Encoder):
 
         self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
 
-        self.pos_embedding = layers_pt.PyTorchPositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                                   num_embed=self.config.model_size,
-                                                                   max_seq_len=self.config.max_seq_len_source,
-                                                                   scale_up_input=True,
-                                                                   scale_down_positions=False)
+        self.pos_embedding = layers_pt.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                            num_embed=self.config.model_size,
+                                                            max_seq_len=self.config.max_seq_len_source,
+                                                            scale_up_input=True,
+                                                            scale_down_positions=False)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
             transformer_pt.PyTorchTransformerEncoderBlock(config, inference_only=inference_only)

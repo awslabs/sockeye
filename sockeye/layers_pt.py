@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -25,7 +25,7 @@ from . import config
 logger = logging.getLogger(__name__)
 
 
-def pytorch_get_activation(act_type: str, inplace: bool = False) -> pt.nn.Module:
+def get_activation(act_type: str, inplace: bool = False) -> pt.nn.Module:
     if act_type == C.SWISH1:
         return pt.nn.SiLU(inplace=inplace)
     if act_type == C.GELU:
@@ -33,7 +33,7 @@ def pytorch_get_activation(act_type: str, inplace: bool = False) -> pt.nn.Module
     return pt.nn.ReLU(inplace=inplace)
 
 
-class PyTorchLHUC(pt.nn.Module):
+class LHUC(pt.nn.Module):
     """
     Learning Hidden Unit Contribution
 
@@ -55,26 +55,7 @@ class PyTorchLHUC(pt.nn.Module):
         return weight * data
 
 
-class PyTorchWeightNormalization(pt.nn.Module):
-    """
-    Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).
-    For a given tensor the normalization is done per hidden dimension.
-
-    :param num_hidden: Size of the first dimension.
-    :param ndim: The total number of dimensions of the weight tensor.
-    """
-
-    def __init__(self, num_hidden: int, ndim: int = 2) -> None:
-        super().__init__()
-        _shape = tuple([num_hidden] + [1] * (ndim - 1))
-        self.scale = pt.ones(*_shape)
-        self._axis_arg = tuple(range(1, ndim))
-
-    def forward(self, weight: pt.Tensor) -> pt.Tensor:
-        return F.normalize(weight, p=2, dim=self._axis_arg, eps=0) * self.scale  # type: ignore
-
-
-class PyTorchOutputLayer(pt.nn.Module):
+class OutputLayer(pt.nn.Module):
     """
     Final output layer of seq2seq models. Supports vocabulary selection that caches reduced weight/bias
     across multiple invocations if selected vocabulary ids do not change.
@@ -140,7 +121,7 @@ class LengthRatioConfig(config.Config):
     weight: float  # Weight of this loss
 
 
-class PyTorchLengthRatio(pt.nn.Module):
+class LengthRatio(pt.nn.Module):
     """
     Defines the length-ratio prediction layer of Sockeye.
 
@@ -184,9 +165,9 @@ class PyTorchLengthRatio(pt.nn.Module):
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
 @pt.jit.script
-def pytorch_interleaved_matmul_encdec_qk(q: pt.Tensor,
-                                         kv: pt.Tensor,
-                                         heads: int) -> pt.Tensor:
+def interleaved_matmul_encdec_qk(q: pt.Tensor,
+                                 kv: pt.Tensor,
+                                 heads: int) -> pt.Tensor:
     """
     Simple port of npx.interleaved_matmul_encdec_qk with PyTorch.
 
@@ -212,9 +193,9 @@ def pytorch_interleaved_matmul_encdec_qk(q: pt.Tensor,
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
 @pt.jit.script
-def pytorch_interleaved_matmul_encdec_valatt(kv: pt.Tensor,
-                                             att: pt.Tensor,
-                                             heads: int) -> pt.Tensor:
+def interleaved_matmul_encdec_valatt(kv: pt.Tensor,
+                                     att: pt.Tensor,
+                                     heads: int) -> pt.Tensor:
     """
     Simple port of npx.interleaved_matmul_encdec_valatt with PyTorch.
     There is probably something to be gained by using views more
@@ -261,7 +242,7 @@ class PyTorchDotAttentionCell(pt.nn.Module):
                      False for valid positions.
         """
         # (batch * heads, qlen, klen)
-        logits = pytorch_interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
+        logits = interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
 
         if mask is not None:
             logits = logits.masked_fill(mask, -C.LARGE_VALUES[logits.dtype])
@@ -273,7 +254,7 @@ class PyTorchDotAttentionCell(pt.nn.Module):
         # key_values: (lk, n, dv * 2)
         # probs: (n*h, lq, lk)
         # result: (n, lq, dv)
-        return pytorch_interleaved_matmul_encdec_valatt(key_values, probs, heads=self.heads)
+        return interleaved_matmul_encdec_valatt(key_values, probs, heads=self.heads)
 
 
 def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int) -> pt.Tensor:
@@ -282,7 +263,7 @@ def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int) 
     return ~(pt.arange(max_length, device=lengths.device)[None, :] < lengths[:, None]).view(-1, 1, max_length)
 
 
-class PyTorchMultiHeadAttentionBase(pt.nn.Module):
+class MultiHeadAttentionBase(pt.nn.Module):
     """
     Base class for Multi-head attention.
 
@@ -361,7 +342,7 @@ class AutoregressiveLayer(pt.nn.Module):
         raise NotImplementedError
 
 
-class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, AutoregressiveLayer):
+class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     """
     Multi-head self-attention. Independent linear projections of inputs serve as
     queries, keys, and values for the attention.
@@ -486,7 +467,7 @@ class PyTorchMultiHeadSelfAttention(PyTorchMultiHeadAttentionBase, Autoregressiv
             return self._attend(queries=queries, key_values=states, mask=mask), states
 
 
-class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
+class MultiHeadAttention(MultiHeadAttentionBase):
     """
     Multi-head attention layer for queries independent from keys/values.
 
@@ -595,20 +576,20 @@ class PyTorchMultiHeadAttention(PyTorchMultiHeadAttentionBase):
 
 def interleave_kv(module: pt.nn.Module):
     """ Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
-    if isinstance(module, PyTorchMultiHeadAttention) or isinstance(module, PyTorchMultiHeadSelfAttention):
+    if isinstance(module, MultiHeadAttention) or isinstance(module, MultiHeadSelfAttention):
         if not module.kv_interleaved:
             module.interleave_kv()
 
 
 def separate_kv(module: pt.nn.Module):
     """ Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
-    if isinstance(module, PyTorchMultiHeadAttention) or isinstance(module, PyTorchMultiHeadSelfAttention):
+    if isinstance(module, MultiHeadAttention) or isinstance(module, MultiHeadSelfAttention):
         if module.kv_interleaved:
             module.separate_kv()
 
 
 @pt.jit.script
-def pytorch_get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
+def get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
     utils.check_condition(depth % 2 == 0, "Positional embeddings require an even embedding size it "
                                           "is however %d." % depth)
     # (1, depth)
@@ -626,7 +607,7 @@ def pytorch_get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
     return encodings
 
 
-class PyTorchPositionalEmbeddings(pt.nn.Module):
+class PositionalEmbeddings(pt.nn.Module):
     """
     Takes an encoded sequence and adds sinusoidal or learned positional embeddings as in Vaswani et al, 2017 to it.
 
@@ -653,7 +634,7 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
         self.scale_down_positions = scale_down_positions
 
         if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
-            weight = pytorch_get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
+            weight = get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
             if self.scale_down_positions:
                 weight *= self.num_embed ** -0.5
             self.weight = pt.nn.Parameter(weight, requires_grad=False)
@@ -690,7 +671,7 @@ class PyTorchPositionalEmbeddings(pt.nn.Module):
         return data + pos_embedding
 
 
-class PyTorchSSRU(AutoregressiveLayer):
+class SSRU(AutoregressiveLayer):
     """
     Simpler Simple Recurrent Unit
 
