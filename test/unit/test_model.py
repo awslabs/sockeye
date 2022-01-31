@@ -171,8 +171,8 @@ def test_mx_pt_eq_sockeye_model():
                                       forward_pass_cache_size=0)
     b_mx.initialize()
 
-    b_pt = sockeye.model_pt.PyTorchSockeyeModel(model_config_pt, inference_only=False, mc_dropout=False,
-                                                forward_pass_cache_size=0)
+    b_pt = sockeye.model_pt.SockeyeModel(model_config_pt, inference_only=False, mc_dropout=False,
+                                         forward_pass_cache_size=0)
 
     assert b_mx.state_structure() == b_pt.state_structure()
 

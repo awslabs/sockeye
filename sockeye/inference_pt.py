@@ -32,12 +32,12 @@ from . import utils
 from . import vocab
 from .beam_search_pt import CandidateScorer, get_search_algorithm, GreedySearch, SearchResult
 from .data_io import tokens2ids
-from .model_pt import PyTorchSockeyeModel
+from .model_pt import SockeyeModel
 
 logger = logging.getLogger(__name__)
 
 
-def models_max_input_output_length(models: List[PyTorchSockeyeModel],
+def models_max_input_output_length(models: List[SockeyeModel],
                                    num_stds: int,
                                    forced_max_input_length: Optional[int] = None,
                                    forced_max_output_length: Optional[int] = None) -> Tuple[int, Callable]:
@@ -632,7 +632,7 @@ class Translator:
                  scorer: CandidateScorer,
                  batch_size: int,
                  beam_search_stop: str,
-                 models: List[PyTorchSockeyeModel],
+                 models: List[SockeyeModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocabs: List[vocab.Vocab],
                  beam_size: int = 5,

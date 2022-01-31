@@ -64,7 +64,7 @@ class CheckpointDecoder:
                  references: List[str],
                  source_vocabs: List[vocab.Vocab],
                  target_vocabs: List[vocab.Vocab],
-                 model: model_pt.PyTorchSockeyeModel,
+                 model: model_pt.SockeyeModel,
                  device: torch.device,
                  max_input_len: Optional[int] = None,
                  batch_size: int = 16,

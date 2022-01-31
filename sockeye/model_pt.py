@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -55,7 +55,7 @@ class ModelConfig(Config):
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
     """
-    config_data: data_io_pt.DataConfig
+    config_data: data_io.DataConfig
     vocab_source_size: int
     vocab_target_size: int
     config_embed_source: encoder_pt.EmbeddingConfig
@@ -68,7 +68,7 @@ class ModelConfig(Config):
     dtype: str = C.DTYPE_FP32
 
 
-class PyTorchSockeyeModel(pt.nn.Module):
+class SockeyeModel(pt.nn.Module):
     """
     SockeyeModel shares components needed for both training and inference.
     The main components of a Sockeye model are
@@ -113,7 +113,7 @@ class PyTorchSockeyeModel(pt.nn.Module):
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder,
                                                                   inference_only=inference_only)
-        self.decoder = decoder_pt.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
+        self.decoder = decoder.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
 
         self.output_layer = layers_pt.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                   vocab_size=self.config.vocab_target_size,
@@ -527,7 +527,7 @@ class _DecodeStep(pt.nn.Module):
 
     def __init__(self,
                  embedding_target: encoder_pt.Embedding,
-                 decoder: decoder_pt.Decoder,
+                 decoder: decoder.Decoder,
                  output_layer: layers_pt.OutputLayer,
                  factor_output_layers: pt.nn.ModuleList):
         super().__init__()
@@ -607,7 +607,7 @@ def load_model(model_folder: str,
                mc_dropout: bool = False,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
-               forward_pass_cache_size: int = 0) -> Tuple[PyTorchSockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
+               forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Load a model from model_folder.
 
@@ -632,7 +632,7 @@ def load_model(model_folder: str,
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
     logger.info("Model version: %s", model_version)
     utils.check_version(model_version)
-    model_config = PyTorchSockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
+    model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
     if inference_only and not mc_dropout:
         logger.info("Disabling dropout layers for performance reasons")
@@ -646,8 +646,8 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    model = PyTorchSockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
-                                mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
+    model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
+                         mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
 
     model.load_parameters(filename=params_fname,
                           device=device,
@@ -685,7 +685,7 @@ def load_models(device: pt.device,
                 mc_dropout: bool = False,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
-                forward_pass_cache_size: int = 0) -> Tuple[List[PyTorchSockeyeModel],
+                forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel],
                                                            List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Loads a list of models for inference.
@@ -705,7 +705,7 @@ def load_models(device: pt.device,
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
     load_time_start = time.time()
-    models = []  # type: List[PyTorchSockeyeModel]
+    models = []  # type: List[SockeyeModel]
     source_vocabs = []  # type: List[List[vocab.Vocab]]
     target_vocabs = []  # type: List[List[vocab.Vocab]]
 

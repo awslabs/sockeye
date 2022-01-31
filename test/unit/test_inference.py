@@ -56,7 +56,7 @@ def mock_translator(batch_size: int = 1,
 
         # This is needed for returning the right number of source factors
         def mock_model():
-            t_mock = Mock(sockeye.model_pt.PyTorchSockeyeModel)
+            t_mock = Mock(sockeye.model_pt.SockeyeModel)
             t_mock.num_source_factors = num_source_factors
             return t_mock
 

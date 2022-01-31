@@ -146,7 +146,7 @@ class PyTorchEarlyStoppingTrainer:
     def __init__(self,
                  config: TrainerConfig,
                  optimizer_config: optimizers.OptimizerConfig,
-                 sockeye_model: model_pt.PyTorchSockeyeModel,
+                 sockeye_model: model_pt.SockeyeModel,
                  training_model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
                  zero_grad_kwargs: Dict[str, Any],

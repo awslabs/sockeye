@@ -27,7 +27,7 @@ from . import data_io
 from . import inference_pt
 from . import vocab
 from .beam_search_pt import CandidateScorer
-from .model_pt import PyTorchSockeyeModel
+from .model_pt import SockeyeModel
 from .output_handler import OutputHandler
 
 logger = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ class Scorer:
     :param device: Torch device to load batches to (should be set to model device).
     """
     def __init__(self,
-                 model: PyTorchSockeyeModel,
+                 model: SockeyeModel,
                  batch_scorer: BatchScorer,
                  source_vocabs: List[vocab.Vocab],
                  target_vocabs: List[vocab.Vocab],

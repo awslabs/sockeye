@@ -81,7 +81,7 @@ def mock_model_pt():
                                           config_embed_source=config_embed, config_embed_target=config_embed,
                                           config_encoder=config_encoder, config_decoder=config_encoder,
                                           weight_tying_type='none')
-    model = sockeye.model_pt.PyTorchSockeyeModel(config=config)
+    model = sockeye.model_pt.SockeyeModel(config=config)
     return model
 
 

@@ -183,7 +183,7 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
 def create_checkpoint_decoder(
         args: argparse.Namespace,
         device: torch.device,
-        sockeye_model: model_pt.PyTorchSockeyeModel,
+        sockeye_model: model_pt.SockeyeModel,
         source_vocabs: List[vocab.Vocab],
         target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder_pt.CheckpointDecoder]:
     """
@@ -974,7 +974,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     optimizer_config = create_optimizer_config(args)
 
-    sockeye_model = model_pt.PyTorchSockeyeModel(
+    sockeye_model = model_pt.SockeyeModel(
         model_config,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
     sockeye_model.to(device)

@@ -24,7 +24,7 @@ import torch as pt
 import sockeye.constants as C
 from . import lexicon
 from . import utils
-from .model_pt import PyTorchSockeyeModel
+from .model_pt import SockeyeModel
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class _Inference(ABC):
 class _SingleModelInference(_Inference):
 
     def __init__(self,
-                 model: PyTorchSockeyeModel,
+                 model: SockeyeModel,
                  skip_softmax: bool = False,
                  constant_length_ratio: float = 0.0,
                  softmax_temperature: Optional[float] = None) -> None:
@@ -99,7 +99,7 @@ class _SingleModelInference(_Inference):
 class _EnsembleInference(_Inference):
 
     def __init__(self,
-                 models: List[PyTorchSockeyeModel],
+                 models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
                  constant_length_ratio: float = 0.0,
                  softmax_temperature: Optional[float] = None) -> None:
@@ -877,7 +877,7 @@ class BeamSearch(pt.nn.Module):
             return finished.sum().item() == batch_size * self.beam_size  # all finished
 
 
-def get_search_algorithm(models: List[PyTorchSockeyeModel],
+def get_search_algorithm(models: List[SockeyeModel],
                          beam_size: int,
                          device: pt.device,
                          output_scores: bool,
