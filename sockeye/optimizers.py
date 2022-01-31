@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class PyTorchOptimizerConfig(config.Config):
+class OptimizerConfig(config.Config):
     # Optimizer
     name: str
     running_on_gpu: bool = False
@@ -47,8 +47,8 @@ class PyTorchOptimizerConfig(config.Config):
     lr_scheduler: Optional[LearningRateScheduler] = None
 
 
-def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> Tuple[torch.optim.Optimizer,
-                                                                                   Dict[str, Any]]:
+def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torch.optim.Optimizer,
+                                                                            Dict[str, Any]]:
     """
     Create an optimizer for a Sockeye model using the specified config settings.
 

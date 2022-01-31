@@ -727,7 +727,7 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
     return losses
 
 
-def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptimizerConfig:
+def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerConfig:
     """
     Returns an OptimizerConfig.
 
@@ -750,16 +750,16 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.PyTorchOptim
                                              args.learning_rate_warmup,
                                              args.max_updates)
 
-    config = optimizers.PyTorchOptimizerConfig(name=args.optimizer,
-                                               running_on_gpu=not args.use_cpu,
-                                               lr=args.initial_learning_rate,
-                                               betas=args.optimizer_betas,
-                                               eps=args.optimizer_eps,
-                                               weight_decay=args.weight_decay,
-                                               momentum=args.momentum,
-                                               gradient_clipping_type=gradient_clipping_type,
-                                               gradient_clipping_threshold=gradient_clipping_threshold,
-                                               lr_scheduler=lr_sched)
+    config = optimizers.OptimizerConfig(name=args.optimizer,
+                                        running_on_gpu=not args.use_cpu,
+                                        lr=args.initial_learning_rate,
+                                        betas=args.optimizer_betas,
+                                        eps=args.optimizer_eps,
+                                        weight_decay=args.weight_decay,
+                                        momentum=args.momentum,
+                                        gradient_clipping_type=gradient_clipping_type,
+                                        gradient_clipping_threshold=gradient_clipping_threshold,
+                                        lr_scheduler=lr_sched)
 
     num_workers = 1 if not utils.is_distributed() else torch.distributed.get_world_size()
     effective_batch_size = args.batch_size * args.update_interval * num_workers
