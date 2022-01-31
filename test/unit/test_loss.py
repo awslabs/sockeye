@@ -66,7 +66,7 @@ def test_loss_metric():
 
 
 def test_cross_entropy_loss():
-    b = sockeye.loss_pt.PyTorchCrossEntropyLoss(ignore_label=C.PAD_ID, label_smoothing=0.0)
+    b = sockeye.loss_pt.CrossEntropyLoss(ignore_label=C.PAD_ID, label_smoothing=0.0)
     assert b.ignore_label == C.PAD_ID
     assert b.name == C.CROSS_ENTROPY
     assert b.weight == 1.0
@@ -136,7 +136,7 @@ def test_mx_pt_eq_cross_entropy_loss(logits, labels, weight, alpha):
     loss_mx = sockeye.loss.CrossEntropyLossWithoutSoftmaxOutput(ignore_label=C.PAD_ID, label_smoothing=alpha,
                                                                 num_labels=num_labels, weight=weight)
     loss_mx.initialize()
-    loss_pt = sockeye.loss_pt.PyTorchCrossEntropyLoss(ignore_label=C.PAD_ID, label_smoothing=alpha, weight=weight)
+    loss_pt = sockeye.loss_pt.CrossEntropyLoss(ignore_label=C.PAD_ID, label_smoothing=alpha, weight=weight)
 
     with mxnet.autograd.record():
         loss_value_mx, loss_samples_mx = loss_mx({C.LOGITS_NAME: logits_mx, 'other_stuff': None},

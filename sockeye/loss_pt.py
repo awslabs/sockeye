@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,11 +12,11 @@
 # permissions and limitations under the License.
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+import math
 from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional, Tuple
 
 import torch as pt
-import math
 
 from . import constants as C
 from . import utils
@@ -125,8 +125,7 @@ class LossMetric(ABC):
         self._num_inst = 0.0
 
 
-# TODO(fhieber): should be scriptable/traceable
-class PyTorchCrossEntropyLoss(Loss):
+class CrossEntropyLoss(Loss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
     Uses an efficient implementation for label smoothing and avoids the obscure SoftmaxOutput op.

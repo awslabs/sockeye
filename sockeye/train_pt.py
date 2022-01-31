@@ -703,14 +703,14 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         label_name = C.TARGET_LABEL_NAME if i == 0 else C.TARGET_FACTOR_LABEL_NAME % i
         label_smoothing = args.label_smoothing if i == 0 else .0  # Note: No label smoothing for target factor losses.
 
-        losses.append(loss_pt.PyTorchCrossEntropyLoss(name=name,
-                                                      weight=weight,
-                                                      label_smoothing=label_smoothing,
-                                                      dtype=C.DTYPE_FP32,
-                                                      output_name=output_name,
-                                                      label_name=label_name,
-                                                      metric_prefix=metric_prefix,
-                                                      label_smoothing_impl=args.label_smoothing_impl))
+        losses.append(loss_pt.CrossEntropyLoss(name=name,
+                                               weight=weight,
+                                               label_smoothing=label_smoothing,
+                                               dtype=C.DTYPE_FP32,
+                                               output_name=output_name,
+                                               label_name=label_name,
+                                               metric_prefix=metric_prefix,
+                                               label_smoothing_impl=args.label_smoothing_impl))
 
     if args.length_task is not None:
         weight = args.length_task_weight
