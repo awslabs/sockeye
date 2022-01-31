@@ -30,8 +30,8 @@ import sockeye.transformer_pt
 def test_embedding_encoder(dropout, factor_configs):
     config = sockeye.encoder_pt.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout,
                                                 factor_configs=factor_configs)
-    embedding = sockeye.encoder_pt.PyTorchEmbedding(config)
-    assert type(embedding) == sockeye.encoder_pt.PyTorchEmbedding
+    embedding = sockeye.encoder_pt.Embedding(config)
+    assert type(embedding) == sockeye.encoder_pt.Embedding
 
 
 @pytest.mark.parametrize('lhuc', [
@@ -54,7 +54,7 @@ def test_get_transformer_encoder(lhuc):
                                                       max_seq_len_target=60,
                                                       use_lhuc=lhuc)
     encoder = sockeye.encoder_pt.pytorch_get_transformer_encoder(config)
-    assert type(encoder) == sockeye.encoder_pt.PyTorchTransformerEncoder
+    assert type(encoder) == sockeye.encoder_pt.TransformerEncoder
 
 
 def test_mx_pt_eq_transformer_encoder():
@@ -124,7 +124,7 @@ def test_mx_pt_eq_embedding(vocab_size, num_embed, factor_configs, sparse):
 
     block_mx = sockeye.encoder.Embedding(config, None, C.DTYPE_FP32)
     block_mx.initialize()
-    block_pt = sockeye.encoder_pt.PyTorchEmbedding(config, None)
+    block_pt = sockeye.encoder_pt.Embedding(config, None)
     block_pt.weights_from_mxnet_block(block_mx)
 
     batch, seq_len, num_factors = 4, 10, len(factor_configs) + 1 if factor_configs is not None else 1

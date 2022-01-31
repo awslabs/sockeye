@@ -107,8 +107,8 @@ class PyTorchSockeyeModel(pt.nn.Module):
         # source & target embeddings, potentially shared/tied
         source_embedding, target_embedding, output_weight = self._get_embeddings()
 
-        self.embedding_source = encoder_pt.PyTorchEmbedding(config.config_embed_source, embedding=source_embedding)
-        self.embedding_target = encoder_pt.PyTorchEmbedding(config.config_embed_target, embedding=target_embedding)
+        self.embedding_source = encoder_pt.Embedding(config.config_embed_source, embedding=source_embedding)
+        self.embedding_target = encoder_pt.Embedding(config.config_embed_target, embedding=target_embedding)
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder_pt.pytorch_get_transformer_encoder(self.config.config_encoder,
@@ -526,7 +526,7 @@ class _DecodeStep(pt.nn.Module):
     """
 
     def __init__(self,
-                 embedding_target: encoder_pt.PyTorchEmbedding,
+                 embedding_target: encoder_pt.Embedding,
                  decoder: decoder_pt.Decoder,
                  output_layer: layers_pt.PyTorchOutputLayer,
                  factor_output_layers: pt.nn.ModuleList):

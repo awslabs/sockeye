@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -24,14 +24,14 @@ from . import transformer_pt
 
 
 def pytorch_get_transformer_encoder(config: transformer_pt.TransformerConfig, inference_only: bool = False):
-    return PyTorchTransformerEncoder(config=config, inference_only=inference_only)
+    return TransformerEncoder(config=config, inference_only=inference_only)
 
 
 get_encoder = pytorch_get_transformer_encoder
 EncoderConfig = Union[transformer_pt.TransformerConfig]
 
 
-class PyTorchEncoder(pt.nn.Module):
+class Encoder(pt.nn.Module):
     """
     Generic encoder interface.
     """
@@ -79,7 +79,7 @@ class EmbeddingConfig(config.Config):
             self.num_factors += len(self.factor_configs)
 
 
-class PyTorchEmbedding(PyTorchEncoder):
+class Embedding(Encoder):
     """
     Thin wrapper around PyTorch's Embedding op.
 
@@ -152,7 +152,7 @@ class PyTorchEmbedding(PyTorchEncoder):
         return self.config.num_embed
 
 
-class PyTorchTransformerEncoder(PyTorchEncoder):
+class TransformerEncoder(Encoder):
     """
     Non-recurrent encoder based on the transformer architecture in:
 
