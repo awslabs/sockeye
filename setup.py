@@ -83,7 +83,7 @@ entry_points = {
         'sockeye-quantize = sockeye.quantize:main',
         'sockeye-score = sockeye.score:main',
         'sockeye-train = sockeye.train:main',
-        'sockeye-translate = sockeye.translate_pt:main',
+        'sockeye-translate = sockeye.translate:main',
         'sockeye-vocab = sockeye.vocab:main',
         'sockeye-rerank = sockeye.rerank:main',
     ],

@@ -103,7 +103,7 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
         import sockeye.translate
         translate_mod = sockeye.translate
     else:
-        import sockeye.translate_pt
+        import sockeye.translate
         translate_mod = sockeye.translate_pt
     out_path = os.path.join(data['work_dir'], "test.out.equiv")
     params = "{} {} {}".format(translate_mod.__file__,

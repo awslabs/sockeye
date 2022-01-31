@@ -21,12 +21,13 @@ from typing import cast, Dict, Optional, Tuple, List
 
 import torch as pt
 
-from sockeye import __version__, transformer
+from sockeye import __version__
 from . import constants as C
 from . import data_io
 from . import decoder
 from . import encoder_pt
 from . import layers_pt
+from . import transformer
 from . import utils
 from . import vocab
 from .config import Config
@@ -60,8 +61,8 @@ class ModelConfig(Config):
     vocab_target_size: int
     config_embed_source: encoder_pt.EmbeddingConfig
     config_embed_target: encoder_pt.EmbeddingConfig
-    config_encoder: transformer_pt.TransformerConfig
-    config_decoder: transformer_pt.TransformerConfig
+    config_encoder: transformer.TransformerConfig
+    config_decoder: transformer.TransformerConfig
     config_length_task: Optional[LengthRatioConfig] = None
     weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX
     lhuc: bool = False

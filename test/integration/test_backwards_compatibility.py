@@ -63,7 +63,7 @@ def test_backwards_compatibility_pt():
     This test checks whether the current code can still produce translations with a model that was trained with the
     same major version.
     """
-    import sockeye.translate_pt
+    import sockeye.translate
     with TemporaryDirectory() as work_dir:
         output_file = os.path.join(work_dir, "out")
         params = """{sockeye} --use-cpu --models {model} --input {input} --output {output} """.format(

@@ -19,7 +19,7 @@ from tempfile import TemporaryDirectory
 import sockeye.constants
 import sockeye.inference_pt
 import sockeye.output_handler
-import sockeye.translate_pt
+import sockeye.translate
 
 TEST_DATA = "Test file line 1\n" \
             "Test file line 2\n"

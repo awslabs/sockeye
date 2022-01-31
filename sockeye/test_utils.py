@@ -210,7 +210,7 @@ def run_train_translate(train_params: str,
     if use_pytorch:
         import sockeye.prepare_data
         import sockeye.train
-        import sockeye.translate_pt
+        import sockeye.translate
         prepare_data_mod = sockeye.prepare_data_pt
         train_mod = sockeye.train_pt
         translate_mod = sockeye.translate_pt
@@ -347,7 +347,7 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str, use_pyto
     vocabulary selection. Adds restricted outputs and scores to the data dictionary.
     """
     if use_pytorch:
-        import sockeye.translate_pt
+        import sockeye.translate
         translate_mod = sockeye.translate_pt
     else:
         import sockeye.translate
