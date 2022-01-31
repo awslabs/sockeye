@@ -150,15 +150,6 @@ def log_sockeye_version(logger):
     logger.info(f"Sockeye: {__version__}, commit {git_hash}, path {__file__}")
 
 
-def log_mxnet_version(logger):
-    try:
-        from mxnet import __version__, __file__
-        info = f'MXNet: {__version__} ({__file__})'
-    except ImportError:
-        info = 'MXNet unavailable'
-    logger.info(info)
-
-
 def log_torch_version(logger):
     try:
         from torch import __version__, __file__

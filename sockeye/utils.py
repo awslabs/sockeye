@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -15,7 +15,6 @@
 A set of utility methods.
 """
 import binascii
-import errno
 import gzip
 import itertools
 import logging
@@ -25,22 +24,17 @@ import os
 import pprint
 import random
 import sys
-import time
 from collections import defaultdict
-from contextlib import contextmanager, ExitStack
-from functools import reduce
-from typing import Any, List, Iterator, Iterable, Set, Tuple, Dict, Optional, Union, IO, TypeVar, cast
+from contextlib import contextmanager
 from itertools import starmap
+from typing import Any, List, Iterator, Iterable, Tuple, Dict, Optional, Union, TypeVar
 
+import numpy as np
 import torch as pt
 import torch.distributed
 
-import numpy as np
-import portalocker
-
 from . import __version__, constants as C
-from . import horovod_mpi
-from .log import log_sockeye_version, log_mxnet_version, log_torch_version
+from .log import log_sockeye_version, log_torch_version
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +96,6 @@ def log_basic_info(args) -> None:
     :param args: Arguments as returned by argparse.
     """
     log_sockeye_version(logger)
-    log_mxnet_version(logger)
     log_torch_version(logger)
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
@@ -127,17 +120,6 @@ def seed_rngs(seed: int, ctx: Optional[Union['mx.Context', List['mx.Context']]] 
         torch.manual_seed(seed)
         logger.info(f"PyTorch seed: {seed}")
     except ImportError:
-        pass
-    try:
-        import mxnet as mx
-        if ctx is None:
-            mx.random.seed(seed, ctx='all')
-        else:
-            if isinstance(ctx, mx.Context):
-                ctx = [ctx]
-            for i, c in enumerate(ctx):
-                mx.random.seed(seed + i, ctx=c)
-    except:
         pass
 
 
@@ -273,22 +255,6 @@ def combine_stds(stds: List[Optional[float]], means: List[Optional[float]], num_
                          if std is not None and mean is not None) / sum(num_sents))
 
 
-def average_arrays(arrays: List['np.ndarray']) -> 'np.ndarray':
-    """
-    Take a list of arrays of the same shape and take the element wise average.
-
-    :param arrays: A list of ndarrays with the same shape that will be averaged.
-    :return: The average of the ndarrays in the same context as arrays[0].
-    """
-    from mxnet import npx
-    if not arrays:
-        raise ValueError("arrays is empty.")
-    if len(arrays) == 1:
-        return arrays[0]
-    check_condition(all(arrays[0].shape == a.shape for a in arrays), "nd array shapes do not match")
-    return npx.add_n(*arrays) / len(arrays)
-
-
 def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
     """
     Compute the element-wise average of a list of tensors of the same shape.
@@ -302,300 +268,6 @@ def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
         return tensors[0]
     check_condition(all(tensors[0].shape == t.shape for t in tensors), "tensor shapes do not match")
     return sum(tensors) / len(tensors)  # type: ignore
-
-
-def get_num_gpus() -> int:
-    """
-    Gets the number of GPUs available on the host.
-
-    :return: The number of GPUs on the system.
-    """
-    try:
-        import mxnet as mx
-    except ImportError:
-        return 0
-    try:
-        return mx.context.num_gpus()
-    except:
-        # Some builds of MXNet will raise a CUDA error when CUDA is not
-        # installed on the host.  In this case, zero GPUs are available.
-        return 0
-
-
-def get_gpu_memory_usage(ctx: Union['mx.context.Context', List['mx.context.Context']]) -> Dict[int, Tuple[int, int]]:  # type: ignore
-    """
-    Returns used and total memory for GPUs identified by the given context list.
-
-    :param ctx: List of MXNet context devices.
-    :return: Dictionary of device id mapping to a tuple of (memory used, memory total).
-    """
-    try:
-        import mxnet as mx
-    except ImportError:
-        return {}
-    if not isinstance(ctx, List):
-        ctx = [ctx]
-    ctx = [c for c in ctx if c.device_type == 'gpu']
-    if not ctx:
-        return {}
-
-    memory_data = {}  # type: Dict[int, Tuple[int, int]]
-    for c in ctx:
-        try:
-            free, total = mx.context.gpu_memory_info(device_id=c.device_id)  # in bytes
-            used = total - free
-            memory_data[c.device_id] = (used * 1e-06, total * 1e-06)
-        except mx.MXNetError:
-            logger.exception("Failed retrieving memory data for gpu%d", c.device_id)
-            continue
-    log_gpu_memory_usage(memory_data)
-    return memory_data
-
-
-def log_gpu_memory_usage(memory_data: Dict[int, Tuple[int, int]]):
-    log_str = " ".join(
-        "GPU %d: %d/%d MB (%.2f%%)" % (k, v[0], v[1], v[0] * 100.0 / v[1]) for k, v in memory_data.items() if v[1])
-    logger.info(log_str)
-
-
-def determine_context(device_ids: List[int],
-                      use_cpu: bool,
-                      disable_device_locking: bool,
-                      lock_dir: str,
-                      exit_stack: ExitStack) -> List['mx.Context']:  # type: ignore
-    """
-    Determine the MXNet context to run on (CPU or GPU).
-
-    :param device_ids: List of device as defined from the CLI.
-    :param use_cpu: Whether to use the CPU instead of GPU(s).
-    :param disable_device_locking: Disable Sockeye's device locking feature.
-    :param lock_dir: Directory to place device lock files in.
-    :param exit_stack: An ExitStack from contextlib.
-
-    :return: A list with the context(s) to run on.
-    """
-    try:
-        import mxnet as mx
-    except ImportError:
-        return []
-    if use_cpu:
-        context = [mx.cpu()]
-    else:
-        num_gpus = get_num_gpus()
-        check_condition(num_gpus >= 1,
-                        "No GPUs found, consider running on the CPU with --use-cpu ")
-        if horovod_mpi.using_horovod():
-            # Running with Horovod/MPI: GPU(s) are determined by local rank
-            check_condition(len(device_ids) == 1 and device_ids[0] < 0,
-                            "When using Horovod, --device-ids should be a negative integer indicating the number of "
-                            "GPUs each worker should use.")
-            n_ids = -device_ids[0]
-            context = [mx.gpu(_id + horovod_mpi.hvd.local_rank() * n_ids) for _id in range(n_ids)]
-        else:
-            if disable_device_locking:
-                context = expand_requested_device_ids(device_ids)
-            else:
-                context = exit_stack.enter_context(acquire_gpus(device_ids, lock_dir=lock_dir))
-            context = [mx.gpu(gpu_id) for gpu_id in context]
-    return context
-
-
-def expand_requested_device_ids(requested_device_ids: List[int]) -> List[int]:
-    """
-    Transform a list of device id requests to concrete device ids. For example on a host with 8 GPUs when requesting
-    [-4, 3, 5] you will get [0, 1, 2, 3, 4, 5]. Namely you will get device 3 and 5, as well as 3 other available
-    device ids (starting to fill up from low to high device ids).
-
-    :param requested_device_ids: The requested device ids, each number is either negative indicating the number of GPUs
-     that will be allocated, or positive indicating we want to acquire a specific device id.
-    :return: A list of device ids.
-    """
-    num_gpus_available = get_num_gpus()
-    if "CUDA_VISIBLE_DEVICES" in os.environ:
-        logger.warning("Sockeye currently does not respect CUDA_VISIBLE_DEVICE settings when locking GPU devices.")
-    return _expand_requested_device_ids(requested_device_ids, num_gpus_available)
-
-
-def _expand_requested_device_ids(requested_device_ids: List[int], num_gpus_available: int) -> List[int]:
-    if num_gpus_available == 0:
-        raise RuntimeError("Can not acquire GPU, as no GPUs were found on this machine.")
-
-    num_arbitrary_device_ids = 0
-    device_ids = []
-    for device_id in requested_device_ids:
-        if device_id < 0:
-            num_gpus = -device_id
-            num_arbitrary_device_ids += num_gpus
-        else:
-            device_ids.append(device_id)
-    num_gpus_requested = len(device_ids) + num_arbitrary_device_ids
-    if num_gpus_requested > num_gpus_available:
-        raise ValueError("Requested %d GPUs, but only %d are available." % (num_gpus_requested, num_gpus_available))
-    remaining_device_ids = set(range(num_gpus_available)) - set(device_ids)
-    logger.info("Attempting to acquire %d GPUs of %d GPUs.", num_gpus_requested, num_gpus_available)
-    return device_ids + list(remaining_device_ids)[:num_arbitrary_device_ids]
-
-
-@contextmanager
-def acquire_gpus(requested_device_ids: List[int], lock_dir: str = "/tmp",
-                 retry_wait_min: int = 10, retry_wait_rand: int = 60,
-                 num_gpus_available: Optional[int] = None):
-    """
-    Acquire a number of GPUs in a transactional way. This method should be used inside a `with` statement.
-    Will try to acquire all the requested number of GPUs. If currently
-    not enough GPUs are available all locks will be released and we wait until we retry. Will retry until enough
-    GPUs become available.
-
-    :param requested_device_ids: The requested device ids, each number is either negative indicating the number of GPUs
-     that will be allocated, or positive indicating we want to acquire a specific device id.
-    :param lock_dir: The directory for storing the lock file.
-    :param retry_wait_min: The minimum number of seconds to wait between retries.
-    :param retry_wait_rand: Randomly add between 0 and `retry_wait_rand` seconds to the wait time.
-    :param num_gpus_available: The number of GPUs available, if None we will call get_num_gpus().
-    :return: yields a list of GPU ids.
-    """
-    if num_gpus_available is None:
-        num_gpus_available = get_num_gpus()
-    if num_gpus_available == 0:
-        raise RuntimeError("Can not acquire GPU, as no GPUs were found on this machine.")
-
-    if not os.path.exists(lock_dir):
-        raise IOError("Lock directory %s does not exist." % lock_dir)
-
-    if not os.access(lock_dir, os.W_OK):
-        raise IOError("Lock directory %s is not writeable." % lock_dir)
-
-    # split the device ids into the specific ids requested and count up the number of arbitrary ids we want
-    # e.g. device_ids = [-3, 2, 5, 7, -5] means we want to acquire device 2, 5 and 7 plus 8 other devices.
-    specific_device_ids = set()  # type: Set[int]
-    num_arbitrary_device_ids = 0
-    for device_id in requested_device_ids:
-        if device_id < 0:
-            num_gpus = -device_id
-            num_arbitrary_device_ids += num_gpus
-        else:
-            if device_id in specific_device_ids:
-                raise ValueError("Requested GPU %d twice." % device_id)
-            specific_device_ids.add(device_id)
-
-    # make sure we have enough GPUs available
-    num_gpus_requested = len(specific_device_ids) + num_arbitrary_device_ids
-    if num_gpus_requested > num_gpus_available:
-        raise ValueError("Requested %d GPUs, but only %d are available." % (num_gpus_requested, num_gpus_available))
-    logger.info("Attempting to acquire %d GPUs of %d GPUs. The requested devices are: %s",
-                num_gpus_requested, num_gpus_available, str(requested_device_ids))
-
-    # note: it's important to first allocate the specific device ids and then the others to not deadlock ourselves.
-
-    # for specific device ids we just have the device id itself as a candidate
-    candidates_to_request = [[device_id] for device_id in specific_device_ids]
-
-    # for the arbitrary device ids we take all remaining device ids as a list of candidates
-    remaining_device_ids = [device_id for device_id in range(num_gpus_available)
-                            if device_id not in specific_device_ids]
-    candidates_to_request += [remaining_device_ids for _ in range(num_arbitrary_device_ids)]
-
-    while True:
-
-        with ExitStack() as exit_stack:
-            any_failed = False
-            acquired_gpus = []  # type: List[int]
-            with GpuFileLock(candidates=["master_lock"], lock_dir=lock_dir) as master_lock:  # type: str
-                # Only one process, determined by the master lock, can try acquiring gpu locks at a time.
-                # This will make sure that we use consecutive device ids whenever possible.
-                if master_lock is not None:
-                    for candidates in candidates_to_request:
-                        gpu_id = exit_stack.enter_context(GpuFileLock(candidates=candidates, lock_dir=lock_dir))
-                        if gpu_id is not None:
-                            acquired_gpus.append(cast(int, gpu_id))
-                        else:
-                            if len(candidates) == 1:
-                                logger.info("Could not acquire GPU %d. It's currently locked.", candidates[0])
-                            any_failed = True
-                            break
-            if master_lock is not None and not any_failed:
-                try:
-                    yield acquired_gpus
-                except:  # pylint: disable=try-except-raise
-                    raise
-                return
-
-        # randomize so that multiple processes starting at the same time don't retry at a similar point in time
-        if retry_wait_rand > 0:
-            retry_wait_actual = retry_wait_min + random.randint(0, retry_wait_rand)
-        else:
-            retry_wait_actual = retry_wait_min
-
-        if master_lock is None:
-            logger.info("Another process is acquiring GPUs at the moment will try again in %ss." % retry_wait_actual)
-        else:
-            logger.info("Not enough GPUs available will try again in %ss." % retry_wait_actual)
-        time.sleep(retry_wait_actual)
-
-
-GpuDeviceType = TypeVar('GpuDeviceType')
-
-
-class GpuFileLock:
-    """
-    Acquires a single GPU by locking a file (therefore this assumes that everyone using GPUs calls this method and
-    shares the lock directory). Sets target to a GPU id or None if none is available.
-
-    :param candidates: List of candidate device ids to try to acquire.
-    :param lock_dir: The directory for storing the lock file.
-    """
-
-    def __init__(self, candidates: List[GpuDeviceType], lock_dir: str) -> None:
-        self.candidates = candidates
-        self.lock_dir = lock_dir
-        self.lock_file = None  # type: Optional[IO[Any]]
-        self.lock_file_path = None  # type: Optional[str]
-        self.gpu_id = None  # type: Optional[GpuDeviceType]
-        self._acquired_lock = False
-
-    def __enter__(self) -> Optional[GpuDeviceType]:
-        for gpu_id in self.candidates:
-            lockfile_path = os.path.join(self.lock_dir, "sockeye.gpu{}.lock".format(gpu_id))
-            try:
-                lock_file = open(lockfile_path, 'w')
-            except IOError:
-                if errno.EACCES:
-                    logger.warning("GPU {} is currently locked by a different process "
-                                   "(Permission denied).".format(gpu_id))
-                    continue
-            try:
-                # exclusive non-blocking lock
-                portalocker.lock(lock_file, portalocker.LOCK_EX | portalocker.LOCK_NB)
-                # got the lock, let's write our PID into it:
-                lock_file.write("%d\n" % os.getpid())
-                lock_file.flush()
-
-                self._acquired_lock = True
-                self.gpu_id = gpu_id
-                self.lock_file = lock_file
-                self.lockfile_path = lockfile_path
-
-                logger.info("Acquired GPU {}.".format(gpu_id))
-
-                return gpu_id
-            except portalocker.LockException as e:
-                # portalocker packages the original exception,
-                # we dig it out and raise if unrelated to us
-                if e.args[0].errno != errno.EAGAIN:  # pylint: disable=no-member
-                    logger.error("Failed acquiring GPU lock.", exc_info=True)
-                    raise e.args[0]
-                else:
-                    logger.debug("GPU {} is currently locked.".format(gpu_id))
-        return None
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.gpu_id is not None:
-            logger.info("Releasing GPU {}.".format(self.gpu_id))
-        if self.lock_file is not None:
-            if self._acquired_lock:
-                portalocker.lock(self.lock_file, portalocker.LOCK_UN)
-            self.lock_file.close()
-            os.remove(self.lockfile_path)
 
 
 def parse_metrics_line(line_number: int, line: str) -> Dict[str, Any]:
@@ -699,41 +371,6 @@ _DTYPE_TO_STRING = {
 
 def _print_dtype(dtype):
     return _DTYPE_TO_STRING.get(dtype, str(dtype))
-
-
-def log_parameters(params: C.ParameterDict):
-    """
-    Logs information about model parameters.
-    """
-    fixed_parameter_names = []
-    learned_parameter_names = []
-    total_learned = 0
-    total_fixed = 0
-    visited = defaultdict(list)
-    for name, param in sorted(params.items()):
-        repr = "%s [%s, %s]" % (name, param.shape, _print_dtype(param.dtype))
-        size = reduce(lambda x, y: x * y, param.shape)
-        if size == 0:
-            logger.debug("Parameter shape for '%s' not yet fully inferred, using 0", name)
-        if param.grad_req == 'null':
-            fixed_parameter_names.append(repr)
-            total_fixed += size
-        else:
-            total_learned += size if param not in visited else 0
-            learned_parameter_names.append(repr)
-        visited[param].append(name)
-    shared_parameter_names = []
-    for param, names in visited.items():
-        if len(names) > 1:
-            shared_parameter_names.append(" = ".join(names))
-    total_parameters = total_learned + total_fixed
-    logger.info("# of parameters: %d | trainable: %d (%.2f%%) | fixed: %d (%.2f%%)",
-                total_parameters,
-                total_learned, total_learned / total_parameters * 100,
-                total_fixed, total_fixed / total_parameters * 100)
-    logger.info("Trainable parameters: \n%s", pprint.pformat(learned_parameter_names))
-    logger.info("Shared parameters: \n%s", pprint.pformat(shared_parameter_names))
-    logger.info("Fixed parameters:\n%s", pprint.pformat(fixed_parameter_names))
 
 
 def log_parameters_pt(model: pt.nn.Module):
