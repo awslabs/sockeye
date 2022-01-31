@@ -208,7 +208,7 @@ def run_train_translate(train_params: str,
     :return: Data dictionary, updated with translation outputs and scores
     """
     if use_pytorch:
-        import sockeye.prepare_data_pt
+        import sockeye.prepare_data
         import sockeye.train_pt
         import sockeye.translate_pt
         prepare_data_mod = sockeye.prepare_data_pt
