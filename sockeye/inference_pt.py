@@ -30,7 +30,7 @@ from . import constants as C
 from . import lexicon
 from . import utils
 from . import vocab
-from .beam_search_pt import CandidateScorer, get_search_algorithm, GreedySearch, SearchResult
+from .beam_search import CandidateScorer, get_search_algorithm, GreedySearch, SearchResult
 from .data_io import tokens2ids
 from .model_pt import SockeyeModel
 

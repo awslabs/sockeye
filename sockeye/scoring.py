@@ -26,7 +26,7 @@ from . import constants as C
 from . import data_io
 from . import inference_pt
 from . import vocab
-from .beam_search_pt import CandidateScorer
+from .beam_search import CandidateScorer
 from .model_pt import SockeyeModel
 from .output_handler import OutputHandler
 

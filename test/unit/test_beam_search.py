@@ -18,7 +18,7 @@ import numpy as onp
 import pytest
 import torch as pt
 
-import sockeye.beam_search_pt
+import sockeye.beam_search
 import sockeye.constants as C
 import sockeye.lexicon
 import sockeye.utils

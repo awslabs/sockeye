@@ -14,7 +14,7 @@
 import torch as pt
 
 import sockeye.scoring
-from sockeye.beam_search_pt import CandidateScorer
+from sockeye.beam_search import CandidateScorer
 
 
 def test_batch_scorer():

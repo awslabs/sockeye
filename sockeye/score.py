@@ -24,7 +24,7 @@ from . import arguments
 from . import constants as C
 from . import data_io
 from . import utils
-from .beam_search_pt import CandidateScorer
+from .beam_search import CandidateScorer
 from .log import setup_main_logger
 from .model_pt import load_model
 from .output_handler import get_output_handler
