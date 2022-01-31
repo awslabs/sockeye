@@ -1,4 +1,4 @@
-# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -25,24 +25,6 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class OptimizerConfig(config.Config):
-    name: str
-    params: Dict[str, Any]
-    kvstore: str
-    initializer: 'mx.initializer.Initializer'  # type: ignore
-    gradient_clipping_type: str
-    gradient_clipping_threshold: Optional[float]
-    update_interval: int = 1
-
-    @property
-    def lr_scheduler(self) -> Optional[LearningRateScheduler]:
-        return self.params.get("lr_scheduler", None)
-
-    def set_lr_scheduler(self, lr_scheduler: Optional[LearningRateScheduler]):
-        self.params["lr_scheduler"] = lr_scheduler
-
-
-@dataclass
 class PyTorchOptimizerConfig(config.Config):
     # Optimizer
     name: str
@@ -65,7 +47,8 @@ class PyTorchOptimizerConfig(config.Config):
     lr_scheduler: Optional[LearningRateScheduler] = None
 
 
-def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> Tuple[torch.optim.Optimizer, Dict[str, Any]]:
+def get_optimizer(model: torch.nn.Module, config: PyTorchOptimizerConfig) -> Tuple[torch.optim.Optimizer,
+                                                                                   Dict[str, Any]]:
     """
     Create an optimizer for a Sockeye model using the specified config settings.
 
