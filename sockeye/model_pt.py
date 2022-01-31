@@ -25,13 +25,13 @@ from sockeye import __version__
 from . import constants as C
 from . import data_io
 from . import decoder
-from . import encoder_pt
+from . import encoder
 from . import layers_pt
 from . import transformer
 from . import utils
 from . import vocab
 from .config import Config
-from .encoder_pt import FactorConfig
+from .encoder import FactorConfig
 from .layers_pt import LengthRatioConfig
 
 logger = logging.getLogger(__name__)

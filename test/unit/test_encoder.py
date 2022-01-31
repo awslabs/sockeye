@@ -16,7 +16,7 @@ import pytest
 import torch as pt
 
 import sockeye.constants as C
-import sockeye.encoder_pt
+import sockeye.encoder
 import sockeye.transformer
 
 
