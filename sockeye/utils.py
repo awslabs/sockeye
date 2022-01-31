@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -101,7 +101,7 @@ def log_basic_info(args) -> None:
     logger.info("Arguments: %s", args)
 
 
-def seed_rngs(seed: int, ctx: Optional[Union['mx.Context', List['mx.Context']]] = None) -> None:  # type: ignore
+def seed_rngs(seed: int) -> None:  # type: ignore
     """
     Seed the random number generators (Python, Numpy and MXNet).
 
@@ -373,7 +373,7 @@ def _print_dtype(dtype):
     return _DTYPE_TO_STRING.get(dtype, str(dtype))
 
 
-def log_parameters_pt(model: pt.nn.Module):
+def log_parameters(model: pt.nn.Module):
     """
     Logs information about model parameters.
     """

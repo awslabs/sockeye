@@ -992,7 +992,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                          fixed_param_names=args.fixed_param_names,
                                          fixed_param_strategy=args.fixed_param_strategy)
 
-    utils.log_parameters_pt(sockeye_model)
+    utils.log_parameters(sockeye_model)
 
     optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
 
