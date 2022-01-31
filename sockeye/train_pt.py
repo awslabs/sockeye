@@ -31,7 +31,7 @@ import torch.distributed
 import torch.distributed.elastic.multiprocessing.errors
 
 from . import arguments
-from . import checkpoint_decoder_pt
+from . import checkpoint_decoder
 from . import constants as C
 from . import data_io_pt
 from . import encoder_pt

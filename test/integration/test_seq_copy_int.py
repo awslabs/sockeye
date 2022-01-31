@@ -30,7 +30,7 @@ except ImportError:
     test_both_backends = [True]
 
 import sockeye.average
-import sockeye.checkpoint_decoder_pt
+import sockeye.checkpoint_decoder
 import sockeye.evaluate
 from sockeye import constants as C
 from sockeye.config import Config

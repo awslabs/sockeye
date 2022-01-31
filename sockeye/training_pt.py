@@ -36,7 +36,7 @@ except ImportError:
     pass
 
 from . import average
-from . import checkpoint_decoder_pt
+from . import checkpoint_decoder
 from . import constants as C
 from . import data_io_pt
 from . import loss_pt
