@@ -13,7 +13,7 @@
 
 import torch as pt
 
-import sockeye.scoring_pt
+import sockeye.scoring
 from sockeye.beam_search_pt import CandidateScorer
 
 

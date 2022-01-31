@@ -28,7 +28,7 @@ from .beam_search_pt import CandidateScorer
 from .log import setup_main_logger
 from .model_pt import load_model
 from .output_handler import get_output_handler
-from .scoring_pt import BatchScorer, Scorer
+from .scoring import BatchScorer, Scorer
 from .utils import check_condition
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)

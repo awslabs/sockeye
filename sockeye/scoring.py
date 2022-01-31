@@ -1,4 +1,4 @@
-# Copyright 2018--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -83,7 +83,8 @@ class BatchScorer(pt.nn.Module):
                 factor_token_scores = factor_logprobs.gather(dim=-1, index=factor_label.unsqueeze(-1)).squeeze()
                 if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
                     factor_token_scores = -factor_token_scores
-                fs = factor_token_scores.masked_fill_(factor_label == C.PAD_ID, .0).sum(dim=-1, keepdims=True)  # type: ignore
+                fs = factor_token_scores.masked_fill_(factor_label == C.PAD_ID, .0).sum(dim=-1,
+                                                                                        keepdims=True)  # type: ignore
                 # Note: factor_scores are not normalized by length
                 factor_scores.append(fs)
             scores = pt.cat([scores] + factor_scores, dim=1)
@@ -102,6 +103,7 @@ class Scorer:
     :param target_vocabs: The target vocabularies.
     :param device: Torch device to load batches to (should be set to model device).
     """
+
     def __init__(self,
                  model: SockeyeModel,
                  batch_scorer: BatchScorer,
@@ -118,7 +120,7 @@ class Scorer:
         self.exclude_list = {C.BOS_ID, C.EOS_ID, C.PAD_ID}
         self.num_target_factors = self.model.num_target_factors
 
-    def score_batch(self, batch: data_io_pt.Batch):
+    def score_batch(self, batch: data_io.Batch):
         # TODO: scoring should support multiple devices
         batch = batch.load(self.device)
 
@@ -147,7 +149,7 @@ class Scorer:
         return scores.numpy()
 
     @pt.inference_mode(True)
-    def score(self, score_iter: data_io_pt.BaseParallelSampleIter, output_handler: OutputHandler):
+    def score(self, score_iter: data_io.BaseParallelSampleIter, output_handler: OutputHandler):
         total_time = 0.
         sentence_no = 0
         batch_no = 0
@@ -163,9 +165,9 @@ class Scorer:
 
                 # Transform arguments in preparation for printing
                 source_ids = source.tolist()
-                source_tokens = list(data_io_pt.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
+                source_tokens = list(data_io.ids2tokens(source_ids, self.source_vocab_inv, self.exclude_list))
                 target_ids = target.tolist()
-                target_tokens = list(data_io_pt.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
+                target_tokens = list(data_io.ids2tokens(target_ids, self.target_vocab_inv, self.exclude_list))
                 target_string = C.TOKEN_SEPARATOR.join(target_tokens)
 
                 # Report a score of -inf for invalid sentence pairs (empty source and/or target)
