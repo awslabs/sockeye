@@ -39,7 +39,7 @@ from . import encoder
 from . import layers
 from . import loss
 from . import lr_scheduler
-from . import model_pt
+from . import model
 from . import optimizers
 from . import training
 from . import transformer

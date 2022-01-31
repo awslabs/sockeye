@@ -27,7 +27,7 @@ from . import data_io
 from . import inference
 from . import vocab
 from .beam_search import CandidateScorer
-from .model_pt import SockeyeModel
+from .model import SockeyeModel
 from .output_handler import OutputHandler
 
 logger = logging.getLogger(__name__)

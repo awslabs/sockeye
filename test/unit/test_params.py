@@ -21,7 +21,7 @@ import torch as pt
 
 import sockeye.constants as C
 import sockeye.encoder
-import sockeye.model_pt
+import sockeye.model
 import sockeye.training
 
 

@@ -22,7 +22,7 @@ from typing import Iterable, Tuple
 import torch as pt
 
 import sockeye.constants as C
-from . import model_pt
+from . import model
 from . import utils
 from .data_io import tokens2ids
 from .log import setup_main_logger

@@ -42,7 +42,7 @@ from . import constants as C
 from . import data_io
 from . import loss
 from . import lr_scheduler
-from . import model_pt
+from . import model
 from . import optimizers
 from . import utils
 from . import vocab

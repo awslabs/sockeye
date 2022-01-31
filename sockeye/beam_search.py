@@ -24,7 +24,7 @@ import torch as pt
 import sockeye.constants as C
 from . import lexicon
 from . import utils
-from .model_pt import SockeyeModel
+from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
 

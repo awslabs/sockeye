@@ -19,7 +19,7 @@ import numpy as onp
 
 import sockeye.constants as C
 import sockeye.loss
-import sockeye.model_pt
+import sockeye.model
 import sockeye.utils
 
 

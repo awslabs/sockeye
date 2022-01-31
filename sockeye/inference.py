@@ -32,7 +32,7 @@ from . import utils
 from . import vocab
 from .beam_search import CandidateScorer, get_search_algorithm, GreedySearch, SearchResult
 from .data_io import tokens2ids
-from .model_pt import SockeyeModel
+from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
 

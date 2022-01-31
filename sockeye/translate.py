@@ -26,7 +26,7 @@ import torch as pt
 
 from sockeye.lexicon import TopKLexicon
 from sockeye.log import setup_main_logger
-from sockeye.model_pt import load_models
+from sockeye.model import load_models
 from sockeye.output_handler import get_output_handler, OutputHandler
 from sockeye.utils import log_basic_info, check_condition, grouper, smart_open, seed_rngs
 from . import arguments

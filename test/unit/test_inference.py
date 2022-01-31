@@ -25,7 +25,7 @@ import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
 import sockeye.lexicon
-import sockeye.model_pt
+import sockeye.model
 import sockeye.utils
 
 _BOS = 0
