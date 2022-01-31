@@ -1,4 +1,4 @@
-# Copyright 2018--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,7 +17,6 @@ Scoring CLI.
 import argparse
 import logging
 import os
-from contextlib import ExitStack
 
 import torch as pt
 
@@ -76,7 +75,7 @@ def score(args: argparse.Namespace):
                     "Number of target inputs/factors provided (%d) does not match number of target factors "
                     "required by the model (%d)" % (len(targets), model.num_target_factors))
 
-    score_iter = data_io_pt.get_scoring_data_iters(
+    score_iter = data_io.get_scoring_data_iters(
         sources=sources,
         targets=targets,
         source_vocabs=source_vocabs,
@@ -94,11 +93,11 @@ def score(args: argparse.Namespace):
         constant_length_ratio = -1.0
 
     batch_scorer = BatchScorer(scorer=CandidateScorer(length_penalty_alpha=args.length_penalty_alpha,
-                                                        length_penalty_beta=args.length_penalty_beta,
-                                                        brevity_penalty_weight=args.brevity_penalty_weight),
-                                score_type=args.score_type,
-                                constant_length_ratio=constant_length_ratio,
-                                softmax_temperature=args.softmax_temperature)
+                                                      length_penalty_beta=args.length_penalty_beta,
+                                                      brevity_penalty_weight=args.brevity_penalty_weight),
+                               score_type=args.score_type,
+                               constant_length_ratio=constant_length_ratio,
+                               softmax_temperature=args.softmax_temperature)
     batch_scorer.to(device)
 
     scorer = Scorer(model=model,
@@ -108,8 +107,8 @@ def score(args: argparse.Namespace):
                     device=device)
 
     scorer.score(score_iter=score_iter,
-                    output_handler=get_output_handler(output_type=args.output_type,
-                                                    output_fname=args.output))
+                 output_handler=get_output_handler(output_type=args.output_type,
+                                                   output_fname=args.output))
 
 
 if __name__ == "__main__":

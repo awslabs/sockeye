@@ -190,7 +190,7 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
         import sockeye.score
         score_mod = sockeye.score
     else:
-        import sockeye.score_pt
+        import sockeye.score
         score_mod = sockeye.score_pt
 
     params = "{} {} {}".format(score_mod.__file__,
