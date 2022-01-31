@@ -26,13 +26,13 @@ from . import constants as C
 from . import data_io
 from . import decoder
 from . import encoder
-from . import layers_pt
+from . import layers
 from . import transformer
 from . import utils
 from . import vocab
 from .config import Config
 from .encoder import FactorConfig
-from .layers_pt import LengthRatioConfig
+from .layers import LengthRatioConfig
 
 logger = logging.getLogger(__name__)
 

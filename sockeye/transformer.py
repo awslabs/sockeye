@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 
 import torch as pt
 
-import sockeye.layers_pt
+import sockeye.layers
 from sockeye import constants as C
 from . import config
 

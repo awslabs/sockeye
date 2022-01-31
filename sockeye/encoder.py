@@ -19,7 +19,7 @@ import torch as pt
 
 import sockeye.constants as C
 from . import config
-from . import layers_pt
+from . import layers
 from . import transformer
 
 

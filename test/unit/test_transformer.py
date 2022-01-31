@@ -17,7 +17,7 @@ import torch as pt
 
 import sockeye.constants as C
 import sockeye.transformer
-from sockeye.layers_pt import prepare_source_length_mask
+from sockeye.layers import prepare_source_length_mask
 
 
 def test_auto_regressive_bias_dtype():

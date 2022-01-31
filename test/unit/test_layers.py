@@ -15,7 +15,7 @@ import numpy as onp
 import pytest
 import torch as pt
 
-import sockeye.layers_pt
+import sockeye.layers
 import sockeye.transformer
 
 

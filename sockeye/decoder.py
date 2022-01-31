@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Tuple, Type, Union
 import torch as pt
 
 from . import constants as C
-from . import layers_pt
+from . import layers
 from . import transformer
 from .transformer import TransformerConfig
 
