@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -27,17 +27,14 @@ from . import transformer_pt
 from .transformer_pt import TransformerConfig
 
 logger = logging.getLogger(__name__)
-DecoderConfig = Union[TransformerConfig, 'sockeye.transformer.TransformerConfig']  # type: ignore
+DecoderConfig = Union[TransformerConfig]  # type: ignore
 
 
-def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'PyTorchDecoder':
-    # TODO: while we still have both transformer.TransformerConfig and transformer_pt.TransformerConfig,
-    # this leads to unexpected behaviors when loading models. We can re-introduce once MXNet is removed
-    #return PyTorchDecoder.get_decoder(config, inference_only)
-    return PyTorchTransformerDecoder(config, inference_only=inference_only)
+def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'Decoder':
+    return Decoder.get_decoder(config, inference_only)
 
 
-class PyTorchDecoder(pt.nn.Module):
+class Decoder(pt.nn.Module):
     """
     Generic decoder interface.
     A decoder needs to implement code to decode a target sequence known in advance (decode_sequence),
@@ -47,7 +44,7 @@ class PyTorchDecoder(pt.nn.Module):
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
 
-    __registry = {}  # type: Dict[Type[DecoderConfig], Type['PyTorchDecoder']]
+    __registry = {}  # type: Dict[Type[DecoderConfig], Type['Decoder']]
 
     @classmethod
     def register(cls, config_type: Type[DecoderConfig]):
@@ -65,7 +62,7 @@ class PyTorchDecoder(pt.nn.Module):
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool) -> 'PyTorchDecoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool) -> 'Decoder':
         """
         Creates decoder based on config type.
 
@@ -112,8 +109,8 @@ class PyTorchDecoder(pt.nn.Module):
         raise NotImplementedError()
 
 
-@PyTorchDecoder.register(TransformerConfig)
-class PyTorchTransformerDecoder(PyTorchDecoder):
+@Decoder.register(TransformerConfig)
+class TransformerDecoder(Decoder):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
     In training, computation scores for each position of the known target sequence are computed in parallel,
@@ -128,7 +125,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
     """
 
     def __init__(self, config: TransformerConfig, inference_only: bool = False) -> None:
-        PyTorchDecoder.__init__(self)
+        Decoder.__init__(self)
         pt.nn.Module.__init__(self)
         self.config = config
         self.inference_only = inference_only

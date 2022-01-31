@@ -16,7 +16,7 @@ import pytest
 import torch as pt
 
 import sockeye.constants as C
-import sockeye.decoder_pt
+import sockeye.decoder
 import sockeye.transformer_pt
 
 
@@ -42,7 +42,7 @@ def test_get_decoder(lhuc):
         use_lhuc=lhuc)
     decoder = sockeye.decoder_pt.pytorch_get_decoder(config, inference_only=False)
 
-    assert type(decoder) == sockeye.decoder_pt.PyTorchTransformerDecoder
+    assert type(decoder) == sockeye.decoder_pt.TransformerDecoder
 
 
 @pytest.mark.parametrize("inference_only", [False, True])

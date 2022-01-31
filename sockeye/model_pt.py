@@ -24,7 +24,7 @@ import torch as pt
 from sockeye import __version__, transformer_pt
 from . import constants as C
 from . import data_io
-from . import decoder_pt
+from . import decoder
 from . import encoder_pt
 from . import layers_pt
 from . import utils
@@ -527,7 +527,7 @@ class _DecodeStep(pt.nn.Module):
 
     def __init__(self,
                  embedding_target: encoder_pt.PyTorchEmbedding,
-                 decoder: decoder_pt.PyTorchDecoder,
+                 decoder: decoder_pt.Decoder,
                  output_layer: layers_pt.PyTorchOutputLayer,
                  factor_output_layers: pt.nn.ModuleList):
         super().__init__()
