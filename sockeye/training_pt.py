@@ -38,7 +38,7 @@ except ImportError:
 from . import average
 from . import checkpoint_decoder
 from . import constants as C
-from . import data_io_pt
+from . import data_io
 from . import loss_pt
 from . import lr_scheduler
 from . import model_pt

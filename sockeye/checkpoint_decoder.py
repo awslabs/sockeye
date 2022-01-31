@@ -25,7 +25,7 @@ from typing import Any, Dict, Optional, List
 import torch
 
 from . import constants as C
-from . import data_io_pt
+from . import data_io
 from . import evaluate
 from . import inference_pt
 from . import model_pt

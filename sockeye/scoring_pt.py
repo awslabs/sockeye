@@ -23,7 +23,7 @@ import numpy as np
 import torch as pt
 
 from . import constants as C
-from . import data_io_pt
+from . import data_io
 from . import inference_pt
 from . import vocab
 from .beam_search_pt import CandidateScorer

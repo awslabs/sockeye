@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -28,9 +28,9 @@ from dataclasses import dataclass
 from itertools import chain
 from typing import Any, cast, Dict, Iterator, Iterable, List, Optional, Sequence, Sized, Tuple, Set
 
+import numpy as np
 import torch
 import torch.distributed
-import numpy as np
 
 from . import config
 from . import constants as C

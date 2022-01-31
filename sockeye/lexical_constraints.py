@@ -16,7 +16,7 @@ import logging
 from operator import attrgetter
 from typing import Dict, List, Optional, Tuple, Set
 
-from .data_io_pt import read_content, tokens2ids
+from .data_io import read_content, tokens2ids
 from .vocab import Vocab
 from . import constants as C
 

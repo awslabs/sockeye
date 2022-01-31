@@ -23,7 +23,7 @@ import torch as pt
 
 from sockeye import __version__, transformer_pt
 from . import constants as C
-from . import data_io_pt
+from . import data_io
 from . import decoder_pt
 from . import encoder_pt
 from . import layers_pt

@@ -27,7 +27,7 @@ import sacrebleu
 from sockeye_contrib import rouge
 from . import arguments
 from . import constants as C
-from . import data_io_pt
+from . import data_io
 from . import utils
 from .log import setup_main_logger, log_sockeye_version
 

@@ -23,7 +23,7 @@ import torch as pt
 
 from . import arguments
 from . import constants as C
-from . import data_io_pt
+from . import data_io
 from . import utils
 from .beam_search_pt import CandidateScorer
 from .log import setup_main_logger

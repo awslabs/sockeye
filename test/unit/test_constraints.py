@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from sockeye.data_io_pt import get_tokens, strids2ids
+from sockeye.data_io import get_tokens, strids2ids
 from sockeye.inference_pt import Translator
 from sockeye.lexical_constraints import init_batch, get_bank_sizes, ConstrainedHypothesis, AvoidBatch, AvoidState, \
     AvoidTrie

@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 
 from sockeye import constants as C
-from sockeye import data_io_pt
+from sockeye import data_io
 from sockeye import utils
 from sockeye import vocab
 from sockeye.utils import SockeyeError, get_tokens, seed_rngs

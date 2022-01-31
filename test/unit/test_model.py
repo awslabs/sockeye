@@ -17,7 +17,7 @@ import pytest
 import torch as pt
 
 import sockeye.constants as C
-import sockeye.data_io_pt
+import sockeye.data_io
 import sockeye.model_pt
 import sockeye.transformer_pt
 
