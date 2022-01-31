@@ -137,12 +137,12 @@ class TransformerDecoder(Decoder):
         self.autoregressive_mask = transformer_pt.AutoRegressiveMask()
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only=self.inference_only)
+            transformer_pt.TransformerDecoderBlock(config, inference_only=self.inference_only)
             for _ in range(config.num_layers))
 
-        self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                           dropout=config.dropout_prepost,
-                                                                           num_hidden=self.config.model_size)
+        self.final_process = transformer_pt.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                    dropout=config.dropout_prepost,
+                                                                    num_hidden=self.config.model_size)
         if self.config.dropout_prepost > 0.0:
             self.dropout = pt.nn.Dropout(p=self.config.dropout_prepost, inplace=inference_only)
 

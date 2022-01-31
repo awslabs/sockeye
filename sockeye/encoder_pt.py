@@ -175,12 +175,12 @@ class TransformerEncoder(Encoder):
                                                             scale_down_positions=False)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.PyTorchTransformerEncoderBlock(config, inference_only=inference_only)
+            transformer_pt.TransformerEncoderBlock(config, inference_only=inference_only)
             for _ in range(config.num_layers))
 
-        self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                           dropout=config.dropout_prepost,
-                                                                           num_hidden=self.config.model_size)
+        self.final_process = transformer_pt.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                    dropout=config.dropout_prepost,
+                                                                    num_hidden=self.config.model_size)
 
     def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         # positional embedding

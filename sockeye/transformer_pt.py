@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -43,7 +43,7 @@ class TransformerConfig(config.Config):
     use_glu: bool = False
 
 
-class PyTorchTransformerEncoderBlock(pt.nn.Module):
+class TransformerEncoderBlock(pt.nn.Module):
     """
     A transformer encoder block consists self-attention and a feed-forward layer with pre/post process blocks
     in between.
@@ -52,29 +52,29 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
     def __init__(self, config: TransformerConfig, inference_only: bool = False) -> None:
         super().__init__()
 
-        self.pre_self_attention = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                 dropout=config.dropout_prepost,
-                                                                 num_hidden=config.model_size)
+        self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                          dropout=config.dropout_prepost,
+                                                          num_hidden=config.model_size)
         self.self_attention = sockeye.layers_pt.MultiHeadSelfAttention(depth_att=config.model_size,
                                                                        heads=config.attention_heads,
                                                                        depth_out=config.model_size,
                                                                        dropout=config.dropout_attention)
-        self.post_self_attention = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                                  dropout=config.dropout_prepost,
-                                                                  num_hidden=config.model_size)
+        self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                           dropout=config.dropout_prepost,
+                                                           num_hidden=config.model_size)
 
-        self.pre_ff = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                     dropout=config.dropout_prepost,
-                                                     num_hidden=config.model_size)
-        self.ff = PyTorchTransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                                num_model=config.model_size,
-                                                act_type=config.act_type,
-                                                dropout=config.dropout_act,
-                                                use_glu=config.use_glu,
-                                                inference_only=inference_only)
-        self.post_ff = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                      dropout=config.dropout_prepost,
-                                                      num_hidden=config.model_size)
+        self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                              dropout=config.dropout_prepost,
+                                              num_hidden=config.model_size)
+        self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                         num_model=config.model_size,
+                                         act_type=config.act_type,
+                                         dropout=config.dropout_act,
+                                         use_glu=config.use_glu,
+                                         inference_only=inference_only)
+        self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                               dropout=config.dropout_prepost,
+                                               num_hidden=config.model_size)
         self.lhuc = None
         if config.use_lhuc:
             self.lhuc = sockeye.layers_pt.LHUC(config.model_size)
@@ -103,7 +103,7 @@ class PyTorchTransformerEncoderBlock(pt.nn.Module):
         return data
 
 
-class PyTorchTransformerDecoderBlock(pt.nn.Module):
+class TransformerDecoderBlock(pt.nn.Module):
     """
     A transformer decoder block consists of an autoregressive attention block, encoder attention,
     and a feed-forward layer with pre/post process blocks in between.
@@ -125,38 +125,38 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
         else:
             raise ValueError("Invalid decoder type.")
 
-        self.pre_autoregr_layer = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                 dropout=config.dropout_prepost,
-                                                                 num_hidden=config.model_size)
+        self.pre_autoregr_layer = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                          dropout=config.dropout_prepost,
+                                                          num_hidden=config.model_size)
 
-        self.post_autoregr_layer = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                                  dropout=config.dropout_prepost,
-                                                                  num_hidden=config.model_size)
+        self.post_autoregr_layer = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                           dropout=config.dropout_prepost,
+                                                           num_hidden=config.model_size)
 
-        self.pre_enc_attention = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                dropout=config.dropout_prepost,
-                                                                num_hidden=config.model_size)
+        self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                         dropout=config.dropout_prepost,
+                                                         num_hidden=config.model_size)
         self.enc_attention = sockeye.layers_pt.MultiHeadAttention(depth_att=config.model_size,
                                                                   heads=config.attention_heads,
                                                                   depth_out=config.model_size,
                                                                   dropout=config.dropout_attention,
                                                                   depth_key_value=config.depth_key_value)
-        self.post_enc_attention = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                                 dropout=config.dropout_prepost,
-                                                                 num_hidden=config.model_size)
+        self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                                          dropout=config.dropout_prepost,
+                                                          num_hidden=config.model_size)
 
-        self.pre_ff = PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                     dropout=config.dropout_prepost,
-                                                     num_hidden=config.model_size)
-        self.ff = PyTorchTransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
-                                                num_model=config.model_size,
-                                                act_type=config.act_type,
-                                                dropout=config.dropout_act,
-                                                use_glu=config.use_glu,
-                                                inference_only=inference_only)
-        self.post_ff = PyTorchTransformerProcessBlock(sequence=config.postprocess_sequence,
-                                                      dropout=config.dropout_prepost,
-                                                      num_hidden=config.model_size)
+        self.pre_ff = TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                              dropout=config.dropout_prepost,
+                                              num_hidden=config.model_size)
+        self.ff = TransformerFeedForward(num_hidden=config.feed_forward_num_hidden,
+                                         num_model=config.model_size,
+                                         act_type=config.act_type,
+                                         dropout=config.dropout_act,
+                                         use_glu=config.use_glu,
+                                         inference_only=inference_only)
+        self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
+                                               dropout=config.dropout_prepost,
+                                               num_hidden=config.model_size)
 
         self.lhuc = None
         if config.use_lhuc:
@@ -210,7 +210,7 @@ class PyTorchTransformerDecoderBlock(pt.nn.Module):
         return target, new_autoregr_states
 
 
-class PyTorchTransformerProcessBlock(pt.nn.Module):
+class TransformerProcessBlock(pt.nn.Module):
     """
     Block to perform pre/post processing on layer inputs.
     The processing steps are determined by the sequence argument, which can contain one of the three operations:
@@ -265,7 +265,7 @@ class PyTorchTransformerProcessBlock(pt.nn.Module):
         return data
 
 
-class PyTorchTransformerFeedForward(pt.nn.Module):
+class TransformerFeedForward(pt.nn.Module):
 
     def __init__(self,
                  num_hidden: int,

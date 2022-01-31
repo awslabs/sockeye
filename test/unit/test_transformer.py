@@ -75,11 +75,11 @@ def test_transformer_feed_forward(use_glu):
 
 @pytest.mark.parametrize('use_glu', [(False), (True)])
 def test_pt_transformer_feed_forward(use_glu):
-    block = sockeye.transformer_pt.PyTorchTransformerFeedForward(num_hidden=2,
-                                                                 num_model=2,
-                                                                 act_type=C.RELU,
-                                                                 dropout=0.1,
-                                                                 use_glu=use_glu)
+    block = sockeye.transformer_pt.TransformerFeedForward(num_hidden=2,
+                                                          num_model=2,
+                                                          act_type=C.RELU,
+                                                          dropout=0.1,
+                                                          use_glu=use_glu)
 
     data = pt.ones(1, 10, 2)
     block(data)
@@ -99,11 +99,11 @@ def test_mx_pt_eq_transformer_feed_forward(use_glu):
                                                       use_glu=use_glu)
     b_mx.initialize()
 
-    b_pt = sockeye.transformer_pt.PyTorchTransformerFeedForward(num_hidden=4,
-                                                                num_model=2,
-                                                                act_type=C.RELU,
-                                                                dropout=0.0,
-                                                                use_glu=use_glu)
+    b_pt = sockeye.transformer_pt.TransformerFeedForward(num_hidden=4,
+                                                         num_model=2,
+                                                         act_type=C.RELU,
+                                                         dropout=0.0,
+                                                         use_glu=use_glu)
     b_pt.weights_from_mxnet_block(b_mx)
 
     result_mx = b_mx(np.ones((2, 2, 2))).asnumpy()
@@ -136,7 +136,7 @@ def test_mx_pt_eq_transformer_process_block(sequence):
 
     b_mx = sockeye.transformer.TransformerProcessBlock(sequence, 0.0, num_hidden)
     b_mx.initialize()
-    b_pt = sockeye.transformer_pt.PyTorchTransformerProcessBlock(sequence, 0.0, num_hidden)
+    b_pt = sockeye.transformer_pt.TransformerProcessBlock(sequence, 0.0, num_hidden)
     b_pt.weights_from_mxnet_block(b_mx)
 
     result_mx = b_mx(x_mx, prev_mx).asnumpy()
@@ -195,7 +195,7 @@ def test_mx_pt_eq_transformer_encoder_block(batch_size, input_len, model_size, h
     b_mx.initialize()
     r_mx = b_mx(data_mx, att_valid_lengths_mx).asnumpy()
 
-    b_pt = sockeye.transformer_pt.PyTorchTransformerEncoderBlock(config)
+    b_pt = sockeye.transformer_pt.TransformerEncoderBlock(config)
     b_pt.weights_from_mxnet_block(b_mx)
 
     r_pt = b_pt(data_pt, source_length_mask_pt).detach().numpy()
@@ -270,7 +270,7 @@ def test_mx_pt_eq_transformer_decoder_block(batch_size, source_input_len, target
     new_target_mx = new_target_mx.asnumpy()
     new_states_mx = [s.asnumpy() for s in new_states_mx]
 
-    b_pt = sockeye.transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only)
+    b_pt = sockeye.transformer_pt.TransformerDecoderBlock(config, inference_only)
     b_pt.eval()
     autoregr_states_pt = pt.zeros(*b_pt.get_states_shape(batch_size))
     b_pt.weights_from_mxnet_block(b_mx)
