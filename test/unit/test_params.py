@@ -22,7 +22,7 @@ import torch as pt
 import sockeye.constants as C
 import sockeye.encoder_pt
 import sockeye.model_pt
-import sockeye.training_pt
+import sockeye.training
 
 
 def test_cleanup_param_files():
