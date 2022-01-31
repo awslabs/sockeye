@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -16,6 +16,7 @@ Simple Training CLI.
 """
 # Run before importing torch or any module that imports torch
 from . import initial_setup
+
 initial_setup.handle_env_cli_arg()
 
 import argparse
@@ -137,7 +138,6 @@ def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
 
     :param args: Arguments as returned by argparse.
     :param output_folder: Main output folder for the model.
-    :param is_primary_worker: Current process is primary worker.
 
     :return: Flag signaling if we are resuming training and the directory with
         the training status.
@@ -185,7 +185,7 @@ def create_checkpoint_decoder(
         device: torch.device,
         sockeye_model: model_pt.SockeyeModel,
         source_vocabs: List[vocab.Vocab],
-        target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder_pt.CheckpointDecoder]:
+        target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
     """
     Returns a checkpoint decoder or None.
 
@@ -206,7 +206,7 @@ def create_checkpoint_decoder(
     if sample_size == 0:
         return None
 
-    checkpoint_decoder = checkpoint_decoder_pt.CheckpointDecoder(
+    cpd = checkpoint_decoder.CheckpointDecoder(
         model_folder=args.output,
         inputs=[args.validation_source] + args.validation_source_factors,
         references=[args.validation_target] + args.validation_target_factors,
@@ -215,8 +215,9 @@ def create_checkpoint_decoder(
         source_vocabs=source_vocabs,
         target_vocabs=target_vocabs,
         device=device)
-    checkpoint_decoder.warmup()
-    return checkpoint_decoder
+    cpd.warmup()
+    return cpd
+
 
 def use_shared_vocab(args: argparse.Namespace) -> bool:
     """
@@ -239,9 +240,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  max_seq_len_target: int,
                                  shared_vocab: bool,
                                  resume_training: bool,
-                                 output_folder: str) -> Tuple['data_io_pt.BaseParallelSampleIter',
-                                                              'data_io_pt.BaseParallelSampleIter',
-                                                              'data_io_pt.DataConfig',
+                                 output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
+                                                              'data_io.BaseParallelSampleIter',
+                                                              'data_io.DataConfig',
                                                               List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Create the data iterators and the vocabularies.
@@ -279,7 +280,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
-        train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io_pt.get_prepared_data_iters(
+        train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io.get_prepared_data_iters(
             prepared_data_dir=args.prepared_data,
             validation_sources=validation_sources,
             validation_targets=validation_targets,
@@ -331,7 +332,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             target_vocabs = vocab.load_target_vocabs(output_folder)
 
             # Recover the vocabulary path from the data info file:
-            data_info = cast(data_io_pt.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
+            data_info = cast(data_io.DataInfo, Config.load(os.path.join(output_folder, C.DATA_INFO)))
             source_vocab_paths = data_info.source_vocabs
             target_vocab_paths = data_info.target_vocabs
 
@@ -380,7 +381,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                         'Training and validation data must have the same number of target factors, '
                         'but found %d and %d.' % (len(source_vocabs), len(validation_sources)))
 
-        train_iter, validation_iter, config_data, data_info = data_io_pt.get_training_data_iters(
+        train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
             targets=targets,
             validation_sources=validation_sources,
@@ -580,7 +581,7 @@ def create_model_config(args: argparse.Namespace,
                         target_vocab_sizes: List[int],
                         max_seq_len_source: int,
                         max_seq_len_target: int,
-                        config_data: data_io_pt.DataConfig) -> model_pt.ModelConfig:
+                        config_data: data_io.DataConfig) -> model_pt.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -683,7 +684,6 @@ def create_model_config(args: argparse.Namespace,
 
 
 def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[loss_pt.Loss]:
-
     # loss weights per factor
     if len(args.target_factors_weight) != len(all_num_classes) - 1:
         check_condition(len(args.target_factors_weight) == 1,
@@ -904,8 +904,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 max_seq_len_source, max_seq_len_target)
 
     device = torch.device('cpu') if args.use_cpu \
-             else torch.device('cuda', utils.get_local_rank()) if utils.is_distributed() \
-             else torch.device('cuda', args.device_id)
+        else torch.device('cuda', utils.get_local_rank()) if utils.is_distributed() \
+        else torch.device('cuda', args.device_id)
     if not args.use_cpu:
         # Ensure that GPU operations use the correct device by default
         torch.cuda.set_device(device)
