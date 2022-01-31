@@ -18,7 +18,7 @@ import pytest
 import numpy as onp
 
 import sockeye.constants as C
-import sockeye.loss_pt
+import sockeye.loss
 import sockeye.model_pt
 import sockeye.utils
 

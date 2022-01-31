@@ -40,7 +40,7 @@ from . import average
 from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
-from . import loss_pt
+from . import loss
 from . import lr_scheduler
 from . import model_pt
 from . import optimizers
