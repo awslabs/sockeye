@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.12]
+
+### Removed
+- Removed unused code for Weight Normalization. Minor code cleanups.
+
 ## [3.0.11]
 
 ### Fixed
