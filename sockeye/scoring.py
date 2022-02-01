@@ -83,8 +83,7 @@ class BatchScorer(pt.nn.Module):
                 factor_token_scores = factor_logprobs.gather(dim=-1, index=factor_label.unsqueeze(-1)).squeeze()
                 if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
                     factor_token_scores = -factor_token_scores
-                fs = factor_token_scores.masked_fill_(factor_label == C.PAD_ID, .0).sum(dim=-1,
-                                                                                        keepdims=True)  # type: ignore
+                fs = factor_token_scores.masked_fill_(factor_label == C.PAD_ID, .0).sum(dim=-1, keepdims=True)  # type: ignore
                 # Note: factor_scores are not normalized by length
                 factor_scores.append(fs)
             scores = pt.cat([scores] + factor_scores, dim=1)
