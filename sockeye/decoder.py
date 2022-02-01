@@ -247,8 +247,7 @@ class TransformerDecoder(Decoder):
         if any(layer.num_state_tensors > 1 for layer in self.layers):
             # separates autoregressive states by layer
             states_iter = iter(autoregr_states)
-            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in
-                               self.layers]  # type: ignore
+            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]  # type: ignore
 
         batch, heads, target_max_len, source_max_len = source_mask.size()
         source_mask_view = source_mask.view(batch * heads, target_max_len, source_max_len)
