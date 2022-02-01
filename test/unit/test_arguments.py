@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -87,18 +87,12 @@ def test_logging_args(test_params, expected_params):
 
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(device_id=0,
-              device_ids=[-1],
               use_cpu=False,
-              env=None,
-              disable_device_locking=False,
-              lock_dir='/tmp')),
-    ('--device-id 1 --device-ids 1 2 3 --use-cpu --disable-device-locking --lock-dir test_dir',
+              env=None)),
+    ('--device-id 1 --use-cpu ',
      dict(device_id=1,
-          device_ids=[1, 2, 3],
           use_cpu=True,
-          env=None,
-          disable_device_locking=True,
-          lock_dir='test_dir'))
+          env=None))
 ])
 def test_device_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_device_args)
@@ -153,7 +147,6 @@ def test_model_parameters(test_params, expected_params):
                       max_input_length=None,
                       restrict_lexicon=None,
                       restrict_lexicon_topk=None,
-                      avoid_list=None,
                       output_type='translation',
                       max_output_length_num_stds=2,
                       max_output_length=None,
@@ -165,8 +158,6 @@ def test_model_parameters(test_params, expected_params):
                       brevity_penalty_type='none',
                       strip_unknown_words=False,
                       dtype=None,
-                      mc_dropout=False,
-                      softmax_temperature=None,
                       prevent_unk=False,
                       sample=None,
                       seed=None)),
@@ -179,7 +170,6 @@ def test_inference_args(test_params, expected_params):
     ('', dict(batch_size=4096,
               batch_type='word',
               batch_sentences_multiple_of=8,
-              loss='cross-entropy-without-softmax-output',
               label_smoothing=0.1,
               label_smoothing_impl='mxnet',
               length_task=None,
@@ -198,10 +188,7 @@ def test_inference_args(test_params, expected_params):
               optimizer='adam',
               optimizer_betas=(0.9, 0.999),
               optimizer_eps=1e-08,
-              optimizer_params=None,
-              horovod=False,
               dist=False,
-              kvstore='device',
               min_samples=None,
               max_samples=None,
               min_updates=None,
@@ -220,14 +207,9 @@ def test_inference_args(test_params, expected_params):
               learning_rate_reduce_factor=0.9,
               learning_rate_reduce_num_not_improved=8,
               learning_rate_warmup=0,
-              weight_init='xavier',
-              weight_init_scale=3.0,
-              weight_init_xavier_rand_type='uniform',
-              weight_init_xavier_factor_type='avg',
               fixed_param_names=[],
               fixed_param_strategy=None,
               decode_and_evaluate=500,
-              decode_and_evaluate_device_id=None,
               stop_training_on_decoder_failure=False,
               seed=1,
               keep_last_params=-1,

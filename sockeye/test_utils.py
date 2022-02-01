@@ -22,6 +22,10 @@ from typing import Any, Dict, List
 from unittest.mock import patch
 
 import sockeye.constants as C
+import sockeye.prepare_data
+import sockeye.train
+import sockeye.translate
+import sockeye.lexicon
 
 logger = logging.getLogger(__name__)
 
@@ -192,8 +196,7 @@ def run_train_translate(train_params: str,
                         data: Dict[str, Any],
                         use_prepared_data: bool = False,
                         max_seq_len: int = 10,
-                        seed: int = 13,
-                        use_pytorch: bool = False) -> Dict[str, Any]:
+                        seed: int = 13) -> Dict[str, Any]:
     """
     Train a model and translate a test set. Returns the updated data dictionary containing paths to translation outputs
     and scores.
@@ -204,23 +207,11 @@ def run_train_translate(train_params: str,
     :param use_prepared_data: Whether to use the prepared data functionality.
     :param max_seq_len: The maximum sequence length.
     :param seed: The seed used for training.
-    :param use_pytorch: Whether to use PyTorch.
     :return: Data dictionary, updated with translation outputs and scores
     """
-    if use_pytorch:
-        import sockeye.prepare_data
-        import sockeye.train
-        import sockeye.translate
-        prepare_data_mod = sockeye.prepare_data_pt
-        train_mod = sockeye.train_pt
-        translate_mod = sockeye.translate_pt
-    else:
-        import sockeye.prepare_data
-        import sockeye.train
-        import sockeye.translate
-        prepare_data_mod = sockeye.prepare_data
-        train_mod = sockeye.train
-        translate_mod = sockeye.translate
+    prepare_data_mod = sockeye.prepare_data
+    train_mod = sockeye.train
+    translate_mod = sockeye.translate
 
     work_dir = os.path.join(data['work_dir'], 'train_translate')
     data['model'] = os.path.join(work_dir, "model")
@@ -312,17 +303,6 @@ def run_train_translate(train_params: str,
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
 
-    # Try to fix transient errors with mxnet tests where parameter file does not yet exist
-    # TODO(migration): remove once mxnet is removed
-    if not use_pytorch:
-        try:
-            from mxnet import npx
-            npx.waitall()
-            import time
-            time.sleep(1)
-        except:
-            pass
-
     logger.info("Translating with params %s", params)
     with patch.object(sys, "argv", params.split()):
         translate_mod.main()
@@ -341,17 +321,12 @@ def run_train_translate(train_params: str,
     return data
 
 
-def run_translate_restrict(data: Dict[str, Any], translate_params: str, use_pytorch: bool = False) -> Dict[str, Any]:
+def run_translate_restrict(data: Dict[str, Any], translate_params: str) -> Dict[str, Any]:
     """
     Runs sockeye.translate with vocabulary selection and checks if number of outputs are the same as without
     vocabulary selection. Adds restricted outputs and scores to the data dictionary.
     """
-    if use_pytorch:
-        import sockeye.translate
-        translate_mod = sockeye.translate_pt
-    else:
-        import sockeye.translate
-        translate_mod = sockeye.translate
+    translate_mod = sockeye.translate
     out_path = os.path.join(data['work_dir'], "out-restrict.txt")
     # Translate corpus with restrict-lexicon
     params = "{} {} {} {}".format(translate_mod.__file__,
@@ -369,14 +344,6 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str, use_pyto
     data['test_outputs_restricted'] = collect_translate_output_and_scores(out_path)
     assert len(data['test_outputs_restricted']) == len(data['test_outputs'])
     return data
-
-
-def create_reference_constraints(translate_inputs: List[str], translate_outputs: List[str]) -> List[Dict[str, Any]]:
-    constrained_inputs = []
-    for sentno, (source, translate_output) in enumerate(zip(translate_inputs, translate_outputs)):
-        constrained_inputs.append(json.dumps({'text': source, 'constraints': ['<s> {} </s>'.format(translate_output)]},
-                                             ensure_ascii=False))
-    return constrained_inputs
 
 
 def collect_translate_output_and_scores(out_path: str) -> List[Dict]:

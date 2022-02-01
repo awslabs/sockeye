@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -13,21 +13,12 @@
 import logging
 import os
 import sys
-from itertools import product
 from tempfile import TemporaryDirectory
 from typing import List
 from unittest.mock import patch
 
 import pytest
 import torch as pt
-
-try:
-    import mxnet
-    # run integration tests with both MXNet and Pytorch
-    test_both_backends = [False, True]
-except ImportError:
-    # only run PyTorch-based tests
-    test_both_backends = [True]
 
 import sockeye.average
 import sockeye.checkpoint_decoder
@@ -56,7 +47,6 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching
      # max updates independent of the checkpoint interval
@@ -69,7 +59,6 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 1 --greedy",
@@ -94,7 +83,6 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
@@ -105,7 +93,6 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --length-task ratio --length-task-weight 1.0 --length-task-layers 1",
@@ -118,7 +105,6 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --length-task length --length-task-weight 1.0 --length-task-layers 1",
@@ -131,7 +117,6 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --weight-init-scale=3.0 --weight-init-xavier-factor-type=avg"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --fixed-param-strategy " + C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
@@ -140,15 +125,14 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
 ]
 
 # expand test cases across transformer & ssru, as well as use_pytorch true/false
-TEST_CASES = [(use_pytorch, train_params.format(decoder=decoder), *other_params)
-              for decoder, use_pytorch in product(C.DECODERS, test_both_backends)
+TEST_CASES = [(train_params.format(decoder=decoder), *other_params)
+              for decoder in C.DECODERS
               for (train_params, *other_params) in ENCODER_DECODER_SETTINGS_TEMPLATE]
 
 
-@pytest.mark.parametrize("use_pytorch, train_params, translate_params, use_prepared_data,"
+@pytest.mark.parametrize("train_params, translate_params, use_prepared_data,"
                          "n_source_factors, n_target_factors", TEST_CASES)
-def test_seq_copy(use_pytorch: bool,
-                  train_params: str,
+def test_seq_copy(train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
                   n_source_factors: int,
@@ -169,7 +153,6 @@ def test_seq_copy(use_pytorch: bool,
                             sort_target=False,
                             with_n_source_factors=n_source_factors,
                             with_n_target_factors=n_target_factors) as data:
-
         # TODO: Here we temporarily switch off comparing translation and scoring scores, which
         # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).
         check_train_translate(train_params=train_params,
@@ -177,8 +160,7 @@ def test_seq_copy(use_pytorch: bool,
                               data=data,
                               use_prepared_data=use_prepared_data,
                               max_seq_len=_LINE_MAX_LENGTH,
-                              compare_output=False,
-                              use_pytorch=use_pytorch)
+                              compare_output=False)
 
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"
@@ -186,6 +168,7 @@ TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transform
                     " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 0"
                     " --checkpoint-interval 4",
                     "--beam-size 1")]
+
 
 @pytest.mark.parametrize("train_params, translate_params", TINY_TEST_MODEL)
 def test_other_clis(train_params: str, translate_params: str):
@@ -205,11 +188,9 @@ def test_other_clis(train_params: str, translate_params: str):
         data = run_train_translate(train_params=train_params,
                                    translate_params=translate_params,
                                    data=data,
-                                   max_seq_len=_LINE_MAX_LENGTH,
-                                   use_pytorch=True)
+                                   max_seq_len=_LINE_MAX_LENGTH)
 
         _test_checkpoint_decoder(data['dev_source'], data['dev_target'], data['model'])
-        #_test_mc_dropout(data['model'])  # mc dropout not implemented yet in Sockeye 3
         _test_parameter_averaging(data['model'])
         _test_evaluate_cli(data['test_outputs'], data['test_target'])
 
@@ -258,31 +239,18 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
 
     model, source_vocabs, target_vocabs = load_model(model_folder=model_path, device=pt.device('cpu'))
 
-    cp_decoder = sockeye.checkpoint_decoder_pt.CheckpointDecoder(device=pt.device('cpu'),
-                                                                 inputs=[dev_source_path],
-                                                                 references=[dev_target_path],
-                                                                 source_vocabs=source_vocabs,
-                                                                 target_vocabs=target_vocabs,
-                                                                 model=model,
-                                                                 model_folder=model_path,
-                                                                 sample_size=sample_size,
-                                                                 batch_size=2,
-                                                                 beam_size=2)
+    cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(device=pt.device('cpu'),
+                                                              inputs=[dev_source_path],
+                                                              references=[dev_target_path],
+                                                              source_vocabs=source_vocabs,
+                                                              target_vocabs=target_vocabs,
+                                                              model=model,
+                                                              model_folder=model_path,
+                                                              sample_size=sample_size,
+                                                              batch_size=2,
+                                                              beam_size=2)
     cp_metrics = cp_decoder.decode_and_evaluate()
     logger.info("Checkpoint decoder metrics: %s", cp_metrics)
     assert 'bleu' in cp_metrics
     assert 'chrf' in cp_metrics
     assert 'decode-walltime' in cp_metrics
-
-
-def _test_mc_dropout(model_path: str):
-    """
-    Check that loading a model with MC Dropoout returns a model with dropout layers.
-    """
-    model, _, _ = load_model(model_folder=model_path, device=pt.device('cpu'), mc_dropout=True, inference_only=True)
-
-    # Ensure the model has some dropout turned on
-    config_blocks = [block for _, block in model.config.__dict__.items() if isinstance(block, Config)]
-    dropout_settings = {setting: val for block in config_blocks for setting, val in block.__dict__.items()
-            if "dropout" in setting}
-    assert any(s > 0.0 for s in dropout_settings.values())

@@ -40,7 +40,6 @@ def test_inv_sqrt_decay_scheduler(learning_rate_warmup, learning_rate_t_scale):
     assert np.isclose(expected_schedule, actual_schedule).all()
 
 
-
 def test_linear_decay_scheduler():
     scheduler = lr_scheduler.get_lr_scheduler('linear-decay',
                                               base_learning_rate=1,

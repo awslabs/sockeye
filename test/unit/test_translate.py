@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -35,22 +35,22 @@ def mock_open(*args, **kargs):
 
 def test_translate_by_file():
     mock_output_handler = unittest.mock.Mock(spec=sockeye.output_handler.OutputHandler)
-    mock_translator = unittest.mock.Mock(spec=sockeye.inference_pt.Translator)
+    mock_translator = unittest.mock.Mock(spec=sockeye.inference.Translator)
     mock_translator.translate.return_value = ['', '']
     mock_translator.num_source_factors = 1
     mock_translator.max_batch_size = 1
 
     mock_translator.nbest_size = 1
-    sockeye.translate_pt.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
-                                            chunk_size=2, input_file='/dev/null', input_factors=None)
+    sockeye.translate.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
+                                         chunk_size=2, input_file='/dev/null', input_factors=None)
 
     with TemporaryDirectory() as temp:
         input_filename = os.path.join(temp, 'input')
         with open(input_filename, 'w') as f:
             f.write(TEST_DATA)
 
-        sockeye.translate_pt.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
-                                                chunk_size=2, input_file=input_filename, input_factors=None)
+        sockeye.translate.read_and_translate(translator=mock_translator, output_handler=mock_output_handler,
+                                             chunk_size=2, input_file=input_filename, input_factors=None)
 
         # Ensure translate gets called once.  Input here will be a dummy mocked result, so we'll ignore it.
         assert mock_translator.translate.call_count == 1
@@ -59,14 +59,14 @@ def test_translate_by_file():
 @unittest.mock.patch("sys.stdin", io.StringIO(TEST_DATA))
 def test_translate_by_stdin_chunk2():
     mock_output_handler = unittest.mock.Mock(spec=sockeye.output_handler.OutputHandler)
-    mock_translator = unittest.mock.Mock(spec=sockeye.inference_pt.Translator)
+    mock_translator = unittest.mock.Mock(spec=sockeye.inference.Translator)
     mock_translator.translate.return_value = ['', '']
     mock_translator.num_source_factors = 1
     mock_translator.max_batch_size = 1
     mock_translator.nbest_size = 1
-    sockeye.translate_pt.read_and_translate(translator=mock_translator,
-                                            output_handler=mock_output_handler,
-                                            chunk_size=2)
+    sockeye.translate.read_and_translate(translator=mock_translator,
+                                         output_handler=mock_output_handler,
+                                         chunk_size=2)
 
     # Ensure translate gets called once.  Input here will be a dummy mocked result, so we'll ignore it.
     assert mock_translator.translate.call_count == 1

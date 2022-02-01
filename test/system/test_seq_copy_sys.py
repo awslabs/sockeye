@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -23,15 +23,6 @@ import sockeye.utils
 from sockeye.test_utils import tmp_digits_dataset
 from test.common import check_train_translate
 
-try:
-    import mxnet
-    # run integration tests with both MXNet and Pytorch
-    test_both_backends = [False, True]
-except ImportError:
-    # only run PyTorch-based tests
-    test_both_backends = [True]
-
-
 logger = logging.getLogger(__name__)
 
 _TRAIN_LINE_COUNT = 10000
@@ -53,7 +44,7 @@ seed = random.randint(0, 1000)
 
 COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial-learning-rate 0.001" \
                          " --decode-and-evaluate 0 --label-smoothing 0.0" \
-                         " --optimized-metric perplexity --loss cross-entropy --weight-tying-type src_trg_softmax"
+                         " --optimized-metric perplexity --weight-tying-type src_trg_softmax"
 
 
 COPY_CASES = [
@@ -103,12 +94,10 @@ COPY_CASES = [
      0.94)
 ]
 
-COPY_CASES = [(use_pytorch, *other_params) for use_pytorch in test_both_backends for other_params in COPY_CASES]
 
-
-@pytest.mark.parametrize("use_pytorch, name, train_params, translate_params, use_prepared_data, "
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, "
                          "perplexity_thresh, bleu_thresh", COPY_CASES)
-def test_seq_copy(use_pytorch, name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
+def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset(prefix="test_seq_copy",
                             train_line_count=_TRAIN_LINE_COUNT,
@@ -127,8 +116,7 @@ def test_seq_copy(use_pytorch, name, train_params, translate_params, use_prepare
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH,
                                      compare_output=True,
-                                     seed=seed,
-                                     use_pytorch=use_pytorch)
+                                     seed=seed)
 
         # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(os.path.join(data['model'], C.METRICS_NAME))
@@ -190,12 +178,9 @@ SORT_CASES = [
 ]
 
 
-SORT_CASES = [(use_pytorch, *other_params) for use_pytorch in test_both_backends for other_params in SORT_CASES]
-
-
-@pytest.mark.parametrize("use_pytorch, name, train_params, translate_params, use_prepared_data, n_source_factors, "
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, n_source_factors, "
                          "n_target_factors, perplexity_thresh, bleu_thresh", SORT_CASES)
-def test_seq_sort(use_pytorch, name, train_params, translate_params, use_prepared_data,
+def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                   n_source_factors, n_target_factors, perplexity_thresh, bleu_thresh):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.",
@@ -211,8 +196,7 @@ def test_seq_sort(use_pytorch, name, train_params, translate_params, use_prepare
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH,
                                      compare_output=True,
-                                     seed=seed,
-                                     use_pytorch=use_pytorch)
+                                     seed=seed)
 
         # get best validation perplexity
         metrics = sockeye.utils.read_metrics_file(os.path.join(data['model'], C.METRICS_NAME))
