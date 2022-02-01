@@ -55,13 +55,10 @@ class _SingleModelInference(_Inference):
     def __init__(self,
                  model: SockeyeModel,
                  skip_softmax: bool = False,
-                 constant_length_ratio: float = 0.0,
-                 softmax_temperature: Optional[float] = None) -> None:
+                 constant_length_ratio: float = 0.0) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
-        self._softmax_temperature = softmax_temperature
-        assert softmax_temperature is None, "NOT IMPLEMENTED"
 
     def state_structure(self) -> List:
         return [self._model.state_structure()]
@@ -101,8 +98,7 @@ class _EnsembleInference(_Inference):
     def __init__(self,
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
-                 constant_length_ratio: float = 0.0,
-                 softmax_temperature: Optional[float] = None) -> None:
+                 constant_length_ratio: float = 0.0) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -111,7 +107,6 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
-        self._softmax_temperature = softmax_temperature
 
     def state_structure(self) -> List:
         return [model.state_structure() for model in self._models]
@@ -886,7 +881,6 @@ def get_search_algorithm(models: List[SockeyeModel],
                          beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                          constant_length_ratio: float = 0.0,
                          sample: Optional[int] = None,
-                         softmax_temperature: Optional[float] = None,
                          prevent_unk: bool = False,
                          greedy: bool = False) -> Union[BeamSearch, GreedySearch]:
     """
@@ -912,8 +906,7 @@ def get_search_algorithm(models: List[SockeyeModel],
             num_target_factors=models[0].num_target_factors,
             inference=_SingleModelInference(model=models[0],
                                             skip_softmax=True,
-                                            constant_length_ratio=0.0,
-                                            softmax_temperature=softmax_temperature))
+                                            constant_length_ratio=0.0))
     else:
         inference = None  # type: Optional[_Inference]
         if len(models) == 1:
@@ -922,13 +915,11 @@ def get_search_algorithm(models: List[SockeyeModel],
                 logger.info("Enabled skipping softmax for a single model and greedy decoding.")
             inference = _SingleModelInference(model=models[0],
                                               skip_softmax=skip_softmax,
-                                              constant_length_ratio=constant_length_ratio,
-                                              softmax_temperature=softmax_temperature)
+                                              constant_length_ratio=constant_length_ratio)
         else:
             inference = _EnsembleInference(models=models,
                                            ensemble_mode=ensemble_mode,
-                                           constant_length_ratio=constant_length_ratio,
-                                           softmax_temperature=softmax_temperature)
+                                           constant_length_ratio=constant_length_ratio)
 
         search = BeamSearch(
             beam_size=beam_size,

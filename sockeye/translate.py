@@ -76,8 +76,7 @@ def run_translate(args: argparse.Namespace):
                                                        model_folders=args.models,
                                                        checkpoints=args.checkpoints,
                                                        dtype=args.dtype,
-                                                       inference_only=True,
-                                                       mc_dropout=args.mc_dropout)
+                                                       inference_only=True)
 
     restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
     if args.restrict_lexicon is not None:
@@ -140,7 +139,6 @@ def run_translate(args: argparse.Namespace):
                                       max_output_length_num_stds=args.max_output_length_num_stds,
                                       max_input_length=args.max_input_length,
                                       max_output_length=args.max_output_length,
-                                      softmax_temperature=args.softmax_temperature,
                                       prevent_unk=args.prevent_unk,
                                       greedy=args.greedy)
 

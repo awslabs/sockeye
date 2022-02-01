@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[TransformerConfig]  # type: ignore
 
 
-def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'Decoder':
+def get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'Decoder':
     return Decoder.get_decoder(config, inference_only)
 
 

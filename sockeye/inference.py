@@ -645,7 +645,6 @@ class Translator:
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None,
-                 softmax_temperature: Optional[float] = None,
                  prevent_unk: bool = False,
                  greedy: bool = False) -> None:
         self.device = device
@@ -690,7 +689,6 @@ class Translator:
             beam_search_stop=beam_search_stop,
             scorer=self._scorer,
             constant_length_ratio=constant_length_ratio,
-            softmax_temperature=softmax_temperature,
             prevent_unk=prevent_unk,
             greedy=greedy)
 
@@ -699,7 +697,7 @@ class Translator:
                                             scorer=self._scorer)  # type: Callable
 
         logger.info("Translator (%d model(s) beam_size=%d algorithm=%s, beam_search_stop=%s max_input_length=%s "
-                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d dtype=%s softmax_temperature=%s)",
+                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d dtype=%s)",
                     len(self.models),
                     self.beam_size,
                     "GreedySearch" if isinstance(self._search, GreedySearch) else "BeamSearch",
@@ -708,8 +706,7 @@ class Translator:
                     self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.max_batch_size,
-                    self.dtype,
-                    softmax_temperature)
+                    self.dtype)
 
     @property
     def max_input_length(self) -> int:

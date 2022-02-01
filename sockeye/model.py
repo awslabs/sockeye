@@ -90,16 +90,12 @@ class SockeyeModel(pt.nn.Module):
                  config: ModelConfig,
                  inference_only: bool = False,
                  train_decoder_only: bool = False,
-                 mc_dropout: bool = False,
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
-        self.mc_dropout = mc_dropout
-        if self.mc_dropout:
-            raise NotImplementedError('mc dropout not implemented yet')
         self.forward_pass_cache_size = forward_pass_cache_size
         self.embed_and_encode = self._embed_and_encode
         if self.forward_pass_cache_size > 0:
@@ -114,7 +110,7 @@ class SockeyeModel(pt.nn.Module):
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder,
                                                        inference_only=inference_only)
-        self.decoder = decoder.pytorch_get_decoder(self.config.config_decoder, inference_only=inference_only)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only)
 
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
@@ -262,7 +258,7 @@ class SockeyeModel(pt.nn.Module):
             if vocab_slice_ids is not None:
                 decode_step_inputs.append(vocab_slice_ids)
             if self.traced_decode_step is None:
-                logger.info("Tracing decode step")
+                logger.debug("Tracing decode step")
                 decode_step_module = _DecodeStep(self.embedding_target,
                                                  self.decoder,
                                                  self.output_layer,
@@ -604,7 +600,6 @@ def load_model(model_folder: str,
                checkpoint: Optional[int] = None,
                inference_only: bool = False,
                train_decoder_only: bool = False,
-               mc_dropout: bool = False,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
                forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
@@ -618,7 +613,6 @@ def load_model(model_folder: str,
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
-    :param mc_dropout: Turn on dropout during inference.
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
@@ -634,12 +628,9 @@ def load_model(model_folder: str,
     utils.check_version(model_version)
     model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
-    if inference_only and not mc_dropout:
+    if inference_only:
         logger.info("Disabling dropout layers for performance reasons")
         model_config.disable_dropout()
-
-    if mc_dropout:
-        logger.info("Monte Carlo dropout enabled, inference output will be non-deterministic.")
 
     if checkpoint is None:
         params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
@@ -647,7 +638,7 @@ def load_model(model_folder: str,
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
     model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
-                         mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
+                         forward_pass_cache_size=forward_pass_cache_size)
 
     model.load_parameters(filename=params_fname,
                           device=device,
@@ -682,7 +673,6 @@ def load_models(device: pt.device,
                 dtype: Optional[str] = C.DTYPE_FP32,
                 inference_only: bool = False,
                 train_decoder_only: bool = False,
-                mc_dropout: bool = False,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
                 forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel],
@@ -697,7 +687,6 @@ def load_models(device: pt.device,
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
-    :param mc_dropout: Turn on dropout during inference.
     :param allow_missing: Allow missing parameters in the loaded models.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
@@ -721,7 +710,6 @@ def load_models(device: pt.device,
                                                checkpoint=checkpoint,
                                                inference_only=inference_only,
                                                train_decoder_only=train_decoder_only,
-                                               mc_dropout=mc_dropout,
                                                allow_missing=allow_missing,
                                                set_grad_req_null=set_grad_req_null,
                                                forward_pass_cache_size=forward_pass_cache_size)

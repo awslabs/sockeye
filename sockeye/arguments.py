@@ -533,16 +533,6 @@ def add_device_args(params):
     device_params.add_argument('--env',
                                help='List of environment variables to be set before importing PyTorch. Separated by '
                                     '",", e.g. --env=OMP_NUM_THREADS=1,PYTORCH_JIT=0 etc.')
-    device_params.add_argument('--disable-device-locking',
-                               action='store_true',
-                               help='Just use the specified device ids without locking.')
-    device_params.add_argument('--lock-dir',
-                               default="/tmp",
-                               help='When acquiring a GPU we do file based locking so that only one Sockeye process '
-                                    'can run on the a GPU. This is the folder in which we store the file '
-                                    'locks. For locking to work correctly it is assumed all processes use the same '
-                                    'lock directory. The only requirement for the directory are file '
-                                    'write permissions.')
 
 
 def add_vocab_args(params):
@@ -1168,17 +1158,6 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
-    decode_params.add_argument('--mc-dropout',
-                               default=False,
-                               action='store_true',
-                               help='Turn on dropout during inference (Monte Carlo dropout). '
-                                    'This will make translations non-deterministic and might slow '
-                                    'down translation speed.')
-    decode_params.add_argument('--softmax-temperature',
-                               type=float,
-                               default=None,
-                               help='Controls peakiness of model predictions. Values < 1.0 produce '
-                                    'peaked predictions, values > 1.0 produce smoothed distributions.')
     decode_params.add_argument('--sample',
                                type=int_greater_or_equal(0),
                                default=None,
