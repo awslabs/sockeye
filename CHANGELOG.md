@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.13]
+
+### Changed
+- use `expand` instead of `repeat` for attention masks to not allocate additional memory
+- avoid repeated `transpose` for initializing cached encoder-attention states in the decoder.
+
 ## [3.0.12]
 
 ### Removed
