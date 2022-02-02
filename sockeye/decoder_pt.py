@@ -200,7 +200,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             # (batch * heads, 1, source_max_len)
             source_mask = layers_pt.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
                                                                source_max_len)
-            source_mask = source_mask.repeat(1, target_length, 1)  # Shape: (batch * heads, trg_max_len, src_max_len)
+            source_mask = source_mask.expand(-1, target_length, -1)  # Shape: (batch * heads, trg_max_len, src_max_len)
 
             # Shape: (batch, heads, trg_max_len, src_max_len)
             source_mask = source_mask.view(-1, self.config.attention_heads, target_length, source_max_len)
@@ -208,8 +208,9 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
             states = [steps, source_mask]
+            encoder_outputs_t = encoder_outputs.transpose(1, 0)  # time-major layout
             for layer in self.layers:
-                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs).transpose(1, 0)
+                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs_t)
                 states.append(enc_att_kv)
         else:
             # NO encoder projection caching
