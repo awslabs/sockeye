@@ -208,8 +208,9 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
             states = [steps, source_mask]
+            encoder_outputs_t = encoder_outputs.transpose(1, 0)  # time-major layout
             for layer in self.layers:
-                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs).transpose(1, 0)
+                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs_t)
                 states.append(enc_att_kv)
         else:
             # NO encoder projection caching
