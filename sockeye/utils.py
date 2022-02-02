@@ -837,3 +837,8 @@ def all_gather_object(obj: T) -> List[T]:
     obj_list = [None] * torch.distributed.get_world_size()  # type: List[T]
     torch.distributed.all_gather_object(obj_list, obj)
     return obj_list
+
+
+def repeat_interleave(x: pt.Tensor, repeats: int, dim: int = 0) -> pt.Tensor:
+    assert dim == 0
+    return x.unsqueeze(-1).expand(-1, repeats).reshape(-1)

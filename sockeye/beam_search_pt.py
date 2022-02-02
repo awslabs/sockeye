@@ -727,8 +727,8 @@ class BeamSearch(pt.nn.Module):
                                     fill_value=self.bos_id, device=self.device, dtype=pt.int32)
 
         # offset for hypothesis indices in batch decoding
-        offset = pt.arange(0, batch_size * self.beam_size, self.beam_size,
-                           dtype=pt.int32, device=self.device).repeat_interleave(self.beam_size)
+        offset = utils.repeat_interleave(pt.arange(0, batch_size * self.beam_size, self.beam_size,
+                                                   dtype=pt.int32, device=self.device), repeats=self.beam_size)
 
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = pt.arange(0, batch_size * self.beam_size, self.beam_size, dtype=pt.int64, device=self.device)
@@ -743,7 +743,7 @@ class BeamSearch(pt.nn.Module):
         finished = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.bool)
 
         # Extending max_output_lengths to shape (batch_size * beam_size,)
-        max_output_lengths = max_output_lengths.repeat_interleave(self.beam_size, dim=0)
+        max_output_lengths = utils.repeat_interleave(max_output_lengths, repeats=self.beam_size, dim=0)
 
         # scores_accumulated: chosen smallest scores in scores (ascending).
         scores_accumulated = pt.zeros(batch_size * self.beam_size, 1, device=self.device, dtype=self.dtype)
@@ -777,7 +777,7 @@ class BeamSearch(pt.nn.Module):
             self._traced_repeat_states = pt.jit.trace(self._repeat_states, model_states, strict=False)
         model_states = self._traced_repeat_states(*model_states)
         # repeat estimated_reference_lengths to shape (batch_size * beam_size)
-        estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
+        estimated_reference_lengths = utils.repeat_interleave(estimated_reference_lengths, repeats=self.beam_size)
 
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results

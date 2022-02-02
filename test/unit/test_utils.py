@@ -370,3 +370,11 @@ def test_write_read_metric_file():
 
     assert len(read_metrics) == len(expected_metrics)
     assert expected_metrics == read_metrics
+
+
+@pytest.mark.parametrize("repeats", [1, 2, 5, 10])
+def test_repeat_interleave(repeats):
+    x = pt.randint(0, 5, (5,))
+    expected = x.clone().repeat_interleave(repeats=repeats)
+    out = utils.repeat_interleave(x, repeats=repeats)
+    assert pt.allclose(out, expected)
