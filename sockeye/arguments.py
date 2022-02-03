@@ -253,6 +253,27 @@ def multiple_values(num_values: int = 0,
     return parse
 
 
+def list_of_values(greater_or_equal: Optional[float] = None, data_type: Callable = int) -> Callable:
+    """
+    Returns a method to be used in argument parsing to parse a string of the
+    form "<val>[:<val>...]" into a list of values of type data_type.
+
+    :param greater_or_equal: Optional constraint that all values should be
+                             greater or equal to this value.
+    :param data_type: Type of values. Default: int.
+    :return: Method for parsing.
+    """
+
+    def parse(value_to_check):
+        values = list(map(data_type, value_to_check.split(C.ARG_SEPARATOR)))
+        if greater_or_equal is not None:
+            if any((value < greater_or_equal for value in values)):
+                raise argparse.ArgumentTypeError("Must provide value greater or equal to %d" % greater_or_equal)
+        return values
+
+    return parse
+
+
 def file_or_stdin() -> Callable:
     """
     Returns a file descriptor from stdin or opening a file from a given path.
@@ -431,6 +452,11 @@ def add_validation_data_params(params):
                         default=[],
                         help='File(s) containing additional token-parallel validation target side factors. '
                              'Default: %(default)s.')
+    params.add_argument('--validation-data-sources', '-vds',
+                        required=False,
+                        type=regular_file(),
+                        help='File with 1 integer per line specifying the data source for the validation line '
+                             '(zero-indexed). Default: %(default)s.')
 
 
 def add_prepared_data_args(params):
@@ -454,7 +480,7 @@ def add_prepared_data_args(params):
                              'T=1 corresponds to weighting data sources by size while larger values push the weights '
                              'toward uniform. Default: %(default)s.')
     params.add_argument('--data-sampling-custom',
-                        type=multiple_values(greater_or_equal=0, data_type=float),
+                        type=list_of_values(greater_or_equal=0, data_type=float),
                         default=[],
                         help='Weights for the "custom" data sampling method. Specify one per prepared data directory '
                              'in the form "x:x:...". Default: %(default)s.')
@@ -652,6 +678,16 @@ def add_model_parameters(params):
                               default=(6, 6),
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
+    model_params.add_argument('--branch-encoder-layers',
+                              type=list_of_values(greater_or_equal=1),
+                              default=None,
+                              help='Encoder layers to branch on different data sources (1-indexed). '
+                                   'Default: %(default)s.')
+    model_params.add_argument('--branch-decoder-layers',
+                              type=list_of_values(greater_or_equal=1),
+                              default=None,
+                              help='Decoder layers to branch on different data sources (1-indexed). '
+                                   'Default: %(default)s.')
 
     # transformer arguments
     model_params.add_argument('--transformer-model-size',

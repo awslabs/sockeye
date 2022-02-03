@@ -177,6 +177,10 @@ class PyTorchSockeyeModel(pt.nn.Module):
     def state_structure(self):
         return self.decoder.state_structure()
 
+    def set_active_branch(self, branch_index: int):
+        self.encoder.set_active_branch(branch_index)
+        self.decoder.set_active_branch(branch_index)
+
     def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
         """Encode the input sequence.
 

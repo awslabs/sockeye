@@ -423,6 +423,7 @@ def create_encoder_config(args: argparse.Namespace,
     :return: The encoder config and the number of hidden units of the encoder.
     """
     encoder_num_layers, _ = args.num_layers
+    num_branches = len(args.prepared_data) if args.branch_encoder_layers is not None else 1
 
     encoder_transformer_preprocess, _ = args.transformer_preprocess
     encoder_transformer_postprocess, _ = args.transformer_postprocess
@@ -454,7 +455,9 @@ def create_encoder_config(args: argparse.Namespace,
         depth_key_value=encoder_transformer_model_size,
         use_lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         decoder_type=args.decoder,
-        use_glu=args.transformer_feed_forward_use_glu)
+        use_glu=args.transformer_feed_forward_use_glu,
+        num_branches=num_branches,
+        branch_layers=args.branch_encoder_layers)
     encoder_num_hidden = encoder_transformer_model_size
 
     return config_encoder, encoder_num_hidden
@@ -476,6 +479,7 @@ def create_decoder_config(args: argparse.Namespace,
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
+    num_branches = len(args.prepared_data) if args.branch_decoder_layers is not None else 1
 
     _, decoder_transformer_preprocess = args.transformer_preprocess
     _, decoder_transformer_postprocess = args.transformer_postprocess
@@ -507,7 +511,9 @@ def create_decoder_config(args: argparse.Namespace,
         use_lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         depth_key_value=encoder_num_hidden,
         decoder_type=args.decoder,
-        use_glu=args.transformer_feed_forward_use_glu)
+        use_glu=args.transformer_feed_forward_use_glu,
+        num_branches=num_branches,
+        branch_layers=args.branch_decoder_layers)
 
     return config_decoder
 
@@ -1018,15 +1024,18 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
         training_model, optimizer = apex.amp.initialize(training_model, optimizer, opt_level='O2')
 
-    logger.info('Tracing model on validation batch')
-    batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
-    # When using AMP, turn on autocasting when tracing the model so that
-    # dtypes will match during AMP training. Disable the weight cache for
-    # compatibility with tracing. See:
-    # https://github.com/pytorch/pytorch/pull/63552
-    with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
-        training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
-                                                          batch.target, batch.target_length), strict=False)
+    if model_config.config_encoder.num_branches > 1 or model_config.config_decoder.num_branches > 1:
+        logger.info('Skipping trace for branching model')
+    else:
+        logger.info('Tracing model on validation batch')
+        batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
+        # When using AMP, turn on autocasting when tracing the model so that
+        # dtypes will match during AMP training. Disable the weight cache for
+        # compatibility with tracing. See:
+        # https://github.com/pytorch/pytorch/pull/63552
+        with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
+            training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
+                                                              batch.target, batch.target_length), strict=False)
     eval_iter.reset()
 
     if utils.is_distributed():

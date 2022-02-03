@@ -171,6 +171,8 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
     def __init__(self, config: transformer_pt.TransformerConfig, inference_only: bool = False) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
+        self._branch_layers = set(config.branch_layers if config.branch_layers is not None else [])
+        self._active_branch = 0
 
         self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
 
@@ -180,13 +182,33 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
                                                                    scale_up_input=True,
                                                                    scale_down_positions=False)
 
-        self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.PyTorchTransformerEncoderBlock(config, inference_only=inference_only)
-            for _ in range(config.num_layers))
+        # Layers are modules (standard) or lists of modules (branching)
+        self._layers = [[transformer_pt.PyTorchTransformerEncoderBlock(config, inference_only=inference_only)
+                        for _ in range(self.config.num_branches)] if i + 1 in self._branch_layers
+                        else transformer_pt.PyTorchTransformerEncoderBlock(config, inference_only=inference_only)
+                        for i in range(config.num_layers)]  # type: List[Union[pt.nn.Module, List[pt.nn.Module]]]
+
+        # Add all unique modules from standard and branch layers to a ModuleList
+        # so they are correctly registered
+        self.layers = pt.nn.ModuleList()
+        for layer in self._layers:
+            if isinstance(layer, list):
+                self.layers.extend(layer)
+            else:
+                self.layers.append(layer)
 
         self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                            dropout=config.dropout_prepost,
                                                                            num_hidden=self.config.model_size)
+
+    def set_active_branch(self, branch_index: int):
+        if branch_index < 0 or branch_index > self.config.num_branches:
+            raise ValueError(f'Unavailable branch: {branch_index}. Branch indices range from 0 to '
+                             f'{self.config.num_branches - 1}')
+        self._active_branch = branch_index
+
+    def get_active_branch(self) -> int:
+        return self._active_branch
 
     def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         # positional embedding
@@ -201,7 +223,9 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
         att_mask = att_mask.repeat(1, max_len, 1)
 
         data = data.transpose(1, 0)  # batch to time major
-        for layer in self.layers:
+        for layer in self._layers:
+            if isinstance(layer, list):
+                layer = layer[self._active_branch]
             data = layer(data, att_mask=att_mask)
 
         data = self.final_process(data)
@@ -216,7 +240,8 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
 
     def weights_from_mxnet_block(self, block_mx: 'TransformerEncoder'):  # type: ignore
         self.pos_embedding.weights_from_mxnet_block(block_mx.pos_embedding)
-        for i, l in enumerate(self.layers):
+        for i, l in enumerate(self._layers):
+            assert not isinstance(l, list), 'Method weights_from_mxnet_block() not supported for branching models'
             l.weights_from_mxnet_block(block_mx.layers[i])
         self.final_process.weights_from_mxnet_block(block_mx.final_process)
 

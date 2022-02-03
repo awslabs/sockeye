@@ -89,6 +89,14 @@ class PyTorchDecoder(pt.nn.Module):
         raise NotImplementedError()
 
     @abstractmethod
+    def set_active_branch(self, branch_index: int):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_active_branch(self) -> int:
+        raise NotImplementedError()
+
+    @abstractmethod
     def init_state_from_encoder(self,
                                 encoder_outputs: pt.Tensor,
                                 encoder_valid_length: Optional[pt.Tensor] = None,
@@ -135,6 +143,8 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         PyTorchDecoder.__init__(self)
         pt.nn.Module.__init__(self)
         self.config = config
+        self._branch_layers = set(config.branch_layers if config.branch_layers is not None else [])
+        self._active_branch = 0
         self.inference_only = inference_only
         self.pos_embedding = layers_pt.PyTorchPositionalEmbeddings(weight_type=self.config.positional_embedding_type,
                                                                    num_embed=self.config.model_size,
@@ -143,9 +153,20 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
                                                                    scale_down_positions=False)
         self.autoregressive_mask = transformer_pt.AutoRegressiveMask()
 
-        self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only=self.inference_only)
-            for _ in range(config.num_layers))
+        # Layers are modules (standard) or lists of modules (branching)
+        self._layers = [[transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only=self.inference_only)
+                        for _ in range(self.config.num_branches)] if i + 1 in self._branch_layers
+                        else transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only=self.inference_only)
+                        for i in range(config.num_layers)]  # type: List[Union[pt.nn.Module, List[pt.nn.Module]]]
+
+        # Add all unique modules from standard and branch layers to a ModuleList
+        # so they are correctly registered
+        self.layers = pt.nn.ModuleList()
+        for layer in self._layers:
+            if isinstance(layer, list):
+                self.layers.extend(layer)
+            else:
+                self.layers.append(layer)
 
         self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                            dropout=config.dropout_prepost,
@@ -164,10 +185,22 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         else:
             structure += C.STEP_STATE + C.ENCODER_STATE + C.MASK_STATE
 
-        total_num_states = sum(layer.num_state_tensors for layer in self.layers)
+        total_num_states = sum(layer.num_state_tensors for layer in self.get_active_layers())
         structure += C.DECODER_STATE * total_num_states
 
         return structure
+
+    def set_active_branch(self, branch_index: int):
+        if branch_index < 0 or branch_index > self.config.num_branches:
+            raise ValueError(f'Unavailable branch: {branch_index}. Branch indices range from 0 to '
+                             f'{self.config.num_branches - 1}')
+        self._active_branch = branch_index
+
+    def get_active_branch(self) -> int:
+        return self._active_branch
+
+    def get_active_layers(self) -> List[pt.nn.Module]:
+        return [layer[self._active_branch] if isinstance(layer, list) else layer for layer in self._layers]
 
     def init_state_from_encoder(self,
                                 encoder_outputs: pt.Tensor,
@@ -208,7 +241,9 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
             states = [steps, source_mask]
-            for layer in self.layers:
+            for layer in self._layers:
+                if isinstance(layer, list):
+                    layer = layer[self._active_branch]
                 enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs).transpose(1, 0)
                 states.append(enc_att_kv)
         else:
@@ -219,7 +254,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         _device = encoder_outputs.device
         _dtype = encoder_outputs.dtype
         dummy_autoregr_states = [pt.zeros(layer.get_states_shape(_batch_size), device=_device, dtype=_dtype)
-                                 for layer in self.layers
+                                 for layer in self.get_active_layers()
                                  for _ in range(layer.num_state_tensors)]
 
         states += dummy_autoregr_states
@@ -245,15 +280,16 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             enc_att_kv = other[:self.config.num_layers]
             autoregr_states = other[self.config.num_layers:]
         else:
-            if any(layer.needs_mask for layer in self.layers):
+            if any(layer.needs_mask for layer in self.get_active_layers()):
                 target_mask = self.autoregressive_mask(step_input)  # mask: (length, length)
             steps, source_encoded, source_mask, *autoregr_states = states
             enc_att_kv = [None for _ in range(self.config.num_layers)]
 
-        if any(layer.num_state_tensors > 1 for layer in self.layers):
+        if any(layer.num_state_tensors > 1 for layer in self.get_active_layers()):
             # separates autoregressive states by layer
             states_iter = iter(autoregr_states)
-            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]  # type: ignore
+            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors))
+                               for layer in self.get_active_layers()]  # type: ignore
 
         batch, heads, target_max_len, source_max_len = source_mask.size()
         source_mask_view = source_mask.view(batch * heads, target_max_len, source_max_len)
@@ -267,7 +303,9 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             target = self.dropout(target)
 
         new_autoregr_states = []  # type: List[pt.Tensor]
-        for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
+        for layer, layer_autoregr_state, layer_enc_att_kv in zip(self._layers, autoregr_states, enc_att_kv):
+            if isinstance(layer, list):
+                layer = layer[self._active_branch]
             target, new_layer_autoregr_state = layer(target=target,
                                                      target_mask=target_mask,
                                                      source=source_encoded,
@@ -297,7 +335,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
 
     def weights_from_mxnet_block(self, block_mx: 'TransformerDecoder'):  # type: ignore
         self.pos_embedding.weights_from_mxnet_block(block_mx.pos_embedding)
-        for i, l in enumerate(self.layers):
+        for i, l in enumerate(self.get_active_layers()):
             l.weights_from_mxnet_block(block_mx.layers[i])
         self.final_process.weights_from_mxnet_block(block_mx.final_process)
 

@@ -1884,11 +1884,13 @@ class MultiParallelSampleIter(BaseParallelSampleIter):
             if utils.is_distributed():
                 # Synchronize order of iterator calls across workers
                 self.iter_call_queue = utils.broadcast_object(self.iter_call_queue)
-        next_iter = self.iters[self.iter_call_queue.pop()]
+        next_iter_i = self.iter_call_queue.pop()
+        next_iter = self.iters[next_iter_i]
         # Reset sub-iterators as needed
         if not next_iter.iter_next():
             next_iter.reset()
         batch = next_iter.next()
+        batch.data_source = next_iter_i
         self.num_sents_this_epoch += batch.samples
         return batch
 
@@ -2038,6 +2040,7 @@ class Batch:
     labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
+    data_source: int
 
     def load(self, device: torch.device) -> 'Batch':
         source = self.source.to(device)
@@ -2045,7 +2048,7 @@ class Batch:
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
-        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
+        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens, self.data_source)
 
 
 def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -2060,7 +2063,10 @@ def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) ->
     return target, label
 
 
-def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor, label: torch.Tensor) -> Batch:
+def create_batch_from_parallel_sample(source: torch.Tensor,
+                                      target: torch.Tensor,
+                                      label: torch.Tensor,
+                                      data_source: int = 0) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
@@ -2086,4 +2092,4 @@ def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    return Batch(source, source_length, target, target_length, labels, samples, tokens)
+    return Batch(source, source_length, target, target_length, labels, samples, tokens, data_source)

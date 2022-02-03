@@ -311,6 +311,7 @@ class PyTorchEarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
+        self.sockeye_model.set_active_branch(batch.data_source)
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
             # Forward
             outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
