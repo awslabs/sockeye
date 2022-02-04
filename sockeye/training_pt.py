@@ -395,8 +395,10 @@ class PyTorchEarlyStoppingTrainer:
 
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
-        for batch in data_iter:
+        while data_iter.iter_next():
+            batch = data_iter.next()
             batch = batch.load(device=self.device)
+            self.sockeye_model.set_active_branch(batch.data_source)
             with torch.inference_mode():
                 # Forward: use sockeye_model because (traced) training_model
                 # doesn't support eval mode (still runs dropout, etc.)
