@@ -430,8 +430,8 @@ def add_training_data_args(params, required=False):
 
 
 def add_validation_data_params(params):
-    params.add_argument('--validation-source', '-vs',
-                        required=True,
+    params.add_argument(C.TRAINING_ARG_VALID_SOURCE, '-vs',
+                        required=False,
                         type=regular_file(),
                         help='Source side of validation data.')
     params.add_argument('--validation-source-factors', '-vsf',
@@ -441,8 +441,8 @@ def add_validation_data_params(params):
                         default=[],
                         help='File(s) containing additional token-parallel validation source side factors. '
                              'Default: %(default)s.')
-    params.add_argument('--validation-target', '-vt',
-                        required=True,
+    params.add_argument(C.TRAINING_ARG_VALID_TARGET, '-vt',
+                        required=False,
                         type=regular_file(),
                         help='Target side of validation data.')
     params.add_argument('--validation-target-factors', '-vtf',
@@ -452,11 +452,13 @@ def add_validation_data_params(params):
                         default=[],
                         help='File(s) containing additional token-parallel validation target side factors. '
                              'Default: %(default)s.')
-    params.add_argument('--validation-data-sources', '-vds',
-                        required=False,
-                        type=regular_file(),
-                        help='File with 1 integer per line specifying the data source for the validation line '
-                             '(zero-indexed). Default: %(default)s.')
+    params.add_argument(C.TRAINING_ARG_VALID_PREPARED_DATA, '-vpd',
+                        nargs='+',
+                        type=regular_folder(),
+                        default=None,
+                        help='One or more prepared training data directories created through python -m '
+                             'sockeye.prepare_data.')
+
 
 
 def add_prepared_data_args(params):

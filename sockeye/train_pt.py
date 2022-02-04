@@ -260,21 +260,40 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     word_min_count_source, word_min_count_target = args.word_min_count
 
-    validation_sources = [args.validation_source] + args.validation_source_factors
-    validation_sources = [str(os.path.abspath(source)) for source in validation_sources]
-    validation_targets = [args.validation_target] + args.validation_target_factors
-    validation_targets = [str(os.path.abspath(target)) for target in validation_targets]
+    validation_sources = None  # type: Optional[List[str]]
+    if args.validation_source is not None:
+        validation_sources = [args.validation_source] + args.validation_source_factors
+        validation_sources = [str(os.path.abspath(source)) for source in validation_sources]  # type: ignore
+    validation_targets = None  # type: Optional[List[str]]
+    if args.validation_target is not None:
+        validation_targets = [args.validation_target] + args.validation_target_factors
+        validation_targets = [str(os.path.abspath(target)) for target in validation_targets]  # type: ignore
 
     if utils.is_distributed():
         error_msg = 'Distributed training requires prepared training data. Use `python -m sockeye.prepare_data` and ' \
                     'specify with %s' % C.TRAINING_ARG_PREPARED_DATA
         check_condition(args.prepared_data is not None, error_msg)
-    either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
-                                       "with %s." % (C.TRAINING_ARG_SOURCE,
-                                                     C.TRAINING_ARG_TARGET,
-                                                     C.TRAINING_ARG_PREPARED_DATA)
+    train_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
+                                      "with %s." % (C.TRAINING_ARG_SOURCE,
+                                                    C.TRAINING_ARG_TARGET,
+                                                    C.TRAINING_ARG_PREPARED_DATA)
+    valid_raw_or_prepared_error_msg = 'Either specify separate validation data files (%s, %s) or at least one ' \
+                                      'prepared validation data directories (%s).' % (C.TRAINING_ARG_VALID_SOURCE,
+                                                                                      C.TRAINING_ARG_VALID_TARGET,
+                                                                                      C.TRAINING_ARG_PREPARED_DATA)
     if args.prepared_data is not None:
-        utils.check_condition(args.source is None and args.target is None, either_raw_or_prepared_error_msg)
+        utils.check_condition(args.source is None and args.target is None, train_raw_or_prepared_error_msg)
+        if args.validation_prepared_data is not None:
+            utils.check_condition(args.validation_source is None and args.validation_target is None,
+                                  valid_raw_or_prepared_error_msg)
+            utils.check_condition(len(args.validation_prepared_data) == 1
+                                  or len(args.validation_prepared_data) == len(args.prepared_data),
+                                  'Either specify a single prepared validation data directory or the same number of '
+                                  'prepared training and validation data directories: %d != 1 or %d'
+                                  % (len(args.validation_prepared_data), len(args.prepared_data)))
+        else:
+            utils.check_condition(args.validation_source is not None and args.validation_target is not None,
+                                  valid_raw_or_prepared_error_msg)
         if not resume_training:
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
@@ -283,6 +302,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             prepared_data_dirs=args.prepared_data,
             validation_sources=validation_sources,
             validation_targets=validation_targets,
+            validation_prepared_data_dirs=args.validation_prepared_data,
             shared_vocab=shared_vocab,
             batch_size=args.batch_size,
             batch_type=args.batch_type,
@@ -326,7 +346,12 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
 
     else:
         utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
-                              either_raw_or_prepared_error_msg)
+                              train_raw_or_prepared_error_msg)
+        utils.check_condition(args.validation_prepared_data is None
+                              and args.validation_source is not None and args.validation_target is not None,
+                              'Specify separate validation data files (%s, %s) when using separate training files (%s, '
+                              '%s).' % (C.TRAINING_ARG_VALID_SOURCE, C.TRAINING_ARG_VALID_TARGET,
+                                        C.TRAINING_ARG_SOURCE, C.TRAINING_ARG_TARGET))
 
         if resume_training:
             # Load the existing vocabs created when starting the training run.
@@ -423,7 +448,9 @@ def create_encoder_config(args: argparse.Namespace,
     :return: The encoder config and the number of hidden units of the encoder.
     """
     encoder_num_layers, _ = args.num_layers
-    num_branches = len(args.prepared_data) if args.branch_encoder_layers is not None else 1
+    num_branches = 1
+    if args.prepared_data is not None and args.branch_encoder_layers is not None:
+        num_branches = len(args.prepared_data)
 
     encoder_transformer_preprocess, _ = args.transformer_preprocess
     encoder_transformer_postprocess, _ = args.transformer_postprocess
@@ -479,7 +506,9 @@ def create_decoder_config(args: argparse.Namespace,
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
-    num_branches = len(args.prepared_data) if args.branch_decoder_layers is not None else 1
+    num_branches = 1
+    if args.prepared_data is not None and args.branch_decoder_layers is not None:
+        num_branches = len(args.prepared_data)
 
     _, decoder_transformer_preprocess = args.transformer_preprocess
     _, decoder_transformer_postprocess = args.transformer_postprocess

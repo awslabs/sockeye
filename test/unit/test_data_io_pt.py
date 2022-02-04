@@ -973,6 +973,7 @@ def test_mx_pt_eq_prepared_data():
                         prepared_data_dirs=[output_folder],
                         validation_sources=[data['dev_source']],
                         validation_targets=[data['dev_target']],
+                        validation_prepared_data_dirs=None,
                         shared_vocab=True,
                         batch_size=batch_size,
                         batch_type=C.BATCH_TYPE_SENTENCE,

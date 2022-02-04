@@ -776,8 +776,9 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
 
 
 def get_prepared_data_iters(prepared_data_dirs: List[str],
-                            validation_sources: List[str],
-                            validation_targets: List[str],
+                            validation_sources: Optional[List[str]],
+                            validation_targets: Optional[List[str]],
+                            validation_prepared_data_dirs: Optional[List[str]],
                             shared_vocab: bool,
                             batch_size: int,
                             batch_type: str,
