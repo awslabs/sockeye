@@ -305,60 +305,6 @@ class CandidateScorer(pt.nn.Module):
             return ((scores.squeeze(1) + bp) * self._lp(lengths)).unsqueeze(1)
 
 
-class SortNormalizeAndUpdateFinished(pt.nn.Module):
-    """
-    A Module for normalizing newly finished hypotheses scores with LengthPenalty.
-    """
-
-    def __init__(self,
-                 pad_id: int,
-                 eos_id: int,
-                 scorer: CandidateScorer,
-                 expect_factors: bool) -> None:
-        super().__init__()
-        self.pad_id = pad_id
-        self.eos_id = eos_id
-        self._scorer = scorer
-        self.expect_factors = expect_factors
-
-    def forward(self, best_hyp_indices, best_word_indices,
-                finished, scores_accumulated, lengths, reference_lengths,
-                *factor_args):
-
-        # Reorder fixed-size beam data according to best_hyp_indices (ascending)
-        finished = finished.index_select(0, best_hyp_indices)
-        lengths = lengths.index_select(0, best_hyp_indices)
-        reference_lengths = reference_lengths.index_select(0, best_hyp_indices)
-
-        # Normalize hypotheses that JUST finished
-        all_finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
-        newly_finished = pt.logical_xor(all_finished, finished).unsqueeze(1)
-        scores_accumulated = pt.where(newly_finished,
-                                      self._scorer(scores_accumulated, lengths, reference_lengths),
-                                      scores_accumulated)
-
-        # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
-        finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
-
-        best_word_indices = best_word_indices.unsqueeze(1)
-
-        # Traced modules do not allow optional return values or None, but lists. We return
-        # primary scores and optional factor scores therefore in a list.
-        scores = [scores_accumulated]  # type: List[pt.Tensor]
-        if self.expect_factors:
-            factors, factor_scores_accumulated = factor_args
-            # factors: (batch*beam, num_secondary_factors, 2)
-            f_sorted = factors.index_select(0, best_hyp_indices)
-            factor_scores, factor_indices = f_sorted[:, :, 0], f_sorted[:, :, 1]
-            # updated_factor_scores: (batch*beam, num_secondary_factors)
-            updated_factor_scores = factor_scores_accumulated.index_select(0, best_hyp_indices) + factor_scores
-            # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
-            best_word_indices = pt.cat((best_word_indices, factor_indices.int()), dim=1)
-            scores.append(updated_factor_scores)
-
-        return best_word_indices, finished, scores, lengths, reference_lengths
-
-
 class TopK(pt.nn.Module):
     """
     Batch-wise topk operation.
@@ -399,6 +345,89 @@ class TopK(pt.nn.Module):
             # Offsetting the indices to match the shape of the scores matrix
             best_hyp_indices = best_hyp_indices + offset
         return best_hyp_indices, best_word_indices, values
+
+
+class SortNormalizeAndUpdateFinished(pt.nn.Module):
+    """
+    A Module for normalizing newly finished hypotheses scores with LengthPenalty.
+    """
+
+    def __init__(self,
+                 k: int,
+                 sample: Optional[int],
+                 pad_id: int,
+                 eos_id: int,
+                 scorer: CandidateScorer,
+                 expect_factors: bool) -> None:
+        super().__init__()
+        self.sample = None  # type: Optional[pt.nn.Module]
+        self.topk = None # type: Optional[pt.nn.Module]
+        if sample is not None:
+            self.sample = SampleK(sample)
+        else:
+            self.topk = TopK(k=k)
+        self.pad_id = pad_id
+        self.eos_id = eos_id
+        self._scorer = scorer
+        self.expect_factors = expect_factors
+
+    def forward(self, scores, offset,
+                finished, lengths, reference_lengths,
+                *other_args):
+
+        # ============ begin of TOPK
+        vocab_slice_ids = None  # type: Optional[pt.Tensor]
+        if (self.expect_factors and len(other_args) == 3) or (not self.expect_factors and other_args):
+            vocab_slice_ids = other_args[0]
+
+        if self.sample is None:
+            best_hyp_indices, best_word_indices, scores_accumulated = self.topk(scores, offset)
+        else:
+            target_dists = None  # TODO
+            best_hyp_indices, best_word_indices, scores_accumulated = self.sample(scores, target_dists, finished)
+        # Map from restricted to full vocab ids if needed
+        if vocab_slice_ids is not None:
+            best_word_indices = vocab_slice_ids.index_select(0, best_word_indices)
+        # ============ end of TOPK
+
+        # Reorder fixed-size beam data according to best_hyp_indices (ascending)
+        finished = finished.index_select(0, best_hyp_indices)
+        lengths = lengths.index_select(0, best_hyp_indices)
+        reference_lengths = reference_lengths.index_select(0, best_hyp_indices)
+
+        # Normalize hypotheses that JUST finished
+        all_finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+        newly_finished = pt.logical_xor(all_finished, finished).unsqueeze(1)
+        scores_accumulated = pt.where(newly_finished,
+                                      self._scorer(scores_accumulated, lengths, reference_lengths),
+                                      scores_accumulated)
+
+        # Recompute finished. Hypotheses are finished if they are extended with <pad> or <eos>
+        finished = pt.logical_or(best_word_indices == self.pad_id, best_word_indices == self.eos_id)
+
+        best_word_indices = best_word_indices.unsqueeze(1)
+
+        # Traced modules do not allow optional return values or None, but lists. We return
+        # primary scores and optional factor scores therefore in a list.
+        scores = [scores_accumulated]  # type: List[pt.Tensor]
+        if self.expect_factors:
+            if not vocab_slice_ids:
+                factors, factor_scores_accumulated = other_args
+            else:
+                _, factors, factor_scores_accumulated = other_args
+            # factors: (batch*beam, num_secondary_factors, 2)
+            f_sorted = factors.index_select(0, best_hyp_indices)
+            factor_scores, factor_indices = f_sorted[:, :, 0], f_sorted[:, :, 1]
+            # updated_factor_scores: (batch*beam, num_secondary_factors)
+            updated_factor_scores = factor_scores_accumulated.index_select(0, best_hyp_indices) + factor_scores
+            # Concatenate sorted secondary target factors to best_word_indices. Shape: (batch*beam, num_factors)
+            best_word_indices = pt.cat((best_word_indices, factor_indices.int()), dim=1)
+            scores.append(updated_factor_scores)
+
+        should_stop = finished.sum() == finished.numel()
+        # TODO: support at least one finished
+
+        return best_hyp_indices, best_word_indices, finished, scores, lengths, reference_lengths, should_stop
 
 
 class SampleK(pt.nn.Module):
@@ -680,6 +709,8 @@ class BeamSearch(pt.nn.Module):
         self._traced_sort_states = None  # type: Optional[pt.jit.ScriptModule]
         self._update_scores = UpdateScores(prevent_unk)  # tracing this module seems to incur a small slowdown on GPUs
         self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
+            k=self.beam_size,
+            sample=sample,
             pad_id=C.PAD_ID,
             eos_id=eos_id,
             scorer=scorer,
@@ -805,33 +836,38 @@ class BeamSearch(pt.nn.Module):
                 if t == 1:
                     scores += first_step_mask
 
-                if self._traced_top is None:
-                    logger.debug("Tracing _top")
-                    self._traced_top = pt.jit.trace(self._top, (scores, offset))
-                best_hyp_indices, best_word_indices, scores_accumulated = self._traced_top(scores, offset)
+                # if self._traced_top is None:
+                #     logger.debug("Tracing _top")
+                #     self._traced_top = pt.jit.trace(self._top, (scores, offset))
+                # best_hyp_indices, best_word_indices, scores_accumulated = self._traced_top(scores, offset)
 
-            # Map from restricted to full vocab ids if needed
-            if restrict_lexicon:
-                best_word_indices = vocab_slice_ids.index_select(0, best_word_indices)
+            # # Map from restricted to full vocab ids if needed
+            # if restrict_lexicon:
+            #     best_word_indices = vocab_slice_ids.index_select(0, best_word_indices)
 
             # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
             # next call to topk(), hypotheses may not be in sorted order.
-            _sort_inputs = [best_hyp_indices, best_word_indices, finished, scores_accumulated, lengths,
-                            estimated_reference_lengths]
+            _sort_inputs = [scores, offset, finished, lengths, estimated_reference_lengths]
+            if restrict_lexicon:
+                _sort_inputs.append(vocab_slice_ids)
             if self.num_target_factors > 1:
                 _sort_inputs += [target_factors, *factor_scores_accumulated]
+
             if self._traced_sort_norm_and_update_finished is None:
+                logger.info("Tracing sort norm")
                 self._traced_sort_norm_and_update_finished = pt.jit.trace(self._sort_norm_and_update_finished,
                                                                           _sort_inputs)
-            best_word_indices, finished, \
+            best_hyp_indices, best_word_indices, finished, \
             (scores_accumulated, *factor_scores_accumulated), \
-            lengths, estimated_reference_lengths = self._traced_sort_norm_and_update_finished(*_sort_inputs)
+            lengths, estimated_reference_lengths, should_stop = self._traced_sort_norm_and_update_finished(*_sort_inputs)
 
             # Collect best hypotheses, best word indices
             best_word_indices_list.append(best_word_indices)
             best_hyp_indices_list.append(best_hyp_indices)
 
-            if self._should_stop(finished, batch_size):
+            #if self._should_stop(finished, batch_size):
+            #    break
+            if bool(should_stop):
                 break
 
             # (5) update models' state with winning hypotheses (ascending)
