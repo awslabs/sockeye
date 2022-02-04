@@ -23,6 +23,12 @@ Sockeye is now exclusively based on Pytorch.
 - Removed arguments `--softmax-temperature`, `--weight-init-*`, `--mc-dropout`, `--horovod`, `--device-ids
 - Removed all MXNet-related tests
 
+## [3.0.13]
+
+### Changed
+- use `expand` instead of `repeat` for attention masks to not allocate additional memory
+- avoid repeated `transpose` for initializing cached encoder-attention states in the decoder.
+
 ## [3.0.12]
 
 ### Removed
