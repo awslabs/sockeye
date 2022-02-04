@@ -153,20 +153,18 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
                                                                    scale_down_positions=False)
         self.autoregressive_mask = transformer_pt.AutoRegressiveMask()
 
-        # Layers are modules (standard) or lists of modules (branching)
+        # Layers are lists of modules with size 1 (standard layer) or
+        # num_branches (branching layer)
         self._layers = [[transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only=self.inference_only)
                         for _ in range(self.config.num_branches)] if i + 1 in self._branch_layers
-                        else transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only=self.inference_only)
-                        for i in range(config.num_layers)]  # type: List[Union[pt.nn.Module, List[pt.nn.Module]]]
+                        else [transformer_pt.PyTorchTransformerDecoderBlock(config, inference_only=self.inference_only)]
+                        for i in range(config.num_layers)]
 
         # Add all unique modules from standard and branch layers to a ModuleList
         # so they are correctly registered
         self.layers = pt.nn.ModuleList()
         for layer in self._layers:
-            if isinstance(layer, list):
-                self.layers.extend(layer)
-            else:
-                self.layers.append(layer)
+            self.layers.extend(layer)
 
         self.final_process = transformer_pt.PyTorchTransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                            dropout=config.dropout_prepost,
@@ -199,8 +197,8 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
     def get_active_branch(self) -> int:
         return self._active_branch
 
-    def get_active_layers(self) -> List[pt.nn.Module]:
-        return [layer[self._active_branch] if isinstance(layer, list) else layer for layer in self._layers]
+    def get_active_layers(self) -> List[transformer_pt.PyTorchTransformerDecoderBlock]:
+        return [layer[self._active_branch] if len(layer) > 1 else layer[0] for layer in self._layers]
 
     def init_state_from_encoder(self,
                                 encoder_outputs: pt.Tensor,
@@ -241,9 +239,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
             states = [steps, source_mask]
-            for layer in self._layers:
-                if isinstance(layer, list):
-                    layer = layer[self._active_branch]
+            for layer in self.get_active_layers():
                 enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs).transpose(1, 0)
                 states.append(enc_att_kv)
         else:
@@ -288,8 +284,8 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         if any(layer.num_state_tensors > 1 for layer in self.get_active_layers()):
             # separates autoregressive states by layer
             states_iter = iter(autoregr_states)
-            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors))
-                               for layer in self.get_active_layers()]  # type: ignore
+            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors))  # type: ignore
+                               for layer in self.get_active_layers()]
 
         batch, heads, target_max_len, source_max_len = source_mask.size()
         source_mask_view = source_mask.view(batch * heads, target_max_len, source_max_len)
@@ -303,9 +299,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
             target = self.dropout(target)
 
         new_autoregr_states = []  # type: List[pt.Tensor]
-        for layer, layer_autoregr_state, layer_enc_att_kv in zip(self._layers, autoregr_states, enc_att_kv):
-            if isinstance(layer, list):
-                layer = layer[self._active_branch]
+        for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.get_active_layers(), autoregr_states, enc_att_kv):
             target, new_layer_autoregr_state = layer(target=target,
                                                      target_mask=target_mask,
                                                      source=source_encoded,
