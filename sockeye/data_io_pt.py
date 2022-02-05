@@ -787,7 +787,7 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
                             sampling_method: str = C.DATA_SAMPLING_UNIFORM,
                             sampling_temperature: float = 1.,
                             sampling_custom: List[float] = []) -> Tuple['BaseParallelSampleIter',
-                                                                        'BaseParallelSampleIter',
+                                                                        List['BaseParallelSampleIter'],
                                                                         'DataConfig',
                                                                         List[vocab.Vocab],
                                                                         List[vocab.Vocab]]:
@@ -906,7 +906,7 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
         validation_iters = []  # type: List[BaseParallelSampleIter]
         config_data_per_validation_iter = []  # type: List[DataConfig]
         for prepared_data_dir in validation_prepared_data_dirs:
-            (_validation_iter, _config_data,
+            (validation_iter, _config_data,
              last_source_vocabs, last_target_vocabs, last_bucket_batch_sizes) = _get_shared_data_iter(prepared_data_dir,
                                                                                                       permute=False)
             check_condition(config_data.num_source_factors == _config_data.num_source_factors,
@@ -915,17 +915,8 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
             check_condition(config_data.num_target_factors == _config_data.num_target_factors,
                             'Training and validation data must have the same number of target factors:'
                             ' %d != %d.' % (config_data.num_target_factors, _config_data.num_target_factors))
-            validation_iters.append(_validation_iter)
+            validation_iters.append(validation_iter)
             config_data_per_validation_iter.append(_config_data)
-        if len(validation_iters) > 1:
-            validation_iter = MultiParallelSampleIter(iters=validation_iters,
-                                                      num_sents_per_iter=[config.data_statistics.num_sents for config
-                                                                          in config_data_per_validation_iter],
-                                                      method=sampling_method,
-                                                      temperature=sampling_temperature,
-                                                      custom=sampling_custom)
-        else:
-            validation_iter = validation_iters[0]  # type: ignore
 
     else:
         assert validation_sources is not None and validation_targets is not None, valid_inputs_err_msg
@@ -936,19 +927,19 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
 
         # Don't shuffle validation data. Different orders can cause different
         # evaluation results.
-        validation_iter = get_validation_data_iter(data_loader=data_loader,
-                                                   validation_sources=validation_sources,
-                                                   validation_targets=validation_targets,
-                                                   buckets=config_data.data_statistics.buckets,
-                                                   bucket_batch_sizes=last_bucket_batch_sizes,
-                                                   source_vocabs=last_source_vocabs,
-                                                   target_vocabs=last_target_vocabs,
-                                                   max_seq_len_source=config_data.max_seq_len_source,
-                                                   max_seq_len_target=config_data.max_seq_len_target,
-                                                   batch_size=batch_size,
-                                                   permute=False)
+        validation_iters = [get_validation_data_iter(data_loader=data_loader,
+                                                     validation_sources=validation_sources,
+                                                     validation_targets=validation_targets,
+                                                     buckets=config_data.data_statistics.buckets,
+                                                     bucket_batch_sizes=last_bucket_batch_sizes,
+                                                     source_vocabs=last_source_vocabs,
+                                                     target_vocabs=last_target_vocabs,
+                                                     max_seq_len_source=config_data.max_seq_len_source,
+                                                     max_seq_len_target=config_data.max_seq_len_target,
+                                                     batch_size=batch_size,
+                                                     permute=False)]
 
-    return train_iter, validation_iter, config_data, last_source_vocabs, last_target_vocabs
+    return train_iter, validation_iters, config_data, last_source_vocabs, last_target_vocabs
 
 
 def get_training_data_iters(sources: List[str],
@@ -969,8 +960,10 @@ def get_training_data_iters(sources: List[str],
                             bucket_scaling: bool = True,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter', Optional['BaseParallelSampleIter'],
-                                                           'DataConfig', 'DataInfo']:
+                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
+                                                           List['BaseParallelSampleIter'],
+                                                           'DataConfig',
+                                                           'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -1060,19 +1053,19 @@ def get_training_data_iters(sources: List[str],
 
     # Don't shuffle validation data. Different orders can cause different
     # evaluation results.
-    validation_iter = get_validation_data_iter(data_loader=data_loader,
-                                               validation_sources=validation_sources,
-                                               validation_targets=validation_targets,
-                                               buckets=buckets,
-                                               bucket_batch_sizes=bucket_batch_sizes,
-                                               source_vocabs=source_vocabs,
-                                               target_vocabs=target_vocabs,
-                                               max_seq_len_source=max_seq_len_source,
-                                               max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size,
-                                               permute=False)
+    validation_iters = [get_validation_data_iter(data_loader=data_loader,
+                                                 validation_sources=validation_sources,
+                                                 validation_targets=validation_targets,
+                                                 buckets=buckets,
+                                                 bucket_batch_sizes=bucket_batch_sizes,
+                                                 source_vocabs=source_vocabs,
+                                                 target_vocabs=target_vocabs,
+                                                 max_seq_len_source=max_seq_len_source,
+                                                 max_seq_len_target=max_seq_len_target,
+                                                 batch_size=batch_size,
+                                                 permute=False)]
 
-    return train_iter, validation_iter, config_data, data_info
+    return train_iter, validation_iters, config_data, data_info  # type: ignore
 
 
 def get_scoring_data_iters(sources: List[str],

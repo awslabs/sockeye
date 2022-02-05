@@ -485,7 +485,7 @@ def test_get_training_data_iters():
         # tmp common vocab
         vcb = vocab.build_from_paths([data['train_source'], data['train_target']])
 
-        train_iter, val_iter, config_data, data_info = data_io_pt.get_training_data_iters(
+        train_iter, val_iters, config_data, data_info = data_io_pt.get_training_data_iters(
             sources=[data['train_source']],
             targets=[data['train_target']],
             validation_sources=[data['dev_source']],
@@ -502,7 +502,7 @@ def test_get_training_data_iters():
             bucketing=True,
             bucket_width=10)
         assert isinstance(train_iter, data_io_pt.ParallelSampleIter)
-        assert isinstance(val_iter, data_io_pt.ParallelSampleIter)
+        assert isinstance(val_iters[0], data_io_pt.ParallelSampleIter)
         assert isinstance(config_data, data_io_pt.DataConfig)
         assert data_info.sources == [data['train_source']]
         assert data_info.targets == [data['train_target']]
@@ -514,7 +514,7 @@ def test_get_training_data_iters():
         assert np.isclose(config_data.data_statistics.length_ratio_std, expected_std)
 
         assert train_iter.batch_size == batch_size
-        assert val_iter.batch_size == batch_size
+        assert val_iters[0].batch_size == batch_size
 
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]

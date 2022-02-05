@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[TransformerConfig, 'sockeye.transformer.TransformerConfig']  # type: ignore
 
 
-def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'PyTorchDecoder':
+def pytorch_get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'PyTorchTransformerDecoder':
     # TODO: while we still have both transformer.TransformerConfig and transformer_pt.TransformerConfig,
     # this leads to unexpected behaviors when loading models. We can re-introduce once MXNet is removed
     #return PyTorchDecoder.get_decoder(config, inference_only)
@@ -189,7 +189,7 @@ class PyTorchTransformerDecoder(PyTorchDecoder):
         return structure
 
     def set_active_branch(self, branch_index: int):
-        if branch_index < 0 or branch_index > self.config.num_branches:
+        if branch_index < 0 or branch_index >= self.config.num_branches:
             raise ValueError(f'Unavailable branch: {branch_index}. Branch indices range from 0 to '
                              f'{self.config.num_branches - 1}')
         self._active_branch = branch_index

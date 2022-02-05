@@ -200,7 +200,7 @@ class PyTorchTransformerEncoder(PyTorchEncoder):
                                                                            num_hidden=self.config.model_size)
 
     def set_active_branch(self, branch_index: int):
-        if branch_index < 0 or branch_index > self.config.num_branches:
+        if branch_index < 0 or branch_index >= self.config.num_branches:
             raise ValueError(f'Unavailable branch: {branch_index}. Branch indices range from 0 to '
                              f'{self.config.num_branches - 1}')
         self._active_branch = branch_index

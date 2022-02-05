@@ -240,7 +240,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  shared_vocab: bool,
                                  resume_training: bool,
                                  output_folder: str) -> Tuple['data_io_pt.BaseParallelSampleIter',
-                                                              'data_io_pt.BaseParallelSampleIter',
+                                                              List['data_io_pt.BaseParallelSampleIter'],
                                                               'data_io_pt.DataConfig',
                                                               List[vocab.Vocab], List[vocab.Vocab]]:
     """
@@ -298,7 +298,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
-        train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io_pt.get_prepared_data_iters(
+        train_iter, validation_iters, data_config, source_vocabs, target_vocabs = data_io_pt.get_prepared_data_iters(
             prepared_data_dirs=args.prepared_data,
             validation_sources=validation_sources,
             validation_targets=validation_targets,
@@ -342,7 +342,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                             'Training and validation data must have the same number of target factors,'
                             ' but found %d and %d.' % (data_config.num_target_factors, len(validation_targets)))
 
-        return train_iter, validation_iter, data_config, source_vocabs, target_vocabs
+        return train_iter, validation_iters, data_config, source_vocabs, target_vocabs
 
     else:
         utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
@@ -408,7 +408,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                         'Training and validation data must have the same number of target factors, '
                         'but found %d and %d.' % (len(source_vocabs), len(validation_sources)))
 
-        train_iter, validation_iter, config_data, data_info = data_io_pt.get_training_data_iters(
+        train_iter, validation_iters, config_data, data_info = data_io_pt.get_training_data_iters(
             sources=sources,
             targets=targets,
             validation_sources=validation_sources,
@@ -431,7 +431,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         logger.info("Writing data config to '%s'", data_info_fname)
         data_info.save(data_info_fname)
 
-        return train_iter, validation_iter, config_data, source_vocabs, target_vocabs
+        return train_iter, validation_iters, config_data, source_vocabs, target_vocabs
 
 
 def create_encoder_config(args: argparse.Namespace,
@@ -953,7 +953,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     logger.info(f'Training Device: {device}')
     utils.seed_rngs(args.seed)
 
-    train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
+    train_iter, validation_iters, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
         args=args,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
@@ -1057,7 +1057,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         logger.info('Skipping trace for branching model')
     else:
         logger.info('Tracing model on validation batch')
-        batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
+        batch = validation_iters[0].next().load(device=device)  # pylint: disable=not-callable
         # When using AMP, turn on autocasting when tracing the model so that
         # dtypes will match during AMP training. Disable the weight cache for
         # compatibility with tracing. See:
@@ -1065,7 +1065,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
             training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
                                                               batch.target, batch.target_length), strict=False)
-    eval_iter.reset()
+    validation_iters[0].reset()
 
     if utils.is_distributed():
         # In distributed mode, wrap the traced model with a distributed
@@ -1096,7 +1096,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     if utils.is_primary_worker():
         checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
 
-    training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
+    training_state = trainer.fit(train_iter=train_iter, validation_iters=validation_iters,
                                  checkpoint_decoder=checkpoint_decoder)
 
     return training_state
