@@ -147,6 +147,7 @@ JSON_FACTORS_KEY = "factors"
 JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
+JSON_ACTIVE_BRANCH_KEY = "active_branch"
 JSON_ENCODING = "utf-8"
 
 VERSION_NAME = "version"

@@ -134,6 +134,7 @@ class TranslatorInput:
     constraints: Optional[List[Tokens]] = None
     avoid_list: Optional[List[Tokens]] = None
     pass_through_dict: Optional[Dict] = None
+    active_branch: Optional[int] = None
 
     def __str__(self):
         return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
@@ -177,7 +178,8 @@ class TranslatorInput:
                                   restrict_lexicon=self.restrict_lexicon,
                                   constraints=constraints,
                                   avoid_list=self.avoid_list,
-                                  pass_through_dict=pass_through_dict)
+                                  pass_through_dict=pass_through_dict,
+                                  active_branch=self.active_branch)
 
     def with_eos(self) -> 'TranslatorInput':
         """
@@ -190,7 +192,8 @@ class TranslatorInput:
                                restrict_lexicon=self.restrict_lexicon,
                                constraints=self.constraints,
                                avoid_list=self.avoid_list,
-                               pass_through_dict=self.pass_through_dict)
+                               pass_through_dict=self.pass_through_dict,
+                               active_branch=self.active_branch)
 
 
 class BadTranslatorInput(TranslatorInput):
@@ -300,9 +303,12 @@ def make_input_from_dict(sentence_id: SentenceId,
         if isinstance(constraints, list):
             constraints = [list(utils.get_tokens(constraint)) for constraint in constraints]
 
+        # Encoder/decoder branch to use for this input
+        active_branch = input_dict.get(C.JSON_ACTIVE_BRANCH_KEY)
+
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
-                               restrict_lexicon=restrict_lexicon, constraints=constraints,
-                               avoid_list=avoid_list, pass_through_dict=input_dict)
+                               restrict_lexicon=restrict_lexicon, constraints=constraints, avoid_list=avoid_list,
+                               pass_through_dict=input_dict, active_branch=active_branch)
 
     except Exception as e:
         logger.exception(e, exc_info=True)  # type: ignore
@@ -842,7 +848,8 @@ class Translator:
                              trans_inputs: List[TranslatorInput]) -> Tuple[pt.Tensor,
                                                                            int,
                                                                            Optional[lexicon.TopKLexicon],
-                                                                           pt.Tensor]:
+                                                                           pt.Tensor,
+                                                                           Optional[int]]:
         """
         Assembles the numerical data for the batch. This comprises a tensor for the source sentences,
         the bucket key (padded source length), a tensor of maximum output lengths for each sentence in the batch.
@@ -860,6 +867,7 @@ class Translator:
         source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
+        active_branch = None  # type: Optional[int]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
@@ -897,10 +905,20 @@ class Translator:
                 else:
                     restrict_lexicon = self.restrict_lexicon
 
+            # Check active branch
+            if trans_input.active_branch is not None:
+                if active_branch is None:
+                    active_branch = trans_input.active_branch
+                else:
+                    if active_branch != trans_input.active_branch:
+                        logger.warning('Sentence %s: different active branch specified, will overrule previous. '
+                                       'All inputs in batch must use same active branch.' % trans_input.sentence_id)
+
         source = pt.tensor(source, device=self.device, dtype=pt.int32)  # type: ignore
         source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
         max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)  # type: ignore
-        return source, source_length, restrict_lexicon, max_output_lengths  # type: ignore
+
+        return source, source_length, restrict_lexicon, max_output_lengths, active_branch  # type: ignore
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -982,7 +1000,8 @@ class Translator:
                       source: pt.Tensor,
                       source_length: pt.Tensor,
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
-                      max_output_lengths: pt.Tensor) -> List[Translation]:
+                      max_output_lengths: pt.Tensor,
+                      active_branch: Optional[int]) -> List[Translation]:
         """
         Translates source of source_length and returns list of Translations.
 
@@ -992,6 +1011,9 @@ class Translator:
 
         :return: List of translations.
         """
+        if active_branch is not None:
+            for model in self.models:
+                model.set_active_branch(active_branch)
         return self._get_best_translations(self._search(source,
                                                         source_length,
                                                         restrict_lexicon,
