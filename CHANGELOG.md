@@ -23,6 +23,13 @@ Sockeye is now exclusively based on Pytorch.
 - Removed arguments `--softmax-temperature`, `--weight-init-*`, `--mc-dropout`, `--horovod`, `--device-ids
 - Removed all MXNet-related tests
 
+## [3.0.14]
+
+### Added
+- Added support for Translation Error Rate (TER) metric as implemented in sacrebleu==1.4.14.
+  Checkpoint decoder metrics will now include TER scores and early stopping can be determined
+  via TER improvements (`--optimized-metric ter`)
+
 ## [3.0.13]
 
 ### Changed

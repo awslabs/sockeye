@@ -57,6 +57,18 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     return sacrebleu.corpus_chrf(hypotheses, [references]).score
 
 
+def raw_corpus_ter(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+    """
+    Simple wrapper around sacreBLEU's TER implementation, without tokenization.
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: TER score as float between 0 and 1.
+    """
+    ter = sacrebleu.metrics.TER(argparse.Namespace())
+    return ter.corpus_score(hypotheses, [references]).score
+
+
 def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> float:
     """
     Simple wrapper around ROUGE-1 implementation.
@@ -145,6 +157,8 @@ def main():
             func = raw_corpus_rouge2
         elif name == C.ROUGEL:
             func = raw_corpus_rougel
+        elif name == C.TER:
+            func = raw_corpus_ter
         else:
             raise ValueError("Unknown metric %s." % name)
         metrics.append((name, func))

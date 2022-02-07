@@ -1279,7 +1279,7 @@ def add_evaluate_args(params):
     eval_params.add_argument('--metrics',
                              nargs='+',
                              choices=C.EVALUATE_METRICS,
-                             default=[C.BLEU, C.CHRF],
+                             default=[C.BLEU, C.CHRF, C.TER],
                              help='List of metrics to compute. Default: %(default)s.')
     eval_params.add_argument('--sentence', '-s',
                              action="store_true",
