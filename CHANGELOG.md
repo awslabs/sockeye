@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.14]
+
+### Added
+- Added support for Translation Error Rate (TER) metric as implemented in sacrebleu==1.4.14.
+  Checkpoint decoder metrics will now include TER scores and early stopping can be determined
+  via TER improvements (`--optimized-metric ter`)
+
 ## [3.0.13]
 
 ### Changed
