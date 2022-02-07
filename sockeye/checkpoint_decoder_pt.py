@@ -187,6 +187,8 @@ class CheckpointDecoder:
                                                         references=self.targets_sentences[0]),
                    C.LENRATIO: evaluate.raw_corpus_length_ratio(hypotheses=translations[0],
                                                                 references=self.targets_sentences[0]),
+                   C.TER: evaluate.raw_corpus_ter(hypotheses=translations[0],
+                                                  references=self.targets_sentences[0]),
                    C.AVG_TIME: avg_time,
                    C.DECODING_TIME: trans_wall_time}
 

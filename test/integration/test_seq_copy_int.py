@@ -229,7 +229,7 @@ def _test_evaluate_cli(test_outputs: List[str], test_target_path: str):
             sockeye.evaluate.__file__,
             hypotheses=out_path,
             references=test_target_path,
-            metrics="bleu chrf rouge1")
+            metrics="bleu chrf rouge1 ter")
         with patch.object(sys, "argv", eval_params.split()):
             sockeye.evaluate.main()
 
