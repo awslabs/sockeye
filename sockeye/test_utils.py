@@ -209,17 +209,13 @@ def run_train_translate(train_params: str,
     :param seed: The seed used for training.
     :return: Data dictionary, updated with translation outputs and scores
     """
-    prepare_data_mod = sockeye.prepare_data
-    train_mod = sockeye.train
-    translate_mod = sockeye.translate
-
     work_dir = os.path.join(data['work_dir'], 'train_translate')
     data['model'] = os.path.join(work_dir, "model")
     # Optionally create prepared data directory
     if use_prepared_data:
         data['train_prepared'] = os.path.join(work_dir, "prepared_data")
         prepare_params = "{} {}".format(
-            prepare_data_mod.__file__,
+            sockeye.prepare_data.__file__,
             PREPARE_DATA_COMMON.format(train_source=data['train_source'],
                                        train_target=data['train_target'],
                                        output=data['train_prepared'],
@@ -236,9 +232,9 @@ def run_train_translate(train_params: str,
 
         logger.info("Preparing data with parameters %s.", prepare_params)
         with patch.object(sys, "argv", prepare_params.split()):
-            prepare_data_mod.main()
+            sockeye.prepare_data.main()
         # Train model
-        params = "{} {} {}".format(train_mod.__file__,
+        params = "{} {} {}".format(sockeye.train.__file__,
                                    TRAIN_PARAMS_PREPARED_DATA_COMMON.format(prepared_data=data['train_prepared'],
                                                                             dev_source=data['dev_source'],
                                                                             dev_target=data['dev_target'],
@@ -253,10 +249,10 @@ def run_train_translate(train_params: str,
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
-            train_mod.main()
+            sockeye.train.main()
     else:
         # Train model
-        params = "{} {} {}".format(train_mod.__file__,
+        params = "{} {} {}".format(sockeye.train.__file__,
                                    TRAIN_PARAMS_COMMON.format(train_source=data['train_source'],
                                                               train_target=data['train_target'],
                                                               dev_source=data['dev_source'],
@@ -277,7 +273,7 @@ def run_train_translate(train_params: str,
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
-            train_mod.main()
+            sockeye.train.main()
 
     # create Top-K lexicon from simple ttable mapping digit to digit
     ttable_path = os.path.join(data['work_dir'], "ttable")
@@ -294,7 +290,7 @@ def run_train_translate(train_params: str,
 
     # Translate corpus with the 1st params and scoring output handler to obtain scores
     data['test_output'] = os.path.join(work_dir, "test.out")
-    params = "{} {} {}".format(translate_mod.__file__,
+    params = "{} {} {}".format(sockeye.translate.__file__,
                                TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                               input=data['test_source'],
                                                               output=data['test_output']),
@@ -305,7 +301,7 @@ def run_train_translate(train_params: str,
 
     logger.info("Translating with params %s", params)
     with patch.object(sys, "argv", params.split()):
-        translate_mod.main()
+        sockeye.translate.main()
 
     # Collect test inputs
     with open(data['test_source']) as inputs:

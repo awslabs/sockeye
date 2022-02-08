@@ -139,10 +139,7 @@ class SockeyeModel(pt.nn.Module):
 
         # traced components (for inference)
         self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_embedding_target = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_decoder = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_factor_output_layers = None  # type: Optional[List[pt.jit.ScriptModule]]
         self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
 
     def cast(self, dtype: str):
