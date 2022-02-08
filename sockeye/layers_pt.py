@@ -220,7 +220,7 @@ def interleaved_matmul_encdec_valatt(kv: pt.Tensor,
     return output
 
 
-class PyTorchDotAttentionCell(pt.nn.Module):
+class DotAttentionCell(pt.nn.Module):
 
     def __init__(self, dropout: float = 0.0, heads: int = 1) -> None:
         super().__init__()
@@ -285,7 +285,7 @@ class MultiHeadAttentionBase(pt.nn.Module):
         self.depth_out = depth_out
         self.depth_per_head = self.depth // self.heads
 
-        self.dot_att = PyTorchDotAttentionCell(dropout=dropout, heads=heads)
+        self.dot_att = DotAttentionCell(dropout=dropout, heads=heads)
         self.ff_out = pt.nn.Linear(in_features=depth_att, out_features=depth_out, bias=False)
 
     def _attend(self,

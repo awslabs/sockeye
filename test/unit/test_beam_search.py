@@ -70,7 +70,7 @@ def test_brevity_penalty_int_input():
     assert onp.isclose(brevity_penalty(hyp_length, ref_length), expected_bp)
 
 
-def test_pytorch_candidate_scorer():
+def test_candidate_scorer():
     scorer = sockeye.beam_search.CandidateScorer(length_penalty_alpha=1.0,
                                                  length_penalty_beta=0.0,
                                                  brevity_penalty_weight=0.1)
