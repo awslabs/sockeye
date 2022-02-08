@@ -23,6 +23,11 @@ Sockeye is now exclusively based on Pytorch.
 - Removed arguments `--softmax-temperature`, `--weight-init-*`, `--mc-dropout`, `--horovod`, `--device-ids
 - Removed all MXNet-related tests
 
+## [3.0.15]
+
+### Fixed
+- Fixed GPU-based scoring by copying to cpu tensor first before converting to numpy.
+
 ## [3.0.14]
 
 ### Added
