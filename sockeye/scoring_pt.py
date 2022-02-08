@@ -144,7 +144,7 @@ class Scorer:
             self.traced_batch_scorer = pt.jit.trace(self.batch_scorer, scorer_inputs, strict=False)
         scores = self.traced_batch_scorer(*scorer_inputs)  # (batch, num_target_factors)
 
-        return scores.numpy()
+        return scores.cpu().numpy()
 
     @pt.inference_mode(True)
     def score(self, score_iter: data_io_pt.BaseParallelSampleIter, output_handler: OutputHandler):

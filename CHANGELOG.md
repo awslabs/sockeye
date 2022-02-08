@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.0.15]
+
+### Fixed
+- Fixed GPU-based scoring by copying to cpu tensor first before converting to numpy.
+
 ## [3.0.14]
 
 ### Added
