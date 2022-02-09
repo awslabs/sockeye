@@ -14,7 +14,7 @@ For questions and issue reports, please [file an issue](https://github.com/awsla
 
 ### Version 3.1.x: PyTorch only
 With version 3.1.x, we remove support for MXNet 2.x. Models trained with PyTorch and Sockeye 3.0.x remain compatible
-with Sockeye 3.1.x. Models trained with 2.3.x (using MXNet) and converted to PyTorch with Sockeye 3.0.x' conversion
+with Sockeye 3.1.x. Models trained with 2.3.x (using MXNet) and converted to PyTorch with Sockeye 3.0.x's conversion
 tool can NOT be used with Sockeye 3.1.x.
 
 ### Version 3.0.0: Concurrent PyTorch and MXNet support
