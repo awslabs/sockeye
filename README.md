@@ -12,9 +12,14 @@ For a quickstart guide to training a standard NMT model on any size of data, see
 
 For questions and issue reports, please [file an issue](https://github.com/awslabs/sockeye/issues/new) on GitHub.
 
-### Version 3.0.0 & Backwards Compatibility
-With version 3.0.0, Sockeye is based on PyTorch. We maintain backwards compatibility with
-MXNet models in version 2.3.x a little bit longer. If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet.
+### Version 3.1.x: PyTorch only
+With version 3.1.x, we remove support for MXNet 2.x. Models trained with PyTorch and Sockeye 3.0.x remain compatible
+with Sockeye 3.1.x. Models trained with 2.3.x (using MXNet) and converted to PyTorch with Sockeye 3.0.x's conversion
+tool can NOT be used with Sockeye 3.1.x.
+
+### Version 3.0.0: Concurrent PyTorch and MXNet support
+Starting with version 3.0.0, Sockeye is also based on PyTorch. We maintain backwards compatibility with
+MXNet models of version 2.3.x with 3.0.x. If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet.
 
 All models trained with 2.3.x (using MXNet)
 can be converted to models running with PyTorch using the converter CLI (`sockeye.mx_to_pt`). This will
@@ -52,6 +57,7 @@ For faster GPU training, install [NVIDIA Apex](https://github.com/NVIDIA/apex). 
 
 ### Older versions
 
+- Sockeye 3.0, based on PyTorch & MXNet 2.x is available in the `sockeye_30` branch.
 - Sockeye 2.x, based on the MXNet Gluon API, is available in the `sockeye_2` branch.
 - Sockeye 1.x, based on the MXNet Module API, is available in the `sockeye_1` branch.
 

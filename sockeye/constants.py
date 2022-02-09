@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,17 +14,8 @@
 """
 Defines various constants used throughout the project
 """
-import sys
-from typing import Dict
 import torch as pt
 import numpy as np
-
-# MXNet environment variables
-MXNET_SAFE_ACCUMULATION = 'MXNET_SAFE_ACCUMULATION'
-
-# Horovod environment variables
-HOROVOD_HIERARCHICAL_ALLREDUCE = 'HOROVOD_HIERARCHICAL_ALLREDUCE'
-HOROVOD_HIERARCHICAL_ALLGATHER = 'HOROVOD_HIERARCHICAL_ALLGATHER'
 
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
@@ -81,19 +72,6 @@ NO_POSITIONAL_EMBEDDING = "none"
 FIXED_POSITIONAL_EMBEDDING = "fixed"
 LEARNED_POSITIONAL_EMBEDDING = "learned"
 POSITIONAL_EMBEDDING_TYPES = [NO_POSITIONAL_EMBEDDING, FIXED_POSITIONAL_EMBEDDING, LEARNED_POSITIONAL_EMBEDDING]
-
-# init types
-INIT_XAVIER = 'xavier'
-INIT_UNIFORM = 'uniform'
-INIT_TYPES = [INIT_XAVIER, INIT_UNIFORM]
-
-INIT_XAVIER_FACTOR_TYPE_IN = "in"
-INIT_XAVIER_FACTOR_TYPE_OUT = "out"
-INIT_XAVIER_FACTOR_TYPE_AVG = "avg"
-INIT_XAVIER_FACTOR_TYPES = [INIT_XAVIER_FACTOR_TYPE_IN, INIT_XAVIER_FACTOR_TYPE_OUT, INIT_XAVIER_FACTOR_TYPE_AVG]
-
-RAND_TYPE_UNIFORM = 'uniform'
-RAND_TYPE_GAUSSIAN = 'gaussian'
 
 DEFAULT_NUM_EMBED = 512
 
@@ -174,10 +152,6 @@ TRAINING_STATE_DIRNAME = "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
 
-# MXNet
-OPT_STATES_LAST = "mx_optimizer_last.pkl"
-OPT_STATES_BEST = "mx_optimizer_best.pkl"
-# PyTorch
 OPT_STATE_LAST = "optimizer_last.pkl"
 OPT_STATE_BEST = "optimizer_best.pkl"
 
@@ -187,8 +161,6 @@ LR_SCHEDULER_BEST = "lr_scheduler_best.pkl"
 BUCKET_ITER_STATE_NAME = "bucket.pkl"
 RNG_STATE_NAME = "rng.pkl"
 TRAINING_STATE_NAME = "training.pkl"
-AMP_LOSS_SCALER_STATE_NAME = "amp_loss_scaler.pkl"
-# PyTorch
 GRAD_SCALER_STATE_NAME = "grad_scaler.pkl"
 APEX_AMP_STATE_NAME = "apex_amp_state.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
@@ -225,16 +197,6 @@ BATCH_TYPE_WORD = "word"
 BATCH_TYPE_MAX_WORD = "max-word"
 BATCH_TYPES = [BATCH_TYPE_SENTENCE, BATCH_TYPE_WORD, BATCH_TYPE_MAX_WORD]
 
-KVSTORE_DEVICE = "device"
-KVSTORE_LOCAL = "local"
-KVSTORE_SYNC = "dist_sync"
-KVSTORE_DIST_DEVICE_SYNC = "dist_device_sync"
-KVSTORE_DIST_ASYNC = "dist_async"
-KVSTORE_NCCL = 'nccl'
-KVSTORE_TYPES = [KVSTORE_DEVICE, KVSTORE_LOCAL, KVSTORE_SYNC,
-                 KVSTORE_DIST_DEVICE_SYNC, KVSTORE_DIST_ASYNC,
-                 KVSTORE_NCCL]
-
 # Training constants
 OPTIMIZER_ADAM = "adam"
 OPTIMIZER_SGD = "sgd"
@@ -254,8 +216,6 @@ GRADIENT_CLIPPING_TYPE_NORM = 'norm'
 GRADIENT_CLIPPING_TYPE_NONE = 'none'
 GRADIENT_CLIPPING_TYPES = [GRADIENT_CLIPPING_TYPE_ABS, GRADIENT_CLIPPING_TYPE_NORM, GRADIENT_CLIPPING_TYPE_NONE]
 
-HOROVOD_SECONDARY_WORKERS_DIRNAME = 'secondary_workers'
-# PyTorch
 DIST_ENV_LOCAL_RANK = 'LOCAL_RANK'
 DIST_SECONDARY_WORKERS_LOGDIR = 'secondary_worker_logs'
 
@@ -299,8 +259,6 @@ EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL, TER]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
-CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT = 'cross-entropy-without-softmax-output'
-
 LINK_NORMAL = 'normal'
 LINK_POISSON = 'poisson'
 LENGTH_TASK_RATIO = 'ratio'
@@ -326,9 +284,6 @@ LARGE_VALUES = {
     np.float32: LARGE_POSITIVE_VALUE,
     pt.float32: LARGE_POSITIVE_VALUE
 }
-
-# TODO(migration) Remove constant only used by MXNet code
-FIXED_GRAD_SCALE_FP16 = 1024.0
 
 # lhuc application points
 LHUC_ENCODER = "encoder"
@@ -383,5 +338,3 @@ AVERAGE_CHOICES = [AVERAGE_BEST, AVERAGE_LAST, AVERAGE_LIFESPAN]
 BREVITY_PENALTY_CONSTANT = 'constant'
 BREVITY_PENALTY_LEARNED = 'learned'
 BREVITY_PENALTY_NONE = 'none'
-
-ParameterDict = Dict[str, 'gluon.Parameter']  # type: ignore

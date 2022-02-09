@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -10,28 +10,29 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-
+import _pickle
 import copy
-import time
 import logging
 import os
-from typing import cast, Dict, Optional, Tuple, Union, List
+import time
+from dataclasses import dataclass
 from functools import lru_cache
+from typing import cast, Dict, Optional, Tuple, List
 
-import mxnet as mx
-from mxnet import gluon, np, npx
+import torch as pt
+
 from sockeye import __version__
-from sockeye.config import Config
-
 from . import constants as C
 from . import data_io
 from . import decoder
 from . import encoder
 from . import layers
-from . import quantization
+from . import transformer
 from . import utils
 from . import vocab
-from dataclasses import dataclass
+from .config import Config
+from .encoder import FactorConfig
+from .layers import LengthRatioConfig
 
 logger = logging.getLogger(__name__)
 
@@ -54,24 +55,21 @@ class ModelConfig(Config):
     :param weight_tying_type: Determines which weights get tied.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
-    :param intgemm_custom_lib: Path to intgemm custom operator library used for dtype is int8.  Default: libintgemm.so
-                               in the same directory as this script.
     """
     config_data: data_io.DataConfig
     vocab_source_size: int
     vocab_target_size: int
     config_embed_source: encoder.EmbeddingConfig
     config_embed_target: encoder.EmbeddingConfig
-    config_encoder: encoder.EncoderConfig
-    config_decoder: decoder.DecoderConfig
-    config_length_task: Optional[layers.LengthRatioConfig] = None
+    config_encoder: transformer.TransformerConfig
+    config_decoder: transformer.TransformerConfig
+    config_length_task: Optional[LengthRatioConfig] = None
     weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX
     lhuc: bool = False
     dtype: str = C.DTYPE_FP32
-    intgemm_custom_lib: str = os.path.join(os.path.dirname(__file__), "libintgemm.so")
 
 
-class SockeyeModel(gluon.Block):
+class SockeyeModel(pt.nn.Module):
     """
     SockeyeModel shares components needed for both training and inference.
     The main components of a Sockeye model are
@@ -86,108 +84,114 @@ class SockeyeModel(gluon.Block):
 
     :param config: Model configuration.
     :param inference_only: Use the model only for inference, enabling optimizations.
-    :param train_decoder_only: Training will only update the decoder. Disable
-           autograd for encoder and embeddings to save memory.
-    :param prefix: Name prefix for all parameters of this model.
     """
 
     def __init__(self,
                  config: ModelConfig,
                  inference_only: bool = False,
                  train_decoder_only: bool = False,
-                 mc_dropout: bool = False,
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
+        self.inference_only = inference_only
         logger.info("%s", self.config)
-        self.dtype = config.dtype
         self.train_decoder_only = train_decoder_only
-        self.mc_dropout = mc_dropout
-        self._output_layer_factor_format_string = 'output_layer_factor%i'
         self.forward_pass_cache_size = forward_pass_cache_size
         self.embed_and_encode = self._embed_and_encode
         if self.forward_pass_cache_size > 0:
             self.embed_and_encode = self._cache_wrapper(self._embed_and_encode)
 
         # source & target embeddings, potentially shared/tied
-        source_embed_weight, target_embed_weight, output_weight = self._get_embedding_weights()
+        source_embedding, target_embedding, output_weight = self._get_embeddings()
 
-        self.embedding_source = encoder.Embedding(config.config_embed_source, embed_weight=source_embed_weight)
-        self.embedding_target = encoder.Embedding(config.config_embed_target, embed_weight=target_embed_weight)
+        self.embedding_source = encoder.Embedding(config.config_embed_source, embedding=source_embedding)
+        self.embedding_target = encoder.Embedding(config.config_embed_target, embedding=target_embedding)
 
         # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder.get_encoder(self.config.config_encoder, dtype=config.dtype)
-        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
-                                           dtype=config.dtype)
+        self.encoder = encoder.get_transformer_encoder(self.config.config_encoder,
+                                                       inference_only=inference_only)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only)
 
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
-                                               weight=output_weight, dtype=config.dtype)
+                                               weight=output_weight)
+        if self.inference_only:
+            self.output_layer = pt.jit.script(self.output_layer)
 
+        self.factor_output_layers = pt.nn.ModuleList()
         # Optional target factor output layers
         for i, factor_config in enumerate(self.target_factor_configs, 1):
             # Each target stream has its own, independent output layer
             # TODO also consider weight tying with target factor input embeddings
-            output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                              vocab_size=factor_config.vocab_size,
-                                              weight=None,
-                                              dtype=config.dtype)
-            # Register the layer as child block
-            setattr(self, self._output_layer_factor_format_string % i, output_layer)
+            output_layer = pt.nn.Linear(in_features=self.decoder.get_num_hidden(),
+                                        out_features=factor_config.vocab_size,
+                                        bias=True)
+            self.factor_output_layers.append(output_layer)
 
-        self.length_ratio = None
+        self.length_ratio = None  # type: Optional[layers.LengthRatio]
         if self.config.config_length_task is not None:
             utils.check_condition(self.config.config_length_task.weight > 0.0,
                                   'Auxiliary length task requested, but its loss weight is zero')
             self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
                                                    num_layers=self.config.config_length_task.num_layers)
+        self.dtype = pt.float32
+        self.cast(config.dtype)
 
-    def cast(self, dtype):
-        self.dtype = dtype
-        super().cast(dtype)
+        # traced components (for inference)
+        self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
+        self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
+        self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
+
+    def cast(self, dtype: str):
+        if dtype == C.DTYPE_FP16:
+            self.half()
+            self.dtype = pt.float16
+        elif dtype == C.DTYPE_INT8:
+            logger.info("Dynamic quantization to int8 for (fused) Linear layers")
+            # TODO: figure out int8 quantization of OutputLayer, supporting weight tying & vocabulary selection
+            quant_mapping = {pt.nn.Linear: pt.nn.quantized.dynamic.Linear}
+            pt.quantization.quantize_dynamic(self, {pt.nn.Linear}, dtype=pt.qint8, inplace=self.inference_only,
+                                             mapping=quant_mapping)
+        else:
+            self.dtype = pt.float32
 
     def state_structure(self):
         return self.decoder.state_structure()
 
-    def encode(self, inputs: np.ndarray, valid_length: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
-        """Encode the input sequence.
-
-        Parameters
-        ----------
-        inputs : ndarray
-        valid_length : ndarray or None, default None
-
-        Returns
-        -------
-        outputs : list
-            Outputs of the encoder.
+    def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
         """
-        source_embed, source_embed_length = self.embedding_source(inputs, valid_length)
-        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        Encodes the input sequence.
+
+        :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
+        :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :return: Encoder outputs, encoded output lengths
+        """
+
+        if self.inference_only:
+            if self.traced_embedding_source is None:
+                logger.debug("Tracing embedding_source")
+                self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
+            source_embed = self.traced_embedding_source(inputs)
+            if self.traced_encoder is None:
+                logger.debug("Tracing encoder")
+                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
+            source_encoded, source_encoded_length = self.traced_encoder(source_embed, valid_length)
+        else:
+            source_embed = self.embedding_source(inputs)
+            source_encoded, source_encoded_length = self.encoder(source_embed, valid_length)
         return source_encoded, source_encoded_length
 
-    def encode_and_initialize(self, inputs: np.ndarray, valid_length: Optional[np.ndarray] = None,
-                              constant_length_ratio: float = 0.0) -> Tuple[List[np.ndarray], np.ndarray]:
+    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None,
+                              constant_length_ratio: float = 0.0) -> Tuple[List[pt.Tensor], pt.Tensor]:
         """
         Encodes the input sequence and initializes decoder states (and predicted output lengths if available).
         Used for inference/decoding.
 
-        Parameters
-        ----------
-        inputs : ndarray
-        valid_length : ndarray or None, default None
-        constant_length_ratio : float
-
-        Returns
-        -------
-        states : list
-            Initial states for the decoder.
-        predicted_output_length : ndarray
-            Predicted output length of shape (batch_size,), 0 if not available.
+        :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
+        :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :param constant_length_ratio: Constant length ratio
+        :return: Initial states for the decoder, predicted output length of shape (batch_size,), 0 if not available.
         """
-        if self.mc_dropout:
-            # Turn on training mode so mxnet knows to add dropout
-            _ = mx.autograd.set_training(True)
 
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
@@ -201,9 +205,8 @@ class SockeyeModel(gluon.Block):
         return states, predicted_output_length
 
     def _embed_and_encode(self,
-                          source: np.ndarray, source_length: np.ndarray,
-                          target: np.ndarray, target_length: np.ndarray) -> Tuple[np.ndarray, np.ndarray,
-                                                                                  np.ndarray, List[np.ndarray]]:
+                          source: pt.Tensor, source_length: pt.Tensor,
+                          target: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, List[pt.Tensor]]:
         """
         Encode the input sequence, embed the target sequence, and initialize the decoder.
         Used for training.
@@ -211,55 +214,51 @@ class SockeyeModel(gluon.Block):
         :param source: Source input data.
         :param source_length: Length of source inputs.
         :param target: Target input data.
-        :param target_length: Length of target inputs.
         :return: encoder outputs and lengths, target embeddings, and decoder initial states
         """
-        source_embed, source_embed_length = self.embedding_source(source, source_length)
-        target_embed, target_embed_length = self.embedding_target(target, target_length)
-        source_encoded, source_encoded_length = self.encoder(source_embed, source_embed_length)
+        source_embed = self.embedding_source(source)
+        target_embed = self.embedding_target(target)
+        source_encoded, source_encoded_length = self.encoder(source_embed, source_length)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         return source_encoded, source_encoded_length, target_embed, states
 
     def decode_step(self,
-                    step_input: np.ndarray,
-                    states: List[np.ndarray],
-                    vocab_slice_ids: Optional[np.ndarray] = None) -> Tuple[np.ndarray,
-                                                                           List[np.ndarray],
-                                                                           List[np.ndarray]]:
+                    step_input: pt.Tensor,
+                    states: List[pt.Tensor],
+                    vocab_slice_ids: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, List[pt.Tensor], List[pt.Tensor]]:
         """
         One step decoding of the translation model.
 
-        Parameters
-        ----------
-        step_input : ndarray
-            Shape (batch_size, num_target_factors)
-        states : list of ndarrays
-        vocab_slice_ids : ndarray or None
+        :param step_input: Input to a single decoder step. Shape: (batch_size, num_target_factors).
+        :param states: List of previous or initial model states. Shape of state tensors and length of states list
+                       determined by self.decoder.state_structure().
+        :param vocab_slice_ids: Optional list of vocabulary ids to use
+                                for reduced matrix multiplication at the output layer.
 
-        Returns
-        -------
-        step_output : ndarray
-            Shape (batch_size, C_out)
-        states : list
-        target_factor_outputs : list
-            Optional target factor predictions.
+        :return: logits, list of new model states, other target factor logits.
         """
-        if self.mc_dropout:
-            # Turn on training mode so mxnet knows to add dropout
-            _ = mx.autograd.set_training(True)
-
-        valid_length = np.ones(shape=(step_input.shape[0],), ctx=step_input.ctx)
-        target_embed, _ = self.embedding_target(np.expand_dims(step_input, axis=1), valid_length=valid_length)
-        decoder_out, new_states = self.decoder(target_embed, states)
-        decoder_out = np.squeeze(decoder_out, axis=1)
-        # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
-        step_output = self.output_layer(decoder_out, vocab_slice_ids)
-
-        # Target factor outputs are currently stored in additional outputs.
-        target_factor_outputs = []  # type: List[np.ndarray]
-        # TODO: consider a dictionary mapping as return value
-        for factor_output_layer in self.factor_output_layers:
-            target_factor_outputs.append(factor_output_layer(decoder_out, None))
+        if self.inference_only:
+            decode_step_inputs = [step_input, states]
+            if vocab_slice_ids is not None:
+                decode_step_inputs.append(vocab_slice_ids)
+            if self.traced_decode_step is None:
+                logger.debug("Tracing decode step")
+                decode_step_module = _DecodeStep(self.embedding_target,
+                                                 self.decoder,
+                                                 self.output_layer,
+                                                 self.factor_output_layers)
+                self.traced_decode_step = pt.jit.trace(decode_step_module, decode_step_inputs)
+            # the traced module returns a flat list of tensors
+            decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
+            step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
+            new_states = decode_step_outputs[self.num_target_factors:]
+        else:
+            target_embed = self.embedding_target(step_input.unsqueeze(1))
+            decoder_out, new_states = self.decoder(target_embed, states)
+            decoder_out = decoder_out.squeeze(1)
+            # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
+            step_output = self.output_layer(decoder_out, vocab_slice_ids)
+            target_factor_outputs = [fol(decoder_out) for fol in self.factor_output_layers]
 
         return step_output, new_states, target_factor_outputs
 
@@ -267,9 +266,10 @@ class SockeyeModel(gluon.Block):
         # When updating only the decoder (specified directly or implied by
         # caching the encoder and embedding forward passes), turn off autograd
         # for the encoder and embeddings to save memory.
-        with mx.autograd.pause() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
-            source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
-                                                                                                target, target_length)
+        with pt.no_grad() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
+            source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source,
+                                                                                                source_length,
+                                                                                                target)
 
         target = self.decoder.decode_seq(target_embed, states=states)
 
@@ -278,7 +278,7 @@ class SockeyeModel(gluon.Block):
         forward_output[C.LOGITS_NAME] = self.output_layer(target, None)
 
         for i, factor_output_layer in enumerate(self.factor_output_layers, 1):
-            forward_output[C.FACTOR_LOGITS_NAME % i] = factor_output_layer(target, None)
+            forward_output[C.FACTOR_LOGITS_NAME % i] = factor_output_layer(target)
 
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)
@@ -287,9 +287,9 @@ class SockeyeModel(gluon.Block):
         return forward_output
 
     def predict_output_length(self,
-                              source_encoded: np.ndarray,
-                              source_encoded_length: np.ndarray,
-                              constant_length_ratio: float = 0.0) -> np.ndarray:
+                              source_encoded: pt.Tensor,
+                              source_encoded_length: pt.Tensor,
+                              constant_length_ratio: float = 0.0) -> pt.Tensor:
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)
             predicted_length_ratio = self.length_ratio(source_encoded, source_encoded_length)
@@ -299,7 +299,7 @@ class SockeyeModel(gluon.Block):
             predicted_output_length = source_encoded_length * constant_length_ratio
         else:
             # (batch,)
-            predicted_output_length = np.zeros_like(source_encoded_length)
+            predicted_output_length = pt.zeros_like(source_encoded_length)
 
         return predicted_output_length
 
@@ -327,79 +327,77 @@ class SockeyeModel(gluon.Block):
 
     def save_parameters(self, fname: str):
         """
-        Saves model parameters to file.
+        Saves model parameters to file. Also see
+        See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
+
         :param fname: Path to save parameters to.
         """
-        super().save_parameters(fname, deduplicate=True)
-        logging.info('Saved params to "%s"', fname)
+        self.apply(layers.interleave_kv)
+        pt.save(self.state_dict(), fname)
+        self.apply(layers.separate_kv)
+        logging.info('Saved params/state_dict to "%s"', fname)
 
     def load_parameters(self,
                         filename: str,
-                        ctx: Union[mx.Context, List[mx.Context]] = None,
+                        device: Optional[pt.device] = None,
                         allow_missing: bool = False,
-                        ignore_extra: bool = False,
-                        cast_dtype: bool = False,
-                        dtype_source: str = 'current'):
-        """Load parameters from file previously saved by `save_parameters`.
-
-        Parameters
-        ----------
-        filename : str
-            Path to parameter file.
-        ctx : Context or list of Context, default cpu()
-            Context(s) to initialize loaded parameters on.
-        allow_missing : bool, default False
-            Whether to silently skip loading parameters not represents in the file.
-        ignore_extra : bool, default False
-            Whether to silently ignore parameters from the file that are not
-            present in this Block.
-        cast_dtype : bool, default False
-            Cast the data type of the ndarray loaded from the checkpoint to the dtype
-            provided by the Parameter if any.
-        dtype_source : str, default 'current'
-            must be in {'current', 'saved'}
-            Only valid if cast_dtype=True, specify the source of the dtype for casting
-            the parameters
-        References
-        ----------
-        `Saving and Loading Gluon Models \
-        <https://mxnet.incubator.apache.org/tutorials/gluon/save_load_params.html>`_
+                        ignore_extra: bool = False):
         """
+        Loads parameters from file previously saved by `save_parameters`.
+        See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
+
+        :param filename: Path to parameter file
+        :param device: Torch device to load parameters to
+        :param allow_missing: Whether to silently skip loading parameters not represents in the file. Default: False.
+        :param ignore_extra: Whether to silently ignore parameters from the file that are not part of this Module.
+                             Default: False.
+        """
+
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                         "This is either not a model directory or the first training "
                                                         "checkpoint has not happened yet." % filename)
-        super().load_parameters(filename, ctx=ctx, allow_missing=allow_missing, ignore_extra=ignore_extra,
-                                cast_dtype=cast_dtype, dtype_source=dtype_source)
-        logger.info('Loaded params from "%s" to "%s"', filename, mx.cpu() if ctx is None else ctx)
+        try:
+            state_dict = pt.load(filename, map_location=device)
+        except _pickle.UnpicklingError as e:
+            logger.error(f"Could not load from '{filename}'. Is this a MXNet parameter file? Please convert first.")
+            raise e
+        missing, unexpected = self.load_state_dict(state_dict, strict=False)
+        if not allow_missing:
+            utils.check_condition(not missing, f"missing keys: {missing}")
+        if not ignore_extra:
+            utils.check_condition(not unexpected, f"extra keys: {unexpected}")
+        # Models are saved with interleaved key-value params. If the current
+        # model is in training mode, separate the loaded params to match the
+        # format used during training.
+        if self.training:
+            self.apply(layers.separate_kv)
+        logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
     def set_parameters(self,
-                       new_params: Dict[str, gluon.Parameter],
+                       new_params: Dict[str, pt.nn.Parameter],
                        allow_missing: bool = True,
                        ignore_extra: bool = False):
         """
-        Update model params on all contexts of the model with new values from a dictionary.
+        Update model params with new values from a dictionary.
 
         :param new_params: Dictionary containing the new parameters.
         :param allow_missing: Whether to skip setting parameters not represented in the dictionary.
         :param ignore_extra: Whether to ignore parameters from new_params that are not present in this model.
         """
-        model_params = self.collect_params()
+        model_params = dict(self.named_parameters())
         if not allow_missing:
-            for k in model_params.keys():
-                assert k in new_params.keys(), "Parameter '%s' is missing in new_params dictionary. " \
-                                               "Set allow_missing=True to ignore missing parameters." % k
-        for k in new_params:
-            assert new_params[k]._data is not None, "Parameter '%s' is not initialized in new_params dictionary." % k
-            if not ignore_extra and k not in model_params:
-                raise ValueError("Parameter '%s' in new_params dictionary is not preset in ParameterDict. "
-                                 "Set ignore_extra=True to ignore." % k)
-            if k in model_params:
-                assert model_params[k]._data is not None, "Parameter '%s' must be initialized before it can be reset " \
-                                                          "using set_parameters." % k
-                assert model_params[k].shape == new_params[k].shape, \
+            for name, _ in model_params.items():
+                assert name in new_params.keys(), "Parameter '%s' is missing in new_params dictionary. " \
+                                                  "Set allow_missing=True to ignore missing parameters." % name
+        for name in new_params:
+            if not ignore_extra and name not in model_params:
+                raise ValueError("Parameter '%s' in new_params dictionary is not present in ParameterDict. "
+                                 "Set ignore_extra=True to ignore." % name)
+            if name in model_params:
+                assert model_params[name].size() == new_params[name].size(), \
                     "Parameter '%s' has shape '%s' in the model but shape '%s' in the new_params dictionary." % \
-                    (k, model_params[k].shape, new_params[k].shape)
-                model_params[k].set_data(new_params[k].data())
+                    (name, model_params[name].size(), new_params[name].size())
+                model_params[name].data[:] = new_params[name].data
 
     @staticmethod
     def save_version(folder: str):
@@ -412,55 +410,34 @@ class SockeyeModel(gluon.Block):
         with open(fname, "w") as out:
             out.write(__version__)
 
-    def _get_embedding_weights(self) -> Tuple[gluon.Parameter, gluon.Parameter, gluon.Parameter]:
+    def _get_embeddings(self) -> Tuple[pt.nn.Embedding, pt.nn.Embedding, Optional[pt.nn.Parameter]]:
         """
-        Returns embeddings for source, target, and output layer.
-        When source and target embeddings are shared, they are created here and passed in to each side,
-        instead of being created in the Embedding constructors.
-
-        :return: Tuple of source, target, and output embedding parameters.
+        Returns embeddings for source, target, and output layer. Handles sharing and weight tying.
         """
         share_embed = C.WEIGHT_TYING_SRC in self.config.weight_tying_type and \
                       C.WEIGHT_TYING_TRG in self.config.weight_tying_type
 
         tie_weights = C.WEIGHT_TYING_SOFTMAX in self.config.weight_tying_type
 
-        source_grad_stype = 'row_sparse' if self.config.config_embed_source.allow_sparse_grad and not tie_weights else 'default'
-        if source_grad_stype == 'row_sparse':
-            logger.warning(
-                "sparse gradient updates for source embeddings not supported yet with MXNet 2.0 & Numpy namespace. "
-                "Using 'default'")
-            source_grad_stype = 'default'
-        source_embed_weight = gluon.Parameter('weight',
-                                              shape=(self.config.config_embed_source.vocab_size,
-                                                     self.config.config_embed_source.num_embed),
-                                              allow_deferred_init=True,
-                                              grad_stype=source_grad_stype)
+        source_grad_sparse = self.config.config_embed_source.allow_sparse_grad and not tie_weights
+        source_embedding = pt.nn.Embedding(self.config.config_embed_source.vocab_size,
+                                           self.config.config_embed_source.num_embed,
+                                           sparse=source_grad_sparse)
 
         if share_embed:
-            target_embed_weight = source_embed_weight
+            target_embedding = source_embedding
         else:
-            target_grad_stype = 'row_sparse' if self.config.config_embed_target.allow_sparse_grad and not tie_weights else 'default'
-            if target_grad_stype == 'row_sparse':
-                logger.warning(
-                    "sparse gradient updates for target embeddings not supported yet with MXNet 2.0 & Numpy namespace. "
-                    "Using 'default'")
-                target_grad_stype = 'default'
-            target_embed_weight = gluon.Parameter('weight',
-                                                  shape=(self.config.config_embed_target.vocab_size,
-                                                         self.config.config_embed_target.num_embed),
-                                                  allow_deferred_init=True,
-                                                  grad_stype=target_grad_stype)
+            target_grad_sparse = self.config.config_embed_target.allow_sparse_grad and not tie_weights
+            target_embedding = pt.nn.Embedding(self.config.config_embed_target.vocab_size,
+                                               self.config.config_embed_target.num_embed,
+                                               sparse=target_grad_sparse)
 
         if tie_weights:
-            output_weight = target_embed_weight
+            output_weight = target_embedding.weight  # type: ignore
         else:
-            output_weight = gluon.Parameter('weight',
-                                            shape=(self.config.config_embed_target.vocab_size,
-                                                   self.config.config_decoder.model_size),
-                                            allow_deferred_init=True)
+            output_weight = None  # will be created when instantiating the OutputLayer
 
-        return source_embed_weight, target_embed_weight, output_weight
+        return source_embedding, target_embedding, output_weight  # type: ignore
 
     @property
     def num_source_factors(self) -> int:
@@ -473,18 +450,12 @@ class SockeyeModel(gluon.Block):
         return self.config.config_data.num_target_factors
 
     @property
-    def target_factor_configs(self) -> List[encoder.FactorConfig]:
+    def target_factor_configs(self) -> List[FactorConfig]:
         """ Returns the factor configs for target factors. """
-        factor_configs = []  # type: List[encoder.FactorConfig]
+        factor_configs = []  # type: List[FactorConfig]
         if self.config.config_embed_target.factor_configs:
             factor_configs = self.config.config_embed_target.factor_configs
         return factor_configs
-
-    @property
-    def factor_output_layers(self) -> List[layers.OutputLayer]:
-        """ Returns the list of factor output layers. """
-        return [getattr(self, self._output_layer_factor_format_string % i) for i, _ in
-                enumerate(self.target_factor_configs, 1)]
 
     @property
     def training_max_observed_len_source(self) -> int:
@@ -526,15 +497,90 @@ class SockeyeModel(gluon.Block):
         return cache_func
 
 
+class _DecodeStep(pt.nn.Module):
+    """
+    Auxiliary module that wraps computation for a single decode step for a SockeyeModel.
+    End-to-end traceable. Return values are put into a flat list to avoid return type constraints
+    for traced modules.
+    """
+
+    def __init__(self,
+                 embedding_target: encoder.Embedding,
+                 decoder: decoder.Decoder,
+                 output_layer: layers.OutputLayer,
+                 factor_output_layers: pt.nn.ModuleList):
+        super().__init__()
+        self.embedding_target = embedding_target
+        self.decoder = decoder
+        self.output_layer = pt.jit.script(output_layer)
+        self.factor_output_layers = factor_output_layers
+        self.has_target_factors = bool(factor_output_layers)
+
+    def forward(self,
+                step_input,
+                states: List[pt.Tensor],
+                vocab_slice_ids: Optional[pt.Tensor] = None) -> List[pt.Tensor]:
+        target_embed = self.embedding_target(step_input.unsqueeze(1))
+        decoder_out, new_states = self.decoder(target_embed, states)
+        decoder_out = decoder_out.squeeze(1)
+
+        # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
+        step_output = self.output_layer(decoder_out, vocab_slice_ids)
+
+        # return values are collected in a flat list due to constraints in mixed return types in traced modules
+        # (can only by tensors, or lists of tensors or dicts of tensors, but no mix of them).
+        outputs = [step_output]
+        if self.has_target_factors:
+            outputs += [fol(decoder_out) for fol in self.factor_output_layers]
+        outputs += new_states
+        return outputs
+
+
+def initialize_parameters(module: pt.nn.Module):
+    """
+    Can be applied to a SockeyeModel (via `model.apply(initialize_parameters)`)
+    to initialize the parameters of a PyTorch SockeyeModel.
+    For reproducibility, set pt.random.manual_seed.
+
+    This implementation follows the default MXNet initialization scheme:
+    - linear/feed-forward weights: Xavier(uniform, avg, magnitude=3.0)
+    - biases: 0.0
+    - layer norm gamma / weight: 1.0
+    - layer norm beta / bias: 0.0
+    - embedding parameters: uniform(-0.07, 0.07) [matches MXNet's default initialization]
+
+    MXNet computes the uniform bounds for Xavier initialization as follows:
+      sqrt(3 / ((fan_in + fan_out) / 2))
+    PyTorch computes the uniform bounds for Xavier initialization as follows:
+      (sqrt(2/(fan_in + fan_out)) * gain) * sqrt(3)
+      where gain is set to 1.0 by default
+    Both are equivalent.
+    For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
+    https://jamesmccaffrey.wordpress.com/2020/11/20/the-gain-parameter-
+    """
+    if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
+        pt.nn.init.xavier_uniform_(module.weight, gain=1)
+        if module.bias is not None:
+            pt.nn.init.zeros_(module.bias)
+    elif isinstance(module, pt.nn.Embedding):
+        pt.nn.init.uniform_(module.weight, -0.07, 0.07)
+    elif isinstance(module, pt.nn.LayerNorm):
+        if module.elementwise_affine:
+            pt.nn.init.ones_(module.weight)
+            pt.nn.init.zeros_(module.bias)
+    elif isinstance(module, layers.LHUC):
+        pt.nn.init.uniform_(module.weight, a=0.1)
+    elif isinstance(module, layers.PositionalEmbeddings):
+        if module.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+            pt.nn.init.xavier_uniform(module.weight, gain=1.0)
+
+
 def load_model(model_folder: str,
-               context: Union[List[mx.context.Context], mx.context.Context] = mx.cpu(),
+               device: pt.device,
                dtype: Optional[str] = None,
                checkpoint: Optional[int] = None,
-               hybridize: bool = True,
                inference_only: bool = False,
                train_decoder_only: bool = False,
-               mc_dropout: bool = False,
-               for_disk_saving: Optional[str] = None,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
                forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
@@ -542,25 +588,20 @@ def load_model(model_folder: str,
     Load a model from model_folder.
 
     :param model_folder: Model folder.
-    :param context: MXNet context to bind modules to.
+    :param device: Torch device to load model to.
     :param checkpoint: Checkpoint to use. If none, uses best checkpoint.
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
-    :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
-    :param mc_dropout: Turn on dropout during inference.
-    :param for_disk_saving: For saving quantized models to disk.
-           None: load as usual and the model will work.
-           int8: The model loaded into RAM will not work, but is suitable for
-               writing to disk in quantized format (including scaling factors).
-           float32: The model loaded into RAM will not work, but is suitable
-               for writing to disk as float32 with precomputed scaling factors.
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :return: List of models, source vocabularies, target vocabularies.
     """
+    assert dtype in (None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8), \
+        f"dtype must be one of {C.DTYPE_FP32}, {C.DTYPE_FP16}, or {C.DTYPE_INT8}"
+
     source_vocabs = vocab.load_source_vocabs(model_folder)
     target_vocabs = vocab.load_target_vocabs(model_folder)
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
@@ -568,92 +609,33 @@ def load_model(model_folder: str,
     utils.check_version(model_version)
     model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
 
-    if inference_only and not mc_dropout:
+    if inference_only:
         logger.info("Disabling dropout layers for performance reasons")
         model_config.disable_dropout()
-
-    if mc_dropout:
-        logger.info("Monte Carlo dropout enabled, inference output will be non-deterministic.")
 
     if checkpoint is None:
         params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    if os.path.exists(params_fname + '.mx'):
-        logger.warning(f"!!!!! Found '{params_fname}.mx' file, indicating that {params_fname} has been converted to "
-                       "PyTorch."
-                       f"Using '{params_fname}.mx' because behavior when loading PyTorch files is undefined.!!!!!\n")
-        params_fname += '.mx'
-
-    if (dtype == C.DTYPE_INT8 or
-        model_config.dtype == C.DTYPE_INT8 or
-        for_disk_saving is not None) and "intgemm_fully_connected" not in dir(npx):
-        # We're going to use int8 but it's not compiled into mxnet.
-        path = os.path.abspath(model_config.intgemm_custom_lib)
-        try:
-            mx.library.load(path)
-        except mx.base.MXNetError:
-            raise NotImplementedError("8-bit int inference requested but intgemm was not compiled into MXNet and a "
-                                      "custom operator library was not found in `%s`.  Compile the custom "
-                                      "operator then set the path using intgemm_custom_lib in the config file." % path)
-
-    # Are we converting the model to 8-bit?
-    quantizing = model_config.dtype != C.DTYPE_INT8 and (dtype == C.DTYPE_INT8 or for_disk_saving is not None)
-    if quantizing:
-        model_config.dtype = C.DTYPE_INT8  # Ensure the scaling factor parameters are created.
-
     model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
-                         mc_dropout=mc_dropout, forward_pass_cache_size=forward_pass_cache_size)
-    model.initialize(ctx=context)
-    if model_config.dtype != C.DTYPE_INT8:
-        # If model_config.dtype is int8, then the above model construction
-        # (which also used model_config) already set everything to the correct
-        # mix of float32 and int8.  Cast would try to make everything int8.
-        model.cast(model_config.dtype)
-
-    if quantizing:
-        logger.info("Model dtype: quantizing from float32 to int8")
-        allow_missing = True  # The scaling factors are missing
-        cast_dtype = True
-        dtype_source = 'saved'
-    elif dtype is None or dtype == model_config.dtype:
-        logger.info("Model dtype: %s" % model_config.dtype)
-        allow_missing = allow_missing
-        cast_dtype = False
-        dtype_source = 'saved'
-    else:
-        logger.info("Model dtype: overridden to %s" % dtype)
-        model.cast(dtype)
-        allow_missing = allow_missing
-        cast_dtype = True
-        dtype_source = 'current'
+                         forward_pass_cache_size=forward_pass_cache_size)
 
     model.load_parameters(filename=params_fname,
-                          ctx=context,
+                          device=device,
                           allow_missing=allow_missing,
-                          ignore_extra=True,  # Scaling factors may be present in float32 models.
-                          cast_dtype=cast_dtype,
-                          dtype_source=dtype_source)
+                          ignore_extra=False)
 
-    params = model.collect_params()
+    model.to(device)
+
     if set_grad_req_null:
-        for param in params.values():
-            param.grad_req = 'null'
+        model.eval()
 
-    if for_disk_saving is not None:
-        # Saving scaling factors and possibly int8 values to disk.
-        if not quantizing:
-            raise RuntimeError("Model is already quantized and for_disk_saving is set.")
-        quantization.convert_weights_disk_format(params, for_disk_saving)
-        model.config.dtype = for_disk_saving
-        # TODO: check for missing parameters somehow (we allowed scaling to be missing)
-    if for_disk_saving is None and model_config.dtype == C.DTYPE_INT8:
-        # Disk format to CPU-dependent format.
-        quantization.convert_weights_cpu_dependent(params)
-
-    if hybridize:
-        model.hybridize(static_alloc=True)
+    if dtype is None or dtype == model_config.dtype:
+        logger.info("Model dtype: %s" % model.dtype)
+    else:
+        model.cast(dtype)
+        logger.info("Model dtype: overridden to %s" % dtype)
 
     utils.check_condition(model.num_source_factors == len(source_vocabs),
                           "Number of loaded source vocabularies (%d) does not match "
@@ -666,29 +648,26 @@ def load_model(model_folder: str,
     return model, source_vocabs, target_vocabs
 
 
-def load_models(context: Union[List[mx.context.Context], mx.context.Context],
+def load_models(device: pt.device,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
                 dtype: Optional[str] = C.DTYPE_FP32,
-                hybridize: bool = True,
                 inference_only: bool = False,
                 train_decoder_only: bool = False,
-                mc_dropout: bool = False,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
-                forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel], List[vocab.Vocab], List[vocab.Vocab]]:
+                forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel],
+                                                           List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Loads a list of models for inference.
 
-    :param context: MXNet context to bind modules to.
+    :param device: PyTorch device.
     :param model_folders: List of model folders to load models from.
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
     :param dtype: Optional data type to use. If None, will be inferred from stored model.
-    :param hybridize: Whether to hybridize the loaded models. Default: true.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
-    :param mc_dropout: Turn on dropout during inference.
     :param allow_missing: Allow missing parameters in the loaded models.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
@@ -707,13 +686,11 @@ def load_models(context: Union[List[mx.context.Context], mx.context.Context],
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
         model, src_vcbs, trg_vcbs = load_model(model_folder,
-                                               context=context,
+                                               device=device,
                                                dtype=dtype,
                                                checkpoint=checkpoint,
-                                               hybridize=hybridize,
                                                inference_only=inference_only,
                                                train_decoder_only=train_decoder_only,
-                                               mc_dropout=mc_dropout,
                                                allow_missing=allow_missing,
                                                set_grad_req_null=set_grad_req_null,
                                                forward_pass_cache_size=forward_pass_cache_size)

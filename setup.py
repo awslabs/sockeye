@@ -74,21 +74,16 @@ else:
 
 
 entry_points = {
-    # TODO: deprecate mxnet CLIs
     'console_scripts': [
         'sockeye-average = sockeye.average:main',
         'sockeye-embeddings = sockeye.embeddings:main',
         'sockeye-evaluate = sockeye.evaluate:main',
         'sockeye-lexicon = sockeye.lexicon:main',
-        'sockeye-prepare-data = sockeye.prepare_data_pt:main',
-        'sockeye-prepare-data-mx = sockeye.prepare_data:main',
+        'sockeye-prepare-data = sockeye.prepare_data:main',
         'sockeye-quantize = sockeye.quantize:main',
-        'sockeye-score = sockeye.score_pt:main',
-        'sockeye-score-mx = sockeye.score:main',
-        'sockeye-train = sockeye.train_pt:main',
-        'sockeye-train-mx = sockeye.train:main',
-        'sockeye-translate = sockeye.translate_pt:main',
-        'sockeye-translate-mx = sockeye.translate:main',
+        'sockeye-score = sockeye.score:main',
+        'sockeye-train = sockeye.train:main',
+        'sockeye-translate = sockeye.translate:main',
         'sockeye-vocab = sockeye.vocab:main',
         'sockeye-rerank = sockeye.rerank:main',
     ],

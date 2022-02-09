@@ -1,4 +1,4 @@
-# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,15 +11,15 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from mxnet import gluon, npx, np
+import torch as pt
 
+import sockeye.layers
+from sockeye import constants as C
 from . import config
-from . import constants as C
-from . import layers
-from . import quantization
 
 
 @dataclass
@@ -43,25 +43,22 @@ class TransformerConfig(config.Config):
     use_glu: bool = False
 
 
-class TransformerEncoderBlock(gluon.HybridBlock):
+class TransformerEncoderBlock(pt.nn.Module):
     """
     A transformer encoder block consists self-attention and a feed-forward layer with pre/post process blocks
     in between.
     """
 
-    def __init__(self,
-                 config: TransformerConfig,
-                 dtype: str) -> None:
+    def __init__(self, config: TransformerConfig, inference_only: bool = False) -> None:
         super().__init__()
 
         self.pre_self_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                           dropout=config.dropout_prepost,
                                                           num_hidden=config.model_size)
-        self.self_attention = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                            heads=config.attention_heads,
-                                                            depth_out=config.model_size,
-                                                            dropout=config.dropout_attention,
-                                                            dtype=dtype)
+        self.self_attention = sockeye.layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                                    heads=config.attention_heads,
+                                                                    depth_out=config.model_size,
+                                                                    dropout=config.dropout_attention)
         self.post_self_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                            dropout=config.dropout_prepost,
                                                            num_hidden=config.model_size)
@@ -73,22 +70,31 @@ class TransformerEncoderBlock(gluon.HybridBlock):
                                          num_model=config.model_size,
                                          act_type=config.act_type,
                                          dropout=config.dropout_act,
-                                         dtype=dtype,
-                                         use_glu=config.use_glu)
+                                         use_glu=config.use_glu,
+                                         inference_only=inference_only)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                dropout=config.dropout_prepost,
                                                num_hidden=config.model_size)
         self.lhuc = None
         if config.use_lhuc:
-            self.lhuc = layers.LHUC(config.model_size)
+            self.lhuc = sockeye.layers.LHUC(config.model_size)
 
-    def forward(self, data: np.ndarray, lengths: np.ndarray) -> np.ndarray:
+    def forward(self, data: pt.Tensor, att_mask: pt.Tensor = None) -> pt.Tensor:
+        """
+        :param data: Input tensor of shape (length, batch_size, hidden)
+        :param att_mask: Optional data length mask of shape (batch_size * self.heads, 1, length)
+                         to mask self-attention scores. True for padding positions.
+        """
         # self-attention
-        data_self_att, _ = self.self_attention(self.pre_self_attention(data, None), None, lengths, None)
+        data_self_att, _ = self.self_attention(inputs=self.pre_self_attention(data),
+                                               previous_states=None,
+                                               mask=att_mask,
+                                               bias=None)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward
-        data_ff = self.ff(self.pre_ff(data, None))
+        data_ff = self.ff(self.pre_ff(data))
+
         data = self.post_ff(data_ff, data)
 
         if self.lhuc is not None:
@@ -97,29 +103,25 @@ class TransformerEncoderBlock(gluon.HybridBlock):
         return data
 
 
-class TransformerDecoderBlock(gluon.HybridBlock):
+class TransformerDecoderBlock(pt.nn.Module):
     """
     A transformer decoder block consists of an autoregressive attention block, encoder attention,
     and a feed-forward layer with pre/post process blocks in between.
     """
 
-    def __init__(self,
-                 config: TransformerConfig,
-                 inference_only: bool,
-                 dtype: str) -> None:
+    def __init__(self, config: TransformerConfig, inference_only: bool) -> None:
         super().__init__()
         self.decoder_type = config.decoder_type
 
+        self.autoregr_layer = None
         if self.decoder_type == C.TRANSFORMER_TYPE:
-            self.autoregr_layer = layers.MultiHeadSelfAttention(depth_att=config.model_size,
-                                                                heads=config.attention_heads,
-                                                                depth_out=config.model_size,
-                                                                dropout=config.dropout_attention,
-                                                                dtype=dtype)
+            self.autoregr_layer = sockeye.layers.MultiHeadSelfAttention(depth_att=config.model_size,
+                                                                        heads=config.attention_heads,
+                                                                        depth_out=config.model_size,
+                                                                        dropout=config.dropout_attention)
         elif self.decoder_type == C.SSRU_TRANSFORMER:
-            self.autoregr_layer = layers.SSRU(model_size=config.model_size,
-                                              inference_only=inference_only,
-                                              dtype=dtype)
+            self.autoregr_layer = sockeye.layers.SSRU(model_size=config.model_size,  # type: ignore
+                                                      inference_only=inference_only)  # type: ignore
         else:
             raise ValueError("Invalid decoder type.")
 
@@ -134,12 +136,11 @@ class TransformerDecoderBlock(gluon.HybridBlock):
         self.pre_enc_attention = TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                          dropout=config.dropout_prepost,
                                                          num_hidden=config.model_size)
-        self.enc_attention = layers.MultiHeadAttention(depth_att=config.model_size,
-                                                       heads=config.attention_heads,
-                                                       depth_out=config.model_size,
-                                                       dropout=config.dropout_attention,
-                                                       depth_key_value=config.depth_key_value,
-                                                       dtype=dtype)
+        self.enc_attention = sockeye.layers.MultiHeadAttention(depth_att=config.model_size,
+                                                               heads=config.attention_heads,
+                                                               depth_out=config.model_size,
+                                                               dropout=config.dropout_attention,
+                                                               depth_key_value=config.depth_key_value)
         self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                           dropout=config.dropout_prepost,
                                                           num_hidden=config.model_size)
@@ -151,15 +152,15 @@ class TransformerDecoderBlock(gluon.HybridBlock):
                                          num_model=config.model_size,
                                          act_type=config.act_type,
                                          dropout=config.dropout_act,
-                                         dtype=dtype,
-                                         use_glu=config.use_glu)
+                                         use_glu=config.use_glu,
+                                         inference_only=inference_only)
         self.post_ff = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                dropout=config.dropout_prepost,
                                                num_hidden=config.model_size)
 
         self.lhuc = None
         if config.use_lhuc:
-            self.lhuc = layers.LHUC(config.model_size)
+            self.lhuc = sockeye.layers.LHUC(config.model_size)
 
     @property
     def num_state_tensors(self) -> int:
@@ -179,30 +180,28 @@ class TransformerDecoderBlock(gluon.HybridBlock):
         return self.autoregr_layer.get_state_shape(batch_size)
 
     def forward(self,
-                target: np.ndarray,
-                target_bias: np.ndarray,
-                source: np.ndarray,
-                source_att_lengths: np.ndarray,
-                autoregr_states: np.ndarray,
-                enc_att_kv: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
-        target_autoregr, *new_autoregr_states = self.autoregr_layer(self.pre_autoregr_layer(target, None),
-                                                                    autoregr_states,
-                                                                    None,
-                                                                    target_bias)
+                target: pt.Tensor,
+                target_mask: Optional[pt.Tensor],
+                source: pt.Tensor,
+                source_mask: Optional[pt.Tensor],
+                autoregr_states: Optional[pt.Tensor],
+                enc_att_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
+        target_autoregr, *new_autoregr_states = self.autoregr_layer(inputs=self.pre_autoregr_layer(target),
+                                                                    previous_states=autoregr_states,
+                                                                    mask=target_mask)
 
         target = self.post_autoregr_layer(target_autoregr, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(self.pre_enc_attention(target, None),
-                                            source,
-                                            source_att_lengths,
-                                            None,
-                                            enc_att_kv)
+        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target),
+                                            key_values=source,
+                                            mask=source_mask,
+                                            projected_memory_kv=enc_att_kv)
 
         target = self.post_enc_attention(target_enc_att, target)
 
         # feed-forward
-        target_ff = self.ff(self.pre_ff(target, None))
+        target_ff = self.ff(self.pre_ff(target))
         target = self.post_ff(target_ff, target)
 
         if self.lhuc:
@@ -211,7 +210,7 @@ class TransformerDecoderBlock(gluon.HybridBlock):
         return target, new_autoregr_states
 
 
-class TransformerProcessBlock(gluon.HybridBlock):
+class TransformerProcessBlock(pt.nn.Module):
     """
     Block to perform pre/post processing on layer inputs.
     The processing steps are determined by the sequence argument, which can contain one of the three operations:
@@ -226,12 +225,16 @@ class TransformerProcessBlock(gluon.HybridBlock):
                  num_hidden: int = 0) -> None:
         super().__init__()
         self.sequence = sequence
-        self.dropout = dropout
         self.layer_norm = None
         if 'n' in sequence:
-            self.layer_norm = gluon.nn.LayerNorm(axis=-1, in_channels=num_hidden, epsilon=1e-06)
+            # do not use Apex' FusedLayerNorm because of
+            # https://github.com/huggingface/transformers/issues/9377
+            self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
+        self.dropout = dropout
+        if dropout > 0.0:
+            self.drop = pt.nn.Dropout(p=dropout)
 
-    def forward(self, data: np.ndarray, prev: Optional[np.ndarray]) -> np.ndarray:
+    def forward(self, data: pt.Tensor, prev: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
         Apply processing sequence to data with optional previous input.
 
@@ -255,64 +258,48 @@ class TransformerProcessBlock(gluon.HybridBlock):
 
             elif step == "d":
                 if self.dropout > 0.0:
-                    data = npx.dropout(data, p=self.dropout)
+                    data = self.drop(data)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
         return data
 
 
-class TransformerFeedForward(gluon.HybridBlock):
-    """
-    Position-wise feed-forward block with activation.
-    """
+class TransformerFeedForward(pt.nn.Module):
 
     def __init__(self,
                  num_hidden: int,
                  num_model: int,
                  act_type: str,
                  dropout: float,
-                 dtype: str,
-                 use_glu: bool = False) -> None:
+                 use_glu: bool = False,
+                 inference_only: bool = False) -> None:
         super().__init__()
         self.dropout = dropout
         self.use_glu = use_glu
-        self.ff1 = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False, dtype=dtype)
-        self.act = layers.get_activation(act_type)
-        if use_glu:
-            self.linear = quantization.QuantizableDense(in_units=num_model, units=num_hidden, flatten=False,
-                                                        dtype=dtype)
-        self.ff2 = quantization.QuantizableDense(in_units=num_hidden, units=num_model, flatten=False, dtype=dtype)
+        self.ff1 = pt.nn.Linear(in_features=num_model, out_features=num_hidden)
+        self.act = sockeye.layers.get_activation(act_type, inplace=inference_only)
+        if self.use_glu:
+            self.linear = pt.nn.Linear(in_features=num_model, out_features=num_hidden)
+        if self.dropout > 0.0:
+            self.drop = pt.nn.Dropout(p=self.dropout, inplace=inference_only)
+        self.ff2 = pt.nn.Linear(in_features=num_hidden, out_features=num_model)
 
-    def forward(self, x: np.ndarray) -> np.ndarray:
+    def forward(self, x):
         h = self.ff1(x)
         h = self.act(h)
         if self.use_glu:
             h = h * self.linear(x)
         if self.dropout > 0.0:
-            h = npx.dropout(h, p=self.dropout)
+            h = self.drop(h)
         y = self.ff2(h)
         return y
 
 
-class AutoRegressiveBias(gluon.HybridBlock):
-    def __init__(self) -> None:
-        super().__init__()
-        self._dtype = 'float32'
+class AutoRegressiveMask(pt.nn.Module):
 
-    def cast(self, dtype):
-        self._dtype = dtype
-        super().cast(dtype)
-
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        # Shape: (length, 1)
-        length_array = npx.arange_like(x, axis=1)
-        # matrix with lower triangle and main diagonal set to 0, upper triangle set to 1
-        # Shape: (length, length)
-        bias = npx.broadcast_greater(np.expand_dims(length_array, axis=0),
-                                     np.expand_dims(length_array, axis=1))
-        bias = bias * -C.LARGE_VALUES[self._dtype]
-        bias = np.expand_dims(bias, axis=0)
-        return npx.stop_gradient(bias)
-
-
+    def forward(self, x: pt.Tensor) -> pt.Tensor:
+        """ Input tensor with length on dimension 1 """
+        mask = pt.full((x.shape[1], x.shape[1]), fill_value=1, device=x.device, dtype=pt.bool)
+        mask = pt.triu(mask, diagonal=1)
+        return mask.detach()  # Shape: (len, len)

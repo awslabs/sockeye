@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -13,8 +13,8 @@
 
 import torch as pt
 
-import sockeye.scoring_pt
-from sockeye.beam_search_pt import CandidateScorer
+import sockeye.scoring
+from sockeye.beam_search import CandidateScorer
 
 
 def test_batch_scorer():
@@ -27,8 +27,8 @@ def test_batch_scorer():
     length_ratio = pt.ones(batch, )
     source_length = pt.randint(0, seq, (batch,)).to(pt.float32)
     target_length = source_length
-    b = sockeye.scoring_pt.BatchScorer(scorer=CandidateScorer(1.0, 0.0, 0.0),
-                                       score_type='neglogprob',
-                                       constant_length_ratio=None)
+    b = sockeye.scoring.BatchScorer(scorer=CandidateScorer(1.0, 0.0, 0.0),
+                                    score_type='neglogprob',
+                                    constant_length_ratio=None)
     scores = b(logits, label, length_ratio, source_length, target_length)
     assert scores.shape == (batch, 1)

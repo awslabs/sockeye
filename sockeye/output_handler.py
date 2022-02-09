@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -19,7 +19,7 @@ from typing import Optional
 
 import sockeye.constants as C
 from sockeye.utils import smart_open
-from . import inference_pt
+from . import inference
 
 
 def get_output_handler(output_type: str,
@@ -57,8 +57,8 @@ class OutputHandler(ABC):
 
     @abstractmethod
     def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -87,8 +87,8 @@ class StringOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -113,8 +113,8 @@ class StringWithScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -138,8 +138,8 @@ class ScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -167,8 +167,8 @@ class PairWithScoreOutputHandler(OutputHandler):
         self.stream = stream
 
     def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -189,8 +189,8 @@ class BenchmarkOutputHandler(StringOutputHandler):
     """
 
     def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.
@@ -214,12 +214,13 @@ class JSONOutputHandler(OutputHandler):
     Output single-line JSON objects.
     Carries over extra fields from the input.
     """
+
     def __init__(self, stream) -> None:
         self.stream = stream
 
     def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
         Outputs a JSON object of the fields in the `TranslatorOutput` object.
@@ -236,12 +237,13 @@ class FactoredStringOutputHandler(OutputHandler):
     Returns a factored string if the model produces target factors. If there are no target factors the output
     is equivalent to StringOutputHandler
     """
+
     def __init__(self, stream):
         self.stream = stream
 
     def handle(self,
-               t_input: inference_pt.TranslatorInput,
-               t_output: inference_pt.TranslatorOutput,
+               t_input: inference.TranslatorInput,
+               t_output: inference.TranslatorOutput,
                t_walltime: float = 0.):
         """
         :param t_input: Translator input.

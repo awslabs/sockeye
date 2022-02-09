@@ -27,7 +27,7 @@ import sacrebleu
 from sockeye_contrib import rouge
 from . import arguments
 from . import constants as C
-from . import data_io_pt
+from . import data_io
 from . import utils
 from .log import setup_main_logger, log_sockeye_version
 
@@ -132,7 +132,7 @@ def main():
     logger.info("Command: %s", " ".join(sys.argv))
     logger.info("Arguments: %s", args)
 
-    references = [' '.join(e) for e in data_io_pt.read_content(args.references)]
+    references = [' '.join(e) for e in data_io.read_content(args.references)]
     all_hypotheses = [[h.strip() for h in hypotheses] for hypotheses in args.hypotheses]
     if not args.not_strict:
         for hypotheses in all_hypotheses:

@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,15 +11,12 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-"""
-Functions to generate loss blocks for sequence-to-sequence models.
-"""
 import logging
 import math
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Tuple
 
-from mxnet import gluon, np, npx
+import torch as pt
 
 from . import constants as C
 from . import utils
@@ -27,7 +24,7 @@ from . import utils
 logger = logging.getLogger(__name__)
 
 
-class Loss(gluon.HybridBlock):
+class Loss(pt.nn.Module):
     """
     Generic Loss interface.
     A loss has a name, a configuration, and stores information about the output and label it requires from the model(s),
@@ -61,7 +58,8 @@ class Loss(gluon.HybridBlock):
                               "label '%s' not found. Loss requires this label key" % self.output_name)
         output = outputs[self.output_name]
         label = labels[self.label_name]
-        return super().__call__(output.astype(label, copy=False), label)
+
+        return super().__call__(output, label)
 
     @abstractmethod
     def create_metric(self) -> 'LossMetric':
@@ -94,6 +92,7 @@ class Loss(gluon.HybridBlock):
 
 
 class LossMetric(ABC):
+
     def __init__(self, name: str, short_name: Optional[str] = None, prefix: str = '') -> None:
         self._name = prefix + name
         self._short_name = prefix + short_name if short_name else self._name
@@ -126,7 +125,7 @@ class LossMetric(ABC):
         self._num_inst = 0.0
 
 
-class CrossEntropyLossWithoutSoftmaxOutput(Loss):
+class CrossEntropyLoss(Loss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
     Uses an efficient implementation for label smoothing and avoids the obscure SoftmaxOutput op.
@@ -140,42 +139,84 @@ class CrossEntropyLossWithoutSoftmaxOutput(Loss):
                  output_name: str = C.LOGITS_NAME,
                  label_name: str = C.TARGET_LABEL_NAME,
                  ignore_label: int = C.PAD_ID,
-                 num_labels: int = 0,
-                 metric_prefix: str = '') -> None:  # this is needed for label smoothing
+                 metric_prefix: str = '',
+                 label_smoothing_impl: str = 'mxnet') -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name,
                          weight=weight, metric_prefix=metric_prefix)
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
         self._dtype = dtype
-        self._num_labels = float(num_labels)
+        self._reduction = 'mean'  # TODO: consider sum reduction and normalization outside of loss for reporting
+        if label_smoothing == 0 or label_smoothing_impl == 'torch':
+            self._ce_impl = self._torch_cross_entropy_loss
+        elif label_smoothing > 0.0 and label_smoothing_impl == 'mxnet':
+            self._ce_impl = self._smoothed_loss_as_in_mxnet
+        elif label_smoothing > 0.0 and label_smoothing_impl == 'fairseq':
+            self._ce_impl = self._smoothed_loss_as_in_fairseq
+        else:
+            raise ValueError("unknown label_smoothing impl. choose from mxnet, fairseq, or torch.")
 
-    def forward(self, logits: np.ndarray, labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        pred = npx.log_softmax(logits, axis=-1)
-
-        # (batch, len)
-        neg_log_likelihood = - npx.pick(pred,  # pylint: disable=invalid-unary-operand-type
-                                        labels, axis=-1, keepdims=False)
-
-        # label smoothing as in
-        # https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4
-        if self._alpha > 0:
-            all_scores = np.sum(pred, axis=-1)
-            neg_log_likelihood = (1 - self._alpha) * neg_log_likelihood - self._alpha / self._num_labels * all_scores
-
+    def _smoothed_loss_as_in_mxnet(self, logits, labels):
+        """
+        Computes label-smoothed cross-entropy loss just like sockeye.loss.CrossEntropyLossWithoutSoftmaxOutput()
+        Notable details:
+        - smoothing with 1/vocab_size, not 1/(vocab_size-1) as in fairseq
+        - form taken from https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4
+        """
+        pred = pt.log_softmax(logits, dim=-1)
+        nll = -pred.gather(dim=-1, index=labels.unsqueeze(-1).long()).squeeze(-1)
+        all_scores = pred.sum(dim=-1)
         # (batch, len,)
-        valid_mask = labels != self.ignore_label
+        valid_mask = labels.not_equal(self.ignore_label)
+        pad_mask = ~valid_mask
+        nll.masked_fill_(pad_mask, 0.0)
+        all_scores.masked_fill_(pad_mask, 0.0)
 
-        # (batch, len)
-        loss = neg_log_likelihood * valid_mask
+        nll = (1 - self._alpha) * nll - self._alpha / logits.size(-1) * all_scores
+        num_valid = valid_mask.sum()
+        ce = nll.sum() * self.weight / num_valid
+        return ce
 
-        # (1,)
-        num_valid = np.sum(valid_mask)
+    def _smoothed_loss_as_in_fairseq(self, logits, labels):
+        """
+        Computes smoothed NLL as in fairseq, see
+        # https://github.com/pytorch/fairseq/blob/db0175a882e8ae0f30d89b5a610373dbe032d528/fairseq/criterions/label_smoothed_cross_entropy.py#L33
+        """
+        pred = pt.log_softmax(logits, dim=-1)
+        if labels.dim() == logits.dim() - 1:
+            labels = labels.unsqueeze(-1)
+        nll = -pred.gather(dim=-1, index=labels.long())
+        smooth_loss = pred.sum(dim=-1, keepdim=True)
 
-        # (1,)
-        ce = np.sum(loss) * self.weight
+        pad_mask = labels.eq(self.ignore_label)
+        nll.masked_fill_(pad_mask, 0.0)
+        smooth_loss.masked_fill_(pad_mask, 0.0)
 
-        # we need to divide by num_valid here to backpropagate a 'valid' normalized loss value like in SoftmaxOutput.
-        return ce / num_valid, np.ones((1,))
+        nll = nll.sum()
+        smooth_loss = smooth_loss.sum()
+
+        alpha_i = self._alpha / (logits.size(-1) - 1)
+        nll = (1.0 - self._alpha - alpha_i) * nll - alpha_i * smooth_loss
+
+        num_valid = (~pad_mask).sum()
+        ce = nll.sum() * self.weight / num_valid
+        return ce
+
+    def _torch_cross_entropy_loss(self, logits, labels):
+        logits = logits.view(-1, logits.size()[-1])
+        # Reshape due to: view size is not compatible with input tensor's size and stride
+        # (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
+        labels = labels.reshape(-1)
+        _kwargs = {'weight': None, 'ignore_index': self.ignore_label, 'reduction': self._reduction}
+        if self._alpha > 0.0:
+            _kwargs['label_smoothing'] = self._alpha
+        ce = pt.nn.functional.cross_entropy(logits, labels.long(), **_kwargs)
+        ce *= self.weight
+        return ce
+
+    def forward(self, logits: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+        ce = self._ce_impl(logits, labels)
+        return ce, pt.ones(1, device=ce.device)
 
     def create_metric(self) -> 'LossMetric':
         """
@@ -205,13 +246,13 @@ class PoissonLoss(Loss):
     """
 
     def __init__(self,
-                 name: str = C.LENRATIO_NAME + "_" + C.LINK_POISSON,
+                 name: str = f'{C.LENRATIO_NAME}_{C.LINK_POISSON}',
                  weight: float = 1.0,
                  output_name: str = C.LENRATIO_NAME,
                  label_name: str = C.LENRATIO_LABEL_NAME) -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
 
-    def forward(self, length_predictions, labels):
+    def forward(self, length_predictions: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         """
         Returns Poisson loss and output given data and expected integers as labels.
 
@@ -220,10 +261,10 @@ class PoissonLoss(Loss):
         :return: Poisson loss of length predictions of the batch, and number of samples (batch size).
         """
         # (batch_size,)
-        loss = length_predictions - labels * np.log(np.maximum(1e-10, length_predictions))
+        loss = length_predictions - labels * pt.log(pt.clamp(length_predictions, min=1e-10))
         # (1,)
-        loss = np.sum(loss * self.weight)
-        num_samples = np.sum(np.ones_like(length_predictions))
+        loss = (loss * self.weight).sum()
+        num_samples = pt.ones_like(length_predictions).sum()
         return loss, num_samples
 
     def create_metric(self) -> 'LossMetric':
@@ -243,7 +284,7 @@ class MSELoss(Loss):
                  label_name: str = C.LENRATIO_LABEL_NAME) -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
 
-    def forward(self, length_predictions, labels):
+    def forward(self, length_predictions: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         """
         Returns MSE loss.
 
@@ -252,11 +293,12 @@ class MSELoss(Loss):
         :return: MSE loss of length predictions of the batch.
         """
         # (batch_size,)
-        loss = (self.weight / 2) * np.square(length_predictions - labels)
+        loss = (self.weight / 2) * pt.square(length_predictions - labels)
         # (1,)
-        loss = np.sum(loss)
-        num_samples = np.sum(np.ones_like(length_predictions))
+        loss = loss.sum()
+        num_samples = pt.ones_like(length_predictions).sum()
         return loss, num_samples
 
     def create_metric(self) -> 'LossMetric':
         return LossMetric(name=C.LENRATIO_MSE)
+

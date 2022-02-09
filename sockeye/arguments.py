@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -527,31 +527,12 @@ def add_device_args(params):
                                default=0,
                                help='GPU to use. 0 translates to "cuda:0", etc. When running in distributed mode '
                                     '(--dist), each process\'s device is set automatically. Default: %(default)s.')
-    # TODO(migration): Remove after removing MXNet code
-    device_params.add_argument('--device-ids', default=[-1],
-                               help='List or number of GPUs ids to use. Default: %(default)s. '
-                                    'Use negative numbers to automatically acquire a certain number of GPUs, e.g. -5 '
-                                    'will find 5 free GPUs. '
-                                    'Use positive numbers to acquire a specific GPU id on this host. '
-                                    '(Note that automatic acquisition of GPUs assumes that all GPU processes on '
-                                    'this host are using automatic sockeye GPU acquisition).',
-                               nargs='+', type=int)
     device_params.add_argument('--use-cpu',
                                action='store_true',
                                help='Use CPU device instead of GPU.')
     device_params.add_argument('--env',
                                help='List of environment variables to be set before importing PyTorch. Separated by '
                                     '",", e.g. --env=OMP_NUM_THREADS=1,PYTORCH_JIT=0 etc.')
-    device_params.add_argument('--disable-device-locking',
-                               action='store_true',
-                               help='Just use the specified device ids without locking.')
-    device_params.add_argument('--lock-dir',
-                               default="/tmp",
-                               help='When acquiring a GPU we do file based locking so that only one Sockeye process '
-                                    'can run on the a GPU. This is the folder in which we store the file '
-                                    'locks. For locking to work correctly it is assumed all processes use the same '
-                                    'lock directory. The only requirement for the directory are file '
-                                    'write permissions.')
 
 
 def add_vocab_args(params):
@@ -762,6 +743,7 @@ def add_model_parameters(params):
                                    'PyTorch AMP with some additional risk and requires installing Apex: '
                                    'https://github.com/NVIDIA/apex')
 
+
 def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',
                         type=int_greater_or_equal(1),
@@ -790,24 +772,12 @@ def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_T
                              'simulate large batches (ex: batch_size 2560 with update_interval 4 gives effective batch '
                              'size 10240). Default: %(default)s.')
 
-# TODO(migration): Remove after removing MXNet code
-def add_hybridization_arg(params):
-    params.add_argument('--no-hybridization',
-                        action='store_true',
-                        help='Turn off hybridization. Hybridization builds a static computation graph and computations will therefore be faster. '
-                             'The downside is that one can not set breakpoints to inspect intermediate results. Default: %(default)s.')
-
 
 def add_training_args(params):
     train_params = params.add_argument_group("Training parameters")
 
     add_batch_args(train_params)
 
-    # TODO(migration): Update after removing MXNet code
-    train_params.add_argument('--loss',
-                              default=C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT,
-                              choices=[C.CROSS_ENTROPY, C.CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT],
-                              help='Loss to optimize. Default: %(default)s.')
     train_params.add_argument('--label-smoothing',
                               default=0.1,
                               type=float,
@@ -926,11 +896,6 @@ def add_training_args(params):
                               default=C.OPTIMIZER_ADAM,
                               choices=C.OPTIMIZERS,
                               help='SGD update rule. Default: %(default)s.')
-    # TODO(migration): Remove after removing MXNet code
-    train_params.add_argument('--optimizer-params',
-                              type=simple_dict(),
-                              default=None,
-                              help='Additional optimizer params as dictionary. Format: key1:value1,key2:value2,...')
     train_params.add_argument('--optimizer-betas',
                               type=multiple_values(2, data_type=float),
                               default=(0.9, 0.999),
@@ -940,14 +905,6 @@ def add_training_args(params):
                               default=1e-08,
                               help='Optimizer epsilon. Default: %(default)s.')
 
-    # TODO(migration): Remove after removing MXNet code
-    train_params.add_argument('--horovod',
-                              action='store_true',
-                              help='Use Horovod/MPI for distributed training (Sergeev and Del Balso 2018, '
-                                   'arxiv.org/abs/1802.05799). When using this option, run Sockeye with `horovodrun '
-                                   '-np X python3 -m sockeye.train` where X is the number of processes. Increasing '
-                                   'the number of processes multiplies the effective batch size (ex: batch_size 2560 '
-                                   'with `-np 4` gives effective batch size 10240).')
     train_params.add_argument('--dist',
                               action='store_true',
                               help='Run in distributed training mode. When using this option, launch training with '
@@ -955,39 +912,6 @@ def add_training_args(params):
                                    'multiplies the effective batch size (ex: batch_size 2560 with `--nproc_per_node 4` '
                                    'gives effective batch size 10240).')
 
-    # TODO(migration): Remove after removing MXNet code
-    train_params.add_argument("--kvstore",
-                              type=str,
-                              default=C.KVSTORE_DEVICE,
-                              choices=C.KVSTORE_TYPES,
-                              help="The MXNet kvstore to use. 'device' is recommended for single process training. "
-                                   "Use any of 'dist_sync', 'dist_device_sync' and 'dist_async' for distributed "
-                                   "training. Default: %(default)s.")
-
-    # TODO(migration): Remove after removing MXNet code
-    train_params.add_argument('--weight-init',
-                              type=str,
-                              default=C.INIT_XAVIER,
-                              choices=C.INIT_TYPES,
-                              help='Type of base weight initialization. Default: %(default)s.')
-    # TODO(migration): Remove after removing MXNet code
-    train_params.add_argument('--weight-init-scale',
-                              type=float,
-                              default=3.0,
-                              help='Weight initialization scale. Applies to uniform (scale) and xavier (magnitude). '
-                                   'Default: %(default)s.')
-    # TODO(migration): Remove after removing MXNet code
-    train_params.add_argument('--weight-init-xavier-factor-type',
-                              type=str,
-                              default=C.INIT_XAVIER_FACTOR_TYPE_AVG,
-                              choices=C.INIT_XAVIER_FACTOR_TYPES,
-                              help='Xavier factor type. Default: %(default)s.')
-    # TODO(migration): Remove after removing MXNet code
-    train_params.add_argument('--weight-init-xavier-rand-type',
-                              type=str,
-                              default=C.RAND_TYPE_UNIFORM,
-                              choices=[C.RAND_TYPE_UNIFORM, C.RAND_TYPE_GAUSSIAN],
-                              help='Xavier random number generator type. Default: %(default)s.')
     train_params.add_argument('--initial-learning-rate',
                               type=float,
                               default=0.0002,
@@ -1036,11 +960,11 @@ def add_training_args(params):
                                    "to 100%% of the initial learning rate. Default: %(default)s.")
 
     train_params.add_argument('--fixed-param-strategy',
-                               default=None,
-                               choices=C.FIXED_PARAM_STRATEGY_CHOICES,
-                               help="Fix various parameters during training using a named strategy. The strategy "
-                                    "name indicates which parameters will be fixed (Wuebker et al., 2018). "
-                                    "Default: %(default)s.")
+                              default=None,
+                              choices=C.FIXED_PARAM_STRATEGY_CHOICES,
+                              help="Fix various parameters during training using a named strategy. The strategy "
+                                   "name indicates which parameters will be fixed (Wuebker et al., 2018). "
+                                   "Default: %(default)s.")
     train_params.add_argument('--fixed-param-names',
                               default=[],
                               nargs='*',
@@ -1051,14 +975,6 @@ def add_training_args(params):
                               type=int,
                               help='x>0: decode x sampled sentences from validation data and '
                                    'compute evaluation metrics. x==-1: use full validation data. Default: %(default)s.')
-
-    # TODO(migration): Remove after removing MXNet code
-    train_params.add_argument('--decode-and-evaluate-device-id',
-                              default=None,
-                              type=int,
-                              help='Separate device for decoding validation data. '
-                                   'Use a negative number to automatically acquire a GPU. '
-                                   'Use a positive number to acquire a specific GPU. Default: %(default)s.')
 
     train_params.add_argument(C.TRAIN_ARGS_STOP_ON_DECODER_FAILURE,
                               action="store_true",
@@ -1114,14 +1030,12 @@ def add_train_cli_args(params):
     add_training_args(params)
     add_device_args(params)
     add_logging_args(params)
-    add_hybridization_arg(params)
 
 
 def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
-    add_hybridization_arg(params)
 
 
 def add_score_cli_args(params):
@@ -1129,7 +1043,6 @@ def add_score_cli_args(params):
     add_vocab_args(params)
     add_device_args(params)
     add_batch_args(params, default_batch_size=56, default_batch_type=C.BATCH_TYPE_SENTENCE)
-    add_hybridization_arg(params)
 
     params = params.add_argument_group("Scoring parameters")
 
@@ -1245,17 +1158,6 @@ def add_inference_args(params):
                                     ' Default: %d without batching '
                                     'and %d * batch_size with batching.' % (C.CHUNK_SIZE_NO_BATCHING,
                                                                             C.CHUNK_SIZE_PER_BATCH_SEGMENT))
-    decode_params.add_argument('--mc-dropout',
-                               default=False,
-                               action='store_true',
-                               help='Turn on dropout during inference (Monte Carlo dropout). '
-                                    'This will make translations non-deterministic and might slow '
-                                    'down translation speed.')
-    decode_params.add_argument('--softmax-temperature',
-                               type=float,
-                               default=None,
-                               help='Controls peakiness of model predictions. Values < 1.0 produce '
-                                    'peaked predictions, values > 1.0 produce smoothed distributions.')
     decode_params.add_argument('--sample',
                                type=int_greater_or_equal(0),
                                default=None,
@@ -1307,12 +1209,6 @@ def add_inference_args(params):
                                default=None,
                                help="Specify the number of translations to load for each source word from the lexicon "
                                     "given with --restrict-lexicon. Default: Load all entries from the lexicon.")
-    # TODO(migration): remove once MXNet is removed
-    decode_params.add_argument('--avoid-list',
-                               type=str,
-                               default=None,
-                               help="Specify a file containing phrases (pre-processed, one per line) to block "
-                                    "from the output. Default: %(default)s.")
     decode_params.add_argument('--strip-unknown-words',
                                action='store_true',
                                default=False,

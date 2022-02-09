@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -44,13 +44,7 @@ def average(param_paths: Iterable[str]) -> Dict[str, torch.Tensor]:
     all_params = []  # type: List[Dict[str, torch.Tensor]]
     for path in param_paths:
         logger.info("Loading parameters from '%s'", path)
-        try:
-            params = torch.load(path, map_location=torch.device('cpu'))
-        except:
-            logger.info('Converting from MXNet')
-            from mxnet import npx
-            params = npx.load(path)
-            params = {k: torch.from_numpy(v.asnumpy()) for k, v in params.items()}
+        params = torch.load(path, map_location=torch.device('cpu'))
         all_params.append(params)
 
     logger.info("%d models loaded", len(all_params))

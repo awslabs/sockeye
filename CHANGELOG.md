@@ -11,6 +11,18 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.0]
+Sockeye is now exclusively based on Pytorch.
+
+### Changed
+- Renamed `x_pt` modules to `x`. Updated entry points in `setup.py`.
+
+### Removed
+- Removed MXNet from the codebase
+- Removed device locking / GPU acquisition logic. Removed dependency on `portalocker`.
+- Removed arguments `--softmax-temperature`, `--weight-init-*`, `--mc-dropout`, `--horovod`, `--device-ids
+- Removed all MXNet-related tests
+
 ## [3.0.15]
 
 ### Fixed

@@ -1,4 +1,4 @@
-# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -20,12 +20,12 @@ import numpy as np
 import pytest
 import torch as pt
 
-import sockeye.beam_search_pt
+import sockeye.beam_search
 import sockeye.constants as C
-import sockeye.data_io_pt
-import sockeye.inference_pt
+import sockeye.data_io
+import sockeye.inference
 import sockeye.lexicon
-import sockeye.model_pt
+import sockeye.model
 import sockeye.utils
 
 _BOS = 0
@@ -40,23 +40,23 @@ def mock_translator(batch_size: int = 1,
     Creates a fake translator object but with real values for things that we need.
     This lets us avoid a messy call to the constructor.
     """
-    with patch.object(sockeye.inference_pt.Translator, '__init__', lambda self, **kwargs: None):
-        translator = sockeye.inference_pt.Translator(device=None,
-                                                     batch_size=None,
-                                                     beam_size=None,
-                                                     ensemble_mode=None,
-                                                     scorer=None,
-                                                     beam_search_stop=None,
-                                                     nbest_size=None,
-                                                     models=None,
-                                                     source_vocabs=None,
-                                                     target_vocabs=None,
-                                                     restrict_lexicon=None,
-                                                     strip_unknown_words=None)
+    with patch.object(sockeye.inference.Translator, '__init__', lambda self, **kwargs: None):
+        translator = sockeye.inference.Translator(device=None,
+                                                  batch_size=None,
+                                                  beam_size=None,
+                                                  ensemble_mode=None,
+                                                  scorer=None,
+                                                  beam_search_stop=None,
+                                                  nbest_size=None,
+                                                  models=None,
+                                                  source_vocabs=None,
+                                                  target_vocabs=None,
+                                                  restrict_lexicon=None,
+                                                  strip_unknown_words=None)
 
         # This is needed for returning the right number of source factors
         def mock_model():
-            t_mock = Mock(sockeye.model_pt.PyTorchSockeyeModel)
+            t_mock = Mock(sockeye.model.SockeyeModel)
             t_mock.num_source_factors = num_source_factors
             return t_mock
 
@@ -79,7 +79,7 @@ def mock_translator(batch_size: int = 1,
 def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     expected_target_ids = [[0], [1], [2], [0], [8], [9], [0], [3], [4], [5], [-1]]
 
-    scorer = sockeye.beam_search_pt.CandidateScorer(lp_alpha, lp_beta, bp_weight)
+    scorer = sockeye.beam_search.CandidateScorer(lp_alpha, lp_beta, bp_weight)
 
     raw_score = (1 + 2 + 3)
     length = len(expected_target_ids)
@@ -87,20 +87,20 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     expected_score = [scorer(raw_score, length, reference_length)]
     # expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids)) - \
     #                  brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
-    translations = [sockeye.inference_pt.Translation([[0], [1], [2], [-1]],
-                                                     [scorer(1.0, 4, 10)],
-                                                     None,
-                                                     10),
+    translations = [sockeye.inference.Translation([[0], [1], [2], [-1]],
+                                                  [scorer(1.0, 4, 10)],
+                                                  None,
+                                                  10),
                     # Translation without EOS
-                    sockeye.inference_pt.Translation([[0], [8], [9]],
-                                                     [scorer(2.0, 3, 11)],
-                                                     None,
-                                                     11),
-                    sockeye.inference_pt.Translation([[0], [3], [4], [5], [-1]],
-                                                     [scorer(3.0, 5, 12)],
-                                                     None,
-                                                     12)]
-    combined = sockeye.inference_pt._concat_translations(translations, stop_ids={_EOS}, scorer=scorer)
+                    sockeye.inference.Translation([[0], [8], [9]],
+                                                  [scorer(2.0, 3, 11)],
+                                                  None,
+                                                  11),
+                    sockeye.inference.Translation([[0], [3], [4], [5], [-1]],
+                                                  [scorer(3.0, 5, 12)],
+                                                  None,
+                                                  12)]
+    combined = sockeye.inference._concat_translations(translations, stop_ids={_EOS}, scorer=scorer)
 
     assert combined.target_ids == expected_target_ids
     assert np.isclose(combined.scores, expected_score)
@@ -115,7 +115,7 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
                           (1, "a test", [['h', 'h'], ['x', 'y']], 1)])
 def test_translator_input(sentence_id, sentence, factors, chunk_size):
     tokens = sentence.split()
-    trans_input = sockeye.inference_pt.TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+    trans_input = sockeye.inference.TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
     assert trans_input.sentence_id == sentence_id
     assert trans_input.tokens == tokens
@@ -157,7 +157,7 @@ def test_get_max_input_output_length(
         length_ratio_std,
         expected_max_input_len,
         expected_max_output_len):
-    max_input_len, get_max_output_len = sockeye.inference_pt.get_max_input_output_length(
+    max_input_len, get_max_output_len = sockeye.inference.get_max_input_output_length(
         supported_max_seq_len_source=supported_max_seq_len_source,
         supported_max_seq_len_target=supported_max_seq_len_target,
         forced_max_input_len=forced_max_input_len,
@@ -193,9 +193,9 @@ def test_make_input_from_factored_string(sentence, num_expected_factors, delimit
     sentence_id = 1
     translator = mock_translator(num_source_factors=num_expected_factors)
 
-    inp = sockeye.inference_pt.make_input_from_factored_string(sentence_id=sentence_id, factored_string=sentence,
-                                                               translator=translator, delimiter=delimiter)
-    assert isinstance(inp, sockeye.inference_pt.TranslatorInput)
+    inp = sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id, factored_string=sentence,
+                                                            translator=translator, delimiter=delimiter)
+    assert isinstance(inp, sockeye.inference.TranslatorInput)
     assert inp.sentence_id == sentence_id
     assert inp.tokens == expected_tokens
     assert inp.factors == expected_factors
@@ -226,10 +226,10 @@ def test_factor_parsing(sentence, num_expected_factors, delimiter):
     """
     sentence_id = 1
     translator = mock_translator(num_source_factors=num_expected_factors)
-    inp = sockeye.inference_pt.make_input_from_factored_string(sentence_id=sentence_id,
-                                                               factored_string=sentence,
-                                                               translator=translator, delimiter=delimiter)
-    assert isinstance(inp, sockeye.inference_pt.BadTranslatorInput)
+    inp = sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                            factored_string=sentence,
+                                                            translator=translator, delimiter=delimiter)
+    assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
 @pytest.mark.parametrize("delimiter", ["\t", "\t \t", "\t\t", "\n", "\r", "\r\n", "\u0020",
@@ -243,9 +243,9 @@ def test_make_input_whitespace_delimiter(delimiter):
     translator = mock_translator(num_source_factors=2)
     sentence = "foo"
     with pytest.raises(sockeye.utils.SockeyeError) as e:
-        sockeye.inference_pt.make_input_from_factored_string(sentence_id=sentence_id,
-                                                             factored_string=sentence,
-                                                             translator=translator, delimiter=delimiter)
+        sockeye.inference.make_input_from_factored_string(sentence_id=sentence_id,
+                                                          factored_string=sentence,
+                                                          translator=translator, delimiter=delimiter)
     assert str(e.value) == 'Factor delimiter can not be whitespace or empty.'
 
 
@@ -258,11 +258,11 @@ def test_make_input_whitespace_delimiter(delimiter):
 def test_make_input_from_valid_json_string(text, factors):
     sentence_id = 1
     translator = mock_translator()
-    expected_tokens = list(sockeye.data_io_pt.get_tokens(text))
-    inp = sockeye.inference_pt.make_input_from_json_string(sentence_id,
-                                                           json.dumps({C.JSON_TEXT_KEY: text,
-                                                                       C.JSON_FACTORS_KEY: factors}),
-                                                           translator)
+    expected_tokens = list(sockeye.data_io.get_tokens(text))
+    inp = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                        json.dumps({C.JSON_TEXT_KEY: text,
+                                                                    C.JSON_FACTORS_KEY: factors}),
+                                                        translator)
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     if factors is not None:
@@ -282,17 +282,17 @@ def test_make_input_from_valid_json_string_restrict_lexicon():
     assert translator.restrict_lexicon['lexicon1'] is not translator.restrict_lexicon['lexicon2']
 
     restrict_lexicon1 = 'lexicon1'
-    inp1 = sockeye.inference_pt.make_input_from_json_string(sentence_id,
-                                                            json.dumps({C.JSON_TEXT_KEY: text,
-                                                                        C.JSON_RESTRICT_LEXICON_KEY: restrict_lexicon1}),
-                                                            translator)
+    inp1 = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                         json.dumps({C.JSON_TEXT_KEY: text,
+                                                                     C.JSON_RESTRICT_LEXICON_KEY: restrict_lexicon1}),
+                                                         translator)
     assert inp1.restrict_lexicon is lexicon1
 
     restrict_lexicon2 = 'lexicon2'
-    inp2 = sockeye.inference_pt.make_input_from_json_string(sentence_id,
-                                                            json.dumps({C.JSON_TEXT_KEY: text,
-                                                                        C.JSON_RESTRICT_LEXICON_KEY: restrict_lexicon2}),
-                                                            translator)
+    inp2 = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                         json.dumps({C.JSON_TEXT_KEY: text,
+                                                                     C.JSON_RESTRICT_LEXICON_KEY: restrict_lexicon2}),
+                                                         translator)
     assert inp2.restrict_lexicon is lexicon2
 
     assert inp1.restrict_lexicon is not inp2.restrict_lexicon
@@ -302,10 +302,10 @@ def test_make_input_from_valid_json_string_restrict_lexicon():
 def test_failed_make_input_from_valid_json_string(text, text_key, factors, factors_key):
     sentence_id = 1
     translator = mock_translator()
-    inp = sockeye.inference_pt.make_input_from_json_string(sentence_id,
-                                                           json.dumps({text_key: text, factors_key: factors}),
-                                                           translator)
-    assert isinstance(inp, sockeye.inference_pt.BadTranslatorInput)
+    inp = sockeye.inference.make_input_from_json_string(sentence_id,
+                                                        json.dumps({text_key: text, factors_key: factors}),
+                                                        translator)
+    assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
 @pytest.mark.parametrize("text, factors",
@@ -317,9 +317,9 @@ def test_failed_make_input_from_valid_json_string(text, text_key, factors, facto
 def test_make_input_from_valid_dict(text, factors):
     sentence_id = 1
     translator = mock_translator()
-    expected_tokens = list(sockeye.data_io_pt.get_tokens(text))
-    inp = sockeye.inference_pt.make_input_from_dict(sentence_id, {C.JSON_TEXT_KEY: text,
-                                                                  C.JSON_FACTORS_KEY: factors}, translator)
+    expected_tokens = list(sockeye.data_io.get_tokens(text))
+    inp = sockeye.inference.make_input_from_dict(sentence_id, {C.JSON_TEXT_KEY: text,
+                                                               C.JSON_FACTORS_KEY: factors}, translator)
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     if factors is not None:
@@ -332,8 +332,8 @@ def test_make_input_from_valid_dict(text, factors):
 def test_failed_make_input_from_valid_dict(text, text_key, factors, factors_key):
     sentence_id = 1
     translator = mock_translator()
-    inp = sockeye.inference_pt.make_input_from_dict(sentence_id, {text_key: text, factors_key: factors}, translator)
-    assert isinstance(inp, sockeye.inference_pt.BadTranslatorInput)
+    inp = sockeye.inference.make_input_from_dict(sentence_id, {text_key: text, factors_key: factors}, translator)
+    assert isinstance(inp, sockeye.inference.BadTranslatorInput)
 
 
 @pytest.mark.parametrize("strings",
@@ -342,10 +342,10 @@ def test_failed_make_input_from_valid_dict(text, text_key, factors, factors_key)
                              ["a b c", "f1 f2 f3", "f3 f3 f3"]
                          ])
 def test_make_input_from_multiple_strings(strings):
-    inp = sockeye.inference_pt.make_input_from_multiple_strings(1, strings)
+    inp = sockeye.inference.make_input_from_multiple_strings(1, strings)
 
-    expected_tokens = list(sockeye.data_io_pt.get_tokens(strings[0]))
-    expected_factors = [list(sockeye.data_io_pt.get_tokens(f)) for f in strings[1:]]
+    expected_tokens = list(sockeye.data_io.get_tokens(strings[0]))
+    expected_factors = [list(sockeye.data_io.get_tokens(f)) for f in strings[1:]]
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     assert inp.factors == expected_factors
@@ -367,14 +367,14 @@ def test_get_best_word_indices_for_kth_hypotheses():
 
     # extract individually
     for k, expected_result in zip(ks, expected_indices):
-        result = sockeye.inference_pt.Translator._get_best_word_indices_for_kth_hypotheses(k, all_hyp_indices)
+        result = sockeye.inference.Translator._get_best_word_indices_for_kth_hypotheses(k, all_hyp_indices)
         assert result.shape == expected_result.shape
         assert (result == expected_result).all()
 
     # extract all at once
     ks = np.concatenate(ks, axis=0)
     expected_indices = np.concatenate(expected_indices, axis=0)
-    result = sockeye.inference_pt.Translator._get_best_word_indices_for_kth_hypotheses(ks, all_hyp_indices)
+    result = sockeye.inference.Translator._get_best_word_indices_for_kth_hypotheses(ks, all_hyp_indices)
     assert result.shape == expected_indices.shape
     assert (result == expected_indices).all()
 
@@ -403,18 +403,18 @@ def test_get_best_translations(expected_best_ids, expected_best_indices):
 
     translator = mock_translator(beam_size=2, batch_size=2)
 
-    expected_result = [sockeye.inference_pt.Translator._assemble_translation(*x) for x in zip(
+    expected_result = [sockeye.inference.Translator._assemble_translation(*x) for x in zip(
         best_word_indices[expected_best_indices, :, np.arange(expected_best_indices.shape[1])],
         lengths[expected_best_ids],
         seq_scores[expected_best_ids],
         itertools.repeat(None))]
 
-    search_result = sockeye.beam_search_pt.SearchResult(best_hyp_indices=best_hyp_indices,
-                                                        best_word_indices=best_word_indices,
-                                                        accumulated_scores=seq_scores,
-                                                        lengths=lengths,
-                                                        estimated_reference_lengths=None)
-    actual_result = sockeye.inference_pt.Translator._get_best_translations(translator, search_result)
+    search_result = sockeye.beam_search.SearchResult(best_hyp_indices=best_hyp_indices,
+                                                     best_word_indices=best_word_indices,
+                                                     accumulated_scores=seq_scores,
+                                                     lengths=lengths,
+                                                     estimated_reference_lengths=None)
+    actual_result = sockeye.inference.Translator._get_best_translations(translator, search_result)
 
     for expected_translation, actual_translation in zip(expected_result, actual_result):
         assert expected_translation.target_ids == actual_translation.target_ids
@@ -429,5 +429,5 @@ def test_get_best_translations(expected_best_ids, expected_best_indices):
                              (np.array([[1, 0], [2, 1], [3, 2]]), C.PAD_ID, [(1, 1), (2, 2), (3, C.PAD_ID)]),
                          ])
 def test_unshift_target_factors(sequence, fill_with, expected_sequence):
-    sequence = sockeye.inference_pt._unshift_target_factors(sequence, fill_last_with=fill_with)
+    sequence = sockeye.inference._unshift_target_factors(sequence, fill_last_with=fill_with)
     assert sequence == expected_sequence

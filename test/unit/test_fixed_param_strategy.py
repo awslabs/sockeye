@@ -16,7 +16,7 @@ from unittest import mock
 import pytest
 
 import sockeye.constants as C
-from sockeye.train_pt import fixed_param_names_from_strategy
+from sockeye.train import fixed_param_names_from_strategy
 
 
 NUM_LAYERS = 3

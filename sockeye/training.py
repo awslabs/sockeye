@@ -1,4 +1,4 @@
-# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -23,34 +23,32 @@ import shutil
 import time
 from collections import deque
 from dataclasses import dataclass
-from math import sqrt
-from typing import Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
+from typing import Any, Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
 
-import mxnet as mx
-import numpy as onp
-from mxnet import amp, np, npx, gluon
+import numpy as np
+import torch
+import torch.distributed
+
+try:
+    import apex.amp
+except ImportError:
+    # Not an issue because Apex AMP is only used when the trainer setting is
+    # activated. We check that Apex can be imported before creating the trainer.
+    pass
 
 from . import average
+from . import checkpoint_decoder
 from . import constants as C
 from . import data_io
-from . import horovod_mpi
 from . import loss
 from . import lr_scheduler
-from . import parallel
+from . import model
+from . import optimizers
 from . import utils
 from . import vocab
-from .checkpoint_decoder import CheckpointDecoder
 from .config import Config
-from .model import SockeyeModel
-from .optimizers import OptimizerConfig
 
 logger = logging.getLogger(__name__)
-
-
-def global_norm(ndarrays: List[np.ndarray]) -> float:
-    # accumulate in a list, as item() is blocking and this way we can run the norm calculation in parallel.
-    norms = [np.square(np.linalg.norm(arr)) for arr in ndarrays if arr is not None]
-    return sqrt(sum(norm.item() for norm in norms))
 
 
 @dataclass
@@ -82,12 +80,9 @@ class TrainState:
     Stores the state an EarlyStoppingTrainer instance.
     """
 
-    _pickle_slots = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches',
-                     'updates', 'samples', 'gradient_norm', 'metrics', 'start_tic', '_tic_last_time_elapsed',
-                     '_time_elapsed', 'early_stopping_metric', 'best_metric', 'best_metric_history',
-                     'best_checkpoint', 'converged', 'diverged']
-
-    __slots__ = _pickle_slots + ['gradients']
+    __slots__ = ['num_not_improved', 'epoch', 'checkpoint', 'best_checkpoint', 'batches', 'updates', 'samples',
+                 'metrics', 'start_tic', '_tic_last_time_elapsed', '_time_elapsed', 'early_stopping_metric',
+                 'best_metric', 'best_metric_history', 'best_checkpoint', 'converged', 'diverged']
 
     def __init__(self, early_stopping_metric: str) -> None:
         self.num_not_improved = 0
@@ -97,8 +92,6 @@ class TrainState:
         self.batches = 0
         self.updates = 0
         self.samples = 0
-        self.gradient_norm = None  # type: Optional[float]
-        self.gradients = {}  # type: Dict[str, List[np.ndarray]]
         # stores dicts of metric names & values for each checkpoint
         self.metrics = []  # type: List[Dict]
         self.start_tic = time.time()
@@ -142,40 +135,40 @@ class TrainState:
         return self._time_elapsed
 
     def __getstate__(self):
-        return {k: getattr(self, k) for k in self._pickle_slots}
+        return {k: getattr(self, k) for k in self.__slots__}
 
     def __setstate__(self, state):
         for k, v in state.items():
             setattr(self, k, v)
-        self.gradients = {}
 
 
-class GluonEarlyStoppingTrainer:
+class EarlyStoppingTrainer:
 
     def __init__(self,
                  config: TrainerConfig,
-                 optimizer_config: OptimizerConfig,
-                 sockeye_model: SockeyeModel,
-                 trainer: gluon.Trainer,
+                 optimizer_config: optimizers.OptimizerConfig,
+                 sockeye_model: model.SockeyeModel,
+                 training_model: torch.nn.Module,
+                 optimizer: torch.optim.Optimizer,
+                 zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss.Loss],
-                 context: List[mx.context.Context],
-                 dtype: str,
+                 device: torch.device,
                  using_amp: bool = False,
+                 using_apex_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
                  checkpoint_callback: Optional[Callable] = None) -> None:
         self.config = config
         self.optimizer_config = optimizer_config
-        self.model = sockeye_model
-        self.trainer = trainer
+        self.sockeye_model = sockeye_model
+        self.training_model = training_model
+        self.optimizer = optimizer
+        self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
-        self.context = context
-        self.dtype = dtype
+        self.device = device
         self.using_amp = using_amp
-        self._parallel = parallel.Parallel(len(context) if len(context) > 1 else 0,
-                                           ParallelModel(sockeye_model,
-                                                         loss_functions,
-                                                         trainer,
-                                                         using_amp=using_amp))
+        if using_amp:
+            self._scaler = torch.cuda.amp.GradScaler()
+        self.using_apex_amp = using_apex_amp
         self.state = None  # type: Optional[TrainState]
         self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
@@ -185,10 +178,10 @@ class GluonEarlyStoppingTrainer:
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
             validation_iter: data_io.BaseParallelSampleIter,
-            checkpoint_decoder: Optional[CheckpointDecoder] = None):
+            checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None):
         logger.info("Early stopping by optimizing '%s'", self.config.early_stopping_metric)
 
-        if self.config.early_stopping_metric in C.METRICS_REQUIRING_DECODER:
+        if utils.is_primary_worker() and self.config.early_stopping_metric in C.METRICS_REQUIRING_DECODER:
             utils.check_condition(checkpoint_decoder is not None,
                                   "%s requires CheckpointDecoder" % self.config.early_stopping_metric)
 
@@ -198,10 +191,10 @@ class GluonEarlyStoppingTrainer:
             self._load_training_state(train_iter)
         else:
             self.state = TrainState(self.config.early_stopping_metric)
-            self.model.save_config(self.config.output_dir)
-            self.model.save_version(self.config.output_dir)
-            # self._save_training_state(train_iter)
-            # self._save_trainer_states(self.best_optimizer_states_fname)  # not saving due to deferred initialization
+            if utils.is_primary_worker():
+                self.sockeye_model.save_config(self.config.output_dir)
+                self.sockeye_model.save_version(self.config.output_dir)
+                self.sockeye_model.save_parameters(self.current_params_fname)
             logger.info("Training started.")
 
         tic = time.time()
@@ -268,130 +261,173 @@ class GluonEarlyStoppingTrainer:
 
         # Always keep the training state to allow continuing training with
         # different stopping criteria
-        self._cleanup(keep_training_state=True)
+        if utils.is_primary_worker():
+            self._cleanup(keep_training_state=True)
+
         return self.state
 
-    def _create_checkpoint(self, checkpoint_decoder: CheckpointDecoder, time_cost: float,
-                           train_iter: data_io.BaseParallelSampleIter, validation_iter: data_io.BaseParallelSampleIter):
+    def _create_checkpoint(self, checkpoint_decoder: checkpoint_decoder.CheckpointDecoder, time_cost: float,
+                           train_iter: data_io.BaseParallelSampleIter,
+                           validation_iter: data_io.BaseParallelSampleIter):
         """
         Creates a checkpoint, which will update self.state.converged/self.state.diverged, evaluate validation
         metrics and update the best known parameters accordingly.
         """
         self.state.checkpoint += 1
         # save parameters and evaluate on validation data
-        self._save_params()
+        if utils.is_primary_worker():
+            self._save_params()
         train_metrics = [lf.metric for lf in self.loss_functions]
         logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                     self.state.checkpoint, self.state.updates, self.state.epoch,
                     self.state.samples, time_cost, self.config.checkpoint_interval / time_cost)
         logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
                     "\t".join("Train-%s" % str(metric) for metric in train_metrics))
+
         val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
-        npx.waitall()
+
         has_improved = self._determine_improvement(val_metrics)
         self.state.converged = self._determine_convergence()
         self.state.diverged = self._determine_divergence(val_metrics)
         self._adjust_learning_rate(has_improved)
-        if has_improved:
-            self._update_best_params()
-            self._save_trainer_states(self.best_optimizer_states_fname)
-            self._save_lr_scheduler(self.best_lr_scheduler_fname)
-        self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+        if utils.is_primary_worker():
+            if has_improved:
+                self._update_best_params()
+                self._save_optimizer_state(self.best_optimizer_state_fname)
+                self._save_lr_scheduler(self.best_lr_scheduler_fname)
+            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+            self._save_training_state(train_iter)
         for metric in train_metrics:
             metric.reset()
-        self._save_training_state(train_iter)
         if self.checkpoint_callback:
             self.checkpoint_callback(self.state.checkpoint)
 
-    def _forward_backward(self, batch: data_io.Batch):
+    def _forward_backward(self, batch: data_io.Batch, is_update_batch: bool = True):
         """
-        Performs forward-backward pass on a batch in data-parallel mode.
+        Performs forward-backward pass on a batch.
 
         :param batch: Current data batch.
-        :return: List loss outputs (tuple of loss value and number of samples) for each loss function.
+        :param is_update_batch: Whether this is the final batch before updating
+                                weights.
+        :return: List loss values.
         """
-        # split batch into shards
-        batch = batch.split_and_load(ctx=self.context)
-
-        # send sharded inputs to the backend
-        for inputs, labels in batch.shards():
-            self._parallel.put((inputs, labels))
-
-        # get outputs from parallel requests to the backend. Each shard output contains a list of tuples, one for each
-        # loss function of the form: (loss_value, num_samples).
-        sharded_outputs = [self._parallel.get() for _ in range(len(self.context))]
-
-        # repack outputs into a list of loss_values (length = number of shards) for each loss function
-        sharded_outputs_per_loss_function = list(zip(*sharded_outputs))
-
-        # sum loss values (on the cpu) and number of samples for each loss function
-        output_per_loss_function = [
-            tuple(npx.add_n(*(s.as_in_context(mx.cpu()) for s in shard)) for shard in zip(*outs)) for outs in
-            sharded_outputs_per_loss_function]
-        return output_per_loss_function
+        batch = batch.load(device=self.device)
+        with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
+            # Forward
+            outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
+            # Loss (scaled by update interval)
+            loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
+            # TODO(mdenkows): We currently give 1/N weight to every batch in the
+            # update, but batches have subtly different sizes (different numbers
+            # of padding tokens). Consider normalizing by relative batch size.
+            loss_values = [v / self.config.update_interval if self.config.update_interval > 1
+                           else v for v, _ in loss_outputs]
+            sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
+        # Backward. PyTorch AMP and Apex AMP use different loss scaling APIs.
+        if self.using_amp:
+            sum_losses = self._scaler.scale(sum_losses)
+        if self.using_apex_amp:
+            with apex.amp.scale_loss(sum_losses, self.optimizer,
+                                     delay_unscale=not is_update_batch) as scaled_sum_losses:
+                scaled_sum_losses.backward()
+        else:
+            sum_losses.backward()  # type: ignore
+        return loss_outputs
 
     def _step(self, batch: data_io.Batch) -> bool:
         self.state.batches += 1
-        loss_outputs = self._forward_backward(batch)
-
-        did_grad_step = False
-        if self.config.update_interval == 1 or self.state.batches % self.config.update_interval == 0:
-            # `step` rescales the gradients for the number of batches in this
-            # update.
-            self.trainer.step(batch_size=self.config.update_interval)
-            if self.config.update_interval > 1:
-                # Multi-batch updates sum gradients for each batch instead of
-                # overwriting, so gradients must be manually zeroed after each
-                # update.
-                self.model.zero_grad()
-            self.state.updates += 1
-            did_grad_step = True
-
         self.state.samples += batch.samples
+        # We accumulate gradients over N=update_interval batches before running
+        # the optimizer to update model weights. Every Nth batch is an update
+        # batch.
+        is_update_batch = self.state.batches % self.config.update_interval == 0
+
+        # Forward/loss/backward (compute gradients). In distributed mode,
+        # workers accumulate gradients locally for N-1 batches (no_sync), then
+        # average the accumulated gradients across workers during the update
+        # batch.
+        with (self.training_model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
+        else utils.no_context()):
+            loss_outputs = self._forward_backward(batch, is_update_batch)
+
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
             loss_func.metric.update(loss_value.item(), num_samples.item())
+
+        did_grad_step = False
+        if is_update_batch:
+            self.state.updates += 1
+            if self.using_amp:
+                self._scaler.unscale_(self.optimizer)
+            # Clip gradients
+            if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
+                torch.nn.utils.clip_grad.clip_grad_value_(self.training_model.parameters(),
+                                                          self.optimizer_config.gradient_clipping_threshold)
+            elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
+                torch.nn.utils.clip_grad.clip_grad_norm_(self.training_model.parameters(),
+                                                         self.optimizer_config.gradient_clipping_threshold)
+            # Set learning rate for current step
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = self.optimizer_config.lr_scheduler(self.state.updates) \
+                    if self.optimizer_config.lr_scheduler is not None else self.optimizer_config.lr
+            # Update weights and reset gradients
+            if self.using_amp:
+                self._scaler.step(self.optimizer)
+                self._scaler.update()
+            else:
+                self.optimizer.step()
+            self.optimizer.zero_grad(**self.zero_grad_kwargs)
+            did_grad_step = True
+
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
         return did_grad_step
 
-    def _evaluate(self, checkpoint: int, data_iter, checkpoint_decoder: Optional[CheckpointDecoder]) -> List[loss.LossMetric]:
+    def _evaluate(self, checkpoint: int, data_iter,
+                  checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss.LossMetric]:
         """
         Computes loss(es) on validation data and returns their metrics.
         :param data_iter: Validation data iterator.
         :return: List of validation metrics, same order as self.loss_functions.
         """
+        # Switch model to eval mode (disable dropout, etc.) to score validation
+        # set and run checkpoint decoder.
+        self.sockeye_model.eval()
+
         data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
-            batch = batch.split_and_load(ctx=self.context)
-            sharded_loss_outputs = []  # type: List[List[Tuple[np.ndarray, np.ndarray]]]
-            for inputs, labels in batch.shards():
-                outputs = self.model(*inputs)  # type: Dict[str, np.ndarray]
-                loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
-                sharded_loss_outputs.append(loss_outputs)
-
-            # repack outputs into a list of loss_values (length = number of shards) for each loss function
-            sharded_loss_outputs_per_loss_function = list(zip(*sharded_loss_outputs))
-            # sum loss values (on the cpu) and number of samples for each loss function
-            output_per_loss_function = [tuple(npx.add_n(*(s.as_in_context(mx.cpu()) for s in shard))
-                                        for shard in zip(*outs)) for outs in sharded_loss_outputs_per_loss_function]
-            # update validation metrics for batch
-            for loss_metric, (loss_value, num_samples) in zip(val_metrics, output_per_loss_function):
+            batch = batch.load(device=self.device)
+            with torch.inference_mode():
+                # Forward: use sockeye_model because (traced) training_model
+                # doesn't support eval mode (still runs dropout, etc.)
+                outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
+                # Loss
+                loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
+                # Update validation metrics for batch
+            for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
                 loss_metric.update(loss_value.item(), num_samples.item())
 
-        # Optionally run the checkpoint decoder
-        if checkpoint_decoder is not None:
+        # Primary worker optionally runs the checkpoint decoder
+        decoder_metrics = {}  # type: Dict[str, float]
+        if utils.is_primary_worker() and checkpoint_decoder is not None:
             output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
             decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
-            for metric_name, metric_value in decoder_metrics.items():
-                assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
-                metric = loss.LossMetric(name=metric_name)
-                metric.update(metric_value, num_samples=1)
-                val_metrics.append(metric)
+        # Broadcast decoder metrics (if any) from primary worker to secondary
+        # workers
+        if utils.is_distributed():
+            decoder_metrics = utils.broadcast_object(decoder_metrics)
+        # Add decoder metrics (if any) to validation metrics
+        for metric_name, metric_value in decoder_metrics.items():
+            assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
+            metric = loss.LossMetric(name=metric_name)
+            metric.update(metric_value, num_samples=1)
+            val_metrics.append(metric)
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
 
+        # Switch model back to train mode to continue training
+        self.sockeye_model.train()
         return val_metrics
 
     def _determine_improvement(self, val_metrics: List[loss.LossMetric]) -> bool:
@@ -406,22 +442,21 @@ class GluonEarlyStoppingTrainer:
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
-                # When using Horovod, the primary worker makes an authoritative
-                # check of whether metric value has improved and broadcasts the
-                # result to secondary workers.  Non-determinism in the order of
-                # GPU operations can lead to slight numeric variation across
+                # In distributed mode, the primary worker makes an authoritative
+                # check of whether the metric value has improved and broadcasts
+                # the result to secondary workers. Non-determinism in the order
+                # of GPU operations can lead to slight numeric variations across
                 # workers, causing potential desync if each worker makes its own
                 # check for key training decisions (reducing learning rate,
                 # early stopping, etc.).
-                if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
-                    # Horovod primary worker or not using Horovod: make
-                    # authoritative metric check.
+                if utils.is_primary_worker():
+                    # Authoritative check
                     value_is_better = utils.metric_value_is_better(value,
                                                                    self.state.best_metric,
                                                                    self.config.early_stopping_metric)
-                if horovod_mpi.using_horovod():
-                    # Broadcast result across workers.
-                    value_is_better = horovod_mpi.MPI.COMM_WORLD.bcast(value_is_better, root=0)
+                if utils.is_distributed():
+                    # Broadcast result
+                    value_is_better = utils.broadcast_object(value_is_better)
                 if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
@@ -465,13 +500,13 @@ class GluonEarlyStoppingTrainer:
         if (self.config.max_num_checkpoint_not_improved is not None
                 and 0 <= self.config.max_num_checkpoint_not_improved
                 and self.state.checkpoint >= self.config.max_num_checkpoint_not_improved):
-            # When using Horovod, the primary worker makes the authoritative
+            # In distrubted mode, the primary worker makes the authoritative
             # calculation of improvement over the window for evaluating stopping
             window_improvement = 0.
-            if not horovod_mpi.using_horovod() or horovod_mpi.hvd.rank() == 0:
+            if utils.is_primary_worker():
                 window_improvement = abs(self.state.best_metric - self.state.best_metric_history[0])
-            if horovod_mpi.using_horovod():
-                window_improvement = horovod_mpi.MPI.COMM_WORLD.bcast(window_improvement, root=0)
+            if utils.is_distributed():
+                window_improvement = utils.broadcast_object(window_improvement)
 
             # <= to correctly handle threshold == 0
             if window_improvement <= self.config.checkpoint_improvement_threshold:
@@ -496,16 +531,17 @@ class GluonEarlyStoppingTrainer:
                 last_ppl = metric.get()
                 break
         # using a double of uniform distribution's value as a threshold
-        if not np.isfinite(last_ppl) or last_ppl > 2 * self.model.config.vocab_target_size:
+        if not np.isfinite(last_ppl) or last_ppl > 2 * self.sockeye_model.config.vocab_target_size:
             logger.warning("Model optimization diverged. Last checkpoint's perplexity: %f", last_ppl)
             return True
         return False
 
     def _adjust_learning_rate(self, has_improved: bool):
         """
-        Adjusts the optimizer learning rate if required.
+        Adjusts the optimizer learning rate if required and logs it.
         """
-        scheduler = self.trainer.optimizer.lr_scheduler
+        scheduler = self.optimizer_config.lr_scheduler
+        lr = self.optimizer_config.lr
         if scheduler is not None:
             if issubclass(type(scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
                 lr_adjusted = scheduler.new_evaluation_result(has_improved)  # type: ignore
@@ -514,28 +550,27 @@ class GluonEarlyStoppingTrainer:
             if lr_adjusted and not has_improved:
                 logger.info("Loading model parameters and optimizer states from best checkpoint: %d",
                             self.state.best_checkpoint)
-                adjusted_lr = self.trainer.optimizer.lr_scheduler.lr
-                # trainer.load_states also reloads the parameters
-                if os.path.exists(self.best_optimizer_states_fname):
-                    self._load_trainer_states(self.best_optimizer_states_fname)
-                # state loading replaces the lr_scheduler instance which then contains the old learning rate,
-                # overwriting here. TODO: make this better...
-                self.trainer.optimizer.lr_scheduler.lr = adjusted_lr
+                if os.path.exists(self.best_params_fname):
+                    self.sockeye_model.load_parameters(filename=self.best_params_fname, device=self.device)
+                if os.path.exists(self.best_optimizer_state_fname):
+                    self._load_optimizer_state(self.best_optimizer_state_fname)
+            lr = scheduler.lr
+        logger.info("Checkpoint [%d]\tLearning-rate=%.6f", self.state.checkpoint, lr)
 
-    def _write_and_log_metrics(self, train_metrics: Iterable[loss.LossMetric], val_metrics: Iterable[loss.LossMetric]):
+    def _write_and_log_metrics(self,
+                               train_metrics: Iterable[loss.LossMetric],
+                               val_metrics: Iterable[loss.LossMetric]):
         """
         Updates metrics for current checkpoint.
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
         """
         data = {"epoch": self.state.epoch,
-                "learning-rate": (self.trainer.learning_rate if self.trainer.optimizer.lr_scheduler is None
-                                  else self.trainer.optimizer.lr_scheduler.lr),
-                "gradient-norm": self.state.gradient_norm,
-                "time-elapsed": self.state.time_elapsed}
-        gpu_memory_usage = utils.get_gpu_memory_usage(self.context)
-        data['used-gpu-memory'] = sum(v[0] for v in gpu_memory_usage.values())
-        data['converged'] = self.state.converged
-        data['diverged'] = self.state.diverged
+                "learning-rate": (self.optimizer_config.lr if self.optimizer_config.lr_scheduler is None
+                                  else self.optimizer_config.lr_scheduler.lr),
+                "time-elapsed": self.state.time_elapsed,
+                "max-gpu-memory": torch.cuda.max_memory_allocated(self.device),
+                "converged": self.state.converged,
+                "diverged": self.state.diverged}
 
         for metric in train_metrics:
             data["%s-train" % metric.name] = metric.get()
@@ -564,32 +599,31 @@ class GluonEarlyStoppingTrainer:
         """
         Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
         """
-        self.model.save_parameters(self.current_params_fname)
+        self.sockeye_model.save_parameters(self.current_params_fname)
         cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
                              self.state.best_checkpoint, self.config.keep_initializations,
-                             self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
+                             self.config.max_params_files_to_cache, self.config.cache_metric,
+                             self.config.cache_strategy)
 
-    def _save_trainer_states(self, fname):
-        trainer_save_states_no_dump_optimizer(self.trainer, fname)
-        logger.info('Saved optimizer states to "%s"', fname)
+    def _save_optimizer_state(self, fname):
+        torch.save(self.optimizer.state_dict(), fname)
+        logger.info('Saved optimizer state to "%s"', fname)
 
-    def _load_trainer_states(self, fname):
-        self.trainer.load_states(fname)
-        logger.info('Loaded optimizer states from "%s"', fname)
+    def _load_optimizer_state(self, fname):
+        self.optimizer.load_state_dict(torch.load(fname, map_location=self.device))
+        logger.info('Loaded optimizer state from "%s"', fname)
 
     def _save_lr_scheduler(self, fname):
-        if self.trainer.optimizer.lr_scheduler is not None:
+        if self.optimizer_config.lr_scheduler is not None:
             with open(fname, "wb") as fp:
-                pickle.dump(self.trainer.optimizer.lr_scheduler, fp)
-            logger.info("Saved '%s' to '%s'", self.trainer.optimizer.lr_scheduler, fname)
+                pickle.dump(self.optimizer_config.lr_scheduler, fp)
+            logger.info("Saved '%s' to '%s'", self.optimizer_config.lr_scheduler, fname)
 
     def _load_lr_scheduler(self, fname):
         if os.path.exists(fname):
             with open(fname, "rb") as fp:
-                self.trainer.optimizer.lr_scheduler = pickle.load(fp)
-            logger.info("Loaded '%s' from '%s'", self.trainer.optimizer.lr_scheduler, fname)
-        self.trainer.optimizer.begin_num_update = self.state.updates
-        self.trainer.optimizer.num_update = self.state.updates
+                self.optimizer_config.lr_scheduler = pickle.load(fp)
+            logger.info("Loaded '%s' from '%s'", self.optimizer_config.lr_scheduler, fname)
 
     def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
@@ -607,20 +641,19 @@ class GluonEarlyStoppingTrainer:
             os.unlink(params_file)
         os.symlink(os.path.join("..", params_base_fname), params_file)
 
-        # (2) Optimizer states
-        opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATES_LAST)
-        self._save_trainer_states(opt_state_fname)
+        # (2) Optimizer state
+        opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATE_LAST)
+        self._save_optimizer_state(opt_state_fname)
 
         # (3) Data iterator
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
         # (4) Random generators
-        # RNG states: python's random and onp.random provide functions for
-        # storing the state, mxnet does not, but inside our code mxnet's RNG is
-        # not used AFAIK
+        # RNG states: python, numpy, torch
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
-            pickle.dump(onp.random.get_state(), fp)
+            pickle.dump(np.random.get_state(), fp)
+            pickle.dump(torch.random.get_rng_state(), fp)
 
         # (5) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
@@ -629,12 +662,11 @@ class GluonEarlyStoppingTrainer:
         lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
         self._save_lr_scheduler(lr_scheduler_fname)
 
-        # (6) AMP loss scaler state
+        # (6) AMP grad scaler state
         if self.using_amp:
-            with open(os.path.join(training_state_dirname, C.AMP_LOSS_SCALER_STATE_NAME), "wb") as fp:
-                pickle.dump([self.trainer._amp_loss_scaler._loss_scale,
-                             self.trainer._amp_loss_scaler._next_loss_scale,
-                             self.trainer._amp_loss_scaler._unskipped], fp)
+            torch.save(self._scaler.state_dict(), os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME))
+        if self.using_apex_amp:
+            torch.save(apex.amp.state_dict(), os.path.join(training_state_dirname, C.APEX_AMP_STATE_NAME))
 
         # First we rename the existing directory to minimize the risk of state
         # loss if the process is aborted during deletion (which will be slower
@@ -660,22 +692,21 @@ class GluonEarlyStoppingTrainer:
         """
         # (1) Parameters
         params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
-        self.model.load_parameters(params_fname, ctx=self.context, allow_missing=False, ignore_extra=False)
+        self.sockeye_model.load_parameters(params_fname, device=self.device, allow_missing=False, ignore_extra=False)
 
         # (2) Optimizer states
-        opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATES_LAST)
-        self._load_trainer_states(opt_state_fname)
+        opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATE_LAST)
+        self._load_optimizer_state(opt_state_fname)
 
         # (3) Data Iterator
         train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
         # (4) Random generators
-        # RNG states: python's random and onp.random provide functions for
-        # storing the state, mxnet does not, but inside our code mxnet's RNG is
-        # not used AFAIK
+        # RNG states: python, numpy, torch
         with open(os.path.join(self.training_state_dirname, C.RNG_STATE_NAME), "rb") as fp:
             random.setstate(pickle.load(fp))
-            onp.random.set_state(pickle.load(fp))
+            np.random.set_state(pickle.load(fp))
+            torch.random.set_rng_state(pickle.load(fp))
 
         # (5) Training state
         self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
@@ -684,13 +715,12 @@ class GluonEarlyStoppingTrainer:
         lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
         self._load_lr_scheduler(lr_scheduler_fname)
 
-        # (6) AMP loss scaler state
+        # (6) AMP grad scaler state
         if self.using_amp:
-            # Load loss scaler state
-            with open(os.path.join(self.training_state_dirname, C.AMP_LOSS_SCALER_STATE_NAME), "rb") as fp:
-                (self.trainer._amp_loss_scaler._loss_scale,
-                 self.trainer._amp_loss_scaler._next_loss_scale,
-                 self.trainer._amp_loss_scaler._unskipped) = pickle.load(fp)
+            self._scaler.load_state_dict(
+                torch.load(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME)))
+        if self.using_apex_amp:
+            apex.amp.load_state_dict(torch.load(os.path.join(self.training_state_dirname, C.APEX_AMP_STATE_NAME)))
 
         logger.info("Training State: epoch=%d, checkpoint=%d batches=%d updates=%d best_metric=%.2f, " \
                     "best_checkpoint=%d time_elapsed=%d" % (
@@ -703,13 +733,14 @@ class GluonEarlyStoppingTrainer:
         """
         cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep,
                              self.state.checkpoint, self.state.best_checkpoint, self.config.keep_initializations,
-                             self.config.max_params_files_to_cache, self.config.cache_metric, self.config.cache_strategy)
+                             self.config.max_params_files_to_cache, self.config.cache_metric,
+                             self.config.cache_strategy)
 
         if not keep_training_state:
             if os.path.exists(self.training_state_dirname):
                 shutil.rmtree(self.training_state_dirname)
-            if os.path.exists(self.best_optimizer_states_fname):
-                os.remove(self.best_optimizer_states_fname)
+            if os.path.exists(self.best_optimizer_state_fname):
+                os.remove(self.best_optimizer_state_fname)
             if os.path.exists(self.best_lr_scheduler_fname):
                 os.remove(self.best_lr_scheduler_fname)
 
@@ -730,50 +761,17 @@ class GluonEarlyStoppingTrainer:
         return os.path.join(self.config.output_dir, C.TRAINING_STATE_DIRNAME)
 
     @property
-    def best_optimizer_states_fname(self) -> str:
-        return os.path.join(self.config.output_dir, C.OPT_STATES_BEST)
+    def best_optimizer_state_fname(self) -> str:
+        return os.path.join(self.config.output_dir, C.OPT_STATE_BEST)
 
     @property
     def best_lr_scheduler_fname(self) -> str:
         return os.path.join(self.config.output_dir, C.LR_SCHEDULER_BEST)
 
 
-class ParallelModel(parallel.Parallelizable):
-
-    def __init__(self,
-                 model: Callable,
-                 loss_functions: List[loss.Loss],
-                 trainer: gluon.Trainer,
-                 using_amp: bool = False) -> None:
-        self.model = model
-        self.loss_functions = loss_functions
-        self.trainer = trainer
-        self.using_amp = using_amp
-
-    def forward_backward(self, shard: Tuple) -> List[Tuple[np.ndarray, np.ndarray]]:
-        """
-        Applies forward-backward pass for a single shard of a batch (data-parallel training).
-        """
-        inputs, labels = shard
-        with mx.autograd.record():
-            outputs = self.model(*inputs)  # type: Dict[str, np.ndarray]
-            loss_outputs = [loss_function(outputs, labels) for loss_function in self.loss_functions]
-            loss_values = (v for v, _ in loss_outputs)
-            sum_losses = npx.add_n(*loss_values)
-            if self.using_amp:
-                # AMP applies dynamic loss scaling to the losses (scale up) and
-                # the Trainer (scale down).
-                with amp.scale_loss(sum_losses, self.trainer) as scaled_loss:
-                    mx.autograd.backward(scaled_loss)
-            else:
-                # backward on the sum of losses, weights are defined in the loss blocks themselves.
-                sum_losses.backward()
-        return loss_outputs
-
-
 class TensorboardLogger:
     """
-    Thin wrapper for MXBoard API to log training events.
+    Thin wrapper for TensorBoard API to log training events.
     Flushes logging events to disk every 60 seconds.
 
     :param logdir: Directory to write Tensorboard event files to.
@@ -789,43 +787,28 @@ class TensorboardLogger:
         self.source_labels = vocab.get_ordered_tokens_from_vocab(source_vocab) if source_vocab is not None else None
         self.target_labels = vocab.get_ordered_tokens_from_vocab(target_vocab) if target_vocab is not None else None
         try:
-            import mxboard
+            from torch.utils.tensorboard import SummaryWriter
             logger.info("Logging training events for Tensorboard at '%s'", self.logdir)
-            self._writer = mxboard.SummaryWriter(logdir=self.logdir, flush_secs=60, verbose=False)
+            self._writer = SummaryWriter(log_dir=self.logdir, flush_secs=60)
         except ImportError:
-            logger.info("mxboard not found. Consider 'pip install mxboard' to log events to Tensorboard.")
+            logger.info("tensorboard not found. Consider 'pip install tensorboard' to log events to Tensorboard.")
             self._writer = None
 
-    def log_metrics(self, metrics: Dict[str, Union[float, int, np.ndarray]], checkpoint: int):
+    def log_metrics(self, metrics: Dict[str, Union[float, int, torch.Tensor]], checkpoint: int):
         if self._writer is None:
             return
 
         for name, value in metrics.items():
-            if isinstance(value, np.ndarray):
-                if np.isfinite(value).sum().item() == value.size:
+            if isinstance(value, torch.Tensor):
+                if torch.isfinite(value).sum().item() == value.size:
                     self._writer.add_histogram(tag=name, values=value, bins=100, global_step=checkpoint)
                 else:
                     logger.warning("Histogram of %s not logged to tensorboard because of infinite data.")
             elif value is None:
                 continue
             else:
-                self._writer.add_scalar(tag=name, value=value, global_step=checkpoint)
+                self._writer.add_scalar(tag=name, scalar_value=value, global_step=checkpoint)
         self._writer.flush()
-
-    def log_source_embedding(self, embedding: np.ndarray, checkpoint: int):
-        if self._writer is None or self.source_labels is None:
-            return
-        self._writer.add_embedding(tag="source", embedding=embedding, labels=self.source_labels, global_step=checkpoint)
-
-    def log_target_embedding(self, embedding: np.ndarray, checkpoint: int):
-        if self._writer is None or self.target_labels is None:
-            return
-        self._writer.add_embedding(tag="target", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
-
-    def log_output_embedding(self, embedding: np.ndarray, checkpoint: int):
-        if self._writer is None or self.target_labels is None:
-            return
-        self._writer.add_embedding(tag="output", embedding=embedding, labels=self.target_labels, global_step=checkpoint)
 
 
 class Speedometer:
@@ -896,32 +879,6 @@ def safe_custom_metrics_logger(logging_function: Callable,
         logging_function(metrics, global_step)
     except Exception as e:
         logging.warning("Didn't use custom metrics logger, exception '{}' occurred".format(str(e)))
-
-
-def trainer_save_states_no_dump_optimizer(trainer: gluon.Trainer, fname: str):
-    """
-    Otherwise exact copy of `Trainer.save_states` that does not include a
-    pickled optimizer instance as part of the state.  This is compatible with
-    the standard `Trainer.load_states`, which will handle a state file with no
-    optimizer instance (any statements involving `self._optimizer` become
-    no-ops).  This is especially important when using AMP, which patches the
-    optimizer at runtime with references to a specific loss scaler instance.
-    Loading a stale optimizer instance causes errors.
-    """
-    assert trainer._optimizer is not None
-
-    if not trainer._kv_initialized:
-        trainer._init_kvstore()
-    if trainer._params_to_init:
-        trainer._init_params()
-
-    if trainer._update_on_kvstore:
-        assert not trainer._params_to_init, "Cannot save trainer states when some " \
-                                            "parameters are not yet initialized in kvstore."
-        trainer._kvstore.save_optimizer_states(fname, dump_optimizer=False)
-    else:
-        with open(fname, 'wb') as fout:
-            fout.write(trainer._updaters[0].get_states(dump_optimizer=False))
 
 
 def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, best_checkpoint: int, keep_first: bool,

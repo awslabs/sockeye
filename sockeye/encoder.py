@@ -1,4 +1,4 @@
-# Copyright 2017--2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,55 +11,30 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-"""
-Encoders for sequence-to-sequence models.
-"""
-import logging
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import List, Tuple, Optional, Union
 
-import mxnet as mx
-from mxnet import np, npx
+import torch as pt
 
+import sockeye.constants as C
 from . import config
-from . import constants as C
 from . import layers
 from . import transformer
-from . import utils
-
-logger = logging.getLogger(__name__)
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig, dtype) -> 'Encoder':
-    """
-    Returns a Transformer encoder, consisting of an embedding layer with
-    positional encodings and a TransformerEncoder instance.
-
-    :param config: Configuration for transformer encoder.
-    :return: Encoder instance.
-    """
-    return TransformerEncoder(config=config, dtype=dtype)
+def get_transformer_encoder(config: transformer.TransformerConfig, inference_only: bool = False):
+    return TransformerEncoder(config=config, inference_only=inference_only)
 
 
 get_encoder = get_transformer_encoder
 EncoderConfig = Union[transformer.TransformerConfig]
 
 
-class Encoder(mx.gluon.HybridBlock):
+class Encoder(pt.nn.Module):
     """
     Generic encoder interface.
     """
-
-    def __call__(self, inputs, valid_length):  # pylint: disable=arguments-differ
-        """
-        Encodes inputs given valid lengths of individual examples.
-
-        :param inputs: Input data.
-        :param valid_length: Length of inputs without padding.
-        :return: Encoded versions of input data (data, data_length).
-        """
-        return mx.gluon.HybridBlock.__call__(self, inputs, valid_length)
 
     @abstractmethod
     def get_num_hidden(self) -> int:
@@ -106,85 +81,69 @@ class EmbeddingConfig(config.Config):
 
 class Embedding(Encoder):
     """
-    Thin wrapper around MXNet's Embedding op. Works with both time- and batch-major data layouts.
+    Thin wrapper around PyTorch's Embedding op.
 
     :param config: Embedding config.
-    :param dtype: Data type. Default: 'float32'.
+    :param embedding: pre-existing embedding Module.
     """
 
-    def __init__(self,
-                 config: EmbeddingConfig,
-                 embed_weight: Optional[mx.gluon.Parameter] = None,
-                 dtype: str = C.DTYPE_FP32) -> None:
+    def __init__(self, config: EmbeddingConfig, embedding: Optional[pt.nn.Embedding] = None) -> None:
         super().__init__()
         self.config = config
-        self._dtype = dtype
-        self._factor_weight_format_string = 'factor%d_weight'
-
-        if embed_weight is None:
-            self.weight = mx.gluon.Parameter('weight',
-                                             shape=(self.config.vocab_size, self.config.num_embed),
-                                             #grad_stype='row_sparse',
-                                             dtype=dtype)
-            self._use_sparse_grad = self.config.allow_sparse_grad
+        if embedding is not None:
+            self.embedding = embedding
         else:
-            self.weight = embed_weight
-            self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
+            self.embedding = pt.nn.Embedding(self.config.vocab_size, self.config.num_embed,
+                                             sparse=self.config.allow_sparse_grad)
 
-        self.factor_weights = []  # type: List[mx.gluon.Parameter]
+        self.num_factors = self.config.num_factors
+        self.factor_embeds = pt.nn.ModuleList()
+        self.factor_combinations = []  # type: List[str]
         if self.config.factor_configs is not None:
             for i, fc in enumerate(self.config.factor_configs, 1):
-                factor_weight_name = self._factor_weight_format_string % i
-                factor_weight = self.weight if fc.share_embedding else \
-                    mx.gluon.Parameter(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
-                # We set the attribute of the class to register the parameter with the block
-                setattr(self, factor_weight_name, factor_weight)
-                self.factor_weights.append(factor_weight)
-
-    def forward(self, data, valid_length):  # pylint: disable=arguments-differ
-        # We will catch the optional factor weights in kwargs
-        average_factors_embeds = []  # type: List[np.ndarray]
-        concat_factors_embeds = []  # type: List[np.ndarray]
-        sum_factors_embeds = []  # type: List[np.ndarray]
-        if self.config.num_factors > 1 and self.config.factor_configs is not None:
-            data, *data_factors = (np.squeeze(x, axis=2) for x in np.split(data, self.config.num_factors, axis=2))
-            for i, (factor_data, factor_config) in enumerate(zip(data_factors,
-                                                                 self.config.factor_configs)):
-                factor_weight = self.factor_weights[i]
-                factor_embedding = npx.embedding(factor_data,
-                                                 input_dim=factor_config.vocab_size,
-                                                 weight=factor_weight.data(),
-                                                 output_dim=factor_config.num_embed)
-                if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
-                    concat_factors_embeds.append(factor_embedding)
-                elif factor_config.combine == C.FACTORS_COMBINE_SUM:
-                    sum_factors_embeds.append(factor_embedding)
-                elif factor_config.combine == C.FACTORS_COMBINE_AVERAGE:
-                    average_factors_embeds.append(factor_embedding)
+                if fc.share_embedding:
+                    factor_embed = self.embedding
                 else:
-                    raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
-        else:
-            data = np.squeeze(data, axis=2)
+                    factor_embed = pt.nn.Embedding(fc.vocab_size, fc.num_embed,
+                                                   sparse=self.config.allow_sparse_grad)
+                self.factor_embeds.append(factor_embed)
+                self.factor_combinations.append(fc.combine)
 
-        embed = npx.embedding(data,
-                              weight=self.weight.data(),
-                              input_dim=self.config.vocab_size,
-                              output_dim=self.config.num_embed,
-                              dtype=self._dtype,
-                              sparse_grad=False)
+        self.dropout = pt.nn.Dropout(p=self.config.dropout) if self.config.dropout > 0.0 else None
 
-        if self.config.num_factors > 1 and self.config.factor_configs is not None:
+    def forward(self, data: pt.Tensor) -> pt.Tensor:
+        primary_data = data[:, :, 0]
+        embedded = self.embedding(primary_data)
+
+        if self.num_factors > 1:
+            average_factors_embeds = []
+            concat_factors_embeds = []
+            sum_factors_embeds = []
+            for i, (factor_embedding, factor_combination) in enumerate(zip(self.factor_embeds,
+                                                                           self.factor_combinations), 1):
+                factor_data = data[:, :, i]
+                factor_embedded = factor_embedding(factor_data)
+                if factor_combination == C.FACTORS_COMBINE_CONCAT:
+                    concat_factors_embeds.append(factor_embedded)
+                elif factor_combination == C.FACTORS_COMBINE_SUM:
+                    sum_factors_embeds.append(factor_embedded)
+                elif factor_combination == C.FACTORS_COMBINE_AVERAGE:
+                    average_factors_embeds.append(factor_embedded)
+                else:
+                    raise ValueError(f"Unknown combine value for factors: {factor_combination}")
+
             if average_factors_embeds:
-                embed = npx.add_n(embed, *average_factors_embeds) / (len(average_factors_embeds) + 1)
+                embedded = pt.mean(pt.stack([embedded] + average_factors_embeds, dim=0), dim=0)
             if sum_factors_embeds:
-                embed = npx.add_n(embed, *sum_factors_embeds)
+                for sum_factor_embed in sum_factors_embeds:
+                    embedded = embedded + sum_factor_embed
             if concat_factors_embeds:
-                embed = np.concatenate((embed, *concat_factors_embeds), axis=2)
+                embedded = pt.cat([embedded] + concat_factors_embeds, dim=2)
 
-        if self.config.dropout > 0:
-            embed = npx.dropout(data=embed, p=self.config.dropout)
+        if self.dropout is not None:
+            embedded = self.dropout(embedded)
 
-        return embed, np.copy(valid_length)  # See https://github.com/apache/incubator-mxnet/issues/14228
+        return embedded
 
     def get_num_hidden(self) -> int:
         """
@@ -193,69 +152,7 @@ class Embedding(Encoder):
         return self.config.num_embed
 
 
-# TODO DEPRECATE, NO LONGER USED
-class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
-    """
-    A sequence of encoders is itself an encoder.
-    """
-
-    def __init__(self) -> None:
-        Encoder.__init__(self)
-        mx.gluon.nn.HybridSequential.__init__(self)
-
-    def add(self, *encoders):
-        """Adds block on top of the stack."""
-        for encoder in encoders:
-            utils.check_condition(isinstance(encoder, Encoder), "%s is not of type Encoder" % encoder)
-        mx.gluon.nn.HybridSequential.add(self, *encoders)
-
-    def forward(self, data, valid_length):  # pylint: disable=arguments-differ
-        for block in self._children.values():
-            data, valid_length = block(data, valid_length)
-        return data, np.copy(valid_length)  # See https://github.com/apache/incubator-mxnet/issues/14228
-
-    def get_num_hidden(self) -> int:
-        """
-        Return the representation size of this encoder.
-        """
-        return next(reversed(self._children.values())).get_num_hidden()
-
-    def get_encoded_seq_len(self, seq_len: int) -> int:
-        """
-        Returns the size of the encoded sequence.
-        """
-        for encoder in self._children.values():
-            seq_len = encoder.get_encoded_seq_len(seq_len)
-        return seq_len
-
-    def get_max_seq_len(self) -> Optional[int]:
-        """
-        :return: The maximum length supported by the encoder if such a restriction exists.
-        """
-        max_seq_len = min((encoder.get_max_seq_len()
-                           for encoder in self._children.values() if encoder.get_max_seq_len() is not None), default=None)
-        return max_seq_len
-
-    def append(self, cls, infer_hidden: bool = False, **kwargs) -> Encoder:
-        """
-        Extends sequence with new Encoder.
-
-        :param cls: Encoder type.
-        :param infer_hidden: If number of hidden should be inferred from previous encoder.
-        :param kwargs: Named arbitrary parameters for Encoder.
-
-        :return: Instance of Encoder.
-        """
-        params = dict(kwargs)
-        if infer_hidden:
-            params['num_hidden'] = self.get_num_hidden()
-
-        encoder = cls(**params)
-        self.add(encoder)
-        return encoder
-
-
-class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
+class TransformerEncoder(Encoder):
     """
     Non-recurrent encoder based on the transformer architecture in:
 
@@ -265,11 +162,11 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     :param config: Configuration for transformer encoder.
     """
 
-    def __init__(self,
-                 config: transformer.TransformerConfig,
-                 dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__()
+    def __init__(self, config: transformer.TransformerConfig, inference_only: bool = False) -> None:
+        pt.nn.Module.__init__(self)
         self.config = config
+
+        self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
 
         self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
                                                          num_embed=self.config.model_size,
@@ -277,31 +174,32 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
                                                          scale_up_input=True,
                                                          scale_down_positions=False)
 
-        self.layers = mx.gluon.nn.HybridSequential()
-        for i in range(config.num_layers):
-            self.layers.add(transformer.TransformerEncoderBlock(config, dtype=dtype))
+        self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
+            transformer.TransformerEncoderBlock(config, inference_only=inference_only)
+            for _ in range(config.num_layers))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  num_hidden=self.config.model_size)
 
-    def forward(self, data, valid_length):
+    def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         # positional embedding
-        data = self.pos_embedding(data, None)
+        data = self.pos_embedding(data)
 
-        if self.config.dropout_prepost > 0.0:
-            data = npx.dropout(data=data, p=self.config.dropout_prepost)
+        if self.dropout is not None:
+            data = self.dropout(data)
 
-        # (batch_size * heads, seq_len)
-        att_valid_length = layers.prepare_source_valid_lengths(valid_length, data,
-                                                               num_heads=self.config.attention_heads)
+        _, max_len, __ = data.size()
+        # length_mask for source attention masking. Shape: (batch_size * heads, 1, max_len)
+        att_mask = layers.prepare_source_length_mask(valid_length, self.config.attention_heads, max_length=max_len)
+        att_mask = att_mask.expand(-1, max_len, -1)
 
-        data = np.transpose(data, axes=(1, 0, 2))
-        for block in self.layers:
-            data = block(data, att_valid_length)
+        data = data.transpose(1, 0)  # batch to time major
+        for layer in self.layers:
+            data = layer(data, att_mask=att_mask)
 
-        data = self.final_process(data, None)
-        data = np.transpose(data, axes=(1, 0, 2))
+        data = self.final_process(data)
+        data = data.transpose(1, 0)  # time to batch major
         return data, valid_length
 
     def get_num_hidden(self) -> int:
