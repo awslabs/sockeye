@@ -571,7 +571,7 @@ def initialize_parameters(module: pt.nn.Module):
       where gain is set to 1.0 by default
     Both are equivalent.
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
-    https: // jamesmccaffrey.wordpress.com / 2020 / 11 / 20 / the - gain - parameter -
+    https://jamesmccaffrey.wordpress.com/2020/11/20/the-gain-parameter-
     """
     if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
         pt.nn.init.xavier_uniform_(module.weight, gain=1)
