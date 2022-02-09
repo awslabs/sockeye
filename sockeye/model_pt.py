@@ -159,17 +159,12 @@ class SockeyeModel(pt.nn.Module):
         return self.decoder.state_structure()
 
     def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
-        """Encode the input sequence.
+        """
+        Encodes the input sequence.
 
-        Parameters
-        ----------
-        inputs : tensor
-        valid_length : tensor or None, default None
-
-        Returns
-        -------
-        outputs : list
-            Outputs of the encoder.
+        :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
+        :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :return: Encoder outputs, encoded output lengths
         """
 
         if self.inference_only:
@@ -192,19 +187,12 @@ class SockeyeModel(pt.nn.Module):
         Encodes the input sequence and initializes decoder states (and predicted output lengths if available).
         Used for inference/decoding.
 
-        Parameters
-        ----------
-        inputs : tensor
-        valid_length : tensor or None, default None
-        constant_length_ratio : float
-
-        Returns
-        -------
-        states : list
-            Initial states for the decoder.
-        predicted_output_length : tensor
-            Predicted output length of shape (batch_size,), 0 if not available.
+        :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
+        :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :param constant_length_ratio: Constant length ratio
+        :return: Initial states for the decoder, predicted output length of shape (batch_size,), 0 if not available.
         """
+
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
         source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
 
@@ -339,9 +327,10 @@ class SockeyeModel(pt.nn.Module):
 
     def save_parameters(self, fname: str):
         """
-        Saves model parameters to file.
-        :param fname: Path to save parameters to.
+        Saves model parameters to file. Also see
         See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
+
+        :param fname: Path to save parameters to.
         """
         self.apply(layers.interleave_kv)
         pt.save(self.state_dict(), fname)
@@ -353,21 +342,17 @@ class SockeyeModel(pt.nn.Module):
                         device: Optional[pt.device] = None,
                         allow_missing: bool = False,
                         ignore_extra: bool = False):
-        """Load parameters from file previously saved by `save_parameters`.
+        """
+        Loads parameters from file previously saved by `save_parameters`.
         See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
 
-        Parameters
-        ----------
-        filename : str
-            Path to parameter file.
-        device : Device
-            Device(s) to initialize loaded parameters on.
-        allow_missing : bool, default False
-            Whether to silently skip loading parameters not represents in the file.
-        ignore_extra : bool, default False
-            Whether to silently ignore parameters from the file that are not
-            present in this Block.
+        :param filename: Path to parameter file
+        :param device: Torch device to load parameters to
+        :param allow_missing: Whether to silently skip loading parameters not represents in the file. Default: False.
+        :param ignore_extra: Whether to silently ignore parameters from the file that are not part of this Module.
+                             Default: False.
         """
+
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                         "This is either not a model directory or the first training "
                                                         "checkpoint has not happened yet." % filename)
