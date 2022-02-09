@@ -574,7 +574,6 @@ def initialize_parameters(module: pt.nn.Module):
     https: // jamesmccaffrey.wordpress.com / 2020 / 11 / 20 / the - gain - parameter -
     """
     if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
-        # TODO: consider using gain=1 / math.sqrt(2)
         pt.nn.init.xavier_uniform_(module.weight, gain=1)
         if module.bias is not None:
             pt.nn.init.zeros_(module.bias)
