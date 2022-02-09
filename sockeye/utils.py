@@ -105,11 +105,6 @@ def seed_rngs(seed: int) -> None:  # type: ignore
     Seed the random number generators (Python, Numpy and MXNet).
 
     :param seed: The random seed.
-    :param ctx: Random number generators in MXNet are device specific.
-           If None, MXNet will set the state of each generator of each device using seed and device id. This will lead
-           to different results on different devices. If ctx is provided, this function will seed
-           device-specific generators with a fixed offset. E.g. for 2 devices and seed=13, seed for gpu(0) will be 13,
-           14 for gpu(1). See https://beta.mxnet.io/api/gluon-related/_autogen/mxnet.random.seed.html.
     """
     logger.info(f"Random seed: {seed}")
     np.random.seed(seed)
