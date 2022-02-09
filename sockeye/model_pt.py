@@ -206,8 +206,7 @@ class SockeyeModel(pt.nn.Module):
 
     def _embed_and_encode(self,
                           source: pt.Tensor, source_length: pt.Tensor,
-                          target: pt.Tensor, target_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor,
-                                                                                pt.Tensor, List[pt.Tensor]]:
+                          target: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, List[pt.Tensor]]:
         """
         Encode the input sequence, embed the target sequence, and initialize the decoder.
         Used for training.
@@ -215,7 +214,6 @@ class SockeyeModel(pt.nn.Module):
         :param source: Source input data.
         :param source_length: Length of source inputs.
         :param target: Target input data.
-        :param target_length: Length of target inputs.
         :return: encoder outputs and lengths, target embeddings, and decoder initial states
         """
         source_embed = self.embedding_source(source)
@@ -234,7 +232,8 @@ class SockeyeModel(pt.nn.Module):
         :param step_input: Input to a single decoder step. Shape: (batch_size, num_target_factors).
         :param states: List of previous or initial model states. Shape of state tensors and length of states list
                        determined by self.decoder.state_structure().
-        :vocab_slice_ids: Optional list of vocabulary ids to use for reduced matrix multiplication at the output layer.
+        :param vocab_slice_ids: Optional list of vocabulary ids to use
+                                for reduced matrix multiplication at the output layer.
 
         :return: logits, list of new model states, other target factor logits.
         """
@@ -268,8 +267,9 @@ class SockeyeModel(pt.nn.Module):
         # caching the encoder and embedding forward passes), turn off autograd
         # for the encoder and embeddings to save memory.
         with pt.no_grad() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
-            source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source, source_length,
-                                                                                                target, target_length)
+            source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source,
+                                                                                                source_length,
+                                                                                                target)
 
         target = self.decoder.decode_seq(target_embed, states=states)
 
