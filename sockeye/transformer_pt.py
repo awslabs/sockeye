@@ -12,8 +12,8 @@
 # permissions and limitations under the License.
 
 
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 import torch as pt
 
@@ -41,6 +41,8 @@ class TransformerConfig(config.Config):
     use_lhuc: bool = False
     depth_key_value: int = 0
     use_glu: bool = False
+    num_branches: int = 1
+    branch_layers: Optional[List] = None
 
 
 class TransformerEncoderBlock(pt.nn.Module):

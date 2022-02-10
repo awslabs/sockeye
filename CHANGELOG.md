@@ -11,6 +11,17 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.1]
+
+### Added
+
+- Added support for training with multiple prepared data directories: `sockeye-train --prepared-data dir1 dir2 ...`.
+  - Prepared data sources should all use the same vocabularies (specify `sockeye-prepare-data --source-vocab ... sockeye-prepare-data --target-vocab ...`).
+  - At each training step, one of the prepared data sources is randomly chosen to provide the next batch.
+  - By default, all data sources have an equal chance of being chosen (`--data-sampling-method uniform`).
+  - Alternatively, the choice can be weighted by data size (number of sequences) and a temperature parameter (`--data-sampling-method temperature --data-sampling-temperature ...`) as described by [Arivazhagan et al (2019)](https://aclanthology.org/N19-1388/).
+  - The user can also specify custom weights (`--data-sampling-method custom --data-sampling-custom ...`).
+
 ## [3.1.0]
 Sockeye is now exclusively based on Pytorch.
 

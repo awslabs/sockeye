@@ -483,7 +483,7 @@ def test_get_training_data_iters():
         # tmp common vocab
         vcb = vocab.build_from_paths([data['train_source'], data['train_target']])
 
-        train_iter, val_iter, config_data, data_info = data_io.get_training_data_iters(
+        train_iter, val_iters, config_data, data_info = data_io.get_training_data_iters(
             sources=[data['train_source']],
             targets=[data['train_target']],
             validation_sources=[data['dev_source']],
@@ -500,7 +500,7 @@ def test_get_training_data_iters():
             bucketing=True,
             bucket_width=10)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
-        assert isinstance(val_iter, data_io.ParallelSampleIter)
+        assert isinstance(val_iters[0], data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
         assert data_info.sources == [data['train_source']]
         assert data_info.targets == [data['train_target']]
@@ -512,7 +512,7 @@ def test_get_training_data_iters():
         assert np.isclose(config_data.data_statistics.length_ratio_std, expected_std)
 
         assert train_iter.batch_size == batch_size
-        assert val_iter.batch_size == batch_size
+        assert val_iters[0].batch_size == batch_size
 
         # test some batches
         bos_id = vcb[C.BOS_SYMBOL]
@@ -753,6 +753,64 @@ def test_sharded_and_parallel_iter_same_num_batches():
             num_batches_seen += 1
 
         assert num_batches_seen == num_batches
+
+
+def test_multi_parallel_sample_iter():
+    # Each data set has 1 bucket that contains 2 sentences
+    data = [torch.zeros(2, 10, 1)]
+    dataset1 = data_io.ParallelDataSet(data, data)
+    dataset2 = data_io.ParallelDataSet(data, data)
+
+    # Each bucket has 1 batch of 2 sentences
+    batch_size = 2
+    buckets = [(10, 10)]
+    bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
+                                                           batch_size,
+                                                           batch_type=C.BATCH_TYPE_SENTENCE,
+                                                           data_target_average_len=[None] * len(buckets))
+
+    with TemporaryDirectory() as work_dir:
+        # Create 2 iterators
+        shard1_fname = os.path.join(work_dir, 'shard1')
+        shard2_fname = os.path.join(work_dir, 'shard2')
+        dataset1.save(shard1_fname)
+        dataset2.save(shard2_fname)
+        iter1 = data_io.ShardedParallelSampleIter([shard1_fname], buckets, batch_size, bucket_batch_sizes)
+        iter2 = data_io.ShardedParallelSampleIter([shard2_fname], buckets, batch_size, bucket_batch_sizes)
+
+        # Create a multi-data iterator that wraps the above 2 iterators
+        it = data_io.MultiParallelSampleIter(iters=[iter1, iter2], num_sents_per_iter=[2, 2],
+                                             method=C.DATA_SAMPLING_UNIFORM, sync_size=2)
+
+        # Sanity check
+        assert len(it.iters) == 2
+        assert isinstance(it.iters[0], data_io.ShardedParallelSampleIter)
+        assert isinstance(it.iters[1], data_io.ShardedParallelSampleIter)
+        assert it.iters[0] is not it.iters[1]
+        assert len(it.iter_weights) == 2
+
+        # Yielding 2 batches means we've yielded the total number of sentences
+        # across both sub-iterators, marking an approximate epoch boundary
+        for _ in range(2):
+            it.next()
+        assert not it.iter_next()
+
+        # Test save/load
+        fname = os.path.join(work_dir, 'saved_multi_iter')
+        it.save_state(fname)
+        it = data_io.MultiParallelSampleIter(iters=[iter1, iter2], num_sents_per_iter=[2, 2],
+                                             method=C.DATA_SAMPLING_UNIFORM, sync_size=2)
+        it.load_state(fname)
+        assert not it.iter_next()
+
+        # Resetting and yielding another batch leaves the iterator mid-epoch
+        it.reset()
+        it.next()
+        assert it.iter_next()
+
+        # Yielding 3 batches total with a sync_size of 2 results in a queue of
+        # length 1
+        assert len(it.iter_call_queue) == 1
 
 
 def test_create_target_and_shifted_label_sequences():

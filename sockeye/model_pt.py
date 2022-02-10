@@ -139,8 +139,10 @@ class SockeyeModel(pt.nn.Module):
 
         # traced components (for inference)
         self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
+        # Encoder and decode steps are traced for each active branch (different
+        # subsets of all encoder or decoder layers)
+        self.traced_encoder = {}  # type: Dict[int, pt.jit.ScriptModule]
+        self.traced_decode_step = {}  # type: Dict[int, pt.jit.ScriptModule]
 
     def cast(self, dtype: str):
         if dtype == C.DTYPE_FP16:
@@ -158,6 +160,12 @@ class SockeyeModel(pt.nn.Module):
     def state_structure(self):
         return self.decoder.state_structure()
 
+    def set_active_branch(self, branch_index: int):
+        if self.encoder.config.num_branches > 1:
+            self.encoder.set_active_branch(branch_index)
+        if self.decoder.config.num_branches > 1:
+            self.decoder.set_active_branch(branch_index)
+
     def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
         """
         Encodes the input sequence.
@@ -172,10 +180,12 @@ class SockeyeModel(pt.nn.Module):
                 logger.debug("Tracing embedding_source")
                 self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
             source_embed = self.traced_embedding_source(inputs)
-            if self.traced_encoder is None:
-                logger.debug("Tracing encoder")
-                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
-            source_encoded, source_encoded_length = self.traced_encoder(source_embed, valid_length)
+            if self.encoder.get_active_branch() not in self.traced_encoder:
+                logger.debug(f"Tracing encoder (branch {self.encoder.get_active_branch()})")
+                self.traced_encoder[self.encoder.get_active_branch()] = \
+                    pt.jit.trace(self.encoder, (source_embed, valid_length))
+            source_encoded, source_encoded_length = \
+                self.traced_encoder[self.encoder.get_active_branch()](source_embed, valid_length)
         else:
             source_embed = self.embedding_source(inputs)
             source_encoded, source_encoded_length = self.encoder(source_embed, valid_length)
@@ -241,15 +251,16 @@ class SockeyeModel(pt.nn.Module):
             decode_step_inputs = [step_input, states]
             if vocab_slice_ids is not None:
                 decode_step_inputs.append(vocab_slice_ids)
-            if self.traced_decode_step is None:
-                logger.debug("Tracing decode step")
+            if self.decoder.get_active_branch() not in self.traced_decode_step:
+                logger.debug(f"Tracing decode step (branch {self.decoder.get_active_branch()})")
                 decode_step_module = _DecodeStep(self.embedding_target,
                                                  self.decoder,
                                                  self.output_layer,
                                                  self.factor_output_layers)
-                self.traced_decode_step = pt.jit.trace(decode_step_module, decode_step_inputs)
+                self.traced_decode_step[self.decoder.get_active_branch()] = \
+                    pt.jit.trace(decode_step_module, decode_step_inputs)
             # the traced module returns a flat list of tensors
-            decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
+            decode_step_outputs = self.traced_decode_step[self.decoder.get_active_branch()](*decode_step_inputs)
             step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
             new_states = decode_step_outputs[self.num_target_factors:]
         else:

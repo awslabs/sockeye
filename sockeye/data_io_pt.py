@@ -775,95 +775,171 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                               permute=permute)
 
 
-def get_prepared_data_iters(prepared_data_dir: str,
-                            validation_sources: List[str],
-                            validation_targets: List[str],
+def get_prepared_data_iters(prepared_data_dirs: List[str],
+                            validation_sources: Optional[List[str]],
+                            validation_targets: Optional[List[str]],
+                            validation_prepared_data_dirs: Optional[List[str]],
                             shared_vocab: bool,
                             batch_size: int,
                             batch_type: str,
                             batch_sentences_multiple_of: int = 1,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
-                                                           'BaseParallelSampleIter',
-                                                           'DataConfig', List[vocab.Vocab], List[vocab.Vocab]]:
+                            permute: bool = True,
+                            sampling_method: str = C.DATA_SAMPLING_UNIFORM,
+                            sampling_temperature: float = 1.,
+                            sampling_custom: List[float] = []) -> Tuple['BaseParallelSampleIter',
+                                                                        List['BaseParallelSampleIter'],
+                                                                        'DataConfig',
+                                                                        List[vocab.Vocab],
+                                                                        List[vocab.Vocab]]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
 
-    version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
-    with open(version_file) as version_in:
-        version = int(version_in.read())
-        check_condition(version == C.PREPARED_DATA_VERSION,
-                        "The dataset %s was written in an old and incompatible format. Please rerun data "
-                        "preparation with a current version of Sockeye." % prepared_data_dir)
-    info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
-    check_condition(os.path.exists(info_file),
-                    "Could not find data info %s. Are you sure %s is a directory created with "
-                    "sockeye-prepare-data?" % (info_file, prepared_data_dir))
-    data_info = cast(DataInfo, DataInfo.load(info_file))
-    config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
-    check_condition(os.path.exists(config_file),
-                    "Could not find data config %s. Are you sure %s is a directory created with "
-                    "sockeye-prepare-data?" % (config_file, prepared_data_dir))
-    config_data = cast(DataConfig, DataConfig.load(config_file))
-    shard_fnames = [os.path.join(prepared_data_dir,
-                                 C.SHARD_NAME % shard_idx) for shard_idx in range(data_info.num_shards)]
-    for shard_fname in shard_fnames:
-        check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
+    train_iters = []  # type: List[BaseParallelSampleIter]
+    config_data_per_iter = []  # type: List[DataConfig]
+    last_source_vocabs = None  # type: Optional[List[vocab.Vocab]]
+    last_target_vocabs = None  # type: Optional[List[vocab.Vocab]]
+    last_bucket_batch_sizes = None  # type: Optional[List[BucketBatchSize]]
 
-    check_condition(shared_vocab == data_info.shared_vocab, "Shared vocabulary settings need to match these "
-                                                            "of the prepared data (e.g. for weight tying). "
-                                                            "Specify or omit %s consistently when training "
-                                                            "and preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
+    def _get_shared_data_iter(prepared_data_dir: str, permute: bool = True) -> Tuple[ShardedParallelSampleIter,
+                                                                                     DataConfig,
+                                                                                     List[vocab.Vocab],
+                                                                                     List[vocab.Vocab],
+                                                                                     List[BucketBatchSize]]:
+        version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
+        with open(version_file) as version_in:
+            version = int(version_in.read())
+            check_condition(version == C.PREPARED_DATA_VERSION,
+                            "The dataset %s was written in an old and incompatible format. Please rerun data "
+                            "preparation with a current version of Sockeye." % prepared_data_dir)
+        info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
+        check_condition(os.path.exists(info_file),
+                        "Could not find data info %s. Are you sure %s is a directory created with "
+                        "sockeye-prepare-data?" % (info_file, prepared_data_dir))
+        data_info = cast(DataInfo, DataInfo.load(info_file))
+        config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
+        check_condition(os.path.exists(config_file),
+                        "Could not find data config %s. Are you sure %s is a directory created with "
+                        "sockeye-prepare-data?" % (config_file, prepared_data_dir))
+        config_data = cast(DataConfig, DataConfig.load(config_file))
+        shard_fnames = [os.path.join(prepared_data_dir,
+                                     C.SHARD_NAME % shard_idx) for shard_idx in range(data_info.num_shards)]
+        for shard_fname in shard_fnames:
+            check_condition(os.path.exists(shard_fname), "Shard %s does not exist." % shard_fname)
 
-    source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
-    target_vocabs = vocab.load_target_vocabs(prepared_data_dir)
+        check_condition(shared_vocab == data_info.shared_vocab, "Shared vocabulary settings need to match these "
+                                                                "of the prepared data (e.g. for weight tying). "
+                                                                "Specify or omit %s consistently when training "
+                                                                "and preparing the data." % C.VOCAB_ARG_SHARED_VOCAB)
 
-    check_condition(len(source_vocabs) == len(data_info.sources),
-                    "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
-                                                                                 len(data_info.sources)))
-    check_condition(len(target_vocabs) == len(data_info.targets),
-                    "Wrong number of target vocabularies. Found %d, need %d." % (len(target_vocabs),
-                                                                                 len(data_info.targets)))
+        source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
+        target_vocabs = vocab.load_target_vocabs(prepared_data_dir)
 
-    buckets = config_data.data_statistics.buckets
-    max_seq_len_source = config_data.max_seq_len_source
-    max_seq_len_target = config_data.max_seq_len_target
+        check_condition(len(source_vocabs) == len(data_info.sources),
+                        "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
+                                                                                     len(data_info.sources)))
+        check_condition(len(target_vocabs) == len(data_info.targets),
+                        "Wrong number of target vocabularies. Found %d, need %d." % (len(target_vocabs),
+                                                                                     len(data_info.targets)))
 
-    bucket_batch_sizes = define_bucket_batch_sizes(buckets,
-                                                   batch_size,
-                                                   batch_type,
-                                                   config_data.data_statistics.average_len_target_per_bucket,
-                                                   batch_sentences_multiple_of)
+        # Verify that all prepared data dirs use the same vocabularies
+        if last_source_vocabs is not None and last_target_vocabs is not None:
+            for v1, v2 in zip(source_vocabs, last_source_vocabs):
+                check_condition(v1 == v2, 'All prepared data directories must use the same source vocabulary '
+                                          '(specify `sockeye-prepare-data --source-vocab ...`)')
+            for v1, v2 in zip(target_vocabs, last_target_vocabs):
+                check_condition(v1 == v2, 'All prepared data directories must use the same target vocabulary '
+                                          '(specify `sockeye-prepare-data --target-vocab ...`)')
 
-    config_data.data_statistics.log(bucket_batch_sizes)
+        buckets = config_data.data_statistics.buckets
+        bucket_batch_sizes = define_bucket_batch_sizes(buckets,
+                                                       batch_size,
+                                                       batch_type,
+                                                       config_data.data_statistics.average_len_target_per_bucket,
+                                                       batch_sentences_multiple_of)
 
-    train_iter = ShardedParallelSampleIter(shard_fnames,
-                                           buckets,
-                                           batch_size,
-                                           bucket_batch_sizes,
-                                           num_source_factors=len(data_info.sources),
-                                           num_target_factors=len(data_info.targets),
-                                           permute=permute)
+        train_iter = ShardedParallelSampleIter(shard_fnames,
+                                               buckets,
+                                               batch_size,
+                                               bucket_batch_sizes,
+                                               num_source_factors=len(data_info.sources),
+                                               num_target_factors=len(data_info.targets),
+                                               permute=permute)
 
-    data_loader = RawParallelDatasetLoader(buckets=buckets,
-                                           eos_id=C.EOS_ID,
-                                           pad_id=C.PAD_ID)
+        return train_iter, config_data, source_vocabs, target_vocabs, bucket_batch_sizes
 
-    # Don't shuffle validation data. Different orders can cause different
-    # evaluation results.
-    validation_iter = get_validation_data_iter(data_loader=data_loader,
-                                               validation_sources=validation_sources,
-                                               validation_targets=validation_targets,
-                                               buckets=buckets,
-                                               bucket_batch_sizes=bucket_batch_sizes,
-                                               source_vocabs=source_vocabs,
-                                               target_vocabs=target_vocabs,
-                                               max_seq_len_source=max_seq_len_source,
-                                               max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size,
-                                               permute=False)
+    # Create a separate iterator for each prepared data dir
+    for prepared_data_dir in prepared_data_dirs:
+        (_train_iter, config_data,
+         last_source_vocabs, last_target_vocabs, last_bucket_batch_sizes) = _get_shared_data_iter(prepared_data_dir,
+                                                                                                  permute=permute)
+        train_iters.append(_train_iter)
+        config_data_per_iter.append(config_data)
 
-    return train_iter, validation_iter, config_data, source_vocabs, target_vocabs
+    if len(train_iters) > 1:
+        # Multiple data dirs: wrap multiple iterators with a single multi-data
+        # iterator
+        train_iter = MultiParallelSampleIter(iters=train_iters,
+                                             num_sents_per_iter=[config.data_statistics.num_sents
+                                                                 for config in config_data_per_iter],
+                                             method=sampling_method,
+                                             temperature=sampling_temperature,
+                                             custom=sampling_custom)
+    else:
+        # Single data dir: use single iterator directly
+        train_iter = train_iters[0]  # type: ignore
+
+    # TODO(mdenkows): We currently use the DataConfig for the last loaded
+    # prepared data directory. The model uses this DataConfig for info about
+    # length ratio, etc. This may skew the behavior of some features toward a
+    # single data source.
+    config_data = config_data_per_iter[0]
+    assert last_source_vocabs is not None and last_target_vocabs is not None and last_bucket_batch_sizes is not None, \
+        'Specify at least one prepared data directory.'
+
+    valid_inputs_err_msg = 'Specify either validation_prepared_data_dirs or validation_sources and validation_targets.'
+    if validation_prepared_data_dirs is not None:
+        logger.info("=================================")
+        logger.info("Creating validation data iterator")
+        logger.info("=================================")
+        assert validation_sources is None and validation_targets is None, valid_inputs_err_msg
+        validation_iters = []  # type: List[BaseParallelSampleIter]
+        config_data_per_validation_iter = []  # type: List[DataConfig]
+        for prepared_data_dir in validation_prepared_data_dirs:
+            (validation_iter, _config_data,
+             last_source_vocabs, last_target_vocabs, last_bucket_batch_sizes) = _get_shared_data_iter(prepared_data_dir,
+                                                                                                      permute=False)
+            check_condition(config_data.num_source_factors == _config_data.num_source_factors,
+                            'Training and validation data must have the same number of source factors:'
+                            ' %d != %d.' % (config_data.num_source_factors, _config_data.num_source_factors))
+            check_condition(config_data.num_target_factors == _config_data.num_target_factors,
+                            'Training and validation data must have the same number of target factors:'
+                            ' %d != %d.' % (config_data.num_target_factors, _config_data.num_target_factors))
+            validation_iters.append(validation_iter)
+            config_data_per_validation_iter.append(_config_data)
+
+    else:
+        assert validation_sources is not None and validation_targets is not None, valid_inputs_err_msg
+
+        data_loader = RawParallelDatasetLoader(buckets=config_data.data_statistics.buckets,
+                                               eos_id=C.EOS_ID,
+                                               pad_id=C.PAD_ID)
+
+        # Don't shuffle validation data. Different orders can cause different
+        # evaluation results.
+        validation_iters = [get_validation_data_iter(data_loader=data_loader,
+                                                     validation_sources=validation_sources,
+                                                     validation_targets=validation_targets,
+                                                     buckets=config_data.data_statistics.buckets,
+                                                     bucket_batch_sizes=last_bucket_batch_sizes,
+                                                     source_vocabs=last_source_vocabs,
+                                                     target_vocabs=last_target_vocabs,
+                                                     max_seq_len_source=config_data.max_seq_len_source,
+                                                     max_seq_len_target=config_data.max_seq_len_target,
+                                                     batch_size=batch_size,
+                                                     permute=False)]
+
+    return train_iter, validation_iters, config_data, last_source_vocabs, last_target_vocabs
 
 
 def get_training_data_iters(sources: List[str],
@@ -884,8 +960,10 @@ def get_training_data_iters(sources: List[str],
                             bucket_scaling: bool = True,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter', Optional['BaseParallelSampleIter'],
-                                                           'DataConfig', 'DataInfo']:
+                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
+                                                           List['BaseParallelSampleIter'],
+                                                           'DataConfig',
+                                                           'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -975,19 +1053,19 @@ def get_training_data_iters(sources: List[str],
 
     # Don't shuffle validation data. Different orders can cause different
     # evaluation results.
-    validation_iter = get_validation_data_iter(data_loader=data_loader,
-                                               validation_sources=validation_sources,
-                                               validation_targets=validation_targets,
-                                               buckets=buckets,
-                                               bucket_batch_sizes=bucket_batch_sizes,
-                                               source_vocabs=source_vocabs,
-                                               target_vocabs=target_vocabs,
-                                               max_seq_len_source=max_seq_len_source,
-                                               max_seq_len_target=max_seq_len_target,
-                                               batch_size=batch_size,
-                                               permute=False)
+    validation_iters = [get_validation_data_iter(data_loader=data_loader,
+                                                 validation_sources=validation_sources,
+                                                 validation_targets=validation_targets,
+                                                 buckets=buckets,
+                                                 bucket_batch_sizes=bucket_batch_sizes,
+                                                 source_vocabs=source_vocabs,
+                                                 target_vocabs=target_vocabs,
+                                                 max_seq_len_source=max_seq_len_source,
+                                                 max_seq_len_target=max_seq_len_target,
+                                                 batch_size=batch_size,
+                                                 permute=False)]
 
-    return train_iter, validation_iter, config_data, data_info
+    return train_iter, validation_iters, config_data, data_info  # type: ignore
 
 
 def get_scoring_data_iters(sources: List[str],
@@ -1777,6 +1855,94 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
         self.shard_iter.load_state(fname + ".sharditer")
 
 
+class MultiParallelSampleIter(BaseParallelSampleIter):
+    """
+    Wraps multiple parallel sample iterators in a single iterator. Each time
+    `next()` is called, one of the sub-iterators is selected by weighted random
+    choice to yield a batch.
+    """
+
+    def __init__(self,
+                 iters: List[BaseParallelSampleIter],
+                 num_sents_per_iter: List[int],
+                 method: str = C.DATA_SAMPLING_UNIFORM,
+                 temperature: float = 1.,
+                 custom: List[float] = [],
+                 sync_size: int = 8192) -> None:
+        self.iters = iters
+        self.num_sents_per_iter = num_sents_per_iter
+        self.total_num_sents = sum(num_sents_per_iter)
+        if utils.is_distributed():
+            self.total_num_sents /= torch.distributed.get_world_size()
+        self.num_sents_this_epoch = 0
+        self.method = method
+        self.temperature = temperature
+        self.custom = custom
+        self.sync_size = sync_size
+        self.iter_call_queue = []  # type: List[int]
+        if self.method == C.DATA_SAMPLING_UNIFORM:
+            self.iter_weights = np.full(len(self.iters), 1 / len(self.iters))
+        elif self.method == C.DATA_SAMPLING_TEMPERATURE:
+            self.iter_weights = np.array([num_sents / self.total_num_sents for num_sents in self.num_sents_per_iter])
+            self.iter_weights **= (1 / self.temperature)
+            self.iter_weights /= self.iter_weights.sum()
+        elif self.method == C.DATA_SAMPLING_CUSTOM:
+            check_condition(len(custom) == len(iters),
+                            'Number of custom data sampling weights must match number of prepared data directories: '
+                            f'{len(custom)} != {len(iters)}')
+            self.iter_weights = np.array(custom)
+            self.iter_weights /= self.iter_weights.sum()
+        else:
+            raise ValueError(f'Unknown data sampling method: {self.method}')
+        logger.info(f'MultiParallelSampleIter initialized with data weights: {self.iter_weights}')
+
+    def reset(self):
+        # This method only resets the sentence counter for epoch reporting. Sub-
+        # iterators are reset as needed in the `next()` method.
+        self.num_sents_this_epoch = 0
+
+    def iter_next(self) -> bool:
+        # This method could always return true since sub-iterators are reset as
+        # needed. However, the model training loop defines an epoch boundary as
+        # the step in which `iter_next()` returns False. We return False when
+        # we've yielded enough sentences to cover the summed size of all
+        # prepared data sources (one approximate epoch).
+        return self.num_sents_this_epoch < self.total_num_sents
+
+    def next(self) -> 'Batch':
+        # When the iterator call queue is empty, decide which iterators to call
+        # for the next N=sync_size batches.
+        if not self.iter_call_queue:
+            self.iter_call_queue = list(np.random.choice(range(len(self.iters)),
+                                                         size=self.sync_size, p=self.iter_weights))
+            if utils.is_distributed():
+                # Synchronize order of iterator calls across workers
+                self.iter_call_queue = utils.broadcast_object(self.iter_call_queue)
+        next_iter_i = self.iter_call_queue.pop()
+        next_iter = self.iters[next_iter_i]
+        # Reset sub-iterators as needed
+        if not next_iter.iter_next():
+            next_iter.reset()
+        batch = next_iter.next()
+        batch.data_source = next_iter_i
+        self.num_sents_this_epoch += batch.samples
+        return batch
+
+    def save_state(self, fname: str):
+        if not os.path.exists(fname):
+            os.mkdir(fname)
+        with open(os.path.join(fname, 'queue'), 'wb') as fp:
+            pickle.dump((self.num_sents_this_epoch, self.iter_call_queue), fp)
+        for i, _iter in enumerate(self.iters):
+            _iter.save_state(os.path.join(fname, str(i)))
+
+    def load_state(self, fname: str):
+        with open(os.path.join(fname, 'queue'), 'rb') as fp:
+            self.num_sents_this_epoch, self.iter_call_queue = pickle.load(fp)
+        for i, _iter in enumerate(self.iters):
+            _iter.load_state(os.path.join(fname, str(i)))
+
+
 class ParallelSampleIter(BaseParallelSampleIter):
     """
     Data iterator on a bucketed ParallelDataSet. Shuffles data at every reset and supports saving and loading the
@@ -1908,6 +2074,7 @@ class Batch:
     labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
+    data_source: int
 
     def load(self, device: torch.device) -> 'Batch':
         source = self.source.to(device)
@@ -1915,7 +2082,7 @@ class Batch:
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
-        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
+        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens, self.data_source)
 
 
 def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -1930,7 +2097,10 @@ def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) ->
     return target, label
 
 
-def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor, label: torch.Tensor) -> Batch:
+def create_batch_from_parallel_sample(source: torch.Tensor,
+                                      target: torch.Tensor,
+                                      label: torch.Tensor,
+                                      data_source: int = 0) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
@@ -1956,4 +2126,4 @@ def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    return Batch(source, source_length, target, target_length, labels, samples, tokens)
+    return Batch(source, source_length, target, target_length, labels, samples, tokens, data_source)

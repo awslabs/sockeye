@@ -177,7 +177,7 @@ class EarlyStoppingTrainer:
 
     def fit(self,
             train_iter: data_io.BaseParallelSampleIter,
-            validation_iter: data_io.BaseParallelSampleIter,
+            validation_iters: List[data_io.BaseParallelSampleIter],
             checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder] = None):
         logger.info("Early stopping by optimizing '%s'", self.config.early_stopping_metric)
 
@@ -215,21 +215,21 @@ class EarlyStoppingTrainer:
                 logger.info("Maximum # of epochs (%s) reached.", self.config.max_epochs)
                 if not checkpoint_up_to_date:
                     time_cost = time.time() - tic
-                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iters)
                 break
 
             if self.config.max_updates is not None and self.state.updates == self.config.max_updates:
                 logger.info("Maximum # of updates (%s) reached.", self.config.max_updates)
                 if not checkpoint_up_to_date:
                     time_cost = time.time() - tic
-                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iters)
                 break
 
             if self.config.max_samples is not None and self.state.samples >= self.config.max_samples:
                 logger.info("Maximum # of samples (%s) reached", self.config.max_samples)
                 if not checkpoint_up_to_date:
                     time_cost = time.time() - tic
-                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                    self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iters)
                 break
 
             did_grad_step = self._step(batch=train_iter.next())
@@ -242,7 +242,7 @@ class EarlyStoppingTrainer:
             if self.state.updates > 0 and self.state.batches % (
                     self.config.checkpoint_interval * self.config.update_interval) == 0:
                 time_cost = time.time() - tic
-                self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iter)
+                self._create_checkpoint(checkpoint_decoder, time_cost, train_iter, validation_iters)
                 checkpoint_up_to_date = True
 
                 if self.config.max_seconds is not None and self.state.time_elapsed >= self.config.max_seconds:
@@ -268,7 +268,7 @@ class EarlyStoppingTrainer:
 
     def _create_checkpoint(self, checkpoint_decoder: checkpoint_decoder.CheckpointDecoder, time_cost: float,
                            train_iter: data_io.BaseParallelSampleIter,
-                           validation_iter: data_io.BaseParallelSampleIter):
+                           validation_iters: List[data_io.BaseParallelSampleIter]):
         """
         Creates a checkpoint, which will update self.state.converged/self.state.diverged, evaluate validation
         metrics and update the best known parameters accordingly.
@@ -284,7 +284,7 @@ class EarlyStoppingTrainer:
         logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
                     "\t".join("Train-%s" % str(metric) for metric in train_metrics))
 
-        val_metrics = self._evaluate(self.state.checkpoint, validation_iter, checkpoint_decoder)
+        val_metrics = self._evaluate(self.state.checkpoint, validation_iters, checkpoint_decoder)
 
         has_improved = self._determine_improvement(val_metrics)
         self.state.converged = self._determine_convergence()
@@ -312,6 +312,10 @@ class EarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
+        # TODO(mdenkows): Right now each batch uses the model branch with the
+        # same index. A data source mapping would allow users to define which
+        # branch is used for each training data source.
+        self.sockeye_model.set_active_branch(batch.data_source)
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
             # Forward
             outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
@@ -382,30 +386,37 @@ class EarlyStoppingTrainer:
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
         return did_grad_step
 
-    def _evaluate(self, checkpoint: int, data_iter,
+    def _evaluate(self,
+                  checkpoint: int,
+                  validation_iters: List[data_io.BaseParallelSampleIter],
                   checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss.LossMetric]:
         """
         Computes loss(es) on validation data and returns their metrics.
-        :param data_iter: Validation data iterator.
+        :param validation_iters: List of validation data iterators.
         :return: List of validation metrics, same order as self.loss_functions.
         """
         # Switch model to eval mode (disable dropout, etc.) to score validation
         # set and run checkpoint decoder.
         self.sockeye_model.eval()
 
-        data_iter.reset()
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
-        for batch in data_iter:
-            batch = batch.load(device=self.device)
-            with torch.inference_mode():
-                # Forward: use sockeye_model because (traced) training_model
-                # doesn't support eval mode (still runs dropout, etc.)
-                outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
-                # Loss
-                loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
-                # Update validation metrics for batch
-            for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
-                loss_metric.update(loss_value.item(), num_samples.item())
+        # TODO(mdenkows): Right now each validation iter uses the model branch
+        # with the same index. A data source mapping would allow users to define
+        # which branch is used for each validation set.
+        for data_source, validation_iter in enumerate(validation_iters):
+            validation_iter.reset()
+            for batch in validation_iter:
+                batch = batch.load(device=self.device)
+                self.sockeye_model.set_active_branch(data_source)
+                with torch.inference_mode():
+                    # Forward: use sockeye_model because (traced) training_model
+                    # doesn't support eval mode (still runs dropout, etc.)
+                    outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
+                    # Loss
+                    loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
+                    # Update validation metrics for batch
+                for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
+                    loss_metric.update(loss_value.item(), num_samples.item())
 
         # Primary worker optionally runs the checkpoint decoder
         decoder_metrics = {}  # type: Dict[str, float]
