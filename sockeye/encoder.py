@@ -37,6 +37,11 @@ class Encoder(pt.nn.Module):
     """
 
     @abstractmethod
+    def __init__(self):
+        super().__init__()
+        self.num_branches = 1
+
+    @abstractmethod
     def get_num_hidden(self) -> int:
         """
         :return: The representation size of this encoder.
@@ -165,6 +170,7 @@ class TransformerEncoder(Encoder):
     def __init__(self, config: transformer.TransformerConfig, inference_only: bool = False) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
+        self.num_branches = self.config.num_branches
         self._branch_layers = set(config.branch_layers if config.branch_layers is not None else [])
         self._active_branch = 0
 
@@ -179,7 +185,7 @@ class TransformerEncoder(Encoder):
         # Layers are lists of modules with size 1 (standard layer) or
         # num_branches (branching layer)
         self._layers = [[transformer.TransformerEncoderBlock(config, inference_only=inference_only)
-                        for _ in range(self.config.num_branches)] if i + 1 in self._branch_layers
+                        for _ in range(self.num_branches)] if i + 1 in self._branch_layers
                         else [transformer.TransformerEncoderBlock(config, inference_only=inference_only)]
                         for i in range(config.num_layers)]
 
@@ -194,9 +200,9 @@ class TransformerEncoder(Encoder):
                                                                  num_hidden=self.config.model_size)
 
     def set_active_branch(self, branch_index: int):
-        if branch_index < 0 or branch_index >= self.config.num_branches:
+        if branch_index < 0 or branch_index >= self.num_branches:
             raise ValueError(f'Unavailable branch: {branch_index}. Branch indices range from 0 to '
-                             f'{self.config.num_branches - 1}')
+                             f'{self.num_branches - 1}')
         self._active_branch = branch_index
 
     def get_active_branch(self) -> int:

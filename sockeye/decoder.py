@@ -81,6 +81,7 @@ class Decoder(pt.nn.Module):
     @abstractmethod
     def __init__(self):
         super().__init__()
+        self.num_branches = 1
 
     @abstractmethod
     def state_structure(self) -> str:
@@ -137,6 +138,7 @@ class TransformerDecoder(Decoder):
         Decoder.__init__(self)
         pt.nn.Module.__init__(self)
         self.config = config
+        self.num_branches = self.config.num_branches
         self._branch_layers = set(config.branch_layers if config.branch_layers is not None else [])
         self._active_branch = 0
         self.inference_only = inference_only
@@ -150,7 +152,7 @@ class TransformerDecoder(Decoder):
         # Layers are lists of modules with size 1 (standard layer) or
         # num_branches (branching layer)
         self._layers = [[transformer.TransformerDecoderBlock(config, inference_only=self.inference_only)
-                        for _ in range(self.config.num_branches)] if i + 1 in self._branch_layers
+                        for _ in range(self.num_branches)] if i + 1 in self._branch_layers
                         else [transformer.TransformerDecoderBlock(config, inference_only=self.inference_only)]
                         for i in range(config.num_layers)]
 
@@ -183,9 +185,9 @@ class TransformerDecoder(Decoder):
         return structure
 
     def set_active_branch(self, branch_index: int):
-        if branch_index < 0 or branch_index >= self.config.num_branches:
+        if branch_index < 0 or branch_index >= self.num_branches:
             raise ValueError(f'Unavailable branch: {branch_index}. Branch indices range from 0 to '
-                             f'{self.config.num_branches - 1}')
+                             f'{self.num_branches - 1}')
         self._active_branch = branch_index
 
     def get_active_branch(self) -> int:
