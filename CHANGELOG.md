@@ -14,7 +14,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 ## [3.1.1]
 
 ### Changed
-- Update torch dependency to `1.10` or later (`torch>=1.10.0`)
+- Updated torch dependency to 1.10.x (`torch>=1.10.0,<1.11.0`)
 
 ## [3.1.0]
 Sockeye is now exclusively based on Pytorch.
