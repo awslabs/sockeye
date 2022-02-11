@@ -1,4 +1,4 @@
-torch>=1.10.0
+torch>=1.10.0,<1.11.0
 pyyaml>=5.1
 numpy>1.16.0,<2.0.0
 sacrebleu==1.4.14
