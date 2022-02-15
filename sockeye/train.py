@@ -206,6 +206,11 @@ def create_checkpoint_decoder(
     if sample_size == 0:
         return None
 
+    if args.validation_prepared_data is not None:
+        logger.info('Checkpoint decoding does not currently support prepared validation data. Disabling checkpoint '
+                    'decoder.')
+        return None
+
     cpd = checkpoint_decoder.CheckpointDecoder(
         model_folder=args.output,
         inputs=[args.validation_source] + args.validation_source_factors,
