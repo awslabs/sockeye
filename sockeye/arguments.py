@@ -16,6 +16,7 @@ Defines commandline arguments for the main CLIs with reasonable defaults.
 """
 import argparse
 import os
+from random import choices
 import sys
 import types
 from typing import Any, Callable, Dict, List, Tuple, Optional
@@ -477,7 +478,7 @@ def add_prepared_data_args(params):
                              'al. 2019, aclanthology.org/N19-1388). Default: %(default)s.')
     params.add_argument('--data-sampling-temperature',
                         type=float,
-                        default=1.,
+                        default=1,
                         help='Temperature parameter for the "temperature" data sampling method. The default value of '
                              'T=1 corresponds to weighting data sources by size while larger values push the weights '
                              'toward uniform. Default: %(default)s.')
@@ -486,6 +487,19 @@ def add_prepared_data_args(params):
                         default=[],
                         help='Weights for the "custom" data sampling method. Specify one per prepared data directory '
                              'in the form "x:x:...". Default: %(default)s.')
+    params.add_argument('--data-random-rerouting',
+                        type=float_greater_or_equal(0),
+                        default=0,
+                        help='Probability with which to randomly reroute batches when training a branching model on '
+                             'multiple data sources (Fan et al. 2021, jmlr.org/papers/v22/20-1307.html). '
+                             'Default: %(default)s.')
+    params.add_argument('--data-random-rerouting-method',
+                        choices=C.DATA_RANDOM_REROUTING_CHOICES,
+                        default=C.DATA_RANDOM_REROUTING_UNIFORM,
+                        help='Method used for randomly rerouting batches. uniform: all branches have equal weight. '
+                             'weighted: branches are weighted using the same weights as data sources. '
+                             'Default: %(default)s.')
+
 
 
 def add_training_output_args(params):

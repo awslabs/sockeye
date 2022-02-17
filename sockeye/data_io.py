@@ -786,11 +786,14 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
                             permute: bool = True,
                             sampling_method: str = C.DATA_SAMPLING_UNIFORM,
                             sampling_temperature: float = 1.,
-                            sampling_custom: List[float] = []) -> Tuple['BaseParallelSampleIter',
-                                                                        List['BaseParallelSampleIter'],
-                                                                        'DataConfig',
-                                                                        List[vocab.Vocab],
-                                                                        List[vocab.Vocab]]:
+                            sampling_custom: List[float] = [],
+                            random_rerouting_rate: float = 0,
+                            random_rerouting_method: str = C.DATA_RANDOM_REROUTING_UNIFORM) -> \
+                                Tuple['BaseParallelSampleIter',
+                                      List['BaseParallelSampleIter'],
+                                      'DataConfig',
+                                      List[vocab.Vocab],
+                                      List[vocab.Vocab]]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -882,9 +885,11 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
         train_iter = MultiParallelSampleIter(iters=train_iters,
                                              num_sents_per_iter=[config.data_statistics.num_sents
                                                                  for config in config_data_per_iter],
-                                             method=sampling_method,
+                                             sampling_method=sampling_method,
                                              temperature=sampling_temperature,
-                                             custom=sampling_custom)
+                                             custom=sampling_custom,
+                                             random_rerouting_rate=random_rerouting_rate,
+                                             random_rerouting_method=random_rerouting_method)
     else:
         # Single data dir: use single iterator directly
         train_iter = train_iters[0]  # type: ignore
@@ -1865,35 +1870,41 @@ class MultiParallelSampleIter(BaseParallelSampleIter):
     def __init__(self,
                  iters: List[BaseParallelSampleIter],
                  num_sents_per_iter: List[int],
-                 method: str = C.DATA_SAMPLING_UNIFORM,
+                 sampling_method: str = C.DATA_SAMPLING_UNIFORM,
                  temperature: float = 1.,
                  custom: List[float] = [],
-                 sync_size: int = 8192) -> None:
+                 sync_size: int = 8192,
+                 random_rerouting_rate: float = 0,
+                 random_rerouting_method: str = C.DATA_RANDOM_REROUTING_UNIFORM) -> None:
         self.iters = iters
         self.num_sents_per_iter = num_sents_per_iter
+        self.sampling_method = sampling_method
+        self.temperature = temperature
+        self.custom = custom
+        self.sync_size = sync_size
+        self.random_rerouting_rate = random_rerouting_rate
+        self.random_rerouting_method = random_rerouting_method
+
         self.total_num_sents = sum(num_sents_per_iter)
         if utils.is_distributed():
             self.total_num_sents /= torch.distributed.get_world_size()
         self.num_sents_this_epoch = 0
-        self.method = method
-        self.temperature = temperature
-        self.custom = custom
-        self.sync_size = sync_size
+
         self.iter_call_queue = []  # type: List[int]
-        if self.method == C.DATA_SAMPLING_UNIFORM:
+        if self.sampling_method == C.DATA_SAMPLING_UNIFORM:
             self.iter_weights = np.full(len(self.iters), 1 / len(self.iters))
-        elif self.method == C.DATA_SAMPLING_TEMPERATURE:
+        elif self.sampling_method == C.DATA_SAMPLING_TEMPERATURE:
             self.iter_weights = np.array([num_sents / self.total_num_sents for num_sents in self.num_sents_per_iter])
             self.iter_weights **= (1 / self.temperature)
             self.iter_weights /= self.iter_weights.sum()
-        elif self.method == C.DATA_SAMPLING_CUSTOM:
+        elif self.sampling_method == C.DATA_SAMPLING_CUSTOM:
             check_condition(len(custom) == len(iters),
                             'Number of custom data sampling weights must match number of prepared data directories: '
                             f'{len(custom)} != {len(iters)}')
             self.iter_weights = np.array(custom)
             self.iter_weights /= self.iter_weights.sum()
         else:
-            raise ValueError(f'Unknown data sampling method: {self.method}')
+            raise ValueError(f'Unknown data sampling method: {self.sampling_method}')
         logger.info(f'MultiParallelSampleIter initialized with data weights: {self.iter_weights}')
 
     def reset(self):
@@ -1924,7 +1935,15 @@ class MultiParallelSampleIter(BaseParallelSampleIter):
         if not next_iter.iter_next():
             next_iter.reset()
         batch = next_iter.next()
-        batch.data_source = next_iter_i
+        if self.random_rerouting_rate > 0 and random.random() < self.random_rerouting_rate:
+            if self.random_rerouting_method == C.DATA_RANDOM_REROUTING_UNIFORM:
+                batch.data_source = np.random.choice(range(len(self.iters)))
+            elif self.random_rerouting_method == C.DATA_RANDOM_REROUTING_WEIGHTED:
+                batch.data_source = np.random.choice(range(len(self.iters)), p=self.iter_weights)
+            else:
+                raise ValueError(f'Unknown random rerouting method: {self.random_rerouting_method}')
+        else:
+            batch.data_source = next_iter_i
         self.num_sents_this_epoch += batch.samples
         return batch
 

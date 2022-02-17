@@ -315,7 +315,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_sentences_multiple_of=args.batch_sentences_multiple_of,
             sampling_method=args.data_sampling_method,
             sampling_temperature=args.data_sampling_temperature,
-            sampling_custom=args.data_sampling_custom)
+            sampling_custom=args.data_sampling_custom,
+            random_rerouting_rate=args.data_random_rerouting,
+            random_rerouting_method=args.data_random_rerouting_method)
 
         check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])

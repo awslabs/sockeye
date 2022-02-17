@@ -780,7 +780,7 @@ def test_multi_parallel_sample_iter():
 
         # Create a multi-data iterator that wraps the above 2 iterators
         it = data_io.MultiParallelSampleIter(iters=[iter1, iter2], num_sents_per_iter=[2, 2],
-                                             method=C.DATA_SAMPLING_UNIFORM, sync_size=2)
+                                             sampling_method=C.DATA_SAMPLING_UNIFORM, sync_size=2)
 
         # Sanity check
         assert len(it.iters) == 2
@@ -799,7 +799,7 @@ def test_multi_parallel_sample_iter():
         fname = os.path.join(work_dir, 'saved_multi_iter')
         it.save_state(fname)
         it = data_io.MultiParallelSampleIter(iters=[iter1, iter2], num_sents_per_iter=[2, 2],
-                                             method=C.DATA_SAMPLING_UNIFORM, sync_size=2)
+                                             sampling_method=C.DATA_SAMPLING_UNIFORM, sync_size=2)
         it.load_state(fname)
         assert not it.iter_next()
 
