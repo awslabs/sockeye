@@ -258,9 +258,9 @@ class DotAttentionCell(pt.nn.Module):
 
 
 def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int) -> pt.Tensor:
-    lengths = lengths.repeat_interleave(heads, dim=0)  # (batch_size * heads, seq_len)
+    lengths = lengths.view(-1, 1).expand(-1, heads).reshape(-1, 1)  # (batch_size * heads, 1)
     # (batch_size * heads, 1, max_len)
-    return ~(pt.arange(max_length, device=lengths.device)[None, :] < lengths[:, None]).view(-1, 1, max_length)
+    return ~(pt.arange(max_length, device=lengths.device).unsqueeze(0) < lengths).view(-1, 1, max_length)
 
 
 class MultiHeadAttentionBase(pt.nn.Module):
