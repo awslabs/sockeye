@@ -93,6 +93,7 @@ class SockeyeModel(pt.nn.Module):
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
+        self.num_branches = max(self.config.config_encoder.num_branches, self.config.config_decoder.num_branches)
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only

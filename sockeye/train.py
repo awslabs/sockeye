@@ -1075,9 +1075,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # In distributed mode, wrap the traced model with a distributed
         # data-parallel model that shares (averages) gradients with models
         # in other worker processes.
-        training_model = torch.nn.parallel.DistributedDataParallel(training_model,
-                                                                   device_ids=None if args.use_cpu else [device],
-                                                                   output_device=None if args.use_cpu else device)
+        training_model = torch.nn.parallel.DistributedDataParallel(
+            training_model,
+            device_ids=None if args.use_cpu else [device],
+            output_device=None if args.use_cpu else device,
+            # Branching models only use a subset of the parameters for each
+            # forward-backward pass
+            find_unused_parameters=sockeye_model.num_branches > 1)
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
