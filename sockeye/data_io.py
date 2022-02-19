@@ -804,11 +804,13 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
     last_target_vocabs = None  # type: Optional[List[vocab.Vocab]]
     last_bucket_batch_sizes = None  # type: Optional[List[BucketBatchSize]]
 
-    def _get_shared_data_iter(prepared_data_dir: str, permute: bool = True) -> Tuple[ShardedParallelSampleIter,
-                                                                                     DataConfig,
-                                                                                     List[vocab.Vocab],
-                                                                                     List[vocab.Vocab],
-                                                                                     List[BucketBatchSize]]:
+    def _get_shared_data_iter(prepared_data_dir: str,
+                              permute: bool = True,
+                              split_when_distributed: bool = True) -> Tuple[ShardedParallelSampleIter,
+                                                                            DataConfig,
+                                                                            List[vocab.Vocab],
+                                                                            List[vocab.Vocab],
+                                                                            List[BucketBatchSize]]:
         version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
         with open(version_file) as version_in:
             version = int(version_in.read())
@@ -867,15 +869,16 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
                                                bucket_batch_sizes,
                                                num_source_factors=len(data_info.sources),
                                                num_target_factors=len(data_info.targets),
-                                               permute=permute)
+                                               permute=permute,
+                                               split_when_distributed=split_when_distributed)
 
         return train_iter, config_data, source_vocabs, target_vocabs, bucket_batch_sizes
 
     # Create a separate iterator for each prepared data dir
     for prepared_data_dir in prepared_data_dirs:
-        (_train_iter, config_data,
-         last_source_vocabs, last_target_vocabs, last_bucket_batch_sizes) = _get_shared_data_iter(prepared_data_dir,
-                                                                                                  permute=permute)
+        # Training data is split per worker in distributed mode
+        _train_iter, config_data, last_source_vocabs, last_target_vocabs, last_bucket_batch_sizes = \
+            _get_shared_data_iter(prepared_data_dir, permute=permute, split_when_distributed=True)
         train_iters.append(_train_iter)
         config_data_per_iter.append(config_data)
 
@@ -911,9 +914,9 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
         validation_iters = []  # type: List[BaseParallelSampleIter]
         config_data_per_validation_iter = []  # type: List[DataConfig]
         for prepared_data_dir in validation_prepared_data_dirs:
-            (validation_iter, _config_data,
-             last_source_vocabs, last_target_vocabs, last_bucket_batch_sizes) = _get_shared_data_iter(prepared_data_dir,
-                                                                                                      permute=False)
+            # Each worker loads the full validation data in distributed mode
+            validation_iter, _config_data, last_source_vocabs, last_target_vocabs, last_bucket_batch_sizes = \
+                _get_shared_data_iter(prepared_data_dir, permute=False, split_when_distributed=False)
             check_condition(config_data.num_source_factors == _config_data.num_source_factors,
                             'Training and validation data must have the same number of source factors:'
                             ' %d != %d.' % (config_data.num_source_factors, _config_data.num_source_factors))
@@ -1454,17 +1457,18 @@ class ParallelDataSet:
         torch.save(self.source + self.target, fname)
 
     @staticmethod
-    def load(fname: str) -> 'ParallelDataSet':
+    def load(fname: str, split_when_distributed: bool = True) -> 'ParallelDataSet':
         """
         Loads a dataset from a binary .npy file. When running in distributed
-        mode, the data is sliced and each worker loads a different slice based
-        on its rank. Specifically, each of N workers loads 1/N of each bucket.
+        mode, the data can be sliced so that each worker loads a different slice
+        based on its rank. Specifically, each of N workers loads 1/N of each
+        bucket.
         """
         data = torch.load(fname)
         n = len(data) // 2
         source = data[:n]
         target = data[n:2 * n]
-        if utils.is_distributed():
+        if utils.is_distributed() and split_when_distributed:
             split_index = torch.distributed.get_rank()
             total_splits = torch.distributed.get_world_size()
             i = split_index / total_splits
@@ -1782,12 +1786,14 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
                  num_source_factors: int = 1,
                  num_target_factors: int = 1,
                  permute: bool = True,
-                 dtype: str = 'int32') -> None:
+                 dtype: str = 'int32',
+                 split_when_distributed: bool = True) -> None:
         super().__init__(buckets=buckets, batch_size=batch_size, bucket_batch_sizes=bucket_batch_sizes,
                          num_source_factors=num_source_factors, num_target_factors=num_target_factors,
                          permute=permute, dtype=dtype)
         assert len(shards_fnames) > 0
         self.shards_fnames = list(shards_fnames)
+        self.split_when_distributed = split_when_distributed
         self.shard_index = -1
 
         self.reset()
@@ -1795,8 +1801,9 @@ class ShardedParallelSampleIter(BaseParallelSampleIter):
     def _load_shard(self):
         shard_fname = self.shards_fnames[self.shard_index]
         logger.info("Loading shard %s.", shard_fname)
-        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index]).fill_up(self.bucket_batch_sizes,
-                                                                                     seed=self.shard_index)
+        dataset = ParallelDataSet.load(self.shards_fnames[self.shard_index],
+                                       split_when_distributed=self.split_when_distributed).fill_up(
+                                           self.bucket_batch_sizes, seed=self.shard_index)
         self.shard_iter = ParallelSampleIter(data=dataset,
                                              buckets=self.buckets,
                                              batch_size=self.batch_size,
