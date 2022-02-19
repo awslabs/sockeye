@@ -91,8 +91,21 @@ def check_arg_compatibility(args: argparse.Namespace):
                     'Please specify at least one stopping criteria: --max-samples --max-updates --max-checkpoints '
                     '--max-num-epochs --max-num-checkpoint-not-improved')
 
-    # Check and possibly adapt the parameters for source factors
     n_source_factors = len(args.validation_source_factors)
+    n_target_factors = len(args.validation_target_factors)
+    # Read number of source/target factors from prepared validation data when
+    # present
+    if args.validation_prepared_data:
+        prepared_data_dir = args.validation_prepared_data[0]
+        config_file = os.path.join(prepared_data_dir, C.DATA_CONFIG)
+        check_condition(os.path.exists(config_file),
+                        "Could not find data config %s. Are you sure %s is a directory created with "
+                        "sockeye-prepare-data?" % (config_file, prepared_data_dir))
+        config_data = cast(data_io.DataConfig, data_io.DataConfig.load(config_file))
+        n_source_factors = config_data.num_source_factors
+        n_target_factors = config_data.num_target_factors
+
+    # Check and possibly adapt the parameters for source factors
     if len(args.source_factors_combine) > 1:
         check_condition(n_source_factors == len(args.source_factors_combine),
                         'The number of combination strategies for source '
@@ -109,7 +122,6 @@ def check_arg_compatibility(args: argparse.Namespace):
         args.source_factors_share_embedding = args.source_factors_share_embedding * n_source_factors
 
     # Check and possibly adapt the parameters for target factors
-    n_target_factors = len(args.validation_target_factors)
     if len(args.target_factors_combine) > 1:
         check_condition(n_target_factors == len(args.target_factors_combine),
                         'The number of combination strategies for target '
