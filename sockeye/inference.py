@@ -142,7 +142,7 @@ class TranslatorInput:
             % (self.sentence_id, self.tokens, self.factors, self.source_prefix_tokens, self.source_prefix_factors, self.constraints, self.avoid_list)
 
     def __len__(self):
-        return len(self.tokens)
+        return len(self.tokens) + self.num_source_prefix_tokens()
 
     @property
     def num_factors(self) -> int:
@@ -151,7 +151,7 @@ class TranslatorInput:
         """
         return 1 + (0 if not self.factors else len(self.factors))
 
-    def get_source_prefix_tokens(self) -> List[str]:
+    def get_source_prefix_tokens(self) -> Tokens:
         """
         Returns the source prefix tokens of this instance.
         """
@@ -178,7 +178,7 @@ class TranslatorInput:
                 'with the first chunk, which is probably wrong.',
                 self.sentence_id, len(self.tokens), chunk_size)
 
-        for chunk_id, i in enumerate(range(0, len(self), chunk_size)):
+        for chunk_id, i in enumerate(range(0, len(self) - self.num_source_prefix_tokens(), chunk_size)):
             factors = [factor[i:i + chunk_size] for factor in self.factors] if self.factors is not None else None
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
             # assigned to the first chunk
@@ -902,7 +902,7 @@ class Translator:
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
 
-        max_length = max(len(inp) + inp.num_source_prefix_tokens() for inp in trans_inputs)
+        max_length = max(len(inp) for inp in trans_inputs)
         # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
         source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
@@ -912,9 +912,8 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
             max_output_lengths.append(self._get_max_output_length(num_tokens))
-            num_tokens = num_tokens + trans_input.num_source_prefix_tokens()
-            source[j, :num_tokens, 0] = tokens2ids(trans_input.get_source_prefix_tokens() \
-                + trans_input.tokens, self.source_vocabs[0])
+            source[j, :num_tokens, 0] = tokens2ids(itertools.chain(trans_input.get_source_prefix_tokens(), \
+                trans_input.tokens), self.source_vocabs[0])
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:
@@ -927,7 +926,7 @@ class Translator:
             else:
                 for i, zip_of_factor_and_prefix_factor in enumerate(zip(factors[:self.num_source_factors - 1], trans_input.source_prefix_factors[:self.num_source_factors - 1]), start=1):
                     factor, source_prefix_factor = zip_of_factor_and_prefix_factor
-                    source[j, :num_tokens, i] = tokens2ids(source_prefix_factor + factor, self.source_vocabs[i])[:num_tokens]
+                    source[j, :num_tokens, i] = tokens2ids(itertools.chain(source_prefix_factor, factor), self.source_vocabs[i])[:num_tokens]
 
             # Check if vocabulary selection/restriction is enabled:
             # - First, see if the translator input provides a lexicon (used for multiple lexicons)

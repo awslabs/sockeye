@@ -84,6 +84,18 @@ The output may be:
 { "sentence_id": 1, "sentiment_id": "positive", "text": "The boy ate the waff@@ le .", "translation": "Der Junge aß die Waffel." }
 ```
 
+Sockeye also supports the use of adding source prefixes to the input during inference. For instance let us assume a multilingual translation model is trained with a source prefix (e.g. 2XX where XX is the target language code) as the translation direction signal. During inference this source prefix can be added with JSON format as follows:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "source_prefix": "2XX"}
+```
+
+Similar to source factors, source prefix factors can be also specified with JSON format, e.g.,
+
+```json
+{ "text": "The boy ate the waff@@ le .", "source_prefix": "2XX", "source_prefix_factors": ["O"]}
+```
+
 ## N-best translations
 
 Sockeye can return the n best hypotheses per input (*nbest lists*).

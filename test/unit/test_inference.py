@@ -152,7 +152,7 @@ def test_translator_input_with_source_prefix(sentence_id, sentence, factors, chu
 
     assert trans_input.sentence_id == sentence_id
     assert trans_input.tokens == tokens
-    assert len(trans_input) == len(tokens)
+    assert len(trans_input) == len(tokens) + len(source_prefix_tokens)
     assert trans_input.factors == factors
     assert trans_input.source_prefix_tokens == source_prefix_tokens
     assert trans_input.source_prefix_factors == source_prefix_factors
