@@ -188,7 +188,7 @@ class TranslatorInput:
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
-                                  source_prefix=self.source_prefix_tokens,
+                                  source_prefix_tokens=self.source_prefix_tokens,
                                   source_prefix_factors=self.source_prefix_factors,
                                   restrict_lexicon=self.restrict_lexicon,
                                   constraints=constraints,
@@ -802,23 +802,23 @@ class Translator:
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
                                                             translation=empty_translation(add_nbest=(self.nbest_size > 1))))
             else:
-                max_input_length = self.max_input_length - trans_input.num_source_prefix_tokens() # take length of source prefix, if used, into account while chunking
-                if max_input_length <= 0:
+                max_input_length_for_chunking = self.max_input_length - trans_input.num_source_prefix_tokens() # take length of source prefix, if used, into account while chunking
+                if max_input_length_for_chunking <= 0:
                     logger.warning(
                         "Input %s has a source prefix with length (%d) that already equals or exceeds max input length (%d). Return an empty translation instead.", \
                         trans_input.sentence_id, trans_input.num_source_prefix_tokens(), self.max_input_length)
                     translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
                                                                 translation=empty_translation(add_nbest=(self.nbest_size > 1))))
-                elif len(trans_input.tokens) > max_input_length:
+                elif len(trans_input.tokens) > max_input_length_for_chunking:
                     # oversized input
                     logger.debug(
                         "Input %s has length (%d) that exceeds max input length (%d). "
                         "Splitting into chunks of size %d.",
                         trans_input.sentence_id, len(trans_input.tokens),
-                        max_input_length, max_input_length)
+                        max_input_length_for_chunking, max_input_length_for_chunking)
                     chunks = [trans_input_chunk.with_eos()
                               for trans_input_chunk in
-                              trans_input.chunks(max_input_length)]
+                              trans_input.chunks(max_input_length_for_chunking)]
                     input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
                                          for chunk_idx, chunk_input in enumerate(chunks)])
                 else:
