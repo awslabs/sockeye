@@ -151,6 +151,18 @@ class TranslatorInput:
         """
         return 1 + (0 if not self.factors else len(self.factors))
 
+    def get_source_prefix_tokens(self) -> List[str]:
+        """
+        Returns the source prefix tokens of this instance.
+        """
+        return self.source_prefix if self.source_prefix is not None else []
+
+    def num_source_prefix_tokens(self) -> int:
+        """
+        Returns the number of source prefix tokens of this instance.
+        """
+        return len(self.get_source_prefix_tokens())
+
     def chunks(self, chunk_size: int) -> Generator['TranslatorInput', None, None]:
         """
         Takes a TranslatorInput (itself) and yields TranslatorInputs for chunks of size chunk_size.
@@ -262,8 +274,18 @@ def make_input_from_dict(sentence_id: SentenceId,
         tokens = list(utils.get_tokens(tokens))
         factors = input_dict.get(C.JSON_FACTORS_KEY)
         source_prefix = input_dict.get(C.JSON_SOURCE_PREFIX_KEY)
+        source_prefix = list(utils.get_tokens(source_prefix)) if source_prefix else None
         source_prefix_factors = input_dict.get(C.JSON_SOURCE_PREFIX_FACTORS_KEY)
-        source_prefix = source_prefix.strip() if source_prefix else None
+        if source_prefix_factors is not None and not source_prefix:
+            logger.error("Source prefix factors cannot be specified when source prefix is not specified")
+            return _bad_input(sentence_id, reason=str(input_dict))
+        if source_prefix_factors is not None and not factors:
+            logger.error("Source prefix factors cannot be specified when source factors are not specified")
+            return _bad_input(sentence_id, reason=str(input_dict))
+        if source_prefix is not None and (factors is not None and not source_prefix_factors):
+            logger.error("Source prefix factors need to be also specified together with source factors")
+            return _bad_input(sentence_id, reason=str(input_dict))
+
         if isinstance(factors, list):
             factors = [list(utils.get_tokens(factor)) for factor in factors]
             lengths = [len(f) for f in factors]
@@ -273,24 +295,13 @@ def make_input_from_dict(sentence_id: SentenceId,
 
         if isinstance(source_prefix_factors, list):
             source_prefix_factors = [list(utils.get_tokens(source_prefix_factor)) for source_prefix_factor in source_prefix_factors]
-
-        if source_prefix is not None and \
-            (factors is not None and not source_prefix_factors):
-                logger.error("Source prefix factors need to be also specified together with source factors")
+            lengths = [len(source_prefix_factor) for source_prefix_factor in source_prefix_factors]
+            if not all(len(source_prefix) == length for length in lengths):
+                logger.error("Source prefix has %d tokens but there are %s prefix factors", len(source_prefix), str(lengths))
                 return _bad_input(sentence_id, reason=str(input_dict))
-        if source_prefix is not None and source_prefix_factors is not None:
-            if not factors:
-                logger.error("Source prefix factors cannot be specified when source factors are not specified")
+            if len(source_prefix_factors) != len(factors):
+                logger.error("There is mismatch in source factors %d and prefix factors %d", len(factors), len(source_prefix_factors))
                 return _bad_input(sentence_id, reason=str(input_dict))
-            else:
-                if len(factors) != len(source_prefix_factors):
-                    logger.error("There is mismatch in source factors %d and prefix factors %d", len(factors), len(source_prefix_factors))
-                    return _bad_input(sentence_id, reason=str(input_dict))
-            lengths = [len(source_prefix_factors[i]) for i in range(len(source_prefix_factors))]
-            if not all(len(source_prefix.split()) == length for length in lengths):
-                logger.error("Source prefix has %d tokens but there are %s prefix factors", len(source_prefix.split()), str(lengths))
-                return _bad_input(sentence_id, reason=str(input_dict))
-
 
         # Lexicon for vocabulary selection/restriction:
         # This is only populated when using multiple lexicons, in which case the
@@ -791,9 +802,7 @@ class Translator:
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
                                                             translation=empty_translation(add_nbest=(self.nbest_size > 1))))
             else:
-                max_input_length = self.max_input_length
-                #take length of source prefix into account while chunking
-                max_input_length = max_input_length if not trans_input.source_prefix else max_input_length - len(trans_input.source_prefix.split())
+                max_input_length = self.max_input_length - trans_input.num_source_prefix_tokens() # take length of source prefix, if used, into account while chunking
                 if len(trans_input.tokens) > max_input_length:
                     # oversized input
                     logger.debug(
@@ -887,7 +896,7 @@ class Translator:
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
 
-        max_length = max(len(inp) for inp in trans_inputs) if not trans_inputs[0].source_prefix else max(len(inp) + len(inp.source_prefix.split()) for inp in trans_inputs)
+        max_length = max(len(inp) + inp.num_source_prefix_tokens() for inp in trans_inputs)
         # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
         source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
@@ -897,20 +906,15 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
             max_output_lengths.append(self._get_max_output_length(num_tokens))
-            num_tokens = num_tokens if not trans_input.source_prefix else num_tokens + len(trans_input.source_prefix.split())
-            if not trans_input.source_prefix:
-                source[j, :num_tokens, 0] = tokens2ids(trans_input.tokens, self.source_vocabs[0])
-            else:
-                #adding source prefix to every chunk
-                source[j, :num_tokens, 0] = tokens2ids(trans_input.source_prefix.split() + \
-                    trans_input.tokens, self.source_vocabs[0])
-
+            num_tokens = num_tokens + trans_input.num_source_prefix_tokens()
+            source[j, :num_tokens, 0] = tokens2ids(trans_input.get_source_prefix_tokens() \
+                + trans_input.tokens, self.source_vocabs[0])
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:
                 logger.warning("Input %d factors, but model(s) expect %d", num_factors,
                                self.num_source_factors)
-            if not trans_input.source_prefix or not trans_input.source_prefix_factors: #no source prefix during inference
+            if not trans_input.source_prefix_factors: # no source prefix during inference
                 for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                     # fill in as many factors as there are tokens
                     source[j, :num_tokens, i] = tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
