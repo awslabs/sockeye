@@ -130,7 +130,7 @@ class TranslatorInput:
     sentence_id: SentenceId
     tokens: Tokens
     factors: Optional[List[Tokens]] = None
-    source_prefix: Optional[Tokens] = None
+    source_prefix_tokens: Optional[Tokens] = None
     source_prefix_factors: Optional[List[Tokens]] = None
     restrict_lexicon: Optional[lexicon.TopKLexicon] = None
     constraints: Optional[List[Tokens]] = None
@@ -138,8 +138,8 @@ class TranslatorInput:
     pass_through_dict: Optional[Dict] = None
 
     def __str__(self):
-        return 'TranslatorInput(%s, %s, factors=%s, source_prefix=%s, source_prefix_factors=%s, constraints=%s, avoid=%s)' \
-            % (self.sentence_id, self.tokens, self.factors, self.source_prefix, self.source_prefix_factors, self.constraints, self.avoid_list)
+        return 'TranslatorInput(%s, %s, factors=%s, source_prefix_tokens=%s, source_prefix_factors=%s, constraints=%s, avoid=%s)' \
+            % (self.sentence_id, self.tokens, self.factors, self.source_prefix_tokens, self.source_prefix_factors, self.constraints, self.avoid_list)
 
     def __len__(self):
         return len(self.tokens)
@@ -155,7 +155,7 @@ class TranslatorInput:
         """
         Returns the source prefix tokens of this instance.
         """
-        return self.source_prefix if self.source_prefix is not None else []
+        return self.source_prefix_tokens if self.source_prefix_tokens is not None else []
 
     def num_source_prefix_tokens(self) -> int:
         """
@@ -188,7 +188,7 @@ class TranslatorInput:
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
-                                  source_prefix=self.source_prefix,
+                                  source_prefix=self.source_prefix_tokens,
                                   source_prefix_factors=self.source_prefix_factors,
                                   restrict_lexicon=self.restrict_lexicon,
                                   constraints=constraints,
@@ -203,7 +203,7 @@ class TranslatorInput:
                                tokens=self.tokens + [C.EOS_SYMBOL],
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
-                               source_prefix=self.source_prefix,
+                               source_prefix_tokens=self.source_prefix_tokens,
                                source_prefix_factors=self.source_prefix_factors,
                                restrict_lexicon=self.restrict_lexicon,
                                constraints=self.constraints,
@@ -273,16 +273,16 @@ def make_input_from_dict(sentence_id: SentenceId,
         tokens = input_dict[C.JSON_TEXT_KEY]
         tokens = list(utils.get_tokens(tokens))
         factors = input_dict.get(C.JSON_FACTORS_KEY)
-        source_prefix = input_dict.get(C.JSON_SOURCE_PREFIX_KEY)
-        source_prefix = list(utils.get_tokens(source_prefix)) if source_prefix else None
+        source_prefix_tokens = input_dict.get(C.JSON_SOURCE_PREFIX_KEY)
+        source_prefix_tokens = list(utils.get_tokens(source_prefix_tokens)) if source_prefix_tokens else None
         source_prefix_factors = input_dict.get(C.JSON_SOURCE_PREFIX_FACTORS_KEY)
-        if source_prefix_factors is not None and not source_prefix:
+        if source_prefix_factors is not None and not source_prefix_tokens:
             logger.error("Source prefix factors cannot be specified when source prefix is not specified")
             return _bad_input(sentence_id, reason=str(input_dict))
         if source_prefix_factors is not None and not factors:
             logger.error("Source prefix factors cannot be specified when source factors are not specified")
             return _bad_input(sentence_id, reason=str(input_dict))
-        if source_prefix is not None and (factors is not None and not source_prefix_factors):
+        if source_prefix_tokens is not None and (factors is not None and not source_prefix_factors):
             logger.error("Source prefix factors need to be also specified together with source factors")
             return _bad_input(sentence_id, reason=str(input_dict))
 
@@ -296,8 +296,8 @@ def make_input_from_dict(sentence_id: SentenceId,
         if isinstance(source_prefix_factors, list):
             source_prefix_factors = [list(utils.get_tokens(source_prefix_factor)) for source_prefix_factor in source_prefix_factors]
             lengths = [len(source_prefix_factor) for source_prefix_factor in source_prefix_factors]
-            if not all(len(source_prefix) == length for length in lengths):
-                logger.error("Source prefix has %d tokens but there are %s prefix factors", len(source_prefix), str(lengths))
+            if not all(len(source_prefix_tokens) == length for length in lengths):
+                logger.error("Source prefix has %d tokens but there are %s prefix factors", len(source_prefix_tokens), str(lengths))
                 return _bad_input(sentence_id, reason=str(input_dict))
             if len(source_prefix_factors) != len(factors):
                 logger.error("There is mismatch in source factors %d and prefix factors %d", len(factors), len(source_prefix_factors))
@@ -342,7 +342,7 @@ def make_input_from_dict(sentence_id: SentenceId,
             constraints = [list(utils.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
-                               source_prefix=source_prefix,
+                               source_prefix_tokens=source_prefix_tokens,
                                source_prefix_factors=source_prefix_factors,
                                restrict_lexicon=restrict_lexicon, constraints=constraints,
                                avoid_list=avoid_list, pass_through_dict=input_dict)
@@ -803,7 +803,13 @@ class Translator:
                                                             translation=empty_translation(add_nbest=(self.nbest_size > 1))))
             else:
                 max_input_length = self.max_input_length - trans_input.num_source_prefix_tokens() # take length of source prefix, if used, into account while chunking
-                if len(trans_input.tokens) > max_input_length:
+                if max_input_length <= 0:
+                    logger.warning(
+                        "Input %s has a source prefix with length (%d) that already equals or exceeds max input length (%d). Return an empty translation instead.", \
+                        trans_input.sentence_id, trans_input.num_source_prefix_tokens(), self.max_input_length)
+                    translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
+                                                                translation=empty_translation(add_nbest=(self.nbest_size > 1))))
+                elif len(trans_input.tokens) > max_input_length:
                     # oversized input
                     logger.debug(
                         "Input %s has length (%d) that exceeds max input length (%d). "
