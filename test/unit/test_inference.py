@@ -137,6 +137,44 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
                 assert factor == expected_factor[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
 
 
+@pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size, source_prefix, source_prefix_factors",
+                         [(1, "a test", None, 4, "prefix test", None),
+                          (1, "a test", None, 2, "prefix test", None),
+                          (1, "a test", None, 1, "prefix test", None),
+                          (0, "", None, 1, "", None),
+                          (1, "a test", [['h', 'l']], 4, "prefix test", [['h', 'l']]),
+                          (1, "a test", [['h', 'h'], ['x', 'y']], 1, "prefix test", [['h', 'h'], ['x', 'y']])])
+def test_translator_input_with_source_prefix(sentence_id, sentence, factors, chunk_size, source_prefix, source_prefix_factors):
+    tokens = sentence.split()
+    source_prefix_tokens = source_prefix.split()
+    trans_input = sockeye.inference.TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, \
+        source_prefix_tokens=source_prefix_tokens, source_prefix_factors=source_prefix_factors)
+
+    assert trans_input.sentence_id == sentence_id
+    assert trans_input.tokens == tokens
+    assert len(trans_input) == len(tokens) + len(source_prefix_tokens)
+    assert trans_input.factors == factors
+    assert trans_input.source_prefix_tokens == source_prefix_tokens
+    assert trans_input.source_prefix_factors == source_prefix_factors
+    if factors is not None:
+        for factor in trans_input.factors:
+            assert len(factor) == len(tokens)
+        if trans_input.source_prefix_factors is not None:
+            assert len(factors) == len(trans_input.source_prefix_factors)
+
+    chunked_inputs = list(trans_input.chunks(chunk_size))
+    assert len(chunked_inputs) == ceil(len(tokens) / chunk_size)
+    for chunk_id, chunk_input in enumerate(chunked_inputs):
+        assert chunk_input.sentence_id == sentence_id
+        assert chunk_input.tokens == trans_input.tokens[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
+        assert chunk_input.source_prefix_tokens == trans_input.source_prefix_tokens
+        assert chunk_input.num_source_prefix_tokens() == trans_input.num_source_prefix_tokens()
+        if source_prefix_factors is not None:
+            assert len(chunk_input.source_prefix_factors) == len(source_prefix_factors)
+            for chunk_input_source_prefix_factor, source_prefix_factor in zip(chunk_input.source_prefix_factors, trans_input.source_prefix_factors):
+                assert len(chunk_input_source_prefix_factor) == len(source_prefix_factor)
+
+
 @pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, "
                          "forced_max_input_len, forced_max_output_len, length_ratio_mean, length_ratio_std, "
                          "expected_max_input_len, expected_max_output_len",

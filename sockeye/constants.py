@@ -122,6 +122,8 @@ DECODER_STATE = 'd'
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
+JSON_SOURCE_PREFIX_KEY = "source_prefix"
+JSON_SOURCE_PREFIX_FACTORS_KEY = "source_prefix_factors"
 JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
