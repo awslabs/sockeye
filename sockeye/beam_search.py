@@ -900,7 +900,7 @@ class BeamSearch(pt.nn.Module):
         [inf],
         [inf],
         [inf],
-        [0.,],
+        [0,],
         [inf],
         [inf],
         [inf],
@@ -914,25 +914,27 @@ class BeamSearch(pt.nn.Module):
 
         Output:
         Adjusted first_steps_masking (batch_size * beam_size, max target prefix length + 1):
-        tensor([[0., 0., 0.],
+        tensor([[0, 0, 0],
                 [inf, inf, inf],
                 [inf, inf, inf],
                 [inf, inf, inf],
                 [inf, inf, inf],
-                [0., 0., 0.],
-                [inf, inf, 0.],
-                [inf, inf, 0.],
-                [inf, inf, 0.],
-                [inf, inf, 0.],
+                [0, 0, 0],
+                [inf, inf, 0],
+                [inf, inf, 0],
+                [inf, inf, 0],
+                [inf, inf, 0],
 
         """
 
         """
         Step 1: Create a zero masking matrix with shape (batch size, max target prefix length + 1)
         Fill 1 into this masking matrix based on the target prefix
-        (target prefix)   (compare to 0)   (roll 1 step to the right + assign 1 at index 0)
-           [1 2]             [1 1 0]                        [1 1 1]
-           [1 0]       ->    [1 0 0]      ->                [1 1 0]
+
+        target prefix     initialize masking     masking           roll one step to the right
+                          from target prefix     is not 0           and assign 1 at index 0
+           [1 2]    ->       [1 2 0]     ->      [1 1 0]                   [1 1 1]
+           [1 0]             [1 0 0]             [1 0 0]      ->           [1 1 0]
         """
         masking = pt.zeros((target_prefix.size(0), target_prefix.size(1) + 1)).to(self.device)
         masking[:,:target_prefix.size(-1)] = target_prefix
@@ -940,7 +942,20 @@ class BeamSearch(pt.nn.Module):
         masking = pt.roll(masking, 1, -1)
         masking[:,0] = 1.
 
-        # Step 2: Adjust first_step_mask based on masking
+        """
+        Step 2: Adjust first_step_mask based on masking
+
+        masking         Expand masking with     Expand first_step_mask with max target prefix
+                       beam size and reshape      length and fill 0 where masking is 0
+        [1 1 1]      ->     [1 1 1]          ->            [0, 0, 0]
+        [1 1 0]             [1 1 1]                        [inf, inf, inf]
+                            [1 1 1]                        [inf, inf, inf]
+                            [1 1 1]                        [inf, inf, inf]
+                            [1 1 0]                        [0, 0, 0]
+                            [1 1 0]                        [inf, inf, 0]
+                            [1 1 0]                        [inf, inf, 0]
+                            [1 1 0]                        [inf, inf, 0]
+        """
         masking = masking.unsqueeze(1).expand(-1, self.beam_size, -1).reshape(first_step_mask.size(0), -1)
         first_step_mask = first_step_mask.expand(-1, masking.size(-1)).clone()
         first_step_mask.masked_fill_(masking == 0., 0.)
