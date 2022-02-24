@@ -264,6 +264,22 @@ def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
     return sum(tensors) / len(tensors)  # type: ignore
 
 
+def one_hot_encoding_from_target_prefix(target_prefix: pt.Tensor, output_vocab_size: int) -> pt.Tensor:
+    """
+    Create an one hot encoding from output vocab size of target_prefix
+
+    :param target_prefix: Target prefix ids. Shape (batch size, 1).
+    :param output_vocab_size: target vocabulary size
+    :return target_prefix_in_one_hot (batch size, 1, output_vocab_size)
+
+    """
+    target_prefix_in_one_hot = pt.nn.functional.one_hot(target_prefix.to(pt.int64), \
+        num_classes=output_vocab_size)
+    # all hots are assigned to 1 if a prefix id is 0 (i.e. no prefix)
+    target_prefix_in_one_hot.masked_fill_(target_prefix.unsqueeze(-1) == 0, 1)
+    return target_prefix_in_one_hot
+
+
 def parse_metrics_line(line_number: int, line: str) -> Dict[str, Any]:
     """
     Parse a line of metrics into a mappings of key and values.
