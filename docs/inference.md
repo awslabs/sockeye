@@ -96,6 +96,18 @@ Similar to source factors, source prefix factors can be also specified with JSON
 { "text": "The boy ate the waff@@ le .", "source_prefix": "2XX", "source_prefix_factors": ["O"]}
 ```
 
+Finally, Sockeye also supports the use of adding target prefixes to the translation during inference. In the same spirit to the example above, let us assume a multilingual translation model trained with a target prefix 2XX (this time the prefix is added to the target sentence instead of the source sentence). During inference target prefix can be specified with JSON format as follows:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX"}
+```
+
+By default, the translation output includes the target prefix as its first string. Alternatively, you can remove the target prefix from the translation output by setting `keep_target_prefix` to be `False`, e.g.,:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "keep_target_prefix": "False"}
+```
+
 ## N-best translations
 
 Sockeye can return the n best hypotheses per input (*nbest lists*).
