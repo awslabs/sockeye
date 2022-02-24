@@ -810,7 +810,7 @@ class BeamSearch(pt.nn.Module):
             if target_prefix is not None and t <= target_prefix.size(-1):
                 target_prefix_in_one_hot = utils.one_hot_encoding_from_target_prefix(target_prefix[:,t-1:t], output_vocab_size)
                 target_prefix_in_one_hot = target_prefix_in_one_hot.expand(-1, self.beam_size, -1).reshape(-1, target_prefix_in_one_hot.size(-1))
-                scores.masked_fill_(target_prefix_in_one_hot==0, onp.inf)
+                scores.masked_fill_(target_prefix_in_one_hot == 0, onp.inf)
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
             if self._sample is not None:
