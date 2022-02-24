@@ -94,6 +94,7 @@ class SockeyeModel(pt.nn.Module):
         super().__init__()
         self.config = copy.deepcopy(config)
         self.num_branches = max(self.config.config_encoder.num_branches, self.config.config_decoder.num_branches)
+        self._active_branch = 1
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
@@ -161,7 +162,11 @@ class SockeyeModel(pt.nn.Module):
     def state_structure(self):
         return self.decoder.state_structure()
 
+    def get_active_branch(self) -> int:
+        return self._active_branch
+
     def set_active_branch(self, branch_index: int):
+        self._active_branch = branch_index
         if self.encoder.num_branches > 1:
             self.encoder.set_active_branch(branch_index)
         if self.decoder.num_branches > 1:

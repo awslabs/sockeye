@@ -105,6 +105,31 @@ class TransformerEncoderBlock(pt.nn.Module):
         return data
 
 
+class TransformerBranchEncoderBlock(pt.nn.Module):
+    """
+    Wraps a group of TransformerEncoderBlocks the represent different model
+    branches. Method calls are routed to the current active branch (block).
+    """
+    def __init__(self, config: TransformerConfig, inference_only: bool = False, num_branches: int = 1) -> None:
+        super().__init__()
+        self.config = config
+        self.inference_only = inference_only
+        self.num_branches = num_branches
+        self.branches = pt.nn.ModuleList(TransformerEncoderBlock(config, inference_only) for _ in range(num_branches))
+        self._active_branch = 0
+
+    def get_active_branch(self):
+        return self._active_branch
+
+    def set_active_branch(self, branch_index: int):
+        if branch_index < 0 or branch_index >= self.num_branches:
+            raise ValueError(f'Unavailable branch: {branch_index}. Indices range from 0 to {self.num_branches - 1}')
+        self._active_branch = branch_index
+
+    def forward(self, data: pt.Tensor, att_mask: pt.Tensor = None) -> pt.Tensor:
+        return self.branches[self._active_branch](data, att_mask)
+
+
 class TransformerDecoderBlock(pt.nn.Module):
     """
     A transformer decoder block consists of an autoregressive attention block, encoder attention,
@@ -210,6 +235,48 @@ class TransformerDecoderBlock(pt.nn.Module):
             target = self.lhuc(target)
 
         return target, new_autoregr_states
+
+
+class TransformerBranchDecoderBlock(pt.nn.Module):
+    """
+    Wraps a group of TransformerDecoderBlocks the represent different model
+    branches. Method calls are routed to the current active branch (block).
+    """
+    def __init__(self, config: TransformerConfig, inference_only: bool = False, num_branches: int = 1) -> None:
+        super().__init__()
+        self.config = config
+        self.inference_only = inference_only
+        self.num_branches = num_branches
+        self.branches = pt.nn.ModuleList(TransformerDecoderBlock(config, inference_only) for _ in range(num_branches))
+        self._active_branch = 0
+
+    def get_active_branch(self):
+        return self._active_branch
+
+    def set_active_branch(self, branch_index: int):
+        if branch_index < 0 or branch_index >= self.num_branches:
+            raise ValueError(f'Unavailable branch: {branch_index}. Indices range from 0 to {self.num_branches - 1}')
+        self._active_branch = branch_index
+
+    @property
+    def num_state_tensors(self) -> int:
+        return self.branches[self._active_branch].autoregr_layer.num_state_tensors
+
+    @property
+    def needs_mask(self):
+        return self.branches[self._active_branch].autoregr_layer.needs_mask
+
+    def get_states_shape(self, batch_size: int) -> Tuple:
+        return self.branches[self._active_branch].autoregr_layer.get_state_shape(batch_size)
+
+    def forward(self,
+                target: pt.Tensor,
+                target_mask: Optional[pt.Tensor],
+                source: pt.Tensor,
+                source_mask: Optional[pt.Tensor],
+                autoregr_states: Optional[pt.Tensor],
+                enc_att_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
+        return self.branches[self._active_branch](target, target_mask, source, source_mask, autoregr_states, enc_att_kv)
 
 
 class TransformerProcessBlock(pt.nn.Module):

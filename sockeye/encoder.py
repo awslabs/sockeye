@@ -171,7 +171,7 @@ class TransformerEncoder(Encoder):
         pt.nn.Module.__init__(self)
         self.config = config
         self.num_branches = self.config.num_branches
-        self._branch_layers = set(config.branch_layers if config.branch_layers is not None else [])
+        self.branch_layers = set(config.branch_layers if config.branch_layers is not None else [])
         self._active_branch = 0
 
         self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
@@ -182,34 +182,24 @@ class TransformerEncoder(Encoder):
                                                          scale_up_input=True,
                                                          scale_down_positions=False)
 
-        # Layers are lists of modules with size 1 (standard layer) or
-        # num_branches (branching layer)
-        self._layers = [[transformer.TransformerEncoderBlock(config, inference_only=inference_only)
-                        for _ in range(self.num_branches)] if i + 1 in self._branch_layers
-                        else [transformer.TransformerEncoderBlock(config, inference_only=inference_only)]
-                        for i in range(config.num_layers)]
-
-        # Add all unique modules from standard and branch layers to a ModuleList
-        # so they are correctly registered
-        self.layers = pt.nn.ModuleList()
-        for layer in self._layers:
-            self.layers.extend(layer)
+        self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
+            transformer.TransformerBranchEncoderBlock(config, inference_only=inference_only,
+                                                      num_branches=self.num_branches) if i in self.branch_layers
+            else transformer.TransformerEncoderBlock(config, inference_only=inference_only)
+            for i in range(config.num_layers))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  num_hidden=self.config.model_size)
 
-    def set_active_branch(self, branch_index: int):
-        if branch_index < 0 or branch_index >= self.num_branches:
-            raise ValueError(f'Unavailable branch: {branch_index}. Branch indices range from 0 to '
-                             f'{self.num_branches - 1}')
-        self._active_branch = branch_index
-
     def get_active_branch(self) -> int:
         return self._active_branch
 
-    def get_active_layers(self) -> List[transformer.TransformerEncoderBlock]:
-        return [layer[self._active_branch] if len(layer) > 1 else layer[0] for layer in self._layers]
+    def set_active_branch(self, branch_index: int):
+        self._active_branch = branch_index
+        for layer in self.layers:
+            if isinstance(layer, transformer.TransformerBranchEncoderBlock):
+                layer.set_active_branch(branch_index)
 
     def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
         # positional embedding
@@ -224,7 +214,7 @@ class TransformerEncoder(Encoder):
         att_mask = att_mask.expand(-1, max_len, -1)
 
         data = data.transpose(1, 0)  # batch to time major
-        for layer in self.get_active_layers():
+        for layer in self.layers:
             data = layer(data, att_mask=att_mask)
 
         data = self.final_process(data)

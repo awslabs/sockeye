@@ -678,12 +678,12 @@ def add_model_parameters(params):
     model_params.add_argument('--branch-encoder-layers',
                               type=list_of_values(greater_or_equal=1),
                               default=None,
-                              help='Encoder layers to branch on different data sources (1-indexed). '
+                              help='Encoder layers to branch on different data sources (zero-indexed). '
                                    'Default: %(default)s.')
     model_params.add_argument('--branch-decoder-layers',
                               type=list_of_values(greater_or_equal=1),
                               default=None,
-                              help='Decoder layers to branch on different data sources (1-indexed). '
+                              help='Decoder layers to branch on different data sources (zero-indexed). '
                                    'Default: %(default)s.')
 
     # transformer arguments
