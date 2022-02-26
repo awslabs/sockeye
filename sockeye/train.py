@@ -882,6 +882,8 @@ def fixed_param_names_from_strategy(config: model.ModelConfig,
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_FEED_FORWARD:
             return not (name.endswith("ff.ff1.bias") or name.endswith("ff.ff1.weight") or
                         name.endswith("ff.ff2.bias") or name.endswith("ff.ff2.weight"))
+        if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_BRANCHING:
+            return 'branches' not in name.split('.')
         if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_AND_SOURCE_EMBEDDINGS:
             return name.startswith(C.ENCODER_PREFIX) or name.startswith(C.SOURCE_EMBEDDING_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_HALF_AND_SOURCE_EMBEDDINGS:
