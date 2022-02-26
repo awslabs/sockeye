@@ -17,7 +17,7 @@ import os
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import cast, Dict, Optional, Tuple, List
+from typing import cast, Dict, List, Optional, Set, Tuple
 
 import torch as pt
 
@@ -378,16 +378,35 @@ class SockeyeModel(pt.nn.Module):
         except _pickle.UnpicklingError as e:
             logger.error(f"Could not load from '{filename}'. Is this a MXNet parameter file? Please convert first.")
             raise e
-        missing, unexpected = self.load_state_dict(state_dict, strict=False)
+        missing, unexpected = (set(keys) for keys in self.load_state_dict(state_dict, strict=False))
+
+        # Initialize branching layers from existing non-branching versions
+        params = {k: v for k, v in self.named_parameters()}
+        loaded = set()  # type: Set[str]
+        for key in list(missing):
+            fields = key.split('.')
+            if 'branches' in fields:
+                i = fields.index('branches')
+                non_branch_key = '.'.join(fields[:i] + fields[i + 2:])
+                logger.info(f'Initializing parameter [{key}] from [{non_branch_key}]')
+                with pt.no_grad():
+                    params[key].copy_(state_dict[non_branch_key])
+                missing.remove(key)
+                loaded.add(non_branch_key)
+        unexpected -= loaded
+
+        # Check if keys are still missing/extra after handling special cases
         if not allow_missing:
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:
             utils.check_condition(not unexpected, f"extra keys: {unexpected}")
+
         # Models are saved with interleaved key-value params. If the current
         # model is in training mode, separate the loaded params to match the
         # format used during training.
         if self.training:
             self.apply(layers.separate_kv)
+
         logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
     def set_parameters(self,
