@@ -25,7 +25,7 @@ from sockeye import constants as C
 from sockeye.test_utils import run_train_translate, run_translate_restrict, \
     TRANSLATE_PARAMS_COMMON, TRANSLATE_WITH_FACTORS_COMMON, \
     collect_translate_output_and_scores, SCORE_PARAMS_COMMON, \
-    SCORE_WITH_SOURCE_FACTORS_COMMON, SCORE_WITH_TARGET_FACTORS_COMMON
+    SCORE_WITH_SOURCE_FACTORS_COMMON, SCORE_WITH_TARGET_FACTORS_COMMON, TRANSLATE_WITH_JSON_FORMAT
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,22 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     the previously generated outputs, referenced in the data dictionary.
     """
     out_path = os.path.join(data['work_dir'], "test.out.equiv")
+    out_with_target_prefix_path = os.path.join(data['work_dir'], "test_with_target_prefix.out.equiv")
+
+    # First set of params (with target prefix in JSON format)
+    params = "{} {} {}".format(sockeye.translate.__file__,
+                               TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                              input=data['test_source_with_target_prefix'],
+                                                              output=out_with_target_prefix_path),
+                               translate_params_equiv)
+    params += TRANSLATE_WITH_JSON_FORMAT
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
+
+    # Collect translate outputs and scores
+    translate_outputs_with_target_prefix_equiv = collect_translate_output_and_scores(out_with_target_prefix_path)
+
+    # Second set of params (without using target prefix)
     params = "{} {} {}".format(sockeye.translate.__file__,
                                TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                               input=data['test_source'],
@@ -95,14 +111,27 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
     translate_outputs_equiv = collect_translate_output_and_scores(out_path)
 
     assert 'test_outputs' in data
-    assert len(data['test_outputs']) == len(translate_outputs_equiv)
+    assert 'test_output_with_target_prefix' in data
+    assert len(data['test_outputs']) == len(data['test_output_with_target_prefix']) == len(translate_outputs_with_target_prefix_equiv) == len(translate_outputs_equiv)
     if compare_output:
-        for json_output, json_output_equiv in zip(data['test_outputs'], translate_outputs_equiv):
+        for json_output, json_output_with_target_prefix, json_output_equiv, json_output_with_target_prefix_equiv in zip(data['test_outputs'], data['test_output_with_target_prefix'], translate_outputs_equiv, translate_outputs_with_target_prefix_equiv):
             assert json_output['translation'] == json_output_equiv['translation'], \
                 f"'{json_output['translation']}' vs. '{json_output_equiv['translation']}'"
+            assert json_output_with_target_prefix['translation'] == json_output_with_target_prefix_equiv['translation'], \
+                f"'{json_output_with_target_prefix['translation']}' vs. '{json_output_with_target_prefix_equiv['translation']}'"
             assert abs(json_output['score'] - json_output_equiv['score']) < 0.01 or \
                    np.isnan(json_output['score'] - json_output_equiv['score']), \
                 f"'{json_output['score']}' vs. '{ json_output_equiv['score']}'"
+            assert abs(json_output_with_target_prefix['score'] - json_output_with_target_prefix_equiv['score']) < 0.01 or \
+                   np.isnan(json_output_with_target_prefix['score'] - json_output_with_target_prefix_equiv['score']), \
+                f"'{json_output_with_target_prefix['score']}' vs. '{ json_output_with_target_prefix_equiv['score']}'"
+
+            # Check translation output always includes target prefix tokens
+            prefix = json_output_with_target_prefix['target_prefix'].split()
+            translation = json_output_with_target_prefix['translation'].split()
+            ending = min(len(prefix), len(translation))
+            assert prefix[:ending] == translation[:ending], \
+                f"'{prefix[:ending]}' vs. '{translation[:ending]}'"
 
 
 def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_scores: bool):

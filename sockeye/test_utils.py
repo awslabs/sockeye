@@ -58,6 +58,42 @@ def generate_digits_file(source_path: str,
             print(C.TOKEN_SEPARATOR.join(digits), file=target_out)
 
 
+def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_file_with_tgt_prefix_path: str, \
+                                          src_factors_path: List[str] = None, tgt_factors_path: List[str] = None, seed=13):
+    random_gen = random.Random(seed)
+    with open(src_path, "r") as src_reader, open(tgt_path, "r") as tgt_reader:
+        with open(json_file_with_tgt_prefix_path, "w") as out:
+            list_src_factors = None
+            list_tgt_factors = None
+
+            if src_factors_path is not None:
+                list_src_factors = [open(src_factors, "r") for src_factors in src_factors_path]
+                list_src_factors = [[sf.strip() for sf in src_factors] for src_factors in list_src_factors]
+
+            if tgt_factors_path is not None:
+                list_tgt_factors = [open(tgt_factors, "r") for tgt_factors in tgt_factors_path]
+                list_tgt_factors = [[tf.strip() for tf in tgt_factors] for tgt_factors in list_tgt_factors]
+
+            for i, stdigits in enumerate(zip(src_reader, tgt_reader)):
+                src_digits, tgt_digits = stdigits[0].strip(), stdigits[1].strip()
+                tgt_prefix = tgt_digits.split()
+                if len(tgt_digits) > 0:
+                    random_pos = random_gen.choice([pos for pos in range(len(tgt_prefix))])
+                    tgt_prefix = tgt_prefix[:random_pos]
+                tgt_prefix = C.TOKEN_SEPARATOR.join(tgt_prefix)
+                if src_factors_path is None and tgt_factors_path is None:
+                    jsone_line = {"text": src_digits, "target_prefix": tgt_prefix}
+                elif src_factors_path is not None and tgt_factors_path is None:
+                    jsone_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], "tgt_prefix": tgt_prefix}
+                elif tgt_factors_path is not None and src_factors_path is None:
+                    jsone_line = {"text": src_digits, "target_prefix": tgt_prefix}
+                    # if we have prefix factors, it should be jsone_line = {"text": src_digits, "tgt_factors": [tgt_factors[i] for tgt_factors in list_tgt_factors], "tgt_prefix": tgt_prefix}
+                else:
+                    jsone_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], "tgt_prefix": tgt_prefix}
+                    # if we have prefix factors, it should be jsone_line = {"text": src_digits, "tgt_factors": [tgt_factors[i] for tgt_factors in list_tgt_factors], "tgt_prefix": tgt_prefix}
+                print(json.dumps(jsone_line), file=out)
+
+
 def generate_low_high_factors(input_path: str, output_path: str):
     """
     Writes low/high factor file given a file of digit sequences.
@@ -115,6 +151,7 @@ def tmp_digits_dataset(prefix: str,
         dev_target_path = os.path.join(work_dir, "dev.tgt")
         test_source_path = os.path.join(work_dir, "test.src")
         test_target_path = os.path.join(work_dir, "test.tgt")
+        test_source_with_target_prefix_path = os.path.join(work_dir, "test_source_with_target_prefix.json")
         generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
                              line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train)
         generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
@@ -127,7 +164,8 @@ def tmp_digits_dataset(prefix: str,
                 'dev_source': dev_source_path,
                 'dev_target': dev_target_path,
                 'test_source': test_source_path,
-                'test_target': test_target_path}
+                'test_target': test_target_path,
+                'test_source_with_target_prefix': test_source_with_target_prefix_path}
 
         if with_n_source_factors > 0:
             data['train_source_factors'] = []
@@ -157,8 +195,12 @@ def tmp_digits_dataset(prefix: str,
                 generate_odd_even_factors(test_target_path, test_factor_path)
                 data['train_target_factors'].append(train_factor_path)
                 data['dev_target_factors'].append(dev_factor_path)
-                data['test_target_factors'].append(dev_factor_path)
+                data['test_target_factors'].append(test_factor_path)
 
+        source_factors_path = None if 'test_source_factors' not in data else data['test_source_factors']
+        target_factors_path = None if 'test_target_factors' not in data else data['test_target_factors']
+        generate_json_input_file_with_tgt_prefix(test_source_path, test_target_path, test_source_with_target_prefix_path, \
+            source_factors_path, target_factors_path)
         yield data
 
 
@@ -182,6 +224,8 @@ TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {
                            "--output-type json"
 
 TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
+
+TRANSLATE_WITH_JSON_FORMAT = " --json-input"
 
 TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
 
@@ -290,6 +334,23 @@ def run_train_translate(train_params: str,
 
     # Translate corpus with the 1st params and scoring output handler to obtain scores
     data['test_output'] = os.path.join(work_dir, "test.out")
+    data['test_output_with_target_prefix'] = os.path.join(work_dir, "test_with_target_prefix.out")
+
+    # First set of params (with target prefix in JSON format)
+    params = "{} {} {}".format(sockeye.translate.__file__,
+                               TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                              input=data['test_source_with_target_prefix'],
+                                                              output=data['test_output_with_target_prefix']),
+                               translate_params)
+    params += TRANSLATE_WITH_JSON_FORMAT
+    logger.info("Translating with params %s", params)
+    with patch.object(sys, "argv", params.split()):
+        sockeye.translate.main()
+
+    # Collect test translate outputs and scores
+    data['test_output_with_target_prefix'] = collect_translate_output_and_scores(data['test_output_with_target_prefix'])
+
+    # Second set of params (without target prefix)
     params = "{} {} {}".format(sockeye.translate.__file__,
                                TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                               input=data['test_source'],
@@ -313,7 +374,7 @@ def run_train_translate(train_params: str,
 
     # Collect test translate outputs and scores
     data['test_outputs'] = collect_translate_output_and_scores(data['test_output'])
-    assert len(data['test_inputs']) == len(data['test_targets']) == len(data['test_outputs'])
+    assert len(data['test_inputs']) == len(data['test_targets']) == len(data['test_outputs']) == len(data['test_output_with_target_prefix'])
     return data
 
 
@@ -324,7 +385,24 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str) -> Dict[
     """
     translate_mod = sockeye.translate
     out_path = os.path.join(data['work_dir'], "out-restrict.txt")
+    out_with_target_prefix_path = os.path.join(data['work_dir'], "out-with-target-prefix-restrict.txt")
     # Translate corpus with restrict-lexicon
+
+    # First set of params (with target prefix in JSON format)
+    params = "{} {} {} {}".format(translate_mod.__file__,
+                                  TRANSLATE_PARAMS_COMMON.format(model=data['model'],
+                                                                 input=data['test_source_with_target_prefix'],
+                                                                 output=out_with_target_prefix_path),
+                                  translate_params,
+                                  TRANSLATE_PARAMS_RESTRICT.format(lexicon=data['lexicon'], topk=1))
+    params += TRANSLATE_WITH_JSON_FORMAT
+    with patch.object(sys, "argv", params.split()):
+        translate_mod.main()
+
+    # Collect test translate outputs and scores
+    data['test_with_target_prefix_outputs_restricted'] = collect_translate_output_and_scores(out_with_target_prefix_path)
+
+    # Second set of params (without using target prefix)
     params = "{} {} {} {}".format(translate_mod.__file__,
                                   TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                                  input=data['test_source'],
@@ -338,7 +416,7 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str) -> Dict[
 
     # Collect test translate outputs and scores
     data['test_outputs_restricted'] = collect_translate_output_and_scores(out_path)
-    assert len(data['test_outputs_restricted']) == len(data['test_outputs'])
+    assert len(data['test_with_target_prefix_outputs_restricted']) == len(data['test_outputs_restricted']) == len(data['test_outputs'])
     return data
 
 

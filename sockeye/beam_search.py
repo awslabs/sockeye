@@ -533,7 +533,7 @@ class GreedySearch(pt.nn.Module):
                  num_source_factors: int,
                  num_target_factors: int,
                  inference: _SingleModelInference,
-                 output_vocab_size: Optional[int] = -1):
+                 output_vocab_size: int):
         super().__init__()
         self.dtype = dtype
         self.bos_id = bos_id
@@ -594,7 +594,11 @@ class GreedySearch(pt.nn.Module):
                                                                                model_states,
                                                                                vocab_slice_ids=vocab_slice_ids)
             if target_prefix is not None and t <= target_prefix.size(-1):
+                # Make sure search selects the current prefix token by setting the scores of all
+                # other vocabulary items to infinity.
                 target_prefix_in_one_hot = utils.one_hot_encoding_from_target_prefix(target_prefix[:,t-1:t], self.output_vocab_size).squeeze(1)
+                if vocab_slice_ids is not None:
+                    target_prefix_in_one_hot = pt.index_select(target_prefix_in_one_hot, -1, vocab_slice_ids)
                 scores.masked_fill_(target_prefix_in_one_hot == 0, onp.inf)
 
             # shape: (batch*beam=1, 1)
@@ -808,8 +812,12 @@ class BeamSearch(pt.nn.Module):
                                                   lengths, max_output_lengths, pad_dist, eos_dist)
 
             if target_prefix is not None and t <= target_prefix.size(-1):
-                target_prefix_in_one_hot = utils.one_hot_encoding_from_target_prefix(target_prefix[:,t-1:t], output_vocab_size)
+                # Make sure search selects the current prefix token by setting the scores of all
+                # other vocabulary items to infinity.
+                target_prefix_in_one_hot = utils.one_hot_encoding_from_target_prefix(target_prefix[:,t-1:t], self.output_vocab_size)
                 target_prefix_in_one_hot = target_prefix_in_one_hot.expand(-1, self.beam_size, -1).reshape(-1, target_prefix_in_one_hot.size(-1))
+                if vocab_slice_ids is not None:
+                    target_prefix_in_one_hot = pt.index_select(target_prefix_in_one_hot, -1, vocab_slice_ids)
                 scores.masked_fill_(target_prefix_in_one_hot == 0, onp.inf)
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
@@ -818,8 +826,10 @@ class BeamSearch(pt.nn.Module):
             else:
                 # On the first timestep, all hypotheses have identical histories, so force topk() to choose extensions
                 # of the first row only by setting all other rows to inf
-                if t <= first_step_mask.size(-1):
-                    scores += first_step_mask[:,t-1:t]
+                if target_prefix is None:
+                    scores = scores + first_step_mask if t == 1 else scores
+                else:
+                    scores = scores + first_step_mask[:,t-1:t] if t <= first_step_mask.size(-1) else scores
 
                 if self._traced_top is None:
                     logger.debug("Tracing _top")
@@ -891,71 +901,77 @@ class BeamSearch(pt.nn.Module):
         :param first_step_mask: Shape (batch_size * beam_size, 1)
         :return (adjusted) first_steps_masking (batch_size * beam_size, max target prefix length + 1).
 
-        An example to illustrate what this function does:
+        An illustrative example of how first_step_masking is adjusted
+
         Inputs:
 
-        first_steps_masking (batch_size = 2 * beam_size = 5, 1)
-        ([[0],
-        [inf],
-        [inf],
-        [inf],
-        [inf],
-        [0,],
-        [inf],
-        [inf],
-        [inf],
-        [inf]
+        target_prefix (batch_size = 2, max target prefix length = 2)
 
-        and target prefix (batch_size = 2, max target prefix length = 2)
         tensor([1 2]
                [1 0])
-        Note: two target prefix tokens in the first sentence, and one target prefix token \
-        in the second sentence)
+        Note: Two target prefix tokens in the first sentence, \
+        one target prefix token in the second sentence.
+
+        first_step_mask (batch_size = 2 * beam_size = 5, 1)
+
+        tensor([[0],
+        [inf],
+        [inf],
+        [inf],
+        [inf],
+        [0],
+        [inf],
+        [inf],
+        [inf],
+        [inf])
 
         Output:
-        Adjusted first_steps_masking (batch_size * beam_size, max target prefix length + 1):
-        tensor([[0, 0, 0],
-                [inf, inf, inf],
-                [inf, inf, inf],
-                [inf, inf, inf],
-                [inf, inf, inf],
-                [0, 0, 0],
-                [inf, inf, 0],
-                [inf, inf, 0],
-                [inf, inf, 0],
-                [inf, inf, 0],
+        Adjusted first_step_mask (batch_size * beam_size, max target prefix length + 1):
 
-        """
+        tensor([[0 0 0],
+                [inf inf inf],
+                [inf inf inf],
+                [inf inf inf],
+                [inf inf, inf],
+                [0 0 0],
+                [inf inf 0],
+                [inf inf 0],
+                [inf inf 0],
+                [inf inf 0]])
 
-        """
+        The concrete steps of what this function does are as follows:
+
         Step 1: Create a zero masking matrix with shape (batch size, max target prefix length + 1)
         Fill 1 into this masking matrix based on the target prefix
 
-        target prefix     initialize masking     masking           roll one step to the right
-                          from target prefix     is not 0           and assign 1 at index 0
-           [1 2]    ->       [1 2 0]     ->      [1 1 0]                   [1 1 1]
-           [1 0]             [1 0 0]             [1 0 0]      ->           [1 1 0]
-        """
-        masking = pt.zeros((target_prefix.size(0), target_prefix.size(1) + 1)).to(self.device)
-        masking[:,:target_prefix.size(-1)] = target_prefix
-        masking.masked_fill_(masking!=0., 1)
-        masking = pt.roll(masking, 1, -1)
-        masking[:,0] = 1.
+        target prefix  initialize masking    masking      roll one step to the right
+                       from target prefix    is not 0      and assign 1 at index 0
+            [1 2]    ->    [1 2 0]        -> [1 1 0]  ->           [1 1 1]
+            [1 0]          [1 0 0]           [1 0 0]               [1 1 0]
 
-        """
         Step 2: Adjust first_step_mask based on masking
 
-        masking         Expand masking with     Expand first_step_mask with max target prefix
-                       beam size and reshape      length and fill 0 where masking is 0
-        [1 1 1]      ->     [1 1 1]          ->            [0, 0, 0]
-        [1 1 0]             [1 1 1]                        [inf, inf, inf]
-                            [1 1 1]                        [inf, inf, inf]
-                            [1 1 1]                        [inf, inf, inf]
-                            [1 1 0]                        [0, 0, 0]
-                            [1 1 0]                        [inf, inf, 0]
-                            [1 1 0]                        [inf, inf, 0]
-                            [1 1 0]                        [inf, inf, 0]
+        masking     expand masking with     expand first_step_mask with max target
+                         beam size         prefix length, fill 0 where masking is 0
+        [1 1 1]  ->      [1 1 1]        ->             [0 0 0]
+        [1 1 0]          [1 1 1]                       [inf inf inf]
+                         [1 1 1]                       [inf inf inf]
+                         [1 1 1]                       [inf inf inf]
+                         [1 1 1]                       [inf inf inf]
+                         [1 1 0]                       [0 0 0]
+                         [1 1 0]                       [inf inf 0]
+                         [1 1 0]                       [inf inf 0]
+                         [1 1 0]                       [inf inf 0]
+                         [1 1 0]                       [inf inf 0]
         """
+        # Step 1
+        masking = pt.zeros((target_prefix.size(0), target_prefix.size(1) + 1)).to(self.device)
+        masking[:,:target_prefix.size(1)] = target_prefix
+        masking.masked_fill_(masking != 0., 1.0)
+        masking = pt.roll(masking, 1, -1)
+        masking[:, 0] = 1.
+
+        # Step 2
         masking = masking.unsqueeze(1).expand(-1, self.beam_size, -1).reshape(first_step_mask.size(0), -1)
         first_step_mask = first_step_mask.expand(-1, masking.size(-1)).clone()
         first_step_mask.masked_fill_(masking == 0., 0.)

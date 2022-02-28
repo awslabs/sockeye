@@ -102,11 +102,18 @@ Finally, Sockeye also supports the use of adding target prefixes to the translat
 { "text": "The boy ate the waff@@ le .", "target_prefix": "2XX"}
 ```
 
-By default, the translation output includes the target prefix as its first string. Alternatively, you can remove the target prefix from the translation output by setting `keep_target_prefix` to be `False`, e.g.,:
+By default, the translation output includes the target prefix as its first string. Alternatively, you can remove the target prefix from the translation output by setting `keep_target_prefix` to `false`, e.g.,:
 
 ```json
-{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "keep_target_prefix": "False"}
+{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "keep_target_prefix": false}
 ```
+
+Note that if an input is very long, Sockeye chunks the text and translates each chunk separately. By default, a target prefix is added to all chunks in that case. Alternatively, you can set `use_target_prefix_all_chunks` to `false` to add the target prefix only to the first chunk, e.g.,:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "use_target_prefix_all_chunks": false}
+```
+
 
 ## N-best translations
 

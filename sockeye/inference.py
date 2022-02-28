@@ -133,6 +133,7 @@ class TranslatorInput:
     source_prefix_tokens: Optional[Tokens] = None
     source_prefix_factors: Optional[List[Tokens]] = None
     target_prefix_tokens: Optional[Tokens] = None
+    use_target_prefix_all_chunks: Optional[bool] = True
     keep_target_prefix_key: Optional[bool] = True
     restrict_lexicon: Optional[lexicon.TopKLexicon] = None
     constraints: Optional[List[Tokens]] = None
@@ -140,8 +141,8 @@ class TranslatorInput:
     pass_through_dict: Optional[Dict] = None
 
     def __str__(self):
-        return 'TranslatorInput(%s, %s, factors=%s, source_prefix_tokens=%s, source_prefix_factors=%s, target_prefix_tokens=%s, keep_target_prefix_key=%s, constraints=%s, avoid=%s)' \
-            % (self.sentence_id, self.tokens, self.factors, self.source_prefix_tokens, self.source_prefix_factors, self.target_prefix_tokens, self.keep_target_prefix_key, self.constraints, self.avoid_list)
+        return 'TranslatorInput(%s, %s, factors=%s, source_prefix_tokens=%s, source_prefix_factors=%s, target_prefix_tokens=%s, use_target_prefix_all_chunks=%s, keep_target_prefix_key=%s, constraints=%s, avoid=%s)' \
+            % (self.sentence_id, self.tokens, self.factors, self.source_prefix_tokens, self.source_prefix_factors, self.target_prefix_tokens, self.use_target_prefix_all_chunks, self.keep_target_prefix_key, self.constraints, self.avoid_list)
 
     def __len__(self):
         return len(self.tokens) + self.num_source_prefix_tokens()
@@ -197,9 +198,13 @@ class TranslatorInput:
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
             # assigned to the first chunk
             constraints = self.constraints if chunk_id == 0 else None
-            # Target_prefix_tokens are also assigned only to the first chunk
-            target_prefix_tokens = self.target_prefix_tokens if chunk_id == 0 else None
-            keep_target_prefix_key = self.keep_target_prefix_key if chunk_id == 0 else True
+            # Target_prefix_tokens are assigned to all chunks if self.use_target_prefix_all_chunks is True,
+            # otherwise target_prefix_tokens are assigned only to the first chunk
+            if self.use_target_prefix_all_chunks:
+                target_prefix_tokens = self.target_prefix_tokens
+            else:
+                target_prefix_tokens = self.target_prefix_tokens if chunk_id == 0 else None
+            keep_target_prefix_key = self.keep_target_prefix_key
             pass_through_dict = copy.deepcopy(self.pass_through_dict) \
                 if (chunk_id == 0 and self.pass_through_dict is not None) else None
             yield TranslatorInput(sentence_id=self.sentence_id,
@@ -208,6 +213,7 @@ class TranslatorInput:
                                   source_prefix_tokens=self.source_prefix_tokens,
                                   source_prefix_factors=self.source_prefix_factors,
                                   target_prefix_tokens=target_prefix_tokens,
+                                  use_target_prefix_all_chunks=self.use_target_prefix_all_chunks,
                                   keep_target_prefix_key=keep_target_prefix_key,
                                   restrict_lexicon=self.restrict_lexicon,
                                   constraints=constraints,
@@ -225,6 +231,7 @@ class TranslatorInput:
                                source_prefix_tokens=self.source_prefix_tokens,
                                source_prefix_factors=self.source_prefix_factors,
                                target_prefix_tokens=self.target_prefix_tokens,
+                               use_target_prefix_all_chunks=self.use_target_prefix_all_chunks,
                                restrict_lexicon=self.restrict_lexicon,
                                constraints=self.constraints,
                                avoid_list=self.avoid_list,
@@ -325,8 +332,13 @@ def make_input_from_dict(sentence_id: SentenceId,
 
         target_prefix_tokens = input_dict.get(C.JSON_TARGET_PREFIX_KEY)
         target_prefix_tokens = list(utils.get_tokens(target_prefix_tokens)) if target_prefix_tokens else None
+        target_prefix_tokens = target_prefix_tokens if (target_prefix_tokens is not None and len(target_prefix_tokens) > 0) else None
+        use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY)
+        if use_target_prefix_all_chunks is None:
+            use_target_prefix_all_chunks = True
         keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY)
-        keep_target_prefix_key = False if (keep_target_prefix_key is not None and keep_target_prefix_key == "False") else True
+        if keep_target_prefix_key is None:
+            keep_target_prefix_key = True
         # Lexicon for vocabulary selection/restriction:
         # This is only populated when using multiple lexicons, in which case the
         # restrict_lexicon key must exist and the value (name) must map to one
@@ -369,6 +381,7 @@ def make_input_from_dict(sentence_id: SentenceId,
                                source_prefix_tokens=source_prefix_tokens,
                                source_prefix_factors=source_prefix_factors,
                                target_prefix_tokens=target_prefix_tokens,
+                               use_target_prefix_all_chunks=use_target_prefix_all_chunks,
                                keep_target_prefix_key=keep_target_prefix_key,
                                restrict_lexicon=restrict_lexicon, constraints=constraints,
                                avoid_list=avoid_list, pass_through_dict=input_dict)
@@ -616,6 +629,19 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
                                       estimated_reference_length=translation.estimated_reference_length))
 
     return nbest_list
+
+def _remove_target_prefix_tokens(target_ids: TokenIds,
+                     num_target_prefix_tokens: int) -> TokenIds:
+        """
+        Remove target prefix tokens from target token Ids
+
+        :param target_ids: target token Ids of translation of an input
+        :param num_target_prefix_tokens: number of target prefix tokens included in the translation
+        :return: new target_ids
+        """
+        starting_idx = min(len(target_ids), num_target_prefix_tokens)
+        target_ids = target_ids[starting_idx:]
+        return target_ids
 
 
 def _concat_translations(translations: List[Translation],
@@ -895,11 +921,20 @@ class Translator:
         chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.input_idx)
         for trans_input, (input_idx, translations_for_input_idx) in zip(trans_inputs, chunks_by_input_idx):
             translations_for_input_idx = list(translations_for_input_idx)  # type: ignore
+            num_target_prefix_tokens = trans_input.num_target_prefix_tokens()
             if len(translations_for_input_idx) == 1:  # type: ignore
                 translation = translations_for_input_idx[0].translation  # type: ignore
+                if num_target_prefix_tokens > 0 and not trans_input.keep_target_prefix_key:
+                    translation.target_ids = \
+                    _remove_target_prefix_tokens(translation.target_ids, num_target_prefix_tokens)
             else:
                 translations_to_concat = [translated_chunk.translation
                                           for translated_chunk in translations_for_input_idx]
+                if num_target_prefix_tokens > 0 and not trans_input.keep_target_prefix_key:
+                    for i in range(len(translations_to_concat)):
+                        if i == 0 or (i > 0 and trans_input.use_target_prefix_all_chunks):
+                            translations_to_concat[i].target_ids = \
+                            _remove_target_prefix_tokens(translations_to_concat[i].target_ids, num_target_prefix_tokens)
                 translation = self._concat_translations(translations_to_concat)
 
             results.append(self._make_result(trans_input, translation))
@@ -1047,11 +1082,6 @@ class Translator:
                 nbest_factor_translations.append(ith_nbest_factor_translations)
             nbest_scores = translation.nbest_translations.scores
 
-        if trans_input.num_target_prefix_tokens() > 0 and not trans_input.keep_target_prefix_key:
-            # remove target prefix from the translation
-            starting_idx = min(len(primary_tokens), trans_input.num_target_prefix_tokens())
-            primary_tokens = primary_tokens[starting_idx:]
-            primary_translation = C.TOKEN_SEPARATOR.join(primary_tokens)
         return TranslatorOutput(sentence_id=trans_input.sentence_id,
                                 translation=primary_translation,
                                 tokens=primary_tokens,
