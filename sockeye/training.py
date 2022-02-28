@@ -284,7 +284,7 @@ class EarlyStoppingTrainer:
         logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
                     "\t".join("Train-%s" % str(metric) for metric in train_metrics))
 
-        val_metrics = self._evaluate(self.state.checkpoint, validation_iters, checkpoint_decoder)
+        val_metrics, val_metrics_per_iter = self._evaluate(self.state.checkpoint, validation_iters, checkpoint_decoder)
 
         has_improved = self._determine_improvement(val_metrics)
         self.state.converged = self._determine_convergence()
@@ -295,7 +295,8 @@ class EarlyStoppingTrainer:
                 self._update_best_params()
                 self._save_optimizer_state(self.best_optimizer_state_fname)
                 self._save_lr_scheduler(self.best_lr_scheduler_fname)
-            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics,
+                                        val_metrics_per_iter=val_metrics_per_iter)
             self._save_training_state(train_iter)
         for metric in train_metrics:
             metric.reset()
@@ -389,7 +390,8 @@ class EarlyStoppingTrainer:
     def _evaluate(self,
                   checkpoint: int,
                   validation_iters: List[data_io.BaseParallelSampleIter],
-                  checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss.LossMetric]:
+                  checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> \
+                      Tuple[List[loss.LossMetric], Optional[List[List[loss.LossMetric]]]]:
         """
         Computes loss(es) on validation data and returns their metrics.
         :param validation_iters: List of validation data iterators.
@@ -400,6 +402,9 @@ class EarlyStoppingTrainer:
         self.sockeye_model.eval()
 
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
+        # When using multiple validation sets, also track per-set metrics
+        val_metrics_per_iter = [[lf.create_metric() for lf in self.loss_functions] for _ in validation_iters] \
+                               if len(validation_iters) > 1 else None
         # TODO(mdenkows): Right now each validation iter uses the model branch
         # with the same index. A data source mapping would allow users to define
         # which branch is used for each validation set.
@@ -414,9 +419,12 @@ class EarlyStoppingTrainer:
                     outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
                     # Loss
                     loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
-                    # Update validation metrics for batch
+                # Update validation metrics for batch
                 for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
                     loss_metric.update(loss_value.item(), num_samples.item())
+                if val_metrics_per_iter is not None:
+                    for loss_metric, (loss_value, num_samples) in zip(val_metrics_per_iter[data_source], loss_outputs):
+                        loss_metric.update(loss_value.item(), num_samples.item())
 
         # Primary worker optionally runs the checkpoint decoder
         decoder_metrics = {}  # type: Dict[str, float]
@@ -436,10 +444,14 @@ class EarlyStoppingTrainer:
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
+        if val_metrics_per_iter is not None:
+            logger.info('Checkpoint [%d]\t%s', self.state.checkpoint,
+                        '\t'.join(('\t'.join('Validation%d-%s' % (data_source, str(m)) for m in metrics))
+                                  for data_source, metrics in enumerate(val_metrics_per_iter)))
 
         # Switch model back to train mode to continue training
         self.sockeye_model.train()
-        return val_metrics
+        return val_metrics, val_metrics_per_iter
 
     def _determine_improvement(self, val_metrics: List[loss.LossMetric]) -> bool:
         """
@@ -570,7 +582,8 @@ class EarlyStoppingTrainer:
 
     def _write_and_log_metrics(self,
                                train_metrics: Iterable[loss.LossMetric],
-                               val_metrics: Iterable[loss.LossMetric]):
+                               val_metrics: Iterable[loss.LossMetric],
+                               val_metrics_per_iter: Optional[Iterable[Iterable[loss.LossMetric]]] = None):
         """
         Updates metrics for current checkpoint.
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
@@ -587,6 +600,10 @@ class EarlyStoppingTrainer:
             data["%s-train" % metric.name] = metric.get()
         for metric in val_metrics:
             data["%s-val" % metric.name] = metric.get()
+        if val_metrics_per_iter is not None:
+            for data_source, metrics in enumerate(val_metrics_per_iter):
+                for metric in metrics:
+                    data["%s-val%d" % (metric.name, data_source)] = metric.get()
 
         self.state.metrics.append(data)
         utils.write_metrics_file(self.state.metrics, self.metrics_fname)
