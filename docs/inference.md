@@ -120,7 +120,7 @@ Note that if an input is very long, Sockeye chunks the text and translates each 
 { "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "target_prefix_factors": ["O"], "use_target_prefix_all_chunks": false}
 ```
 
-Finally, the translation output includes the target prefix as its first string by default. Alternatively, you can remove the target prefix from the translation output by setting `keep_target_prefix` to `false`, e.g.,:
+Note also that the translation output includes the target prefix as its first string by default. Alternatively, you can remove the target prefix from the translation output by setting `keep_target_prefix` to `false`, e.g.,:
 
 ```json
 { "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "keep_target_prefix": false}
