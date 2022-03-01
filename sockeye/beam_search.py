@@ -46,7 +46,8 @@ class _Inference(ABC):
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List,
-                    vocab_slice_ids: Optional[pt.Tensor] = None):
+                    vocab_slice_ids: Optional[pt.Tensor] = None,
+                    target_prefix_factors: Optional[pt.Tensor] = None):
         raise NotImplementedError()
 
 
@@ -70,7 +71,8 @@ class _SingleModelInference(_Inference):
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List,
-                    vocab_slice_ids: Optional[pt.Tensor] = None):
+                    vocab_slice_ids: Optional[pt.Tensor] = None,
+                    target_prefix_factors: Optional[pt.Tensor] = None):
         logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             logits = pt.log_softmax(logits, dim=-1)
@@ -79,10 +81,15 @@ class _SingleModelInference(_Inference):
         target_factors = None  # type: Optional[pt.Tensor]
         if target_factor_outputs:
             predictions = []  # type: List[pt.Tensor]
-            for tf_logits in target_factor_outputs:
+            for i, tf_logits in enumerate(target_factor_outputs):
                 if not self._skip_softmax:
                     tf_logits = pt.log_softmax(tf_logits, dim=-1)
                 tf_scores = -tf_logits
+                if target_prefix_factors is not None:
+                    beam_size = tf_scores.size()[0]//target_prefix_factors.size()[0]
+                    target_prefix_factors_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix_factors[:, i:i+1], tf_scores.size(-1))
+                    target_prefix_factors_in_one_hot = target_prefix_factors_in_one_hot.expand(-1, beam_size, -1).reshape(-1, target_prefix_factors_in_one_hot.size(-1))
+                    tf_scores.masked_fill_(target_prefix_factors_in_one_hot == 0, onp.inf)
                 # target factors are greedily chosen, and score and index are collected via torch.min.
                 # Shape per factor: (batch*beam, 1, 2), where last dimension holds values and indices.
                 tf_prediction = pt.cat(tf_scores.min(dim=-1, keepdim=True), dim=1).unsqueeze(1)
@@ -125,7 +132,8 @@ class _EnsembleInference(_Inference):
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List,
-                    vocab_slice_ids: Optional[pt.Tensor] = None):
+                    vocab_slice_ids: Optional[pt.Tensor] = None,
+                    target_prefix_factors: Optional[pt.Tensor] = None):
         outputs = []  # type: List[pt.Tensor]
         new_states = []  # type: List[pt.Tensor]
         factor_outputs = []  # type: List[List[pt.Tensor]]
@@ -138,6 +146,12 @@ class _EnsembleInference(_Inference):
             outputs.append(probs)
             if target_factor_outputs:
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
+                if target_prefix_factors is not None:
+                    for i in range(len(target_factor_probs)):
+                        beam_size = int(target_factor_probs[i].size()[0]/target_prefix_factors.size()[0])
+                        target_prefix_factors_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix_factors[:, i:i+1], target_factor_probs[i].size(-1))
+                        target_prefix_factors_in_one_hot = target_prefix_factors_in_one_hot.expand(-1, beam_size, -1).reshape(-1, target_prefix_factors_in_one_hot.size(-1))
+                        target_factor_probs[i].masked_fill_(target_prefix_factors_in_one_hot == 0, onp.inf)
                 factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
@@ -553,7 +567,8 @@ class GreedySearch(pt.nn.Module):
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
                 max_output_lengths: pt.Tensor = None,
-                target_prefix: Optional[pt.Tensor] = None) -> SearchResult:
+                target_prefix: Optional[pt.Tensor] = None,
+                target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
         """
         Translates a single sentence (batch_size=1) using greedy search.
 
@@ -589,14 +604,27 @@ class GreedySearch(pt.nn.Module):
         # TODO: check for disabled predicted output length
 
         t = 1
+        if target_prefix_factors is not None and C.TARGET_FACTOR_SHIFT:
+            target_prefix_factors_shift = pt.zeros(target_prefix_factors.size(0), target_prefix_factors.size(1) + 1, target_prefix_factors.size(2)).to(self.device).type(target_prefix_factors.dtype)
+            target_prefix_factors_shift[:, 1:] = target_prefix_factors
+            target_prefix_factors = target_prefix_factors_shift
+
         for t in range(1, max_iterations + 1):
-            scores, model_states, target_factors = self._inference.decode_step(best_word_index,
-                                                                               model_states,
-                                                                               vocab_slice_ids=vocab_slice_ids)
-            if target_prefix is not None and t <= target_prefix.size(-1):
+            if target_prefix_factors is None:
+                scores, model_states, target_factors = self._inference.decode_step(best_word_index,
+                                                                                   model_states,
+                                                                                   vocab_slice_ids=vocab_slice_ids)
+            else:
+                target_prefix_factor = target_prefix_factors[:, t-1, :] if self.num_target_factors > 1 and t <= target_prefix_factors.size(1) else None
+                scores, model_states, target_factors = self._inference.decode_step(best_word_index,
+                                                                                   model_states,
+                                                                                   vocab_slice_ids,
+                                                                                   target_prefix_factor)
+
+            if target_prefix is not None and t <= target_prefix.size(1):
                 # Make sure search selects the current prefix token by setting the scores of all
                 # other vocabulary items to infinity.
-                target_prefix_in_one_hot = utils.one_hot_encoding_from_target_prefix(target_prefix[:,t-1:t], self.output_vocab_size).squeeze(1)
+                target_prefix_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix[:, t-1:t], self.output_vocab_size).squeeze(1)
                 if vocab_slice_ids is not None:
                     target_prefix_in_one_hot = pt.index_select(target_prefix_in_one_hot, -1, vocab_slice_ids)
                 scores.masked_fill_(target_prefix_in_one_hot == 0, onp.inf)
@@ -711,7 +739,8 @@ class BeamSearch(pt.nn.Module):
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.TopKLexicon],
                 max_output_lengths: pt.Tensor,
-                target_prefix: Optional[pt.Tensor] = None) -> SearchResult:
+                target_prefix: Optional[pt.Tensor] = None,
+                target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
         """
         Translates multiple sentences using beam search.
 
@@ -721,6 +750,7 @@ class BeamSearch(pt.nn.Module):
         :param max_output_lengths: Tensor of maximum output lengths per input in source.
                 Shape: (batch_size,). Dtype: int32.
         :param target_prefix: Target prefix ids. Shape: (batch_size, max prefix length).
+        :param target_prefix_factors: Target prefix factors ids. Shape: (batch_size, max prefix factors length, num_target_factors).
         :return SearchResult.
         """
         batch_size = source.size()[0]
@@ -796,14 +826,26 @@ class BeamSearch(pt.nn.Module):
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
 
         t = 1
+        if target_prefix_factors is not None and C.TARGET_FACTOR_SHIFT:
+            target_prefix_factors_shift = pt.zeros(target_prefix_factors.size(0), target_prefix_factors.size(1) + 1, target_prefix_factors.size(2)).to(self.device).type(target_prefix_factors.dtype)
+            target_prefix_factors_shift[:, 1:] = target_prefix_factors
+            target_prefix_factors = target_prefix_factors_shift
+
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
             # target_factors: (batch_size * beam_size, num_secondary_factors, 2),
             # where last dimension holds indices and scores
-            target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
-                                                                                     model_states,
-                                                                                     vocab_slice_ids)
+            if target_prefix_factors is None:
+                target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
+                                                                                         model_states,
+                                                                                         vocab_slice_ids)
+            else:
+                target_prefix_factor = target_prefix_factors[:, t-1, :] if self.num_target_factors > 1 and t <= target_prefix_factors.size(1) else None
+                target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
+                                                                                         model_states,
+                                                                                         vocab_slice_ids,
+                                                                                         target_prefix_factor)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished rows.
@@ -811,14 +853,15 @@ class BeamSearch(pt.nn.Module):
             scores, lengths = self._update_scores(target_dists, finished, scores_accumulated,
                                                   lengths, max_output_lengths, pad_dist, eos_dist)
 
-            if target_prefix is not None and t <= target_prefix.size(-1):
+            if target_prefix is not None and t <= target_prefix.size(1):
                 # Make sure search selects the current prefix token by setting the scores of all
                 # other vocabulary items to infinity.
-                target_prefix_in_one_hot = utils.one_hot_encoding_from_target_prefix(target_prefix[:,t-1:t], self.output_vocab_size)
+                target_prefix_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix[:, t-1:t], self.output_vocab_size)
                 target_prefix_in_one_hot = target_prefix_in_one_hot.expand(-1, self.beam_size, -1).reshape(-1, target_prefix_in_one_hot.size(-1))
                 if vocab_slice_ids is not None:
                     target_prefix_in_one_hot = pt.index_select(target_prefix_in_one_hot, -1, vocab_slice_ids)
                 scores.masked_fill_(target_prefix_in_one_hot == 0, onp.inf)
+
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
             if self._sample is not None:
@@ -829,7 +872,7 @@ class BeamSearch(pt.nn.Module):
                 if target_prefix is None:
                     scores = scores + first_step_mask if t == 1 else scores
                 else:
-                    scores = scores + first_step_mask[:,t-1:t] if t <= first_step_mask.size(-1) else scores
+                    scores = scores + first_step_mask[:, t-1:t] if t <= first_step_mask.size(-1) else scores
 
                 if self._traced_top is None:
                     logger.debug("Tracing _top")

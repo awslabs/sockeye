@@ -72,7 +72,7 @@ def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_f
 
             if tgt_factors_path is not None:
                 list_tgt_factors = [open(tgt_factors, "r") for tgt_factors in tgt_factors_path]
-                list_tgt_factors = [[tf.strip() for tf in tgt_factors] for tgt_factors in list_tgt_factors]
+                list_tgt_factors = [[tf.strip().split() for tf in tgt_factors] for tgt_factors in list_tgt_factors]
 
             for i, stdigits in enumerate(zip(src_reader, tgt_reader)):
                 src_digits, tgt_digits = stdigits[0].strip(), stdigits[1].strip()
@@ -80,17 +80,25 @@ def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_f
                 if len(tgt_digits) > 0:
                     random_pos = random_gen.choice([pos for pos in range(len(tgt_prefix))])
                     tgt_prefix = tgt_prefix[:random_pos]
+                if tgt_factors_path is not None and len(list_tgt_factors[0][i]) > 0:
+                    # Another random_pos, which is different to the one used for target prefix
+                    # With this, target prefix and target factors may have different lengths for testing
+                    random_pos = random_gen.choice([pos for pos in range(len(list_tgt_factors[0][i]))])
+                    for k in range(len(list_tgt_factors)):
+                        list_tgt_factors[k][i] = list_tgt_factors[k][i][:random_pos]
                 tgt_prefix = C.TOKEN_SEPARATOR.join(tgt_prefix)
                 if src_factors_path is None and tgt_factors_path is None:
                     jsone_line = {"text": src_digits, "target_prefix": tgt_prefix}
                 elif src_factors_path is not None and tgt_factors_path is None:
-                    jsone_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], "tgt_prefix": tgt_prefix}
+                    jsone_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], \
+                    "target_prefix": tgt_prefix}
                 elif tgt_factors_path is not None and src_factors_path is None:
-                    jsone_line = {"text": src_digits, "target_prefix": tgt_prefix}
-                    # if we have prefix factors, it should be jsone_line = {"text": src_digits, "tgt_factors": [tgt_factors[i] for tgt_factors in list_tgt_factors], "tgt_prefix": tgt_prefix}
+                    jsone_line = {"text": src_digits, "target_prefix_factors": [C.TOKEN_SEPARATOR.join(tgt_factors[i]) for tgt_factors in list_tgt_factors], \
+                    "target_prefix": tgt_prefix}
                 else:
-                    jsone_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], "tgt_prefix": tgt_prefix}
-                    # if we have prefix factors, it should be jsone_line = {"text": src_digits, "tgt_factors": [tgt_factors[i] for tgt_factors in list_tgt_factors], "tgt_prefix": tgt_prefix}
+                    jsone_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], \
+                    "target_prefix_factors": [C.TOKEN_SEPARATOR.join(tgt_factors[i]) for tgt_factors in list_tgt_factors], \
+                    "target_prefix": tgt_prefix}
                 print(json.dumps(jsone_line), file=out)
 
 
@@ -334,13 +342,13 @@ def run_train_translate(train_params: str,
 
     # Translate corpus with the 1st params and scoring output handler to obtain scores
     data['test_output'] = os.path.join(work_dir, "test.out")
-    data['test_output_with_target_prefix'] = os.path.join(work_dir, "test_with_target_prefix.out")
+    data['test_with_target_prefix_output'] = os.path.join(work_dir, "test_with_target_prefix.out")
 
     # First set of params (with target prefix in JSON format)
     params = "{} {} {}".format(sockeye.translate.__file__,
                                TRANSLATE_PARAMS_COMMON.format(model=data['model'],
                                                               input=data['test_source_with_target_prefix'],
-                                                              output=data['test_output_with_target_prefix']),
+                                                              output=data['test_with_target_prefix_output']),
                                translate_params)
     params += TRANSLATE_WITH_JSON_FORMAT
     logger.info("Translating with params %s", params)
@@ -348,7 +356,7 @@ def run_train_translate(train_params: str,
         sockeye.translate.main()
 
     # Collect test translate outputs and scores
-    data['test_output_with_target_prefix'] = collect_translate_output_and_scores(data['test_output_with_target_prefix'])
+    data['test_with_target_prefix_outputs'] = collect_translate_output_and_scores(data['test_with_target_prefix_output'])
 
     # Second set of params (without target prefix)
     params = "{} {} {}".format(sockeye.translate.__file__,
@@ -374,7 +382,7 @@ def run_train_translate(train_params: str,
 
     # Collect test translate outputs and scores
     data['test_outputs'] = collect_translate_output_and_scores(data['test_output'])
-    assert len(data['test_inputs']) == len(data['test_targets']) == len(data['test_outputs']) == len(data['test_output_with_target_prefix'])
+    assert len(data['test_inputs']) == len(data['test_targets']) == len(data['test_outputs']) == len(data['test_with_target_prefix_outputs'])
     return data
 
 

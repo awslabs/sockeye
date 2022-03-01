@@ -133,6 +133,7 @@ class TranslatorInput:
     source_prefix_tokens: Optional[Tokens] = None
     source_prefix_factors: Optional[List[Tokens]] = None
     target_prefix_tokens: Optional[Tokens] = None
+    target_prefix_factors: Optional[List[Tokens]] = None
     use_target_prefix_all_chunks: Optional[bool] = True
     keep_target_prefix_key: Optional[bool] = True
     restrict_lexicon: Optional[lexicon.TopKLexicon] = None
@@ -141,8 +142,8 @@ class TranslatorInput:
     pass_through_dict: Optional[Dict] = None
 
     def __str__(self):
-        return 'TranslatorInput(%s, %s, factors=%s, source_prefix_tokens=%s, source_prefix_factors=%s, target_prefix_tokens=%s, use_target_prefix_all_chunks=%s, keep_target_prefix_key=%s, constraints=%s, avoid=%s)' \
-            % (self.sentence_id, self.tokens, self.factors, self.source_prefix_tokens, self.source_prefix_factors, self.target_prefix_tokens, self.use_target_prefix_all_chunks, self.keep_target_prefix_key, self.constraints, self.avoid_list)
+        return 'TranslatorInput(%s, %s, factors=%s, source_prefix_tokens=%s, source_prefix_factors=%s, target_prefix_tokens=%s, target_prefix_factors=%s, use_target_prefix_all_chunks=%s, keep_target_prefix_key=%s, constraints=%s, avoid=%s)' \
+            % (self.sentence_id, self.tokens, self.factors, self.source_prefix_tokens, self.source_prefix_factors, self.target_prefix_tokens, self.target_prefix_factors, self.use_target_prefix_all_chunks, self.keep_target_prefix_key, self.constraints, self.avoid_list)
 
     def __len__(self):
         return len(self.tokens) + self.num_source_prefix_tokens()
@@ -178,6 +179,18 @@ class TranslatorInput:
         """
         return len(self.get_target_prefix_tokens())
 
+    def get_target_prefix_factors(self) -> List[Tokens]:
+        """
+        Returns the target prefix factors of this instance.
+        """
+        return self.target_prefix_factors if self.target_prefix_factors is not None else [[]]
+
+    def num_target_prefix_factors(self) -> int:
+        """
+        Returns the number of target prefix factors of this instance.
+        """
+        return len(self.get_target_prefix_factors()[0])
+
     def chunks(self, chunk_size: int) -> Generator['TranslatorInput', None, None]:
         """
         Takes a TranslatorInput (itself) and yields TranslatorInputs for chunks of size chunk_size.
@@ -202,8 +215,10 @@ class TranslatorInput:
             # otherwise target_prefix_tokens are assigned only to the first chunk
             if self.use_target_prefix_all_chunks:
                 target_prefix_tokens = self.target_prefix_tokens
+                target_prefix_factors = self.target_prefix_factors
             else:
                 target_prefix_tokens = self.target_prefix_tokens if chunk_id == 0 else None
+                target_prefix_factors = self.target_prefix_factors if chunk_id == 0 else None
             keep_target_prefix_key = self.keep_target_prefix_key
             pass_through_dict = copy.deepcopy(self.pass_through_dict) \
                 if (chunk_id == 0 and self.pass_through_dict is not None) else None
@@ -213,6 +228,7 @@ class TranslatorInput:
                                   source_prefix_tokens=self.source_prefix_tokens,
                                   source_prefix_factors=self.source_prefix_factors,
                                   target_prefix_tokens=target_prefix_tokens,
+                                  target_prefix_factors=self.target_prefix_factors,
                                   use_target_prefix_all_chunks=self.use_target_prefix_all_chunks,
                                   keep_target_prefix_key=keep_target_prefix_key,
                                   restrict_lexicon=self.restrict_lexicon,
@@ -231,6 +247,7 @@ class TranslatorInput:
                                source_prefix_tokens=self.source_prefix_tokens,
                                source_prefix_factors=self.source_prefix_factors,
                                target_prefix_tokens=self.target_prefix_tokens,
+                               target_prefix_factors=self.target_prefix_factors,
                                use_target_prefix_all_chunks=self.use_target_prefix_all_chunks,
                                restrict_lexicon=self.restrict_lexicon,
                                constraints=self.constraints,
@@ -332,7 +349,11 @@ def make_input_from_dict(sentence_id: SentenceId,
 
         target_prefix_tokens = input_dict.get(C.JSON_TARGET_PREFIX_KEY)
         target_prefix_tokens = list(utils.get_tokens(target_prefix_tokens)) if target_prefix_tokens else None
-        target_prefix_tokens = target_prefix_tokens if (target_prefix_tokens is not None and len(target_prefix_tokens) > 0) else None
+
+        target_prefix_factors = input_dict.get(C.JSON_TARGET_PREFIX_FACTORS_KEY)
+        if isinstance(target_prefix_factors, list):
+            target_prefix_factors = [list(utils.get_tokens(target_prefix_factor)) for target_prefix_factor in target_prefix_factors]
+
         use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY)
         if use_target_prefix_all_chunks is None:
             use_target_prefix_all_chunks = True
@@ -381,6 +402,7 @@ def make_input_from_dict(sentence_id: SentenceId,
                                source_prefix_tokens=source_prefix_tokens,
                                source_prefix_factors=source_prefix_factors,
                                target_prefix_tokens=target_prefix_tokens,
+                               target_prefix_factors=target_prefix_factors,
                                use_target_prefix_all_chunks=use_target_prefix_all_chunks,
                                keep_target_prefix_key=keep_target_prefix_key,
                                restrict_lexicon=restrict_lexicon, constraints=constraints,
@@ -951,6 +973,7 @@ class Translator:
                                                                            int,
                                                                            Optional[pt.Tensor],
                                                                            Optional[lexicon.TopKLexicon],
+                                                                           pt.Tensor,
                                                                            pt.Tensor]:
         """
         Assembles the numerical data for the batch. This comprises a tensor for the source sentences,
@@ -965,11 +988,13 @@ class Translator:
         lengths = [len(inp) for inp in trans_inputs]
 
         max_target_prefix_length = max(inp.num_target_prefix_tokens() for inp in trans_inputs)
+        max_target_prefix_factors_length = max(inp.num_target_prefix_factors() for inp in trans_inputs)
         max_length = max(len(inp) for inp in trans_inputs)
         # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
         source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
         target_prefix = onp.zeros((batch_size, max_target_prefix_length), dtype='int32') if max_target_prefix_length > 0 else None
+        target_prefix_factors = onp.zeros((batch_size, max_target_prefix_factors_length, self.num_target_factors - 1), dtype='int32') if self.num_target_factors > 1 and max_target_prefix_factors_length > 0 else None
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
 
         max_output_lengths = []  # type: List[int]
@@ -980,6 +1005,9 @@ class Translator:
                 trans_input.tokens), self.source_vocabs[0])
             if target_prefix is not None and trans_input.num_target_prefix_tokens() > 0:
                 target_prefix[j, :trans_input.num_target_prefix_tokens()] = tokens2ids(trans_input.get_target_prefix_tokens(), self.vocab_targets[0])
+            if target_prefix_factors is not None and self.num_target_factors > 1 and trans_input.num_target_prefix_factors() > 0:
+                for i in range(1, self.num_target_factors):
+                    target_prefix_factors[j, :trans_input.num_target_prefix_factors(), i - 1] = tokens2ids(trans_input.get_target_prefix_factors()[i - 1], self.vocab_targets[i])
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:
@@ -1018,7 +1046,8 @@ class Translator:
         source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
         max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)  # type: ignore
         target_prefix = pt.tensor(target_prefix, device=self.device, dtype=pt.int32) if target_prefix is not None else None  # type: ignore
-        return source, source_length, restrict_lexicon, max_output_lengths, target_prefix  # type: ignore
+        target_prefix_factors = pt.tensor(target_prefix_factors, device=self.device, dtype=pt.int32) if target_prefix_factors is not None else None  # type: ignore
+        return source, source_length, restrict_lexicon, max_output_lengths, target_prefix, target_prefix_factors  # type: ignore
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -1101,7 +1130,8 @@ class Translator:
                       source_length: pt.Tensor,
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
                       max_output_lengths: pt.Tensor,
-                      target_prefix: Optional[pt.Tensor] = None) -> List[Translation]:
+                      target_prefix: Optional[pt.Tensor] = None,
+                      target_prefix_factors: Optional[pt.Tensor] = None) -> List[Translation]:
         """
         Translates source of source_length and returns list of Translations.
 
@@ -1111,6 +1141,7 @@ class Translator:
         :param max_output_lengths: Tensor of maximum output lengths per input in source.
                  Shape: (batch_size,). Dtype: int32.
         :param target_prefix: Target prefix ids.
+        :param target_prefix_factors: Target prefix factors ids.
 
         :return: List of translations.
         """
@@ -1118,7 +1149,8 @@ class Translator:
                                                         source_length,
                                                         restrict_lexicon,
                                                         max_output_lengths,
-                                                        target_prefix))
+                                                        target_prefix,
+                                                        target_prefix_factors))
 
     def _get_best_translations(self, result: SearchResult) -> List[Translation]:
         """
