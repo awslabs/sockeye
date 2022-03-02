@@ -68,6 +68,12 @@ class _SingleModelInference(_Inference):
         states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
         return states, predicted_output_length
 
+    def get_model(self):
+        """
+        Returns the model of this instance.
+        """
+        return self._model
+
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List,
@@ -81,14 +87,15 @@ class _SingleModelInference(_Inference):
         target_factors = None  # type: Optional[pt.Tensor]
         if target_factor_outputs:
             predictions = []  # type: List[pt.Tensor]
-            for i, tf_logits in enumerate(target_factor_outputs):
+            for i, tf_logits in enumerate(target_factor_outputs, 1):
                 if not self._skip_softmax:
                     tf_logits = pt.log_softmax(tf_logits, dim=-1)
                 tf_scores = -tf_logits
                 if target_prefix_factors is not None:
-                    beam_size = tf_scores.size()[0]//target_prefix_factors.size()[0]
-                    target_prefix_factors_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix_factors[:, i:i+1], tf_scores.size(-1))
-                    target_prefix_factors_in_one_hot = target_prefix_factors_in_one_hot.expand(-1, beam_size, -1).reshape(-1, target_prefix_factors_in_one_hot.size(-1))
+                    tf_scores_sizes = tf_scores.size()
+                    beam_size = tf_scores_sizes[0] // target_prefix_factors.size()[0]
+                    target_prefix_factors_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix_factors[:, i-1:i], tf_scores_sizes[-1])
+                    target_prefix_factors_in_one_hot = target_prefix_factors_in_one_hot.expand(-1, beam_size, -1).reshape(-1, tf_scores_sizes[-1])
                     tf_scores.masked_fill_(target_prefix_factors_in_one_hot == 0, onp.inf)
                 # target factors are greedily chosen, and score and index are collected via torch.min.
                 # Shape per factor: (batch*beam, 1, 2), where last dimension holds values and indices.
@@ -148,9 +155,10 @@ class _EnsembleInference(_Inference):
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
                 if target_prefix_factors is not None:
                     for i in range(len(target_factor_probs)):
-                        beam_size = int(target_factor_probs[i].size()[0]/target_prefix_factors.size()[0])
-                        target_prefix_factors_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix_factors[:, i:i+1], target_factor_probs[i].size(-1))
-                        target_prefix_factors_in_one_hot = target_prefix_factors_in_one_hot.expand(-1, beam_size, -1).reshape(-1, target_prefix_factors_in_one_hot.size(-1))
+                        target_factor_prob_sizes = target_factor_probs[i].size()
+                        beam_size = target_factor_prob_sizes[0] // target_prefix_factors.size()[0]
+                        target_prefix_factors_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix_factors[:, i:i+1], target_factor_prob_sizes[-1])
+                        target_prefix_factors_in_one_hot = target_prefix_factors_in_one_hot.expand(-1, beam_size, -1).reshape(-1, target_factor_prob_sizes[-1])
                         target_factor_probs[i].masked_fill_(target_prefix_factors_in_one_hot == 0, onp.inf)
                 factor_outputs.append(target_factor_probs)
             new_states += model_states
@@ -546,14 +554,13 @@ class GreedySearch(pt.nn.Module):
                  device: pt.device,
                  num_source_factors: int,
                  num_target_factors: int,
-                 inference: _SingleModelInference,
-                 output_vocab_size: int):
+                 inference: _SingleModelInference):
         super().__init__()
         self.dtype = dtype
         self.bos_id = bos_id
         self.eos_id = eos_id
         self.device = device
-        self.output_vocab_size = output_vocab_size
+        self.output_vocab_size = inference.get_model().output_layer_vocab_size
         self._inference = inference
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
@@ -578,6 +585,7 @@ class GreedySearch(pt.nn.Module):
         :param max_output_lengths: ndarray of maximum output lengths per input in source.
                 Shape: (batch_size=1,). Dtype: int32.
         :param target_prefix: Target prefix ids. Shape: (batch_size=1, max target prefix length).
+        :param target_prefix_factors: Target prefix factor ids. Shape: (batch_size=1, max target prefix factors length, num_target_factors).
         :return SearchResult.
         """
         batch_size = source.size()[0]
@@ -604,11 +612,6 @@ class GreedySearch(pt.nn.Module):
         # TODO: check for disabled predicted output length
 
         t = 1
-        if target_prefix_factors is not None and C.TARGET_FACTOR_SHIFT:
-            target_prefix_factors_shift = pt.zeros(target_prefix_factors.size(0), target_prefix_factors.size(1) + 1, target_prefix_factors.size(2)).to(self.device).type(target_prefix_factors.dtype)
-            target_prefix_factors_shift[:, 1:] = target_prefix_factors
-            target_prefix_factors = target_prefix_factors_shift
-
         for t in range(1, max_iterations + 1):
             if target_prefix_factors is None:
                 scores, model_states, target_factors = self._inference.decode_step(best_word_index,
@@ -779,7 +782,7 @@ class BeamSearch(pt.nn.Module):
         first_step_mask = pt.full((batch_size * self.beam_size, 1), fill_value=onp.inf, device=self.device, dtype=self.dtype)
         first_step_mask[batch_indices] = 0.0
         if target_prefix is not None:
-            first_step_mask = self.adjust_first_step_masking(target_prefix, first_step_mask)
+            first_step_mask = utils.adjust_first_step_masking(target_prefix, first_step_mask)
 
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[pt.Tensor]
@@ -826,11 +829,6 @@ class BeamSearch(pt.nn.Module):
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
 
         t = 1
-        if target_prefix_factors is not None and C.TARGET_FACTOR_SHIFT:
-            target_prefix_factors_shift = pt.zeros(target_prefix_factors.size(0), target_prefix_factors.size(1) + 1, target_prefix_factors.size(2)).to(self.device).type(target_prefix_factors.dtype)
-            target_prefix_factors_shift[:, 1:] = target_prefix_factors
-            target_prefix_factors = target_prefix_factors_shift
-
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
             # target_dists: (batch_size * beam_size, target_vocab_size)
@@ -872,6 +870,7 @@ class BeamSearch(pt.nn.Module):
                 if target_prefix is None:
                     scores = scores + first_step_mask if t == 1 else scores
                 else:
+                    # While decoding target prefixes, we also mask all other hypotheses than the first
                     scores = scores + first_step_mask[:, t-1:t] if t <= first_step_mask.size(-1) else scores
 
                 if self._traced_top is None:
@@ -933,93 +932,6 @@ class BeamSearch(pt.nn.Module):
                             lengths=lengths,
                             estimated_reference_lengths=estimated_reference_lengths)
 
-    def adjust_first_step_masking(self,
-                target_prefix: pt.Tensor, first_step_mask: pt.Tensor) -> pt.Tensor:
-        """
-        Adjust first_step_masking based on the target prefix
-        (Target prefix for each input in the same batch may have a different length. \
-        Thus first_step_mask needs to be adjusted accordingly.)
-
-        :param target_prefix: Shape (batch size, max target prefix length).
-        :param first_step_mask: Shape (batch_size * beam_size, 1)
-        :return (adjusted) first_steps_masking (batch_size * beam_size, max target prefix length + 1).
-
-        An illustrative example of how first_step_masking is adjusted
-
-        Inputs:
-
-        target_prefix (batch_size = 2, max target prefix length = 2)
-
-        tensor([1 2]
-               [1 0])
-        Note: Two target prefix tokens in the first sentence, \
-        one target prefix token in the second sentence.
-
-        first_step_mask (batch_size = 2 * beam_size = 5, 1)
-
-        tensor([[0],
-        [inf],
-        [inf],
-        [inf],
-        [inf],
-        [0],
-        [inf],
-        [inf],
-        [inf],
-        [inf])
-
-        Output:
-        Adjusted first_step_mask (batch_size * beam_size, max target prefix length + 1):
-
-        tensor([[0 0 0],
-                [inf inf inf],
-                [inf inf inf],
-                [inf inf inf],
-                [inf inf, inf],
-                [0 0 0],
-                [inf inf 0],
-                [inf inf 0],
-                [inf inf 0],
-                [inf inf 0]])
-
-        The concrete steps of what this function does are as follows:
-
-        Step 1: Create a zero masking matrix with shape (batch size, max target prefix length + 1)
-        Fill 1 into this masking matrix based on the target prefix
-
-        target prefix  initialize masking    masking      roll one step to the right
-                       from target prefix    is not 0      and assign 1 at index 0
-            [1 2]    ->    [1 2 0]        -> [1 1 0]  ->           [1 1 1]
-            [1 0]          [1 0 0]           [1 0 0]               [1 1 0]
-
-        Step 2: Adjust first_step_mask based on masking
-
-        masking     expand masking with     expand first_step_mask with max target
-                         beam size         prefix length, fill 0 where masking is 0
-        [1 1 1]  ->      [1 1 1]        ->             [0 0 0]
-        [1 1 0]          [1 1 1]                       [inf inf inf]
-                         [1 1 1]                       [inf inf inf]
-                         [1 1 1]                       [inf inf inf]
-                         [1 1 1]                       [inf inf inf]
-                         [1 1 0]                       [0 0 0]
-                         [1 1 0]                       [inf inf 0]
-                         [1 1 0]                       [inf inf 0]
-                         [1 1 0]                       [inf inf 0]
-                         [1 1 0]                       [inf inf 0]
-        """
-        # Step 1
-        masking = pt.zeros((target_prefix.size(0), target_prefix.size(1) + 1)).to(self.device)
-        masking[:,:target_prefix.size(1)] = target_prefix
-        masking.masked_fill_(masking != 0., 1.0)
-        masking = pt.roll(masking, 1, -1)
-        masking[:, 0] = 1.
-
-        # Step 2
-        masking = masking.unsqueeze(1).expand(-1, self.beam_size, -1).reshape(first_step_mask.size(0), -1)
-        first_step_mask = first_step_mask.expand(-1, masking.size(-1)).clone()
-        first_step_mask.masked_fill_(masking == 0., 0.)
-        return first_step_mask
-
     def _should_stop(self, finished: pt.Tensor, batch_size: int) -> bool:
         if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:
             at_least_one_finished = finished.reshape(batch_size, self.beam_size).sum(dim=1) > 0
@@ -1062,8 +974,7 @@ def get_search_algorithm(models: List[SockeyeModel],
             num_target_factors=models[0].num_target_factors,
             inference=_SingleModelInference(model=models[0],
                                             skip_softmax=True,
-                                            constant_length_ratio=0.0),
-            output_vocab_size=models[0].output_layer_vocab_size)
+                                            constant_length_ratio=0.0))
     else:
         inference = None  # type: Optional[_Inference]
         if len(models) == 1:

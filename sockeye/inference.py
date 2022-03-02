@@ -142,8 +142,15 @@ class TranslatorInput:
     pass_through_dict: Optional[Dict] = None
 
     def __str__(self):
-        return 'TranslatorInput(%s, %s, factors=%s, source_prefix_tokens=%s, source_prefix_factors=%s, target_prefix_tokens=%s, target_prefix_factors=%s, use_target_prefix_all_chunks=%s, keep_target_prefix_key=%s, constraints=%s, avoid=%s)' \
-            % (self.sentence_id, self.tokens, self.factors, self.source_prefix_tokens, self.source_prefix_factors, self.target_prefix_tokens, self.target_prefix_factors, self.use_target_prefix_all_chunks, self.keep_target_prefix_key, self.constraints, self.avoid_list)
+        return f'TranslatorInput({self.sentence_id}, {self.tokens}, factors={self.factors}, \
+                                  source_prefix_tokens={self.source_prefix_tokens}, \
+                                  source_prefix_factors={self.source_prefix_factors}, \
+                                  target_prefix_tokens={self.target_prefix_tokens}, \
+                                  target_prefix_factors={self.target_prefix_factors}, \
+                                  use_target_prefix_all_chunks={self.use_target_prefix_all_chunks}, \
+                                  keep_target_prefix_key={self.keep_target_prefix_key}, \
+                                  constraints={self.constraints}, \
+                                  avoid={self.avoid_list})'
 
     def __len__(self):
         return len(self.tokens) + self.num_source_prefix_tokens()
@@ -215,7 +222,6 @@ class TranslatorInput:
             # otherwise target_prefix_tokens are assigned only to the first chunk
             target_prefix_tokens = self.target_prefix_tokens if chunk_id == 0 or self.use_target_prefix_all_chunks else None
             target_prefix_factors = self.target_prefix_factors if chunk_id == 0 or self.use_target_prefix_all_chunks else None
-            keep_target_prefix_key = self.keep_target_prefix_key
             pass_through_dict = copy.deepcopy(self.pass_through_dict) \
                 if (chunk_id == 0 and self.pass_through_dict is not None) else None
             yield TranslatorInput(sentence_id=self.sentence_id,
@@ -226,7 +232,7 @@ class TranslatorInput:
                                   target_prefix_tokens=target_prefix_tokens,
                                   target_prefix_factors=self.target_prefix_factors,
                                   use_target_prefix_all_chunks=self.use_target_prefix_all_chunks,
-                                  keep_target_prefix_key=keep_target_prefix_key,
+                                  keep_target_prefix_key=self.keep_target_prefix_key,
                                   restrict_lexicon=self.restrict_lexicon,
                                   constraints=constraints,
                                   avoid_list=self.avoid_list,
@@ -245,6 +251,7 @@ class TranslatorInput:
                                target_prefix_tokens=self.target_prefix_tokens,
                                target_prefix_factors=self.target_prefix_factors,
                                use_target_prefix_all_chunks=self.use_target_prefix_all_chunks,
+                               keep_target_prefix_key=self.keep_target_prefix_key,
                                restrict_lexicon=self.restrict_lexicon,
                                constraints=self.constraints,
                                avoid_list=self.avoid_list,
@@ -644,18 +651,16 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
 
     return nbest_list
 
-def _remove_target_prefix_tokens(target_ids: TokenIds,
-                     num_target_prefix_tokens: int) -> TokenIds:
-        """
-        Remove target prefix tokens from target token Ids
+def _remove_target_prefix_tokens(target_ids: TokenIds, num_target_prefix_tokens: int) -> TokenIds:
+    """
+    Remove target prefix tokens from target token Ids
 
-        :param target_ids: target token Ids of translation of an input
-        :param num_target_prefix_tokens: number of target prefix tokens included in the translation
-        :return: new target_ids
-        """
-        starting_idx = min(len(target_ids), num_target_prefix_tokens)
-        return target_ids[starting_idx:]
-
+    :param target_ids: target token Ids of translation of an input
+    :param num_target_prefix_tokens: number of target prefix tokens included in the translation
+    :return: new target_ids
+    """
+    starting_idx = min(len(target_ids), num_target_prefix_tokens)
+    return target_ids[starting_idx:]
 
 def _concat_translations(translations: List[Translation],
                          stop_ids: Set[int],
@@ -1038,6 +1043,12 @@ class Translator:
         max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)  # type: ignore
         target_prefix = pt.tensor(target_prefix, device=self.device, dtype=pt.int32) if target_prefix is not None else None  # type: ignore
         target_prefix_factors = pt.tensor(target_prefix_factors, device=self.device, dtype=pt.int32) if target_prefix_factors is not None else None  # type: ignore
+
+        # During inference, if C.TARGET_FACTOR_SHIFT is True, predicting target_factors are left-shifted (see _unshift_target_factors function()) so that \
+        # they re-align with the words. With that, target_prefix_factors need to be also right-shifted here if C.TARGET_FACTOR_SHIFT is True so that when \
+        # they are shifted back later they would align with words.
+        target_prefix_factors = utils.shift_prefix_factors(target_prefix_factors) if target_prefix_factors is not None and C.TARGET_FACTOR_SHIFT else target_prefix_factors
+
         return source, source_length, restrict_lexicon, max_output_lengths, target_prefix, target_prefix_factors  # type: ignore
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],

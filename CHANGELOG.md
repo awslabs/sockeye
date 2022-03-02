@@ -14,8 +14,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 ## [3.1.4]
 
 ### Added
-- Added support for the use of adding target prefix to the input in JSON format during inference.
-- Added support for the use of adding target prefix factors to the input in JSON format during inference.
+- Added support for the use of adding target prefix and target prefix factors to the input in JSON format during inference.
 
 ## [3.1.3]
 

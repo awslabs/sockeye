@@ -273,10 +273,113 @@ def one_hot_encoding_from_prefix(prefix: pt.Tensor, vocab_size: int) -> pt.Tenso
     :return prefix_in_one_hot (batch size, 1, output_vocab_size)
 
     """
-    prefix_in_one_hot = pt.nn.functional.one_hot(prefix.to(pt.int64), num_classes=vocab_size)
+    prefix_in_one_hot = pt.nn.functional.one_hot(prefix.to(pt.int64), num_classes=vocab_size).to(prefix.device)
     # all hots are assigned to 1 if a prefix id is 0 (i.e. no prefix)
     prefix_in_one_hot.masked_fill_(prefix.unsqueeze(-1) == 0, 1)
     return prefix_in_one_hot
+
+
+def shift_prefix_factors(prefix_factors: pt.Tensor) -> pt.Tensor:
+    """
+    Shift prefix factors one step to the right
+
+    :param prefix_factors: tensor ids. Shape (batch size, length, num of factors).
+    :return new prefix_factors_shift (batch size, length + 1, num of factors)
+    """
+    prefix_factors_sizes = prefix_factors.size()
+    prefix_factors_shift = pt.zeros(prefix_factors_sizes[0], prefix_factors_sizes[1] + 1, prefix_factors_sizes[2], dtype=prefix_factors.dtype, device=prefix_factors.device)
+    prefix_factors_shift[:, 1:] = prefix_factors
+    return prefix_factors_shift
+
+
+def adjust_first_step_masking(target_prefix: pt.Tensor, first_step_mask: pt.Tensor) -> pt.Tensor:
+        """
+        Adjust first_step_masking based on the target prefix
+        (Target prefix for each input in the same batch may have a different length. \
+        Thus first_step_mask needs to be adjusted accordingly.)
+
+        :param target_prefix: Shape (batch size, max target prefix length).
+        :param first_step_mask: Shape (batch_size * beam_size, 1)
+        :return (adjusted) first_steps_masking (batch_size * beam_size, max target prefix length + 1).
+
+        An illustrative example of how first_step_masking is adjusted
+
+        Inputs:
+
+        target_prefix (batch_size = 2, max target prefix length = 2)
+
+        tensor([1 2]
+               [1 0])
+        Note: Two target prefix tokens in the first sentence, \
+        one target prefix token in the second sentence.
+
+        first_step_mask (batch_size = 2 * beam_size = 5, 1)
+
+        tensor([[0],
+        [inf],
+        [inf],
+        [inf],
+        [inf],
+        [0],
+        [inf],
+        [inf],
+        [inf],
+        [inf])
+
+        Output:
+        Adjusted first_step_mask (batch_size * beam_size, max target prefix length + 1):
+
+        tensor([[0 0 0],
+                [inf inf inf],
+                [inf inf inf],
+                [inf inf inf],
+                [inf inf, inf],
+                [0 0 0],
+                [inf inf 0],
+                [inf inf 0],
+                [inf inf 0],
+                [inf inf 0]])
+
+        The concrete steps of what this function does are as follows:
+
+        Step 1: Create a zero masking matrix with shape (batch size, max target prefix length + 1)
+        Fill 1 into this masking matrix based on the target prefix
+
+        target prefix  initialize masking    masking      roll one step to the right
+                       from target prefix    is not 0      and assign 1 at index 0
+            [1 2]    ->    [1 2 0]        -> [1 1 0]  ->           [1 1 1]
+            [1 0]          [1 0 0]           [1 0 0]               [1 1 0]
+
+        Step 2: Adjust first_step_mask based on masking
+
+        masking     expand masking with     expand first_step_mask with max target
+                         beam size         prefix length, fill 0 where masking is 0
+        [1 1 1]  ->      [1 1 1]        ->             [0 0 0]
+        [1 1 0]          [1 1 1]                       [inf inf inf]
+                         [1 1 1]                       [inf inf inf]
+                         [1 1 1]                       [inf inf inf]
+                         [1 1 1]                       [inf inf inf]
+                         [1 1 0]                       [0 0 0]
+                         [1 1 0]                       [inf inf 0]
+                         [1 1 0]                       [inf inf 0]
+                         [1 1 0]                       [inf inf 0]
+                         [1 1 0]                       [inf inf 0]
+        """
+        first_step_mask_sizes = first_step_mask.size()
+        target_prefix_sizes = target_prefix.size()
+        beam_size = first_step_mask_sizes[0] // target_prefix_sizes[0]
+        # Step 1
+        masking = pt.zeros((target_prefix_sizes[0], target_prefix_sizes[1] + 1), device=target_prefix.device)
+        masking[:,:target_prefix_sizes[1]] = target_prefix
+        masking.masked_fill_(masking != 0., 1.0)
+        masking = pt.roll(masking, 1, -1)
+        masking[:, 0] = 1.
+
+        # Step 2
+        masking = masking.unsqueeze(1).expand(-1, beam_size, -1).reshape(first_step_mask_sizes[0], -1)
+        first_step_mask = first_step_mask.expand(-1, masking.size(-1)).clone()
+        first_step_mask.masked_fill_(masking == 0., 0.)
+        return first_step_mask
 
 
 def parse_metrics_line(line_number: int, line: str) -> Dict[str, Any]:

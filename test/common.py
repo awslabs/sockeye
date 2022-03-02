@@ -138,7 +138,7 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
                 prefix = json_output_with_target_prefix['target_prefix_factors']
                 if len(prefix) > 0:
                     for j in range(1, len(prefix) + 1):
-                        factors_from_translation = json_output_with_target_prefix['factor' + str(j)]
+                        factors_from_translation = json_output_with_target_prefix[f'factor{j}']
                         ending = min(len(prefix[j - 1]), len(factors_from_translation))
                         assert prefix[j - 1][:ending] == factors_from_translation[:ending], \
                             f"'{prefix[j - 1][:ending]}' vs. '{factors_from_translation[:ending]}' from . '{json_output_with_target_prefix}'"
@@ -172,18 +172,18 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
         for json_output in data['test_outputs']:
             print(json_output['translation'], file=target_out)
             for i, factor_out in enumerate(target_factor_outs, 1):
-                factor = json_output['factor%d' % i]
+                factor = json_output[f'factor{i}']
                 print(factor, file=factor_out)
 
     target_with_target_prefix_path = os.path.join(data['work_dir'], "score_with_target_prefix.target")
-    target_with_target_prefix_factor_paths = [os.path.join(data['work_dir'], "score_with_target_prefix.target.factor%d" % i) for i, _ in
+    target_with_target_prefix_factor_paths = [os.path.join(data['work_dir'], f"score_with_target_prefix.target.factor{i}") for i, _ in
                            enumerate(data.get('test_target_factors', []), 1)]
     with open(target_with_target_prefix_path, 'w') as target_out, ExitStack() as exit_stack:
         target_factor_outs = [exit_stack.enter_context(open(p, 'w')) for p in target_with_target_prefix_factor_paths]
         for json_output in data['test_with_target_prefix_outputs']:
             print(json_output['translation'], file=target_out)
             for i, factor_out in enumerate(target_factor_outs, 1):
-                factor = json_output['factor%d' % i]
+                factor = json_output[f'factor{i}']
                 print(factor, file=factor_out)
 
 
