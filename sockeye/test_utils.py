@@ -18,7 +18,7 @@ import random
 import sys
 from contextlib import contextmanager
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 import sockeye.constants as C
@@ -59,7 +59,7 @@ def generate_digits_file(source_path: str,
 
 
 def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_file_with_tgt_prefix_path: str, \
-                                          src_factors_path: List[str] = None, tgt_factors_path: List[str] = None, seed=13):
+                                          src_factors_path: Optional[List[str]] = None, tgt_factors_path: List[str] = None, seed=13):
     random_gen = random.Random(seed)
     with open(src_path, "r") as src_reader, open(tgt_path, "r") as tgt_reader:
         with open(json_file_with_tgt_prefix_path, "w") as out:

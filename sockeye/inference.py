@@ -213,12 +213,8 @@ class TranslatorInput:
             constraints = self.constraints if chunk_id == 0 else None
             # Target_prefix_tokens are assigned to all chunks if self.use_target_prefix_all_chunks is True,
             # otherwise target_prefix_tokens are assigned only to the first chunk
-            if self.use_target_prefix_all_chunks:
-                target_prefix_tokens = self.target_prefix_tokens
-                target_prefix_factors = self.target_prefix_factors
-            else:
-                target_prefix_tokens = self.target_prefix_tokens if chunk_id == 0 else None
-                target_prefix_factors = self.target_prefix_factors if chunk_id == 0 else None
+            target_prefix_tokens = self.target_prefix_tokens if chunk_id == 0 or self.use_target_prefix_all_chunks else None
+            target_prefix_factors = self.target_prefix_factors if chunk_id == 0 or self.use_target_prefix_all_chunks else None
             keep_target_prefix_key = self.keep_target_prefix_key
             pass_through_dict = copy.deepcopy(self.pass_through_dict) \
                 if (chunk_id == 0 and self.pass_through_dict is not None) else None
@@ -354,12 +350,8 @@ def make_input_from_dict(sentence_id: SentenceId,
         if isinstance(target_prefix_factors, list):
             target_prefix_factors = [list(utils.get_tokens(target_prefix_factor)) for target_prefix_factor in target_prefix_factors]
 
-        use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY)
-        if use_target_prefix_all_chunks is None:
-            use_target_prefix_all_chunks = True
-        keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY)
-        if keep_target_prefix_key is None:
-            keep_target_prefix_key = True
+        use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
+        keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)
         # Lexicon for vocabulary selection/restriction:
         # This is only populated when using multiple lexicons, in which case the
         # restrict_lexicon key must exist and the value (name) must map to one
@@ -662,8 +654,7 @@ def _remove_target_prefix_tokens(target_ids: TokenIds,
         :return: new target_ids
         """
         starting_idx = min(len(target_ids), num_target_prefix_tokens)
-        target_ids = target_ids[starting_idx:]
-        return target_ids
+        return target_ids[starting_idx:]
 
 
 def _concat_translations(translations: List[Translation],
@@ -954,7 +945,7 @@ class Translator:
                                           for translated_chunk in translations_for_input_idx]
                 if num_target_prefix_tokens > 0 and not trans_input.keep_target_prefix_key:
                     for i in range(len(translations_to_concat)):
-                        if i == 0 or (i > 0 and trans_input.use_target_prefix_all_chunks):
+                        if i == 0 or trans_input.use_target_prefix_all_chunks:
                             translations_to_concat[i].target_ids = \
                             _remove_target_prefix_tokens(translations_to_concat[i].target_ids, num_target_prefix_tokens)
                 translation = self._concat_translations(translations_to_concat)
