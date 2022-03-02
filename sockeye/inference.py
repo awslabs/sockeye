@@ -1042,14 +1042,14 @@ class Translator:
         source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
         max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)  # type: ignore
         target_prefix = pt.tensor(target_prefix, device=self.device, dtype=pt.int32) if target_prefix is not None else None  # type: ignore
-        target_prefix_factors = pt.tensor(target_prefix_factors, device=self.device, dtype=pt.int32) if target_prefix_factors is not None else None  # type: ignore
+        target_prefix_factors_tensor = pt.tensor(target_prefix_factors, device=self.device, dtype=pt.int32) if target_prefix_factors is not None else None  # type: ignore
 
         # During inference, if C.TARGET_FACTOR_SHIFT is True, predicting target_factors are left-shifted (see _unshift_target_factors function()) so that \
         # they re-align with the words. With that, target_prefix_factors need to be also right-shifted here if C.TARGET_FACTOR_SHIFT is True so that when \
         # they are shifted back later they would align with words.
-        target_prefix_factors = utils.shift_prefix_factors(target_prefix_factors) if target_prefix_factors is not None and C.TARGET_FACTOR_SHIFT else target_prefix_factors
+        target_prefix_factors_tensor = utils.shift_prefix_factors(target_prefix_factors_tensor) if target_prefix_factors_tensor is not None and C.TARGET_FACTOR_SHIFT else target_prefix_factors_tensor # type: ignore
 
-        return source, source_length, restrict_lexicon, max_output_lengths, target_prefix, target_prefix_factors  # type: ignore
+        return source, source_length, restrict_lexicon, max_output_lengths, target_prefix, target_prefix_factors_tensor  # type: ignore
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
