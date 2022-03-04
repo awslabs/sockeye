@@ -264,18 +264,16 @@ def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
     return sum(tensors) / len(tensors)  # type: ignore
 
 
-def one_hot_encoding_from_prefix(prefix: pt.Tensor, timestep: int, vocab_size: int) -> pt.Tensor:
+def one_hot_encoding_from_prefix(prefix: pt.Tensor, vocab_size: int) -> pt.Tensor:
     """
-    Create an one hot encoding from output vocab size of prefix at a specific timestep.
+    Create an one hot encoding from output vocab size of prefix.
 
     :param prefix: Target prefix token or factors in ids. Shape (batch size, max length of prefix).
-    :param timestep: Time step
     :param vocab_size: vocabulary size
-    :return prefix_in_one_hot (batch size, 1, output_vocab_size) at the timestep.
+    :return prefix_in_one_hot (batch size, max length of prefix, output_vocab_size).
 
     """
-    prefix_slice = prefix[:, timestep:timestep + 1]
-    prefix_in_one_hot = pt.nn.functional.one_hot(prefix_slice.to(pt.int64), num_classes=vocab_size).to(prefix.device)
+    prefix_in_one_hot = pt.nn.functional.one_hot(prefix.to(pt.int64), num_classes=vocab_size).to(prefix.device)
 
     # In the same batch during inference, it is possible that some translations have target prefix
     # while others do not have. It is also possible that translation may have a target prefix with
@@ -296,7 +294,7 @@ def one_hot_encoding_from_prefix(prefix: pt.Tensor, timestep: int, vocab_size: i
     # This makes sure there is no constraint on selecting any specific target token for the translation
     # in that case.
 
-    prefix_in_one_hot.masked_fill_(prefix_slice.unsqueeze(-1) == 0, 1)
+    prefix_in_one_hot.masked_fill_(prefix.unsqueeze(-1) == 0, 1)
     return prefix_in_one_hot
 
 
