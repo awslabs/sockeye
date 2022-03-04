@@ -351,11 +351,15 @@ def make_input_from_dict(sentence_id: SentenceId,
                 return _bad_input(sentence_id, reason=str(input_dict))
 
         target_prefix_tokens = input_dict.get(C.JSON_TARGET_PREFIX_KEY)
+        if target_prefix_tokens is not None and not target_prefix_tokens:
+            logger.warning(f"Empty string is specified as a target prefix for input '{input_dict[C.JSON_TEXT_KEY]}'.")
         target_prefix_tokens = list(utils.get_tokens(target_prefix_tokens)) if target_prefix_tokens else None
 
         target_prefix_factors = input_dict.get(C.JSON_TARGET_PREFIX_FACTORS_KEY)
         if isinstance(target_prefix_factors, list):
             target_prefix_factors = [list(utils.get_tokens(target_prefix_factor)) for target_prefix_factor in target_prefix_factors]
+            if not target_prefix_factors[0]:
+                logger.warning(f"Empty list is specified as target prefix factors for input '{input_dict[C.JSON_TEXT_KEY]}'.")
 
         use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
         keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)
@@ -648,7 +652,6 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
     for target_ids, score in zip(translation.nbest_translations.target_ids_list, translation.nbest_translations.scores):
         nbest_list.append(Translation(target_ids, score,
                                       estimated_reference_length=translation.estimated_reference_length))
-
     return nbest_list
 
 def _remove_target_prefix_tokens(target_ids: TokenIds, num_target_prefix_tokens: int) -> TokenIds:
@@ -1044,7 +1047,7 @@ class Translator:
         target_prefix = pt.tensor(target_prefix, device=self.device, dtype=pt.int32) if target_prefix is not None else None  # type: ignore
         target_prefix_factors_tensor = pt.tensor(target_prefix_factors, device=self.device, dtype=pt.int32) if target_prefix_factors is not None else None  # type: ignore
 
-        # During inference, if C.TARGET_FACTOR_SHIFT is True, predicting target_factors are left-shifted (see _unshift_target_factors function()) so that \
+        # During inference, if C.TARGET_FACTOR_SHIFT is True, predicted target_factors are left-shifted (see _unshift_target_factors function()) so that \
         # they re-align with the words. With that, target_prefix_factors need to be also right-shifted here if C.TARGET_FACTOR_SHIFT is True so that when \
         # they are shifted back later they would align with words.
         target_prefix_factors_tensor = utils.shift_prefix_factors(target_prefix_factors_tensor) if target_prefix_factors_tensor is not None and C.TARGET_FACTOR_SHIFT else target_prefix_factors_tensor # type: ignore
