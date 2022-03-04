@@ -264,18 +264,39 @@ def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
     return sum(tensors) / len(tensors)  # type: ignore
 
 
-def one_hot_encoding_from_prefix(prefix: pt.Tensor, vocab_size: int) -> pt.Tensor:
+def one_hot_encoding_from_prefix(prefix: pt.Tensor, timestep: int, vocab_size: int) -> pt.Tensor:
     """
-    Create an one hot encoding from output vocab size of prefix
+    Create an one hot encoding from output vocab size of prefix at a specific timestep.
 
-    :param prefix: Target prefix ids. Shape (batch size, 1).
+    :param prefix: Target prefix token or factors in ids. Shape (batch size, max length of prefix).
+    :param timestep: Time step
     :param vocab_size: vocabulary size
-    :return prefix_in_one_hot (batch size, 1, output_vocab_size)
+    :return prefix_in_one_hot (batch size, 1, output_vocab_size) at the timestep.
 
     """
-    prefix_in_one_hot = pt.nn.functional.one_hot(prefix.to(pt.int64), num_classes=vocab_size).to(prefix.device)
-    # all hots are assigned to 1 if a prefix id is 0 (i.e. no prefix)
-    prefix_in_one_hot.masked_fill_(prefix.unsqueeze(-1) == 0, 1)
+    prefix_slice = prefix[:, timestep:timestep + 1]
+    prefix_in_one_hot = pt.nn.functional.one_hot(prefix_slice.to(pt.int64), num_classes=vocab_size).to(prefix.device)
+
+    # In the same batch during inference, it is possible that some translations have target prefix
+    # while others do not have. It is also possible that translation may have a target prefix with
+    # different length to others. Thus prefix ids may include a full zero vector if a translation
+    # in the batch does not have prefix, or include a vector padding with zeros on the right if some
+    # translations are with shorter prefix. An example of prefix ids reflecting length differences \
+    # is as follows:
+    #
+    # [1, 2, 3]
+    # [1, 2, 0]
+    # [0, 0, 0]
+    #
+    # Here, the first sentence has a prefix of length 3, the second one has a prefix of length 1 \
+    # and the last one does not have prefix.
+    #
+    # At any timestep, some target prefix ids could be zero. If a prefix id is zero for a translation \
+    # at a timestep, all hots in the vocab are assigned to 1 (instead of only one hot is assigned to 1). \
+    # This makes sure there is no constraint on selecting any specific target token for the translation
+    # in that case.
+
+    prefix_in_one_hot.masked_fill_(prefix_slice.unsqueeze(-1) == 0, 1)
     return prefix_in_one_hot
 
 
@@ -365,18 +386,18 @@ def adjust_first_step_masking(target_prefix: pt.Tensor, first_step_mask: pt.Tens
                          [1 1 0]                       [inf inf 0]
                          [1 1 0]                       [inf inf 0]
         """
-        first_step_mask_sizes = first_step_mask.size()
-        target_prefix_sizes = target_prefix.size()
-        beam_size = first_step_mask_sizes[0] // target_prefix_sizes[0]
+        batch_beam, _  = first_step_mask.size()
+        batch, max_prefix_len = target_prefix.size()
+        beam_size = batch_beam // batch
         # Step 1
-        masking = pt.zeros((target_prefix_sizes[0], target_prefix_sizes[1] + 1), device=target_prefix.device)
-        masking[:,:target_prefix_sizes[1]] = target_prefix
+        masking = pt.zeros((batch, max_prefix_len + 1), device=target_prefix.device)
+        masking[:, :max_prefix_len] = target_prefix
         masking.masked_fill_(masking != 0., 1.0)
         masking = pt.roll(masking, 1, -1)
         masking[:, 0] = 1.
 
         # Step 2
-        masking = masking.unsqueeze(1).expand(-1, beam_size, -1).reshape(first_step_mask_sizes[0], -1)
+        masking = masking.unsqueeze(1).expand(-1, beam_size, -1).reshape(batch_beam, -1)
         first_step_mask = first_step_mask.expand(-1, masking.size(-1)).clone()
         first_step_mask.masked_fill_(masking == 0., 0.)
         return first_step_mask
