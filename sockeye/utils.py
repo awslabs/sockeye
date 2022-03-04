@@ -390,7 +390,7 @@ def adjust_first_step_masking(target_prefix: pt.Tensor, first_step_mask: pt.Tens
         # Step 1
         masking = pt.zeros((batch, max_prefix_len + 1), device=target_prefix.device)
         masking[:, :max_prefix_len] = target_prefix
-        masking.masked_fill_(masking != 0., 1.0)
+        masking = pt.clamp(masking, 0., 1.) # force all non zero ids to 1
         masking = pt.roll(masking, 1, -1)
         masking[:, 0] = 1.
 
