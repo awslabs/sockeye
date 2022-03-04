@@ -321,7 +321,9 @@ def make_input_from_dict(sentence_id: SentenceId,
         tokens = list(utils.get_tokens(tokens))
         factors = input_dict.get(C.JSON_FACTORS_KEY)
         source_prefix_tokens = input_dict.get(C.JSON_SOURCE_PREFIX_KEY)
-        source_prefix_tokens = list(utils.get_tokens(source_prefix_tokens)) if source_prefix_tokens else None
+        source_prefix_tokens = list(utils.get_tokens(source_prefix_tokens)) if source_prefix_tokens is not None else None
+        if source_prefix_tokens is not None and not source_prefix_tokens:
+            logger.warning(f"Empty string is specified as a source prefix for input '{input_dict[C.JSON_SOURCE_PREFIX_KEY]}'.")
         source_prefix_factors = input_dict.get(C.JSON_SOURCE_PREFIX_FACTORS_KEY)
         if source_prefix_factors is not None and not source_prefix_tokens:
             logger.error("Source prefix factors cannot be specified when source prefix is not specified")
@@ -342,6 +344,9 @@ def make_input_from_dict(sentence_id: SentenceId,
 
         if isinstance(source_prefix_factors, list):
             source_prefix_factors = [list(utils.get_tokens(source_prefix_factor)) for source_prefix_factor in source_prefix_factors]
+            for source_prefix_factor in source_prefix_factors:
+                if not source_prefix_factor:
+                    logger.warning(f"Empty list is specified as source prefix factors for input '{input_dict[C.JSON_TEXT_KEY]}'.")
             lengths = [len(source_prefix_factor) for source_prefix_factor in source_prefix_factors]
             if not all(len(source_prefix_tokens) == length for length in lengths):
                 logger.error("Source prefix has %d tokens but there are %s prefix factors", len(source_prefix_tokens), str(lengths))
@@ -351,15 +356,16 @@ def make_input_from_dict(sentence_id: SentenceId,
                 return _bad_input(sentence_id, reason=str(input_dict))
 
         target_prefix_tokens = input_dict.get(C.JSON_TARGET_PREFIX_KEY)
+        target_prefix_tokens = list(utils.get_tokens(target_prefix_tokens)) if target_prefix_tokens is not None else None
         if target_prefix_tokens is not None and not target_prefix_tokens:
             logger.warning(f"Empty string is specified as a target prefix for input '{input_dict[C.JSON_TEXT_KEY]}'.")
-        target_prefix_tokens = list(utils.get_tokens(target_prefix_tokens)) if target_prefix_tokens else None
 
         target_prefix_factors = input_dict.get(C.JSON_TARGET_PREFIX_FACTORS_KEY)
         if isinstance(target_prefix_factors, list):
             target_prefix_factors = [list(utils.get_tokens(target_prefix_factor)) for target_prefix_factor in target_prefix_factors]
-            if not target_prefix_factors[0]:
-                logger.warning(f"Empty list is specified as target prefix factors for input '{input_dict[C.JSON_TEXT_KEY]}'.")
+            for target_prefix_factor in target_prefix_factors:
+                if not target_prefix_factor:
+                    logger.warning(f"Empty list is specified as target prefix factors for input '{input_dict[C.JSON_TEXT_KEY]}'.")
 
         use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
         keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)
