@@ -618,16 +618,14 @@ class GreedySearch(pt.nn.Module):
 
         t = 1
         for t in range(1, max_iterations + 1):
-            if target_prefix_factors is None:
-                scores, model_states, target_factors = self._inference.decode_step(best_word_index,
-                                                                                   model_states,
-                                                                                   vocab_slice_ids)
-            else:
-                target_prefix_factor = target_prefix_factors[:, t-1, :] if self.num_target_factors > 1 and t <= target_prefix_factors.size(1) else None
-                scores, model_states, target_factors = self._inference.decode_step(best_word_index,
-                                                                                   model_states,
-                                                                                   vocab_slice_ids,
-                                                                                   target_prefix_factor)
+            target_prefix_factor = target_prefix_factors[:, t-1, :] if target_prefix_factors is not None \
+                                                                    and self.num_target_factors > 1 \
+                                                                    and t <= target_prefix_factors.size(1) \
+                                                                    else None
+            scores, model_states, target_factors = self._inference.decode_step(best_word_index,
+                                                                               model_states,
+                                                                               vocab_slice_ids,
+                                                                               target_prefix_factor)
             if target_prefix is not None and t <= target_prefix.size(1):
                 # Make sure search selects the current prefix token by setting the scores of all
                 # other vocabulary items to infinity.
@@ -839,16 +837,14 @@ class BeamSearch(pt.nn.Module):
             # target_dists: (batch_size * beam_size, target_vocab_size)
             # target_factors: (batch_size * beam_size, num_secondary_factors, 2),
             # where last dimension holds indices and scores
-            if target_prefix_factors is None:
-                target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
-                                                                                         model_states,
-                                                                                         vocab_slice_ids)
-            else:
-                target_prefix_factor = target_prefix_factors[:, t-1, :] if self.num_target_factors > 1 and t <= target_prefix_factors.size(1) else None
-                target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
-                                                                                         model_states,
-                                                                                         vocab_slice_ids,
-                                                                                         target_prefix_factor)
+            target_prefix_factor = target_prefix_factors[:, t-1, :] if target_prefix_factors is not None \
+                                                                    and self.num_target_factors > 1 \
+                                                                    and t <= target_prefix_factors.size(1) \
+                                                                    else None
+            target_dists, model_states, target_factors = self._inference.decode_step(best_word_indices,
+                                                                                     model_states,
+                                                                                     vocab_slice_ids,
+                                                                                     target_prefix_factor)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished rows.
