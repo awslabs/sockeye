@@ -865,8 +865,7 @@ class BeamSearch(pt.nn.Module):
                                                   lengths, max_output_lengths, pad_dist, eos_dist)
 
             if target_prefix is not None and t <= target_prefix.size(1):
-                # Make sure search selects the current prefix token by setting the scores of all
-                # other vocabulary items to infinity.
+                # Make sure search selects the current prefix token
                 scores += prefix_masks[:, t-1].reshape(-1, output_vocab_size)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
