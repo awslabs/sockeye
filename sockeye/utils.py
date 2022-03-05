@@ -264,16 +264,21 @@ def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
     return sum(tensors) / len(tensors)  # type: ignore
 
 
-def one_hot_encoding_from_prefix(prefix: pt.Tensor, vocab_size: int) -> pt.Tensor:
+def gen_prefix_masking(prefix: pt.Tensor, vocab_size: int, dtype: pt.dtype) -> pt.Tensor:
     """
-    Create an one hot encoding from output vocab size of prefix.
+    Generate prefix masks from prefix ids, which are inf everywhere except zero for prefix ids.
 
     :param prefix: Target prefix token or factors in ids. Shape (batch size, max length of prefix).
     :param vocab_size: vocabulary size
-    :return prefix_in_one_hot (batch size, max length of prefix, output_vocab_size).
+    :return prefix_masks (batch size, max length of prefix, vocab_size), with type as dtype
 
     """
-    prefix_in_one_hot = pt.nn.functional.one_hot(prefix.to(pt.int64), num_classes=vocab_size).to(prefix.device)
+    # create one hot vectors with size of vocab_size for each prefix id.
+    prefix_one_hot = pt.nn.functional.one_hot(prefix.to(pt.int64), num_classes=vocab_size).to(prefix.device)
+
+    # prefix_masks are inf everywhere except zero for indices of prefix ids.
+    prefix_masks = pt.full(prefix_one_hot.size(), fill_value=np.inf, device=prefix.device, dtype=dtype)
+    prefix_masks[prefix_one_hot != 0] = 0.
 
     # In the same batch during inference, it is possible that some translations have target prefix
     # while others do not have. It is also possible that translation may have a target prefix with
@@ -290,12 +295,12 @@ def one_hot_encoding_from_prefix(prefix: pt.Tensor, vocab_size: int) -> pt.Tenso
     # and the last one does not have prefix.
     #
     # At any timestep, some target prefix ids could be zero. If a prefix id is zero for a translation \
-    # at a timestep, all hots in the vocab are assigned to 1 (instead of only one hot is assigned to 1). \
-    # This makes sure there is no constraint on selecting any specific target token for the translation
-    # in that case.
+    # at a timestep, all hots in the vocab are assigned to 0 (instead of only one hot is assigned to 0 \
+    # and other hots are inf). This makes sure there is no constraint on selecting any specific target \
+    # token for the translation in that case.
 
-    prefix_in_one_hot.masked_fill_(prefix.unsqueeze(-1) == 0, 1)
-    return prefix_in_one_hot
+    prefix_masks.masked_fill_(prefix.unsqueeze(-1) == 0, 0)
+    return prefix_masks
 
 
 def shift_prefix_factors(prefix_factors: pt.Tensor) -> pt.Tensor:

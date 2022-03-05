@@ -76,22 +76,27 @@ class _SingleModelInference(_Inference):
         logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             logits = pt.log_softmax(logits, dim=-1)
-        scores = -logits  # shape: (batch, output_vocab_size/len(vocab_slice_ids))
+        scores = -logits  # shape: (batch*beam, output_vocab_size/len(vocab_slice_ids))
 
         target_factors = None  # type: Optional[pt.Tensor]
         if target_factor_outputs:
-            target_prefix_factor_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix_factor, target_factor_outputs[0].size(-1)) if target_prefix_factor is not None else None  # type: ignore
+            target_prefix_factor_masks = None  # type: Optional[pt.Tensor]
+            factor_vocab_size = target_factor_outputs[0].size(-1)  # type: ignore
+            if target_prefix_factor is not None:
+                batch_beam, _ = scores.size()
+                batch, _ = target_prefix_factor.size()
+                beam_size = batch_beam // batch
+                # Prefix factor masks, where scores are infinity for all other vocabulary items except target_prefix_factor ids
+                target_prefix_factor_masks = utils.gen_prefix_masking(target_prefix_factor, factor_vocab_size, scores.dtype)
+                target_prefix_factor_masks = target_prefix_factor_masks.unsqueeze(2).expand(-1, -1, beam_size, -1)
+
             predictions = []  # type: List[pt.Tensor]
             for i, tf_logits in enumerate(target_factor_outputs, 1):
                 if not self._skip_softmax:
                     tf_logits = pt.log_softmax(tf_logits, dim=-1)
                 tf_scores = -tf_logits
                 if target_prefix_factor is not None:
-                    batch_beam, vocab_size = tf_scores.size()
-                    batch, _ = target_prefix_factor.size()
-                    beam_size = batch_beam // batch
-                    target_prefix_factor_in_one_hot_slice = target_prefix_factor_in_one_hot[:, i-1:i].expand(-1, beam_size, -1).reshape(-1, vocab_size)
-                    tf_scores.masked_fill_(target_prefix_factor_in_one_hot_slice == 0, onp.inf)
+                    tf_scores += target_prefix_factor_masks[:, i-1].reshape(-1, factor_vocab_size)
                 # target factors are greedily chosen, and score and index are collected via torch.min.
                 # Shape per factor: (batch*beam, 1, 2), where last dimension holds values and indices.
                 tf_prediction = pt.cat(tf_scores.min(dim=-1, keepdim=True), dim=1).unsqueeze(1)
@@ -151,15 +156,16 @@ class _EnsembleInference(_Inference):
             probs = logits.softmax(dim=-1)
             outputs.append(probs)
             if target_factor_outputs:
-                target_prefix_factor_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix_factor, target_factor_outputs[0].size(-1)) if target_prefix_factor is not None else None  # type: ignore
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
                 if target_prefix_factor is not None:
+                    batch_beam, factor_vocab_size = probs.size()
+                    batch, _ = target_prefix_factor.size()
+                    beam_size = batch_beam // batch
+                    # Prefix factor masks, where scores are infinity for all other vocabulary items except target_prefix_factor ids
+                    target_prefix_factor_masks = utils.gen_prefix_masking(target_prefix_factor, factor_vocab_size, probs.dtype)
+                    target_prefix_factor_masks = target_prefix_factor_masks.unsqueeze(2).expand(-1, -1, beam_size, -1)
                     for i in range(len(target_factor_probs)):
-                        batch_beam, vocab_size = target_factor_probs[i].size()
-                        batch, _ = target_prefix_factor.size()
-                        beam_size = batch_beam // batch
-                        target_prefix_factor_in_one_hot_slice = target_prefix_factor_in_one_hot[:, i:i+1].expand(-1, beam_size, -1).reshape(-1, vocab_size)
-                        target_factor_probs[i].masked_fill_(target_prefix_factor_in_one_hot_slice == 0, onp.inf)
+                        target_factor_probs[i] += target_prefix_factor_masks[:, i].reshape(-1, factor_vocab_size)
                 factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
@@ -614,9 +620,12 @@ class GreedySearch(pt.nn.Module):
         # (0) encode source sentence, returns a list
         model_states, _ = self._inference.encode_and_initialize(source, source_length)
         # TODO: check for disabled predicted output length
-        target_prefix_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix, self.output_vocab_size) if target_prefix is not None else None  # type: ignore
-        if target_prefix_in_one_hot is not None and vocab_slice_ids is not None:
-            target_prefix_in_one_hot = pt.index_select(target_prefix_in_one_hot, -1, vocab_slice_ids)
+
+        # Prefix token masks, where scores are infinity for all other vocabulary items except target_prefix ids
+        prefix_masks = utils.gen_prefix_masking(target_prefix, self.output_vocab_size, self.dtype) \
+                       if target_prefix is not None else None  # type: ignore
+        if prefix_masks is not None and vocab_slice_ids is not None:
+            prefix_masks = pt.index_select(prefix_masks, -1, vocab_slice_ids)
 
         t = 1
         for t in range(1, max_iterations + 1):
@@ -629,10 +638,8 @@ class GreedySearch(pt.nn.Module):
                                                                                vocab_slice_ids,
                                                                                target_prefix_factor)
             if target_prefix is not None and t <= target_prefix.size(1):
-                # Make sure search selects the current prefix token by setting the scores of all
-                # other vocabulary items to infinity.
-                target_prefix_in_one_hot_slice = target_prefix_in_one_hot[:, t-1]
-                scores.masked_fill_(target_prefix_in_one_hot_slice == 0, onp.inf)
+                # Make sure search selects the current prefix token
+                scores += prefix_masks[:, t-1]
 
             # shape: (batch*beam=1, 1)
             best_word_index = self.work_block(scores, vocab_slice_ids, target_factors)
@@ -830,9 +837,12 @@ class BeamSearch(pt.nn.Module):
         # repeat estimated_reference_lengths to shape (batch_size * beam_size)
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
 
-        target_prefix_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix, self.output_vocab_size).unsqueeze(2).expand(-1, -1, self.beam_size, -1) if target_prefix is not None else None # type: ignore
-        if target_prefix_in_one_hot is not None and vocab_slice_ids is not None:
-            target_prefix_in_one_hot = pt.index_select(target_prefix_in_one_hot, -1, vocab_slice_ids)
+        # Prefix token masks, where scores are infinity for all other vocabulary items except target_prefix ids
+        prefix_masks = utils.gen_prefix_masking(target_prefix, self.output_vocab_size, self.dtype) \
+                       if target_prefix is not None else None # type: ignore
+        prefix_masks = prefix_masks.unsqueeze(2).expand(-1, -1, self.beam_size, -1) if target_prefix is not None else None #  type: ignore
+        if prefix_masks is not None and vocab_slice_ids is not None:
+            prefix_masks = pt.index_select(prefix_masks, -1, vocab_slice_ids)
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
@@ -857,8 +867,7 @@ class BeamSearch(pt.nn.Module):
             if target_prefix is not None and t <= target_prefix.size(1):
                 # Make sure search selects the current prefix token by setting the scores of all
                 # other vocabulary items to infinity.
-                target_prefix_in_one_hot_slice = target_prefix_in_one_hot[:, t-1].reshape(-1, output_vocab_size)
-                scores.masked_fill_(target_prefix_in_one_hot_slice == 0, onp.inf)
+                scores += prefix_masks[:, t-1].reshape(-1, output_vocab_size)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
             # far as the active beam size for each sentence.
