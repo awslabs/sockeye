@@ -615,6 +615,8 @@ class GreedySearch(pt.nn.Module):
         model_states, _ = self._inference.encode_and_initialize(source, source_length)
         # TODO: check for disabled predicted output length
         target_prefix_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix, self.output_vocab_size) if target_prefix is not None else None  # type: ignore
+        if target_prefix_in_one_hot is not None and vocab_slice_ids is not None:
+            target_prefix_in_one_hot = pt.index_select(target_prefix_in_one_hot, -1, vocab_slice_ids)
 
         t = 1
         for t in range(1, max_iterations + 1):
@@ -629,9 +631,7 @@ class GreedySearch(pt.nn.Module):
             if target_prefix is not None and t <= target_prefix.size(1):
                 # Make sure search selects the current prefix token by setting the scores of all
                 # other vocabulary items to infinity.
-                target_prefix_in_one_hot_slice = target_prefix_in_one_hot[:, t-1:t].squeeze(1)
-                if vocab_slice_ids is not None:
-                    target_prefix_in_one_hot_slice = pt.index_select(target_prefix_in_one_hot_slice, -1, vocab_slice_ids)
+                target_prefix_in_one_hot_slice = target_prefix_in_one_hot[:, t-1]
                 scores.masked_fill_(target_prefix_in_one_hot_slice == 0, onp.inf)
 
             # shape: (batch*beam=1, 1)
@@ -830,7 +830,9 @@ class BeamSearch(pt.nn.Module):
         # repeat estimated_reference_lengths to shape (batch_size * beam_size)
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
 
-        target_prefix_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix, self.output_vocab_size) if target_prefix is not None else None # type: ignore
+        target_prefix_in_one_hot = utils.one_hot_encoding_from_prefix(target_prefix, self.output_vocab_size).unsqueeze(2).expand(-1, -1, self.beam_size, -1) if target_prefix is not None else None # type: ignore
+        if target_prefix_in_one_hot is not None and vocab_slice_ids is not None:
+            target_prefix_in_one_hot = pt.index_select(target_prefix_in_one_hot, -1, vocab_slice_ids)
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
@@ -855,9 +857,7 @@ class BeamSearch(pt.nn.Module):
             if target_prefix is not None and t <= target_prefix.size(1):
                 # Make sure search selects the current prefix token by setting the scores of all
                 # other vocabulary items to infinity.
-                target_prefix_in_one_hot_slice = target_prefix_in_one_hot[:, t-1:t].expand(-1, self.beam_size, -1).reshape(-1, self.output_vocab_size)
-                if vocab_slice_ids is not None:
-                    target_prefix_in_one_hot_slice = pt.index_select(target_prefix_in_one_hot_slice, -1, vocab_slice_ids)
+                target_prefix_in_one_hot_slice = target_prefix_in_one_hot[:, t-1].reshape(-1, output_vocab_size)
                 scores.masked_fill_(target_prefix_in_one_hot_slice == 0, onp.inf)
 
             # (3) Get beam_size winning hypotheses for each sentence block separately. Only look as
