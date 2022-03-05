@@ -206,6 +206,13 @@ class TransformerDecoderBlock(pt.nn.Module):
         """
         return self.autoregr_layer.get_state_shape(batch_size)
 
+    def get_encoder_projections(self, encoder_outputs_t: pt.Tensor):
+        """
+        :param encoder_outputs_t: Encoder outputs in time-major layout
+        :return: Encoder projections for caching
+        """
+        return self.enc_attention.ff_kv(encoder_outputs_t)
+
     def forward(self,
                 target: pt.Tensor,
                 target_mask: Optional[pt.Tensor],
@@ -268,6 +275,9 @@ class TransformerBranchDecoderBlock(pt.nn.Module):
 
     def get_states_shape(self, batch_size: int) -> Tuple:
         return self.branches[self._active_branch].autoregr_layer.get_state_shape(batch_size)
+
+    def get_encoder_projections(self, encoder_outputs_t: pt.Tensor):
+        return self.branches[self._active_branch].enc_attention.ff_kv(encoder_outputs_t)
 
     def forward(self,
                 target: pt.Tensor,

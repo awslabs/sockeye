@@ -228,7 +228,7 @@ class TransformerDecoder(Decoder):
             states = [steps, source_mask]
             encoder_outputs_t = encoder_outputs.transpose(1, 0)  # time-major layout
             for layer in self.layers:
-                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs_t)
+                enc_att_kv = layer.get_encoder_projections(encoder_outputs_t)
                 states.append(enc_att_kv)
         else:
             # NO encoder projection caching
