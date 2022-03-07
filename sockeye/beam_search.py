@@ -92,7 +92,7 @@ class _SingleModelInference(_Inference):
                     tf_logits = pt.log_softmax(tf_logits, dim=-1)
                 tf_scores = -tf_logits
                 if target_prefix_factor is not None:
-                    tf_scores += target_prefix_factor_masks[:, i-1].reshape(-1, factor_vocab_size)
+                    tf_scores += target_prefix_factor_masks.reshape(-1, factor_vocab_size)
                 # target factors are greedily chosen, and score and index are collected via torch.min.
                 # Shape per factor: (batch*beam, 1, 2), where last dimension holds values and indices.
                 tf_prediction = pt.cat(tf_scores.min(dim=-1, keepdim=True), dim=1).unsqueeze(1)
@@ -103,8 +103,8 @@ class _SingleModelInference(_Inference):
         return scores, states, target_factors
 
     @property
-    def model(self):
-        return self._model
+    def model_vocab_size(self):
+        return self._model.output_layer_vocab_size
 
 
 class _EnsembleInference(_Inference):
@@ -154,10 +154,11 @@ class _EnsembleInference(_Inference):
             if target_factor_outputs:
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
                 if target_prefix_factor is not None:
+                    factor_vocab_size = target_factor_outputs[0].size(-1)  # type: ignore
                     # Prefix factor masks, where scores are infinity for all other vocabulary items except target_prefix_factor ids
                     target_prefix_factor_masks = utils.gen_prefix_masking(target_prefix_factor, factor_vocab_size, probs.dtype)
                     for i in range(len(target_factor_probs)):
-                        target_factor_probs[i] += target_prefix_factor_masks[:, i].reshape(-1, factor_vocab_size)
+                        target_factor_probs[i] += target_prefix_factor_masks.reshape(-1, factor_vocab_size)
                 factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
@@ -180,6 +181,9 @@ class _EnsembleInference(_Inference):
         log_probs = utils.average_tensors([p.log() for p in predictions])
         return -(log_probs.log_softmax())
 
+    @property
+    def model_vocab_size(self):
+        return self._models[0].output_layer_vocab_size
 
 @dataclass
 class SearchResult:
@@ -562,7 +566,7 @@ class GreedySearch(pt.nn.Module):
         self.bos_id = bos_id
         self.eos_id = eos_id
         self.device = device
-        self.output_vocab_size = inference.model.output_layer_vocab_size
+        self.output_vocab_size = inference.model_vocab_size
         self._inference = inference
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
