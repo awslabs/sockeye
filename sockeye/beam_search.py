@@ -83,12 +83,8 @@ class _SingleModelInference(_Inference):
             target_prefix_factor_masks = None  # type: Optional[pt.Tensor]
             factor_vocab_size = target_factor_outputs[0].size(-1)  # type: ignore
             if target_prefix_factor is not None:
-                batch_beam, _ = scores.size()
-                batch, _ = target_prefix_factor.size()
-                beam_size = batch_beam // batch
                 # Prefix factor masks, where scores are infinity for all other vocabulary items except target_prefix_factor ids
                 target_prefix_factor_masks = utils.gen_prefix_masking(target_prefix_factor, factor_vocab_size, scores.dtype)
-                target_prefix_factor_masks = target_prefix_factor_masks.unsqueeze(2).expand(-1, -1, beam_size, -1)
 
             predictions = []  # type: List[pt.Tensor]
             for i, tf_logits in enumerate(target_factor_outputs, 1):
@@ -158,12 +154,8 @@ class _EnsembleInference(_Inference):
             if target_factor_outputs:
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
                 if target_prefix_factor is not None:
-                    batch_beam, factor_vocab_size = probs.size()
-                    batch, _ = target_prefix_factor.size()
-                    beam_size = batch_beam // batch
                     # Prefix factor masks, where scores are infinity for all other vocabulary items except target_prefix_factor ids
                     target_prefix_factor_masks = utils.gen_prefix_masking(target_prefix_factor, factor_vocab_size, probs.dtype)
-                    target_prefix_factor_masks = target_prefix_factor_masks.unsqueeze(2).expand(-1, -1, beam_size, -1)
                     for i in range(len(target_factor_probs)):
                         target_factor_probs[i] += target_prefix_factor_masks[:, i].reshape(-1, factor_vocab_size)
                 factor_outputs.append(target_factor_probs)
@@ -629,7 +621,7 @@ class GreedySearch(pt.nn.Module):
 
         t = 1
         for t in range(1, max_iterations + 1):
-            target_prefix_factor = target_prefix_factors[:, t-1, :] if target_prefix_factors is not None \
+            target_prefix_factor = target_prefix_factors[:, t-1:t, :] if target_prefix_factors is not None \
                                                                     and self.num_target_factors > 1 \
                                                                     and t <= target_prefix_factors.size(1) \
                                                                     else None
@@ -849,7 +841,7 @@ class BeamSearch(pt.nn.Module):
             # target_dists: (batch_size * beam_size, target_vocab_size)
             # target_factors: (batch_size * beam_size, num_secondary_factors, 2),
             # where last dimension holds indices and scores
-            target_prefix_factor = target_prefix_factors[:, t-1, :] if target_prefix_factors is not None \
+            target_prefix_factor = target_prefix_factors[:, t-1:t, :].expand(-1, self.beam_size, -1) if target_prefix_factors is not None \
                                                                     and self.num_target_factors > 1 \
                                                                     and t <= target_prefix_factors.size(1) \
                                                                     else None
