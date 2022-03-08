@@ -532,7 +532,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
                          beam_size: int,
                          target_prefix: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, int]:
     device = source_words.device
-    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.cpu().int().numpy())
+    vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.cpu().int().numpy()) # type: ignore
     if target_prefix is not None:
         # Ensuring that target prefix ids are part of vocab_slice_ids
         vocab_slice_ids = pt.unique(pt.concat([pt.tensor(vocab_slice_ids, device=device, dtype=pt.int64), pt.flatten(target_prefix).type(pt.int64)], -1))
@@ -544,7 +544,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         # Pad to a multiple of 8.
         vocab_slice_ids = pt.nn.functional.pad(pt.tensor(vocab_slice_ids, device=source_words.device, dtype=pt.int64),  # type: ignore
                                                pad=(0, 7 - ((vocab_slice_ids.size - 1) % 8)),
-                                               mode='constant', value=eos_id)
+                                               mode='constant', value=eos_id)  # type: ignore
 
     vocab_slice_ids_shape = vocab_slice_ids.size()[0]  # type: ignore
     if vocab_slice_ids_shape < beam_size + 1:
