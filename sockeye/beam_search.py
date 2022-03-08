@@ -96,7 +96,7 @@ class _SingleModelInference(_Inference):
                     tf_logits = pt.log_softmax(tf_logits, dim=-1)
                 tf_scores = -tf_logits
                 if target_prefix_factor_mask is not None:
-                    tf_scores += target_prefix_factor_mask.reshape(-1, factor_vocab_size)
+                    tf_scores += target_prefix_factor_mask[:,:,i-1].reshape(-1, factor_vocab_size)
                 # target factors are greedily chosen, and score and index are collected via torch.min.
                 # Shape per factor: (batch*beam, 1, 2), where last dimension holds values and indices.
                 tf_prediction = pt.cat(tf_scores.min(dim=-1, keepdim=True), dim=1).unsqueeze(1)
@@ -164,7 +164,7 @@ class _EnsembleInference(_Inference):
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
                 if target_prefix_factor_mask is not None:
                     for i in range(len(target_factor_probs)):
-                        target_factor_probs[i] += target_prefix_factor_mask.reshape(-1, factor_vocab_size)
+                        target_factor_probs[i] += target_prefix_factor_mask[:,:,i].reshape(-1, factor_vocab_size)
                 factor_outputs.append(target_factor_probs)
             new_states += model_states
         scores = self._interpolation(outputs)
@@ -535,11 +535,16 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
     vocab_slice_ids = restrict_lexicon.get_trg_ids(source_words.cpu().int().numpy())
     if target_prefix is not None:
         # Ensuring that target prefix ids are part of vocab_slice_ids
-        vocab_slice_ids = onp.lib.arraysetops.unique(onp.concatenate([vocab_slice_ids, target_prefix.cpu().int().numpy().flatten()]))
-    # Pad to a multiple of 8.
-    vocab_slice_ids = pt.nn.functional.pad(pt.tensor(vocab_slice_ids, device=source_words.device, dtype=pt.int64),  # type: ignore
-                                           pad=(0, 7 - ((vocab_slice_ids.size - 1) % 8)),
-                                           mode='constant', value=eos_id)
+        vocab_slice_ids = pt.unique(pt.concat([pt.tensor(vocab_slice_ids, device=device, dtype=pt.int64), pt.flatten(target_prefix).type(pt.int64)], -1))
+        # Pad to a multiple of 8.
+        vocab_slice_ids = pt.nn.functional.pad(vocab_slice_ids.clone().detach(),  # type: ignore
+                                               pad=(0, 7 - ((vocab_slice_ids.size(-1) - 1) % 8)),
+                                               mode='constant', value=eos_id)
+    else:
+        # Pad to a multiple of 8.
+        vocab_slice_ids = pt.nn.functional.pad(pt.tensor(vocab_slice_ids, device=source_words.device, dtype=pt.int64),  # type: ignore
+                                               pad=(0, 7 - ((vocab_slice_ids.size - 1) % 8)),
+                                               mode='constant', value=eos_id)
 
     vocab_slice_ids_shape = vocab_slice_ids.size()[0]  # type: ignore
     if vocab_slice_ids_shape < beam_size + 1:
