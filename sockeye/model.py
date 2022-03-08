@@ -127,6 +127,7 @@ class SockeyeModel(pt.nn.Module):
                                         out_features=factor_config.vocab_size,
                                         bias=True)
             self.factor_output_layers.append(output_layer)
+        self.factor_vocab_size = factor_config.vocab_size if self.target_factor_configs else None
 
         self.length_ratio = None  # type: Optional[layers.LengthRatio]
         if self.config.config_length_task is not None:

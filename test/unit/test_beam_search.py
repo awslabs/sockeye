@@ -286,6 +286,14 @@ class _TestInference(sockeye.beam_search._Inference):
         self.states = states = [internal_lengths, pt.tensor([num_decode_step_calls], dtype=pt.int)]
         return scores, states, None
 
+    @property
+    def model_output_vocab_size(self):
+        return self.output_vocab_size
+
+    @property
+    def model_output_factor_vocab_size(self):
+        return None
+
 
 # TODO make this a useful test
 # TODO: add vocabulary selection test
