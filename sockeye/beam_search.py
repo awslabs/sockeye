@@ -538,7 +538,7 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
         # Ensuring that target prefix ids are part of vocab_slice_ids
         vocab_slice_ids = pt.unique(pt.concat([pt.tensor(vocab_slice_ids_np, device=device, dtype=pt.int64), pt.flatten(target_prefix).type(pt.int64)], -1))
         # Pad to a multiple of 8.
-        vocab_slice_ids = pt.nn.functional.pad(vocab_slice_ids.clone().detach(),
+        vocab_slice_ids = pt.nn.functional.pad(vocab_slice_ids,
                                                pad=(0, 7 - ((vocab_slice_ids.size(-1) - 1) % 8)),
                                                mode='constant', value=eos_id)
     else:
