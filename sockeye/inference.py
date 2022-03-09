@@ -153,7 +153,7 @@ class TranslatorInput:
                                   avoid={self.avoid_list})'
 
     def __len__(self):
-        return len(self.tokens) + self.num_source_prefix_tokens()
+        return len(self.tokens) + self.num_source_prefix_tokens
 
     @property
     def num_factors(self) -> int:
@@ -168,6 +168,7 @@ class TranslatorInput:
         """
         return self.source_prefix_tokens if self.source_prefix_tokens is not None else []
 
+    @property
     def num_source_prefix_tokens(self) -> int:
         """
         Returns the number of source prefix tokens of this instance.
@@ -180,6 +181,7 @@ class TranslatorInput:
         """
         return self.target_prefix_tokens if self.target_prefix_tokens is not None else []
 
+    @property
     def num_target_prefix_tokens(self) -> int:
         """
         Returns the number of target prefix tokens of this instance.
@@ -192,6 +194,7 @@ class TranslatorInput:
         """
         return self.target_prefix_factors if self.target_prefix_factors is not None else [[]]
 
+    @property
     def num_target_prefix_factors(self) -> int:
         """
         Returns the number of target prefix factors of this instance.
@@ -213,7 +216,7 @@ class TranslatorInput:
                 'with the first chunk, which is probably wrong.',
                 self.sentence_id, len(self.tokens), chunk_size)
 
-        for chunk_id, i in enumerate(range(0, len(self) - self.num_source_prefix_tokens(), chunk_size)):
+        for chunk_id, i in enumerate(range(0, len(self) - self.num_source_prefix_tokens, chunk_size)):
             factors = [factor[i:i + chunk_size] for factor in self.factors] if self.factors is not None else None
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
             # assigned to the first chunk
@@ -881,11 +884,11 @@ class Translator:
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
                                                             translation=empty_translation(add_nbest=(self.nbest_size > 1))))
             else:
-                max_input_length_for_chunking = self.max_input_length - trans_input.num_source_prefix_tokens() # take length of source prefix, if used, into account while chunking
+                max_input_length_for_chunking = self.max_input_length - trans_input.num_source_prefix_tokens # take length of source prefix, if used, into account while chunking
                 if max_input_length_for_chunking <= 0:
                     logger.warning(
                         "Input %s has a source prefix with length (%d) that already equals or exceeds max input length (%d). Return an empty translation instead.", \
-                        trans_input.sentence_id, trans_input.num_source_prefix_tokens(), self.max_input_length)
+                        trans_input.sentence_id, trans_input.num_source_prefix_tokens, self.max_input_length)
                     translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
                                                                 translation=empty_translation(add_nbest=(self.nbest_size > 1))))
                 elif len(trans_input.tokens) > max_input_length_for_chunking:
@@ -948,7 +951,7 @@ class Translator:
         chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.input_idx)
         for trans_input, (input_idx, translations_for_input_idx) in zip(trans_inputs, chunks_by_input_idx):
             translations_for_input_idx = list(translations_for_input_idx)  # type: ignore
-            num_target_prefix_tokens = trans_input.num_target_prefix_tokens()
+            num_target_prefix_tokens = trans_input.num_target_prefix_tokens
             if len(translations_for_input_idx) == 1:  # type: ignore
                 translation = translations_for_input_idx[0].translation  # type: ignore
                 if num_target_prefix_tokens > 0 and not trans_input.keep_target_prefix_key:
@@ -992,8 +995,8 @@ class Translator:
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
 
-        max_target_prefix_length = max(inp.num_target_prefix_tokens() for inp in trans_inputs)
-        max_target_prefix_factors_length = max(inp.num_target_prefix_factors() for inp in trans_inputs)
+        max_target_prefix_length = max(inp.num_target_prefix_tokens for inp in trans_inputs)
+        max_target_prefix_factors_length = max(inp.num_target_prefix_factors for inp in trans_inputs)
         max_length = max(len(inp) for inp in trans_inputs)
         # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
         source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
@@ -1008,11 +1011,11 @@ class Translator:
             max_output_lengths.append(self._get_max_output_length(num_tokens))
             source[j, :num_tokens, 0] = tokens2ids(itertools.chain(trans_input.get_source_prefix_tokens(), \
                 trans_input.tokens), self.source_vocabs[0])
-            if target_prefix is not None and trans_input.num_target_prefix_tokens() > 0:
-                target_prefix[j, :trans_input.num_target_prefix_tokens()] = tokens2ids(trans_input.get_target_prefix_tokens(), self.vocab_targets[0])
-            if target_prefix_factors is not None and self.num_target_factors > 1 and trans_input.num_target_prefix_factors() > 0:
+            if target_prefix is not None and trans_input.num_target_prefix_tokens > 0:
+                target_prefix[j, :trans_input.num_target_prefix_tokens] = tokens2ids(trans_input.get_target_prefix_tokens(), self.vocab_targets[0])
+            if target_prefix_factors is not None and self.num_target_factors > 1 and trans_input.num_target_prefix_factors > 0:
                 for i in range(1, self.num_target_factors):
-                    target_prefix_factors[j, :trans_input.num_target_prefix_factors(), i - 1] = tokens2ids(trans_input.get_target_prefix_factors()[i - 1], self.vocab_targets[i])
+                    target_prefix_factors[j, :trans_input.num_target_prefix_factors, i - 1] = tokens2ids(trans_input.get_target_prefix_factors()[i - 1], self.vocab_targets[i])
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:

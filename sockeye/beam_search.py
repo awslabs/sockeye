@@ -47,7 +47,7 @@ class _Inference(ABC):
                     step_input: pt.Tensor,
                     states: List,
                     vocab_slice_ids: Optional[pt.Tensor] = None,
-                    target_prefix_factor: Optional[pt.Tensor] = None,
+                    target_prefix_factor_mask: Optional[pt.Tensor] = None,
                     factor_vocab_size: Optional[int] = None):
         raise NotImplementedError()
 
