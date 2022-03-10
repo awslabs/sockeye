@@ -250,3 +250,122 @@ def test_write_read_metric_file():
 
     assert len(read_metrics) == len(expected_metrics)
     assert expected_metrics == read_metrics
+
+
+def test_adjust_first_step_masking():
+    first_step_mask = pt.tensor([[0.],
+                                 [np.inf],
+                                 [np.inf],
+                                 [np.inf],
+                                 [0.],
+                                 [np.inf],
+                                 [np.inf],
+                                 [np.inf]])
+    target_prefix = pt.tensor([[1, 2], [1, 0]])
+    adjust_first_step_mask = pt.tensor([[0., 0., 0.],
+                                        [np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf],
+                                        [0., 0., 0.],
+                                        [np.inf, np.inf, 0.],
+                                        [np.inf, np.inf, 0.],
+                                        [np.inf, np.inf, 0.]])
+    assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True
+    target_prefix = pt.tensor([[1, 0], [2, 3]])
+    adjust_first_step_mask = pt.tensor([[0., 0., 0.],
+                                        [np.inf, np.inf, 0.],
+                                        [np.inf, np.inf, 0.],
+                                        [np.inf, np.inf, 0.],
+                                        [0., 0., 0.],
+                                        [np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf]])
+    assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True
+    target_prefix = pt.tensor([[1, 0, 0], [2, 3, 4]])
+    adjust_first_step_mask = pt.tensor([[0., 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0.],
+                                        [np.inf, np.inf, 0., 0.],
+                                        [np.inf, np.inf, 0., 0.],
+                                        [0., 0., 0., 0.],
+                                        [np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf]])
+    assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True
+    target_prefix = pt.tensor([[1, 0, 0, 0], [2, 3, 4, 5]])
+    adjust_first_step_mask = pt.tensor([[0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf]])
+    assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True
+    first_step_mask = pt.tensor([[0.],
+                                 [np.inf],
+                                 [np.inf],
+                                 [np.inf],
+                                 [0.],
+                                 [np.inf],
+                                 [np.inf],
+                                 [np.inf],
+                                 [0.],
+                                 [np.inf],
+                                 [np.inf],
+                                 [np.inf]])
+    target_prefix = pt.tensor([[1, 0, 0, 0], [1, 0, 0, 0], [2, 3, 4, 5]])
+    adjust_first_step_mask = pt.tensor([[0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf]])
+    assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True
+    target_prefix = pt.tensor([[1, 0, 0, 0], [1, 3, 0, 0], [2, 3, 4, 5]])
+    adjust_first_step_mask = pt.tensor([[0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [np.inf, np.inf, 0., 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, np.inf, 0., 0.],
+                                        [np.inf, np.inf, np.inf, 0., 0.],
+                                        [np.inf, np.inf, np.inf, 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf]])
+    assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True
+    target_prefix = pt.tensor([[0, 0, 0, 0], [1, 3, 0, 0], [2, 3, 4, 5]])
+    adjust_first_step_mask = pt.tensor([[0., 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, np.inf, 0., 0.],
+                                        [np.inf, np.inf, np.inf, 0., 0.],
+                                        [np.inf, np.inf, np.inf, 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf]])
+    assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True
+    target_prefix = pt.tensor([[0, 0, 0, 0], [0, 0, 0, 0], [2, 3, 4, 5]])
+    adjust_first_step_mask = pt.tensor([[0., 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [np.inf, 0., 0., 0., 0.],
+                                        [0., 0., 0., 0., 0.],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf],
+                                        [np.inf, np.inf, np.inf, np.inf, np.inf]])
+    assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True

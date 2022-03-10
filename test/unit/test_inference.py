@@ -168,7 +168,7 @@ def test_translator_input_with_source_prefix(sentence_id, sentence, factors, chu
         assert chunk_input.sentence_id == sentence_id
         assert chunk_input.tokens == trans_input.tokens[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
         assert chunk_input.source_prefix_tokens == trans_input.source_prefix_tokens
-        assert chunk_input.num_source_prefix_tokens() == trans_input.num_source_prefix_tokens()
+        assert chunk_input.num_source_prefix_tokens == trans_input.num_source_prefix_tokens
         if source_prefix_factors is not None:
             assert len(chunk_input.source_prefix_factors) == len(source_prefix_factors)
             for chunk_input_source_prefix_factor, source_prefix_factor in zip(chunk_input.source_prefix_factors, trans_input.source_prefix_factors):
