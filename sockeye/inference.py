@@ -142,15 +142,15 @@ class TranslatorInput:
     pass_through_dict: Optional[Dict] = None
 
     def __str__(self):
-        return f'TranslatorInput({self.sentence_id}, {self.tokens}, factors={self.factors}, \
-                                  source_prefix_tokens={self.source_prefix_tokens}, \
-                                  source_prefix_factors={self.source_prefix_factors}, \
-                                  target_prefix_tokens={self.target_prefix_tokens}, \
-                                  target_prefix_factors={self.target_prefix_factors}, \
-                                  use_target_prefix_all_chunks={self.use_target_prefix_all_chunks}, \
-                                  keep_target_prefix_key={self.keep_target_prefix_key}, \
-                                  constraints={self.constraints}, \
-                                  avoid={self.avoid_list})'
+        return f'TranslatorInput({self.sentence_id}, {self.tokens}, factors={self.factors}', \
+                                 f'source_prefix_tokens={self.source_prefix_tokens}', \
+                                 f'source_prefix_factors={self.source_prefix_factors}', \
+                                 f'target_prefix_tokens={self.target_prefix_tokens}', \
+                                 f'target_prefix_factors={self.target_prefix_factors}', \
+                                 f'use_target_prefix_all_chunks={self.use_target_prefix_all_chunks}', \
+                                 f'keep_target_prefix_key={self.keep_target_prefix_key}', \
+                                 f'constraints={self.constraints}', \
+                                 f'avoid={self.avoid_list})'
 
     def __len__(self):
         return len(self.tokens) + self.num_source_prefix_tokens
