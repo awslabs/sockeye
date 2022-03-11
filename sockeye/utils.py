@@ -264,7 +264,7 @@ def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
     return sum(tensors) / len(tensors)  # type: ignore
 
 
-def gen_prefix_masking(prefix: pt.Tensor, vocab_size: int, dtype: pt.dtype) -> pt.Tensor:
+def gen_prefix_masking(prefix: pt.Tensor, vocab_size: int, dtype: pt.dtype) -> Tuple[pt.Tensor, int]:
     """
     Generate prefix masks from prefix ids, which are inf everywhere except zero for prefix ids.
 
@@ -274,7 +274,8 @@ def gen_prefix_masking(prefix: pt.Tensor, vocab_size: int, dtype: pt.dtype) -> p
     :return prefix_masks (batch size, max length of prefix, vocab_size), with type as dtype
 
     """
-    prefix_masks_sizes = [s for s in prefix.size()]
+    prefix_masks_sizes = list(prefix.size())  # type: List[int]
+    max_length = prefix_masks_sizes[1]
     prefix_masks_sizes.append(vocab_size)
 
     # prefix_masks are inf everywhere except zero for indices of prefix ids.
@@ -304,7 +305,7 @@ def gen_prefix_masking(prefix: pt.Tensor, vocab_size: int, dtype: pt.dtype) -> p
     # selecting any specific target token for the translation in that case.
 
     prefix_masks.masked_fill_(prefix.unsqueeze(-1) == 0, 0)
-    return prefix_masks
+    return prefix_masks, max_length
 
 
 def shift_prefix_factors(prefix_factors: pt.Tensor) -> pt.Tensor:
