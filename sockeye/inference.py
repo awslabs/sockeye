@@ -712,7 +712,7 @@ def _concat_translations(translations: List[Translation],
         scores = np.add(scores, [raw_score, *factor_scores])
 
     # Re-normalize the primary score
-    scores = scorer(scores[0], len(target_ids), estimated_reference_length)
+    scores[0] = scorer(scores[0], len(target_ids), estimated_reference_length)
 
     return Translation(target_ids, scores.tolist(), estimated_reference_length=estimated_reference_length)
 
