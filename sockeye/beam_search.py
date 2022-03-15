@@ -633,7 +633,7 @@ class GreedySearch(pt.nn.Module):
 
         # Prefix masks, where scores are infinity for all other vocabulary items except target_prefix ids
         prefix_masks, prefix_masks_length = None, 0
-        if prefix_masks is not None:
+        if target_prefix is not None:
             prefix_masks, prefix_masks_length = utils.gen_prefix_masking(target_prefix, self.output_vocab_size, self.dtype)
             if vocab_slice_ids is not None:
                 prefix_masks = pt.index_select(prefix_masks, -1, vocab_slice_ids)

@@ -361,10 +361,10 @@ def make_input_from_dict(sentence_id: SentenceId,
         target_prefix_factors = input_dict.get(C.JSON_TARGET_PREFIX_FACTORS_KEY)
         if isinstance(target_prefix_factors, list):
             target_prefix_factors = [list(utils.get_tokens(tpf)) for tpf in target_prefix_factors]
-            for target_prefix_factor in target_prefix_factors:
-                if not target_prefix_factor:
-                    logger.warning(f"Empty list is specified as target prefix factors for input '%s'.",
-                                   input_dict[C.JSON_TEXT_KEY])
+            if len(target_prefix_factors) != translator.num_target_factors - 1:
+                logger.error("Must provide target prefix for each target factor. Given: %s required: %s",
+                             len(target_prefix_factors), translator.num_target_factors - 1)
+                return _bad_input(sentence_id, reason=str(input_dict))
 
         use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
         keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)
