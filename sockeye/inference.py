@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 
-import numpy as onp
+import numpy as np
 import torch as pt
 
 from . import constants as C
@@ -105,7 +105,7 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
         """
         if forced_max_output_len is not None:
             return forced_max_output_len + C.SPACE_FOR_XOS
-        return int(onp.ceil(factor * input_length))
+        return int(np.ceil(factor * input_length))
 
     return max_input_len, get_max_output_length
 
@@ -338,16 +338,19 @@ def make_input_from_dict(sentence_id: SentenceId,
                 return _bad_input(sentence_id, reason=str(input_dict))
 
         if isinstance(source_prefix_factors, list):
-            source_prefix_factors = [list(utils.get_tokens(source_prefix_factor)) for source_prefix_factor in source_prefix_factors]
+            source_prefix_factors = [list(utils.get_tokens(spf)) for spf in source_prefix_factors]
             for source_prefix_factor in source_prefix_factors:
                 if not source_prefix_factor:
-                    logger.warning(f"Empty list is specified as source prefix factors for input '{input_dict[C.JSON_TEXT_KEY]}'.")
+                    logger.warning(f"Empty list is specified as source prefix factors for input '%s'.",
+                                   input_dict[C.JSON_TEXT_KEY])
             lengths = [len(source_prefix_factor) for source_prefix_factor in source_prefix_factors]
             if not all(len(source_prefix_tokens) == length for length in lengths):
-                logger.error("Source prefix has %d tokens but there are %s prefix factors", len(source_prefix_tokens), str(lengths))
+                logger.error("Source prefix has %d tokens but there are %s prefix factors",
+                             len(source_prefix_tokens), str(lengths))
                 return _bad_input(sentence_id, reason=str(input_dict))
             if len(source_prefix_factors) != len(factors):
-                logger.error("There is mismatch in source factors %d and prefix factors %d", len(factors), len(source_prefix_factors))
+                logger.error("There is mismatch in source factors %d and prefix factors %d",
+                             len(factors), len(source_prefix_factors))
                 return _bad_input(sentence_id, reason=str(input_dict))
 
         target_prefix_tokens = input_dict.get(C.JSON_TARGET_PREFIX_KEY)
@@ -357,10 +360,11 @@ def make_input_from_dict(sentence_id: SentenceId,
 
         target_prefix_factors = input_dict.get(C.JSON_TARGET_PREFIX_FACTORS_KEY)
         if isinstance(target_prefix_factors, list):
-            target_prefix_factors = [list(utils.get_tokens(target_prefix_factor)) for target_prefix_factor in target_prefix_factors]
-            for target_prefix_factor in target_prefix_factors:
-                if not target_prefix_factor:
-                    logger.warning(f"Empty list is specified as target prefix factors for input '{input_dict[C.JSON_TEXT_KEY]}'.")
+            target_prefix_factors = [list(utils.get_tokens(tpf)) for tpf in target_prefix_factors]
+            if len(target_prefix_factors) != translator.num_target_factors - 1:
+                logger.error("Must provide target prefix for each target factor. Given: %s required: %s",
+                             len(target_prefix_factors), translator.num_target_factors - 1)
+                return _bad_input(sentence_id, reason=str(input_dict))
 
         use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
         keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)
@@ -381,7 +385,7 @@ def make_input_from_dict(sentence_id: SentenceId,
                              % (restrict_lexicon_name, ' '.join(sorted(translator.restrict_lexicon))))
                 return _bad_input(sentence_id, reason=str(input_dict))
 
-        # List of phrases to prevent from occuring in the output
+        # List of phrases to prevent from occurring in the output
         avoid_list = input_dict.get(C.JSON_AVOID_KEY)
 
         # List of phrases that must appear in the output
@@ -565,7 +569,7 @@ def empty_translation(add_nbest: bool = False) -> Translation:
     :param add_nbest: Include (empty) nbest_translations in the translation object.
     """
     return Translation(target_ids=[],
-                       scores=[-onp.inf],
+                       scores=[-np.inf],
                        nbest_translations=NBestTranslations([], []) if add_nbest else None)
 
 
@@ -655,6 +659,7 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
                                       estimated_reference_length=translation.estimated_reference_length))
     return nbest_list
 
+
 def _remove_target_prefix_tokens(target_ids: TokenIds, num_target_prefix_tokens: int) -> TokenIds:
     """
     Remove target prefix tokens from target token Ids
@@ -665,6 +670,7 @@ def _remove_target_prefix_tokens(target_ids: TokenIds, num_target_prefix_tokens:
     """
     starting_idx = min(len(target_ids), num_target_prefix_tokens)
     return target_ids[starting_idx:]
+
 
 def _concat_translations(translations: List[Translation],
                          stop_ids: Set[int],
@@ -683,7 +689,7 @@ def _concat_translations(translations: List[Translation],
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
     estimated_reference_length = None  # type: Optional[float]
-    scores = onp.zeros_like(translations[0].scores)
+    scores = np.zeros_like(translations[0].scores)
 
     for idx, translation in enumerate(translations):
         if idx == len(translations) - 1:
@@ -703,7 +709,7 @@ def _concat_translations(translations: List[Translation],
         # Unnormalize the primary score:
         raw_score = scorer.unnormalize(score, len(translation.target_ids), translation.estimated_reference_length)
         # Accumulate scores element-wise
-        scores = onp.add(scores, [raw_score, *factor_scores])
+        scores = np.add(scores, [raw_score, *factor_scores])
 
     # Re-normalize the primary score
     scores[0] = scorer(scores[0], len(target_ids), estimated_reference_length)
@@ -870,19 +876,23 @@ class Translator:
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                            translation=empty_translation(add_nbest=(self.nbest_size > 1))))
+                                                            translation=empty_translation(add_nbest=(
+                                                                    self.nbest_size > 1))))
             # empty input
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                            translation=empty_translation(add_nbest=(self.nbest_size > 1))))
+                                                            translation=empty_translation(add_nbest=(
+                                                                    self.nbest_size > 1))))
             else:
-                max_input_length_for_chunking = self.max_input_length - trans_input.num_source_prefix_tokens # take length of source prefix, if used, into account while chunking
+                # take length of source prefix, if used, into account while chunking
+                max_input_length_for_chunking = self.max_input_length - trans_input.num_source_prefix_tokens
                 if max_input_length_for_chunking <= 0:
-                    logger.warning(
-                        "Input %s has a source prefix with length (%d) that already equals or exceeds max input length (%d). Return an empty translation instead.", \
-                        trans_input.sentence_id, trans_input.num_source_prefix_tokens, self.max_input_length)
+                    logger.warning("Input %s has a source prefix with length (%d) that already equals or exceeds "
+                                   "max input length (%d). Return an empty translation instead.",
+                                   trans_input.sentence_id, trans_input.num_source_prefix_tokens, self.max_input_length)
                     translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                                translation=empty_translation(add_nbest=(self.nbest_size > 1))))
+                                                                translation=empty_translation(
+                                                                    add_nbest=(self.nbest_size > 1))))
                 elif len(trans_input.tokens) > max_input_length_for_chunking:
                     # oversized input
                     logger.debug(
@@ -925,7 +935,7 @@ class Translator:
 
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
             with pt.inference_mode():
-                batch_translations = self._translate_np(*self._get_inference_input(translator_inputs))  # type: ignore
+                batch_translations = self._translate_np(*self._get_inference_input(translator_inputs))
 
             # truncate to remove filler translations
             if fill_up_batches and rest > 0:
@@ -970,19 +980,19 @@ class Translator:
 
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[pt.Tensor,
-                                                                           int,
-                                                                           Optional[pt.Tensor],
+                                                                           pt.Tensor,
                                                                            Optional[lexicon.TopKLexicon],
                                                                            pt.Tensor,
-                                                                           pt.Tensor]:
+                                                                           Optional[pt.Tensor],
+                                                                           Optional[pt.Tensor]]:
         """
         Assembles the numerical data for the batch. This comprises a tensor for the source sentences,
         the bucket key (padded source length), a tensor of maximum output lengths for each sentence in the batch.
 
         :param trans_inputs: List of TranslatorInputs.
         :return tensor of source ids (shape=(batch_size, bucket_key, num_factors)),
-                tensor of valid source lengths, target prefix, lexicon for vocabulary restriction, and a tensor of maximum output
-                lengths.
+                tensor of valid source lengths, lexicon for vocabulary restriction, tensor of maximum output lengths,
+                optional target prefix, and optional target prefix factors.
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
@@ -991,23 +1001,29 @@ class Translator:
         max_target_prefix_factors_length = max(inp.num_target_prefix_factors for inp in trans_inputs)
         max_length = max(len(inp) for inp in trans_inputs)
         # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
-        source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
+        source_np = np.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
-        target_prefix = onp.zeros((batch_size, max_target_prefix_length), dtype='int32') if max_target_prefix_length > 0 else None
-        target_prefix_factors = onp.zeros((batch_size, max_target_prefix_factors_length, self.num_target_factors - 1), dtype='int32') if self.num_target_factors > 1 and max_target_prefix_factors_length > 0 else None
+        target_prefix_np = np.zeros((batch_size, max_target_prefix_length), dtype='int32') \
+            if max_target_prefix_length > 0 else None
+        target_prefix_factors_np = np.zeros((batch_size, max_target_prefix_factors_length,
+                                             self.num_target_factors - 1), dtype='int32') \
+            if self.num_target_factors > 1 and max_target_prefix_factors_length > 0 else None
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
             max_output_lengths.append(self._get_max_output_length(num_tokens))
-            source[j, :num_tokens, 0] = tokens2ids(itertools.chain(trans_input.get_source_prefix_tokens(), \
-                trans_input.tokens), self.source_vocabs[0])
-            if target_prefix is not None and trans_input.num_target_prefix_tokens > 0:
-                target_prefix[j, :trans_input.num_target_prefix_tokens] = tokens2ids(trans_input.get_target_prefix_tokens(), self.vocab_targets[0])
-            if target_prefix_factors is not None and self.num_target_factors > 1 and trans_input.num_target_prefix_factors > 0:
+            source_np[j, :num_tokens, 0] = tokens2ids(itertools.chain(trans_input.get_source_prefix_tokens(),
+                                                                      trans_input.tokens), self.source_vocabs[0])
+            if target_prefix_np is not None and trans_input.num_target_prefix_tokens > 0:
+                target_prefix_np[j, :trans_input.num_target_prefix_tokens] = \
+                    tokens2ids(trans_input.get_target_prefix_tokens(), self.vocab_targets[0])
+            if target_prefix_factors_np is not None \
+                    and self.num_target_factors > 1 and trans_input.num_target_prefix_factors > 0:
                 for i in range(1, self.num_target_factors):
-                    target_prefix_factors[j, :trans_input.num_target_prefix_factors, i - 1] = tokens2ids(trans_input.get_target_prefix_factors()[i - 1], self.vocab_targets[i])
+                    target_prefix_factors_np[j, :trans_input.num_target_prefix_factors, i - 1] = \
+                        tokens2ids(trans_input.get_target_prefix_factors()[i - 1], self.vocab_targets[i])
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:
@@ -1016,11 +1032,15 @@ class Translator:
             if not trans_input.source_prefix_factors: # no source prefix during inference
                 for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
                     # fill in as many factors as there are tokens
-                    source[j, :num_tokens, i] = tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+                    source_np[j, :num_tokens, i] = tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
             else:
-                for i, zip_of_factor_and_prefix_factor in enumerate(zip(factors[:self.num_source_factors - 1], trans_input.source_prefix_factors[:self.num_source_factors - 1]), start=1):
+                for i, zip_of_factor_and_prefix_factor in enumerate(
+                        zip(factors[:self.num_source_factors - 1],
+                            trans_input.source_prefix_factors[:self.num_source_factors - 1]),
+                        start=1):
                     factor, source_prefix_factor = zip_of_factor_and_prefix_factor
-                    source[j, :num_tokens, i] = tokens2ids(itertools.chain(source_prefix_factor, factor), self.source_vocabs[i])[:num_tokens]
+                    source_np[j, :num_tokens, i] = tokens2ids(itertools.chain(source_prefix_factor, factor),
+                                                              self.source_vocabs[i])[:num_tokens]
 
             # Check if vocabulary selection/restriction is enabled:
             # - First, see if the translator input provides a lexicon (used for multiple lexicons)
@@ -1042,18 +1062,23 @@ class Translator:
                 else:
                     restrict_lexicon = self.restrict_lexicon
 
-        source = pt.tensor(source, device=self.device, dtype=pt.int32)  # type: ignore
+        source = pt.tensor(source_np, device=self.device, dtype=pt.int32)
         source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
-        max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)  # type: ignore
-        target_prefix = pt.tensor(target_prefix, device=self.device, dtype=pt.int32) if target_prefix is not None else None  # type: ignore
-        target_prefix_factors_tensor = pt.tensor(target_prefix_factors, device=self.device, dtype=pt.int32) if target_prefix_factors is not None else None  # type: ignore
+        max_out_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)
+        target_prefix = pt.tensor(target_prefix_np, device=self.device, dtype=pt.int32) \
+            if target_prefix_np is not None else None
+        target_prefix_factors = pt.tensor(target_prefix_factors_np, device=self.device, dtype=pt.int32) \
+            if target_prefix_factors_np is not None else None
 
-        # During inference, if C.TARGET_FACTOR_SHIFT is True, predicted target_factors are left-shifted (see _unshift_target_factors function()) so that \
-        # they re-align with the words. With that, target_prefix_factors need to be also right-shifted here if C.TARGET_FACTOR_SHIFT is True so that when \
-        # they are shifted back later they would align with words.
-        target_prefix_factors_tensor = utils.shift_prefix_factors(target_prefix_factors_tensor) if target_prefix_factors_tensor is not None and C.TARGET_FACTOR_SHIFT else target_prefix_factors_tensor # type: ignore
+        # During inference, if C.TARGET_FACTOR_SHIFT is True, predicted target_factors are left-shifted
+        # (see _unshift_target_factors function()) so that they re-align with the words.
+        # With that, target_prefix_factors need to be also right-shifted here if C.TARGET_FACTOR_SHIFT is True so
+        # that when they are shifted back later they would align with words.
+        target_prefix_factors = utils.shift_prefix_factors(target_prefix_factors) \
+            if target_prefix_factors is not None and \
+               C.TARGET_FACTOR_SHIFT else target_prefix_factors
 
-        return source, source_length, restrict_lexicon, max_output_lengths, target_prefix, target_prefix_factors_tensor  # type: ignore
+        return source, source_length, restrict_lexicon, max_out_lengths, target_prefix, target_prefix_factors
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -1174,12 +1199,12 @@ class Translator:
             estimated_reference_lengths = result.estimated_reference_lengths.cpu().numpy()
         batch_size = best_hyp_indices.shape[0] // self.beam_size
         nbest_translations = []  # type: List[List[Translation]]
-        reference_lengths = estimated_reference_lengths if estimated_reference_lengths is not None \
-                                                        else onp.zeros((self.batch_size * self.beam_size, 1))
+        reference_lengths = estimated_reference_lengths \
+            if estimated_reference_lengths is not None else np.zeros((self.batch_size * self.beam_size, 1))
         for n in range(0, self.nbest_size):
 
             # Initialize the best_ids to the first item in each batch, plus current nbest index
-            best_ids = onp.arange(n, batch_size * self.beam_size, self.beam_size, dtype='int32')
+            best_ids = np.arange(n, batch_size * self.beam_size, self.beam_size, dtype='int32')
             # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)  # type: ignore
             indices_shape_1 = indices.shape[1]  # pylint: disable=unsubscriptable-object
@@ -1187,7 +1212,7 @@ class Translator:
                     [self._assemble_translation(*x, unshift_target_factors=C.TARGET_FACTOR_SHIFT) for x in
                      zip(best_word_indices[indices,
                                            :,  # get all factors
-                                           onp.arange(indices_shape_1)],
+                                           np.arange(indices_shape_1)],
                          lengths[best_ids],
                          accumulated_scores[best_ids],
                          reference_lengths[best_ids])])  # type: ignore
@@ -1197,7 +1222,7 @@ class Translator:
         return reduced_translations
 
     @staticmethod
-    def _get_best_word_indices_for_kth_hypotheses(ks: onp.ndarray, all_hyp_indices: onp.ndarray) -> onp.ndarray:
+    def _get_best_word_indices_for_kth_hypotheses(ks: np.ndarray, all_hyp_indices: np.ndarray) -> np.ndarray:
         """
         Traverses the matrix of best hypotheses indices collected during beam search in reversed order by
         using the kth hypotheses index as a backpointer.
@@ -1211,7 +1236,7 @@ class Translator:
         """
         batch_size = ks.shape[0]
         num_steps = all_hyp_indices.shape[1]
-        result = onp.zeros((batch_size, num_steps - 1), dtype=all_hyp_indices.dtype)
+        result = np.zeros((batch_size, num_steps - 1), dtype=all_hyp_indices.dtype)
         # first index into the history of the desired hypotheses.
         pointer = all_hyp_indices[ks, -1]
         # for each column/step follow the pointer, starting from the penultimate column/step
@@ -1221,9 +1246,9 @@ class Translator:
         return result
 
     @staticmethod
-    def _assemble_translation(sequence: onp.ndarray,
-                              length: onp.ndarray,
-                              seq_scores: onp.ndarray,
+    def _assemble_translation(sequence: np.ndarray,
+                              length: np.ndarray,
+                              seq_scores: np.ndarray,
                               estimated_reference_length: Optional[float],
                               unshift_target_factors: bool = False) -> Translation:
         """
@@ -1248,7 +1273,7 @@ class Translator:
                            estimated_reference_length=estimated_reference_length)
 
 
-def _unshift_target_factors(sequence: onp.ndarray, fill_last_with: int = C.EOS_ID):
+def _unshift_target_factors(sequence: np.ndarray, fill_last_with: int = C.EOS_ID):
     """
     Shifts back target factors so that they re-align with the words.
 
