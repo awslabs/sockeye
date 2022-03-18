@@ -27,25 +27,26 @@ class LearningRateScheduler:
                    linearly increases.
     :param t_scale: Scaling factor for step number.
     """
-    def __init__(self, base_lr: float = 1.0, warmup: int = 0, t_scale: float = 1.0) -> None:
+    def __init__(self, base_lr: float = 1.0, warmup: int = 0, t_scale: float = 1.0, t_offset: int = 0) -> None:
         self.base_lr = base_lr
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
         self.warmup = warmup
         self.t_scale = t_scale
+        self.t_offset = t_offset
         self.lr = None  # type: Optional[float]
 
     def __call__(self, t):
         pass
 
-    def _warmup(self, scaled_t):
+    def _warmup(self, scaled_offset_t):
         """
         Returns linearly increasing fraction of base_lr.  Here t is not scaled
-        by t_scale, as individual schedulers should scale t prior to calling
-        this method.
+        by t_scale or offset by t_offset, as individual schedulers should scale/
+        offset t prior to calling this method.
         """
         if not self.warmup:
             return self.base_lr
-        return self.base_lr * min(1.0, scaled_t / self.warmup)
+        return self.base_lr * min(1.0, scaled_offset_t / self.warmup)
 
 
 class AdaptiveLearningRateScheduler(LearningRateScheduler):
@@ -73,14 +74,14 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
     """
 
     def __call__(self, t: int):
-        # Time scale
-        scaled_t = t * self.t_scale
+        # Time scale and offset
+        scaled_offset_t = (t * self.t_scale) + self.t_offset
         # Warmup
-        warm_lr = self._warmup(scaled_t)
+        warm_lr = self._warmup(scaled_offset_t)
         # Avoid square root of zero
         warmup_steps = max(1, self.warmup)
         # Warmup first N steps, then decay
-        lr = warm_lr / sqrt(max(scaled_t, warmup_steps))
+        lr = warm_lr / sqrt(max(scaled_offset_t, warmup_steps))
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
         self.lr = lr
@@ -104,18 +105,23 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
     :param t_scale: Scaling factor for step number.
     """
 
-    def __init__(self, base_lr: float, total_steps: int, warmup: int = 0, t_scale: float = 1.0) -> None:
-        super().__init__(base_lr, warmup, t_scale)
+    def __init__(self,
+                 base_lr: float,
+                 total_steps: int,
+                 warmup: int = 0,
+                 t_scale: float = 1.0,
+                 t_offset: int = 0) -> None:
+        super().__init__(base_lr, warmup, t_scale, t_offset)
         check_condition(total_steps >= 0, "total_steps need to be >= 0.")
         self.total_steps = total_steps
 
     def __call__(self, t: int):
-        # Time scale
-        scaled_t = t * self.t_scale
+        # Time scale and offset
+        scaled_offset_t = (t * self.t_scale) + self.t_offset
         # Warmup
-        warm_lr = self._warmup(scaled_t)
+        warm_lr = self._warmup(scaled_offset_t)
         # Linear decay
-        bounded_t = min(max(scaled_t, 1), self.total_steps)
+        bounded_t = min(max(scaled_offset_t, 1), self.total_steps)
         lr = warm_lr * (1 - bounded_t / self.total_steps)
         # For this scheduler, `self.lr` represents the last seen lr and is only
         # used for logging purposes.
@@ -193,6 +199,7 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
 def get_lr_scheduler(scheduler_type: str,
                      base_learning_rate: float,
                      learning_rate_t_scale: float,
+                     learning_rate_t_offset: int,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
                      learning_rate_warmup: int = 0,
@@ -204,6 +211,7 @@ def get_lr_scheduler(scheduler_type: str,
     :param base_lr: Base learning rate.
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
     :param learning_rate_t_scale: Scaling factor for step number.
+    :param learning_rate_t_offset: Offset for step number.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no
            improvement after which learning rate is reduced.
     :param learning_rate_warmup: Number of initial updates during which the
@@ -217,8 +225,10 @@ def get_lr_scheduler(scheduler_type: str,
     if scheduler_type is None or scheduler_type == C.LR_SCHEDULER_NONE:
         return None
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
-        return LearningRateSchedulerInvSqrtDecay(base_lr=base_learning_rate, warmup=learning_rate_warmup,
-                                                 t_scale=learning_rate_t_scale)
+        return LearningRateSchedulerInvSqrtDecay(base_lr=base_learning_rate,
+                                                 warmup=learning_rate_warmup,
+                                                 t_scale=learning_rate_t_scale,
+                                                 t_offset=learning_rate_t_offset)
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
         check_condition(max_updates is not None,
                         "The total number of training updates (--max-updates) must be specified when using the linear "
@@ -226,7 +236,8 @@ def get_lr_scheduler(scheduler_type: str,
         return LearningRateSchedulerLinearDecay(base_lr=base_learning_rate,
                                                 total_steps=max_updates,
                                                 warmup=learning_rate_warmup,
-                                                t_scale=learning_rate_t_scale)
+                                                t_scale=learning_rate_t_scale,
+                                                t_offset=learning_rate_t_offset)
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)

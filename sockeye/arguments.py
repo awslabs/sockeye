@@ -1016,6 +1016,11 @@ def add_training_args(params):
                               default=1.0,
                               help="Step number is multiplied by this value when determining learning rate for the "
                                    "current step. Default: %(default)s.")
+    train_params.add_argument('--learning-rate-t-offset',
+                              type=int_greater_or_equal(0),
+                              default=0,
+                              help="This value is added to the step number when determining learning rate for the "
+                                   "current step. Default: %(default)s.")
     train_params.add_argument('--learning-rate-reduce-factor',
                               type=float,
                               default=0.9,
