@@ -116,6 +116,8 @@ class SockeyeModel(pt.nn.Module):
                                                vocab_size=self.config.vocab_target_size,
                                                weight=output_weight)
         if self.inference_only:
+            # Running this layer scripted with a newly initialized model can
+            # cause an overflow error.
             self.output_layer = pt.jit.script(self.output_layer)
 
         self.factor_output_layers = pt.nn.ModuleList()
@@ -167,19 +169,14 @@ class SockeyeModel(pt.nn.Module):
         :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
         :return: Encoder outputs, encoded output lengths
         """
-
-        if self.inference_only:
-            if self.traced_embedding_source is None:
-                logger.debug("Tracing embedding_source")
-                self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
-            source_embed = self.traced_embedding_source(inputs)
-            if self.traced_encoder is None:
-                logger.debug("Tracing encoder")
-                self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
-            source_encoded, source_encoded_length = self.traced_encoder(source_embed, valid_length)
-        else:
-            source_embed = self.embedding_source(inputs)
-            source_encoded, source_encoded_length = self.encoder(source_embed, valid_length)
+        if self.traced_embedding_source is None:
+            logger.debug("Tracing embedding_source")
+            self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
+        source_embed = self.traced_embedding_source(inputs)
+        if self.traced_encoder is None:
+            logger.debug("Tracing encoder")
+            self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
+        source_encoded, source_encoded_length = self.traced_encoder(source_embed, valid_length)
         return source_encoded, source_encoded_length
 
     def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None,
@@ -238,29 +235,20 @@ class SockeyeModel(pt.nn.Module):
 
         :return: logits, list of new model states, other target factor logits.
         """
-        if self.inference_only:
-            decode_step_inputs = [step_input, states]
-            if vocab_slice_ids is not None:
-                decode_step_inputs.append(vocab_slice_ids)
-            if self.traced_decode_step is None:
-                logger.debug("Tracing decode step")
-                decode_step_module = _DecodeStep(self.embedding_target,
-                                                 self.decoder,
-                                                 self.output_layer,
-                                                 self.factor_output_layers)
-                self.traced_decode_step = pt.jit.trace(decode_step_module, decode_step_inputs)
-            # the traced module returns a flat list of tensors
-            decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
-            step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
-            new_states = decode_step_outputs[self.num_target_factors:]
-        else:
-            target_embed = self.embedding_target(step_input.unsqueeze(1))
-            decoder_out, new_states = self.decoder(target_embed, states)
-            decoder_out = decoder_out.squeeze(1)
-            # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
-            step_output = self.output_layer(decoder_out, vocab_slice_ids)
-            target_factor_outputs = [fol(decoder_out) for fol in self.factor_output_layers]
-
+        decode_step_inputs = [step_input, states]
+        if vocab_slice_ids is not None:
+            decode_step_inputs.append(vocab_slice_ids)
+        if self.traced_decode_step is None:
+            logger.debug("Tracing decode step")
+            decode_step_module = _DecodeStep(self.embedding_target,
+                                                self.decoder,
+                                                self.output_layer,
+                                                self.factor_output_layers)
+            self.traced_decode_step = pt.jit.trace(decode_step_module, decode_step_inputs)
+        # the traced module returns a flat list of tensors
+        decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
+        step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
+        new_states = decode_step_outputs[self.num_target_factors:]
         return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
