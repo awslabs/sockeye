@@ -213,7 +213,7 @@ class CheckpointDecoder:
     def warmup(self):
         """
         Translate a single sentence to warm up the model. Set the model to eval
-        mode for tracing, translate the sentence, then set model back to its
+        mode for tracing, translate the sentence, then set the model back to its
         original mode.
         """
         model_mode = self.model.training
