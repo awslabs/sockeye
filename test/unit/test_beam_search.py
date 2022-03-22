@@ -140,7 +140,10 @@ def test_topk_func(batch_size, beam_size, target_vocab_size):
     np_hyp, np_word, np_values = numpy_topk(scores, k=beam_size, offset=offset)
 
     topk = sockeye.beam_search.TopK(k=beam_size)
-    pt_hyp, pt_word, pt_values = topk(pt.tensor(scores), pt.tensor(offset))
+    pt_hyp, pt_word, pt_values = topk(pt.tensor(scores))
+    if batch_size > 1:
+        # Offsetting the indices to match the shape of the scores matrix
+        pt_hyp += pt.tensor(offset)
     assert onp.allclose(pt_hyp.detach().numpy(), np_hyp)
     assert onp.allclose(pt_word.detach().numpy(), np_word)
     assert onp.allclose(pt_values.detach().numpy(), np_values)
