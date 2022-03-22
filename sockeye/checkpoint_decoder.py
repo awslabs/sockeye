@@ -222,6 +222,7 @@ class CheckpointDecoder:
         _ = self.translator.translate(one_sentence)
         self.model.train(model_mode)
 
+
 def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:
     # custom random number generator to guarantee the same samples across runs in order to be able to
     # compare metrics across independent runs
