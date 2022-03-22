@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.6]
+
+### Changed
+
+- Moved offsetting of topk scores out of the (traced) TopK module. This allows sending requests of variable
+  batch size to the same Translator/Model/BeamSearch instance.
+
 ## [3.1.5]
 
 ### Changed

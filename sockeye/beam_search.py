@@ -410,12 +410,11 @@ class TopK(pt.nn.Module):
         super().__init__()
         self.k = k
 
-    def forward(self, scores, offset):
+    def forward(self, scores):
         """
         Get the lowest k elements per sentence from a `scores` matrix.
 
         :param scores: Vocabulary scores for the next beam step. (batch_size * beam_size, target_vocabulary_size)
-        :param offset: Array to add to the hypothesis indices for offsetting in batch decoding.
         :return: The row indices, column indices and values of the k smallest items in matrix.
         """
         batch_times_beam, vocab_size = scores.size()
@@ -430,9 +429,6 @@ class TopK(pt.nn.Module):
 
         best_hyp_indices, best_word_indices = indices.div(vocab_size, rounding_mode='floor'), indices.fmod(vocab_size)
 
-        if batch_size > 1:
-            # Offsetting the indices to match the shape of the scores matrix
-            best_hyp_indices = best_hyp_indices + offset
         return best_hyp_indices, best_word_indices, values
 
 
@@ -909,8 +905,11 @@ class BeamSearch(pt.nn.Module):
 
                 if self._traced_top is None:
                     logger.debug("Tracing _top")
-                    self._traced_top = pt.jit.trace(self._top, (scores, offset))
-                best_hyp_indices, best_word_indices, scores_accumulated = self._traced_top(scores, offset)
+                    self._traced_top = pt.jit.trace(self._top, (scores,))
+                best_hyp_indices, best_word_indices, scores_accumulated = self._traced_top(scores)
+                if batch_size > 1:
+                    # Offsetting the indices to match the shape of the scores matrix
+                    best_hyp_indices = best_hyp_indices + offset
 
             # Map from restricted to full vocab ids if needed
             if restrict_lexicon:
