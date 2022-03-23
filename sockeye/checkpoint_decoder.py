@@ -85,7 +85,6 @@ class CheckpointDecoder:
         self.bucket_width_source = bucket_width_source
         self.length_penalty_alpha = length_penalty_alpha
         self.length_penalty_beta = length_penalty_beta
-        # TODO(mdenkows): Trace encoder/decoder even though inference_only=False
         self.model = model
 
         with ExitStack() as exit_stack:
@@ -149,6 +148,12 @@ class CheckpointDecoder:
         """
 
         # 1. Translate
+
+        # Store original mode and set to eval mode in case the model is not yet
+        # traced.
+        original_mode = self.model.training
+        self.model.eval()
+
         trans_wall_time = 0.0
         translations = []  # type: List[List[str]]
         with ExitStack() as exit_stack:
@@ -172,7 +177,11 @@ class CheckpointDecoder:
         avg_time = trans_wall_time / len(self.targets_sentences[0])
         translations = list(zip(*translations))  # type: ignore
 
+        # Restore original model mode
+        self.model.train(original_mode)
+
         # 2. Evaluate
+
         metrics = {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations[0],
                                                     references=self.targets_sentences[0],
                                                     offset=0.01),
@@ -202,9 +211,16 @@ class CheckpointDecoder:
         return metrics
 
     def warmup(self):
-        """Translate a single sentence to warm up the model"""
+        """
+        Translate a single sentence to warm up the model. Set the model to eval
+        mode for tracing, translate the sentence, then set the model back to its
+        original mode.
+        """
+        original_mode = self.model.training
+        self.model.eval()
         one_sentence = [inference.make_input_from_multiple_strings(0, self.inputs_sentences[0])]
         _ = self.translator.translate(one_sentence)
+        self.model.train(original_mode)
 
 
 def parallel_subsample(parallel_sequences: List[List[Any]], sample_size: int, seed: int) -> List[Any]:

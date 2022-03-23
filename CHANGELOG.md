@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.7]
+
+### Changed
+
+- SockeyeModel components are now traced regardless of whether `inference_only` is set, including for the CheckpointDecoder during training.
+
 ## [3.1.6]
 
 ### Changed
