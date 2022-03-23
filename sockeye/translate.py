@@ -218,9 +218,9 @@ def read_and_translate(translator: inference.Translator,
             chunk_size = C.CHUNK_SIZE_NO_BATCHING
         else:
             # Get a constant number of batches per call to Translator.translate.
-            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * translator.max_batch_size
+            chunk_size = C.CHUNK_SIZE_PER_BATCH_SEGMENT * batch_size
     else:
-        if chunk_size < translator.max_batch_size:
+        if chunk_size < batch_size:
             logger.warning("You specified a chunk size (%d) smaller than the max batch size (%d). This will lead to "
                            "a reduction in translation speed. Consider choosing a larger chunk size." % (chunk_size,
                                                                                                          batch_size))
