@@ -496,10 +496,10 @@ def repeat_interleave_with_expand(state: pt.Tensor, repeats: int, dim: int) -> p
     :param dim: int
     :return repeat_state
     """
-    repeat_state_size = list(state.size())
-    repeat_state_size[dim] = repeat_state_size[dim] * repeats  # type: List[int]
+    repeat_state_size = list(state.size())  # type: List[int]
+    repeat_state_size[dim] = repeat_state_size[dim] * repeats
     expand_size = [-1 for _ in range(len(repeat_state_size) + 1)]  # type: List[int]
-    expand_size[dim +1] = repeats
+    expand_size[dim + 1] = repeats
     return state.unsqueeze(dim + 1).expand(expand_size).reshape(repeat_state_size)
 
 
