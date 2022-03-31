@@ -47,7 +47,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching
      # max updates independent of the checkpoint interval
      " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none",
@@ -59,7 +59,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 1 --greedy",
      True, 0, 0),
@@ -69,7 +69,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type trg_softmax"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --source-factors-combine sum concat average --source-factors-share-embedding true false true"
      " --source-factors-num-embed 8 2 8"
@@ -83,7 +83,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 0"
+     " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
      False, 0, 0),
@@ -93,7 +93,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --length-task ratio --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
@@ -105,7 +105,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --length-task length --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
@@ -117,7 +117,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-feed-forward-num-hidden 16"
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
-     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --fixed-param-strategy " + C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
      "--beam-size 2",
@@ -165,7 +165,7 @@ def test_seq_copy(train_params: str,
 
 TINY_TEST_MODEL = [(" --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 4 --num-embed 4"
                     " --transformer-feed-forward-num-hidden 4 --weight-tying-type src_trg_softmax"
-                    " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 0"
+                    " --batch-size 2 --batch-type sentence --max-updates 4 --decode-and-evaluate 2"
                     " --checkpoint-interval 4",
                     "--beam-size 1")]
 
