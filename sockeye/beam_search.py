@@ -493,7 +493,7 @@ class RepeatStates(pt.nn.Module):
                 repeat_axis = 1
             else:
                 raise ValueError("Provided state format %s not recognized." % state_format)
-            repeated_state = state.repeat_interleave(repeats=self.beam_size, dim=repeat_axis)
+            repeated_state = utils.repeat_interleave_with_expand(state, repeats=self.beam_size, dim=repeat_axis)
             repeated_states.append(repeated_state)
         return repeated_states
 

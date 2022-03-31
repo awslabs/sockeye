@@ -488,6 +488,21 @@ def grouper(iterable: Iterable, size: int) -> Iterable:
         yield chunk
 
 
+def repeat_interleave_with_expand(state: pt.Tensor, repeats: int, dim: int) -> pt.Tensor:
+    """
+    Replace repeat_interleave with expand for latency (i.e. equivalent to state.repeat_interleave(repeats=num_of_repeat, dim=dim))
+    :param state: a pt.Tensor
+    :param repeats: int
+    :param dim: int
+    :return repeat_state
+    """
+    repeat_state_size = list(state.size())
+    repeat_state_size[dim] = repeat_state_size[dim] * repeats  # type: List[int]
+    expand_size = [-1 for _ in range(len(repeat_state_size) + 1)]  # type: List[int]
+    expand_size[dim +1] = repeats
+    return state.unsqueeze(dim + 1).expand(expand_size).reshape(repeat_state_size)
+
+
 def metric_value_is_better(new: float, old: float, metric: str) -> bool:
     """
     Returns true if new value is strictly better than old for given metric.
