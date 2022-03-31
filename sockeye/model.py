@@ -322,7 +322,10 @@ class SockeyeModel(pt.nn.Module):
         :param fname: Path to save parameters to.
         """
         self.apply(layers.interleave_kv)
-        pt.save(self.state_dict(), fname)
+        # Do not save parameters for traced modules. Traced modules are created
+        # at runtime and use the same parameters as non-traced versions.
+        filtered_state_dict = {name: param for (name, param) in self.state_dict().items() if 'traced' not in name}
+        pt.save(filtered_state_dict, fname)
         self.apply(layers.separate_kv)
         logging.info('Saved params/state_dict to "%s"', fname)
 
@@ -351,6 +354,9 @@ class SockeyeModel(pt.nn.Module):
             logger.error(f"Could not load from '{filename}'. Is this a MXNet parameter file? Please convert first.")
             raise e
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
+        # Earlier versions of Sockeye may have saved parameters for traced
+        # modules. These parameters can be safely ignored.
+        unexpected = [key for key in unexpected if 'traced' not in key]
         if not allow_missing:
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:

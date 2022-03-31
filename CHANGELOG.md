@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.8]
+
+### Fixed
+
+- When saving parameters, SockeyeModel now skips parameters for traced modules because these modules are created at runtime and use the same parameters as non-traced versions. When loading parameters, SockeyeModel ignores parameters for traced modules that may have been saved by earlier versions.
+
 ## [3.1.7]
 
 ### Changed
