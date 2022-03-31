@@ -252,6 +252,19 @@ def test_write_read_metric_file():
     assert expected_metrics == read_metrics
 
 
+def test_repeat_interleave_with_expand():
+    beam_size = 5
+    state = pt.rand(2, 1024)
+    assert pt.equal(state.repeat_interleave(beam_size, dim=0), utils.repeat_interleave_with_expand(state, beam_size, 0))
+    assert pt.equal(state.repeat_interleave(beam_size, dim=1), utils.repeat_interleave_with_expand(state, beam_size, 1))
+    state = pt.rand(2, 3, 1024)
+    assert pt.equal(state.repeat_interleave(beam_size, dim=0), utils.repeat_interleave_with_expand(state, beam_size, 0))
+    assert pt.equal(state.repeat_interleave(beam_size, dim=1), utils.repeat_interleave_with_expand(state, beam_size, 1))
+    state = pt.rand(2, 3, 4, 1024)
+    assert pt.equal(state.repeat_interleave(beam_size, dim=0), utils.repeat_interleave_with_expand(state, beam_size, 0))
+    assert pt.equal(state.repeat_interleave(beam_size, dim=1), utils.repeat_interleave_with_expand(state, beam_size, 1))
+
+
 def test_adjust_first_step_masking():
     first_step_mask = pt.tensor([[0.],
                                  [np.inf],

@@ -251,7 +251,7 @@ class TransformerDecoder(Decoder):
             autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]  # type: ignore
 
         batch, heads, target_max_len, source_max_len = source_mask.size()
-        source_mask_view = source_mask.view(batch * heads, target_max_len, source_max_len)
+        source_mask_view = source_mask.reshape(batch * heads, target_max_len, source_max_len)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
