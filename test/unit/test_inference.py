@@ -314,8 +314,8 @@ def test_make_input_from_valid_json_string_restrict_lexicon():
     text = 'this is a test'
     translator = mock_translator()
 
-    lexicon1 = Mock(sockeye.lexicon.TopKLexicon)
-    lexicon2 = Mock(sockeye.lexicon.TopKLexicon)
+    lexicon1 = Mock(sockeye.lexicon.RestrictLexicon)
+    lexicon2 = Mock(sockeye.lexicon.RestrictLexicon)
     translator.restrict_lexicon = {'lexicon1': lexicon1, 'lexicon2': lexicon2}
     assert translator.restrict_lexicon['lexicon1'] is not translator.restrict_lexicon['lexicon2']
 

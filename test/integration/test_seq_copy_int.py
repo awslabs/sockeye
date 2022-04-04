@@ -53,6 +53,17 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none",
      "--beam-size 2 --nbest-size 2",
      False, 0, 0),
+    # Basic transformer w/ Neural Vocabulary Selection
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     " --neural-vocab-selection logit_max --bow-task-weight 2",
+     "--beam-size 2 --nbest-size 2",
+     False, 0, 0),
     # Basic transformer w/ prepared data & greedy decoding
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"

@@ -326,18 +326,23 @@ def add_rerank_args(params):
                                help="Returns the reranking scores as scores in output JSON objects.")
 
 
-def add_lexicon_args(params):
+def add_lexicon_args(params, is_for_block_lexicon: bool = False):
     lexicon_params = params.add_argument_group("Model & Top-k")
     lexicon_params.add_argument("--model", "-m", required=True,
                                 help="Model directory containing source and target vocabularies.")
-    lexicon_params.add_argument("-k", type=int, default=200,
-                                help="Number of target translations to keep per source. Default: %(default)s.")
+    if not is_for_block_lexicon:
+        lexicon_params.add_argument("-k", type=int, default=200,
+                                    help="Number of target translations to keep per source. Default: %(default)s.")
 
 
-def add_lexicon_create_args(params):
+def add_lexicon_create_args(params, is_for_block_lexicon: bool = False):
     lexicon_params = params.add_argument_group("I/O")
+    if is_for_block_lexicon:
+        input_help = "A text file with tokens that shall be blocked. All token must be in the model vocabulary."
+    else:
+        input_help = "Probabilistic lexicon (fast_align format) to build top-k lexicon from."
     lexicon_params.add_argument("--input", "-i", required=True,
-                                help="Probabilistic lexicon (fast_align format) to build top-k lexicon from.")
+                                help=input_help)
     lexicon_params.add_argument("--output", "-o", required=True, help="File name to write top-k lexicon to.")
 
 
@@ -743,6 +748,21 @@ def add_model_parameters(params):
                                    'PyTorch AMP with some additional risk and requires installing Apex: '
                                    'https://github.com/NVIDIA/apex')
 
+    model_params.add_argument('--neural-vocab-selection',
+                              type=str,
+                              default=None,
+                              choices=C.NVS_TYPES,
+                              help='When enabled the model contains a neural vocabulary selection model that restricts '
+                                   'the target output vocabulary to speed up inference.'
+                                   'logit_max: predictions are made per source token and combined by max pooling.'
+                                   'eos: the prediction is based on the hidden representation of the <eos> token.')
+
+    model_params.add_argument('--neural-vocab-selection-block-loss',
+                              action='store_true',
+                              help='When enabled, gradients for NVS are blocked from propagating back to the encoder. '
+                                    'This means that NVS learns to work with the main model\'s representations but '
+                                    'does not influence its training.')
+
 
 def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',
@@ -771,6 +791,25 @@ def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_T
                         help='Accumulate gradients over X batches for each model update. Set a value higher than 1 to '
                              'simulate large batches (ex: batch_size 2560 with update_interval 4 gives effective batch '
                              'size 10240). Default: %(default)s.')
+
+
+def add_nvs_train_parameters(params):
+    params.add_argument(
+        '--bow-task-weight',
+        type=float_greater_or_equal(0.0),
+        default=1.0,
+        help=
+        'The weight of the auxiliary Bag-of-word (BOW) loss when --neural-vocab-selection is enabled. Default %(default)s.'
+    )
+
+    params.add_argument(
+        '--bow-task-pos-weight',
+        type=float_greater_or_equal(0.0),
+        default=10,
+        help='The weight of the positive class (the set of words present on the target side) for the BOW loss '
+             'when --neural-vocab-selection is set as x * num_negative_class / num_positive_class where x is the '
+             '--bow-task-pos-weight. Higher values will bias more towards recall, resulting in larger vocabularies '
+             'at test time trading off larger vocabularies for higher translation quality. Default %(default)s.')
 
 
 def add_training_args(params):
@@ -802,6 +841,8 @@ def add_training_args(params):
                               type=int_greater_or_equal(1),
                               default=1,
                               help='Number of fully-connected layers for predicting the length ratio. Default %(default)s.')
+
+    add_nvs_train_parameters(train_params)
 
     train_params.add_argument('--target-factors-weight',
                               type=float,
@@ -1203,18 +1244,38 @@ def add_inference_args(params):
                                nargs='+',
                                type=multiple_values(num_values=2, data_type=str),
                                default=None,
-                               help="Specify top-k lexicon to restrict output vocabulary to the k most likely context-"
-                                    "free translations of the source words in each sentence (Devlin, 2017). See the "
-                                    "lexicon module for creating top-k lexicons. To use multiple lexicons, provide "
+                               help="Specify block or top-k lexicon. A top-k lexicon will pose a positive constraint, "
+                                    "by providing the set of allowed target words. While a blocking lexicon poses a "
+                                    "negative constraint on providing a set of target words to be avoided. "
+                                    "Specifically, a top-k lexicon will restrict the output vocabulary to the k most "
+                                    "likely context-free translations of the source words in each sentence "
+                                    "(Devlin, 2017). See the lexicon module for creating lexicons, i.e. by running "
+                                    "sockeye-lexicon. To use multiple lexicons, provide "
                                     "'--restrict-lexicon key1:path1 key2:path2 ...' and use JSON input to specify the "
                                     "lexicon for each sentence: "
                                     "{\"text\": \"some input string\", \"restrict_lexicon\": \"key\"}. "
+                                    "If a single lexicon is specified it will be applied to all inputs. "
+                                    "If multiple lexica are specified they can be selected via the JSON input or it "
+                                    "can be skipped by not providing a lexicon in the JSON input. "
                                     "Default: %(default)s.")
     decode_params.add_argument('--restrict-lexicon-topk',
                                type=int,
                                default=None,
                                help="Specify the number of translations to load for each source word from the lexicon "
-                                    "given with --restrict-lexicon. Default: Load all entries from the lexicon.")
+                                    "given with --restrict-lexicon top-k lexicon. "
+                                    "Default: Load all entries from the lexicon.")
+
+    decode_params.add_argument('--skip-nvs',
+                               action='store_true',
+                               help='Manually turn off Neural Vocabulary Selection (NVS) to do a softmax over the full target vocabulary.',
+                               default=False)
+
+    decode_params.add_argument('--nvs-thresh',
+                               type=float,
+                               help='The probability threshold for a word to be added to the set of target words. '
+                                    'Default: 0.5.',
+                               default=0.5)
+
     decode_params.add_argument('--strip-unknown-words',
                                action='store_true',
                                default=False,

@@ -58,6 +58,17 @@ COPY_CASES = [
      False,
      1.02,
      0.98),
+    ("Copy:transformer:transformer",
+     "--encoder transformer --decoder transformer"
+     " --max-updates 4000"
+     " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64 --num-embed 32"
+     " --batch-size 16 --batch-type sentence"
+     " --neural-vocab-selection logit_max --bow-task-weight 2" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1 --prevent-unk",
+     False,
+     1.02,
+     0.98),
     ("greedy",
      "--encoder transformer --decoder transformer"
      " --max-updates 4000"

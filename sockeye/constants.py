@@ -40,6 +40,7 @@ TARGET_FACTOR_SHIFT = True
 ENCODER_PREFIX = "encoder"
 DECODER_PREFIX = "decoder"
 DEFAULT_OUTPUT_LAYER_PREFIX = "output_layer"
+NVS_LAYER_PREFIX = "nvs"
 
 # SSRU
 SSRU_PREFIX = "ssru_"
@@ -86,6 +87,10 @@ WEIGHT_TYING_SRC_TRG = 'src_trg'
 WEIGHT_TYING_SRC_TRG_SOFTMAX = 'src_trg_softmax'
 WEIGHT_TYING_TYPES = [WEIGHT_TYING_NONE, WEIGHT_TYING_SRC_TRG_SOFTMAX, WEIGHT_TYING_SRC_TRG, WEIGHT_TYING_TRG_SOFTMAX]
 
+NVS_TYPE_LOGIT_MAX = "logit_max"
+NVS_TYPE_EOS = "eos"
+NVS_TYPES = [NVS_TYPE_LOGIT_MAX, NVS_TYPE_EOS]
+
 # Activation types
 RELU = "relu"
 # Swish-1/SiLU (https://arxiv.org/pdf/1710.05941.pdf, https://arxiv.org/pdf/1702.03118.pdf)
@@ -102,6 +107,8 @@ LENRATIO_NAME = "length_ratio"
 
 LOGITS_NAME = "logits"
 FACTOR_LOGITS_NAME = "factor%d_logits"
+
+NVS_PRED_NAME = "nvs_pred"
 
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
 
@@ -252,19 +259,21 @@ CHRF = 'chrf'
 ROUGE1 = 'rouge1'
 ROUGE2 = 'rouge2'
 ROUGEL = 'rougel'
+BOW_PERPLEXITY = 'bow-perplexity'
 TER = 'ter'
 LENRATIO = 'length-ratio-mse'
 AVG_TIME = "avg-sec-per-sent"
 DECODING_TIME = "decode-walltime"
-METRICS = [PERPLEXITY, ACCURACY, LENRATIO_MSE, BLEU, CHRF, ROUGE1, TER]
+METRICS = [PERPLEXITY, ACCURACY, LENRATIO_MSE, BLEU, CHRF, ROUGE1, BOW_PERPLEXITY, TER]
 METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, CHRF: True, ROUGE1: True, PERPLEXITY: False, LENRATIO_MSE: False,
-                   TER: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, CHRF: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf, TER: np.inf}
+                   TER: False, BOW_PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, CHRF: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf, BOW_PERPLEXITY: np.inf, TER: np.inf}
 METRICS_REQUIRING_DECODER = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL, TER]
 EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL, TER]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
+BINARY_CROSS_ENTROPY = 'binary-cross-entropy'
 LINK_NORMAL = 'normal'
 LINK_POISSON = 'poisson'
 LENGTH_TASK_RATIO = 'ratio'

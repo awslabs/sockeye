@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Tuple
 
 import torch as pt
+import numpy as np
 
 from . import constants as C
 from . import utils
@@ -222,6 +223,98 @@ class CrossEntropyLoss(Loss):
         """
         Create an instance of the EvalMetric that corresponds to this Loss function.
         """
+        return PerplexityMetric(prefix=self._metric_prefix)
+
+
+class DynamicBCEWithLogitsLoss(pt.nn.BCEWithLogitsLoss):
+    """ A version of BCEWithLogitsLoss where the pos_weight can be supplied dynamically in the `forward` call. """
+
+    def __init__(self, weight: Optional[pt.Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean',
+                 pos_weight: Optional[pt.Tensor] = None) -> None:
+        super().__init__(reduction=reduction)
+        self.register_buffer('weight', weight)
+        self.register_buffer('pos_weight', pos_weight)
+        self.weight: Optional[pt.Tensor]
+        self.pos_weight: Optional[pt.Tensor]
+
+    def forward(self, input: pt.Tensor, target: pt.Tensor, pos_weight: Optional[pt.Tensor] = None) -> pt.Tensor:
+        if pos_weight is None:
+            pos_weight = self.pos_weight
+
+        return pt.nn.functional.binary_cross_entropy_with_logits(
+            input,
+            target,
+            self.weight,
+            pos_weight=pos_weight,
+            reduction=self.reduction)
+
+
+@pt.jit.script
+def _label_to_bow(label: pt.Tensor, num_labels: int):
+    bow = pt.zeros(label.shape[0], num_labels, device=label.device)
+    bow[pt.arange(0, label.shape[0], dtype=pt.int64)[:, np.newaxis], label.long()] = 1.
+    return bow
+
+
+class BinaryCrossEntropyBowLoss(Loss):
+    """
+    Computes the binary cross entropy loss over a bag-of-words of target tokens.
+    """
+
+    def __init__(self,
+                 name: str = C.BINARY_CROSS_ENTROPY,
+                 pos_weight: float = 1.0,
+                 weight: float = 1.0,
+                 dtype: str = C.DTYPE_FP32,
+                 output_name: str = C.NVS_PRED_NAME,
+                 label_name: str = C.TARGET_LABEL_NAME,
+                 num_labels: int = 0,
+                 metric_prefix: str = '') -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name,
+                         weight=weight, metric_prefix=metric_prefix)
+        self._dtype = dtype
+        assert num_labels != 0, "num_labels required"
+        self._num_labels = num_labels
+        self.ce_loss = DynamicBCEWithLogitsLoss(reduction='none')
+        self.pos_weight = pos_weight
+
+    def forward(self, output: pt.Tensor, label: pt.Tensor):
+        """
+        pred: (batch_size, num_vocab) probabilities.
+        labels: (batch_size, target_length) words.
+        """
+        nvs_pred = output
+
+        bow = _label_to_bow(label, self._num_labels)
+
+        # Set automatically using positive and negative counts
+        num_positive = pt.sum(bow).float()
+        num_total = bow.shape[0] * bow.shape[1]
+        num_negative = num_total - num_positive
+        pos_weight = self.pos_weight * num_negative / num_positive
+
+        # instead of normalizing 1/num_labels, as done by the ce block, we want to also 
+        # normalize by the virtual positive counts implied by the pos_weight
+        # Everything is one per sentence, so we get the average positive cases
+        # convert it to the additional (therefore pos_weight-1) implied counts
+        # and renormalize
+        avg_pos_count = pt.mean(pt.sum(bow, dim=1).float())
+        implied_pos_count = avg_pos_count * (pos_weight-1)
+        scale = 1. / (self._num_labels + implied_pos_count)
+
+        # shape: (batch_size, vocab_size)
+        loss = self.ce_loss(nvs_pred, bow, pos_weight)
+
+        # shape: (batch_size,)
+        loss = pt.sum(loss, 1) * scale
+
+        # Remove the batch dimension
+        # (1,)
+        ce = pt.mean(loss) * self.weight
+
+        return ce, pt.ones(1, device=ce.device)
+
+    def create_metric(self) -> 'LossMetric':
         return PerplexityMetric(prefix=self._metric_prefix)
 
 
