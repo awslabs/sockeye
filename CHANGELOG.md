@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.9]
+
+### Changed
+
+- Clarified usage of `batch_size` in Translator code.
+
 ## [3.1.8]
 
 ### Fixed
