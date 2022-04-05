@@ -1200,7 +1200,7 @@ class Translator:
         batch_size = best_hyp_indices.shape[0] // self.beam_size
         nbest_translations = []  # type: List[List[Translation]]
         reference_lengths = estimated_reference_lengths \
-            if estimated_reference_lengths is not None else np.zeros((self.batch_size * self.beam_size, 1))
+            if estimated_reference_lengths is not None else np.zeros((batch_size * self.beam_size, 1))
         for n in range(0, self.nbest_size):
 
             # Initialize the best_ids to the first item in each batch, plus current nbest index
