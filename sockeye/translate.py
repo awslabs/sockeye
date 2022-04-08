@@ -211,7 +211,6 @@ def read_and_translate(translator: inference.Translator,
     :param input_factors: Optional list of paths to files that contain source factors.
     :param input_is_json: Whether the input is in json format.
     """
-    batch_size = translator.max_batch_size
     if chunk_size is None:
         if translator.max_batch_size == 1:
             # No batching, therefore there is not need to read segments in chunks.
@@ -222,8 +221,8 @@ def read_and_translate(translator: inference.Translator,
     else:
         if chunk_size < translator.max_batch_size:
             logger.warning("You specified a chunk size (%d) smaller than the max batch size (%d). This will lead to "
-                           "a reduction in translation speed. Consider choosing a larger chunk size." % (chunk_size,
-                                                                                                         batch_size))
+                           "a reduction in translation speed. Consider choosing a larger chunk size.",
+                           chunk_size, translator.max_batch_size)
 
     logger.info("Translating...")
 

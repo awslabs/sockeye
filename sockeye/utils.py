@@ -264,6 +264,153 @@ def average_tensors(tensors: List[pt.Tensor]) -> pt.Tensor:
     return sum(tensors) / len(tensors)  # type: ignore
 
 
+def gen_prefix_masking(prefix: pt.Tensor, vocab_size: int, dtype: pt.dtype) -> Tuple[pt.Tensor, int]:
+    """
+    Generate prefix masks from prefix ids, which are inf everywhere except zero for prefix ids.
+
+    :param prefix: Target prefix token or factors in ids. Shape (batch size, max length of prefix).
+    :param vocab_size: vocabulary size
+    :param dtype: dtype of the retuning output
+    :return prefix_masks (batch size, max length of prefix, vocab_size), with type as dtype
+
+    """
+    prefix_masks_sizes = list(prefix.size())  # type: List[int]
+    max_length = prefix_masks_sizes[1]
+    prefix_masks_sizes.append(vocab_size)
+
+    # prefix_masks are inf everywhere except zero for indices of prefix ids.
+    prefix_masks = pt.full(prefix_masks_sizes, fill_value=np.inf, device=prefix.device, dtype=dtype)
+    prefix_masks.scatter_(-1, prefix.to(pt.int64).unsqueeze(-1), 0.)
+    # Note: The use of prefix_masks.scatter_() function is equivalent (but much faster) to
+    # prefix_masks[prefix_one_hot != 0] = 0., where
+    # prefix_one_hot = pt.nn.functional.one_hot(prefix.to(pt.int64), num_classes=vocab_size).to(prefix.device)
+
+    # In the same batch during inference, it is possible that some translations have target prefix
+    # while others do not have. It is also possible that translation may have a target prefix with
+    # different length to others. Thus prefix ids may include a full zero vector if a translation
+    # in the batch does not have prefix, or include a vector padding with zeros on the right if some
+    # translations are with shorter prefix. An example of prefix ids reflecting length differences \
+    # is as follows:
+    #
+    # [1, 2, 3]
+    # [1, 2, 0]
+    # [0, 0, 0]
+    #
+    # Here, the first sentence has a prefix of length 3, the second one has a prefix of length 1 \
+    # and the last one does not have prefix.
+    #
+    # At any timestep, some target prefix ids could be 0 (i.e. 0 in the target_prefix means 'no constraint'). \
+    # If a prefix id is 0 for a translation at a timestep, all hots in the vocab are assigned to 0 (instead \
+    # of only one hot is assigned to 0 and other hots are inf). This makes sure there is no constraint on \
+    # selecting any specific target token for the translation in that case.
+
+    prefix_masks.masked_fill_(prefix.unsqueeze(-1) == 0, 0)
+    return prefix_masks, max_length
+
+
+def shift_prefix_factors(prefix_factors: pt.Tensor) -> pt.Tensor:
+    """
+    Shift prefix factors one step to the right
+
+    :param prefix_factors: tensor ids. Shape (batch size, length, num of factors).
+    :return new prefix_factors_shift (batch size, length + 1, num of factors)
+    """
+    prefix_factors_sizes = prefix_factors.size()
+    prefix_factors_shift = pt.zeros(prefix_factors_sizes[0], prefix_factors_sizes[1] + 1, prefix_factors_sizes[2], dtype=prefix_factors.dtype, device=prefix_factors.device)
+    prefix_factors_shift[:, 1:] = prefix_factors
+    return prefix_factors_shift
+
+
+def adjust_first_step_masking(target_prefix: pt.Tensor, first_step_mask: pt.Tensor) -> pt.Tensor:
+    """
+    Adjust first_step_masking based on the target prefix
+    (Target prefix for each input in the same batch may have a different length. \
+    Thus first_step_mask needs to be adjusted accordingly.)
+
+    :param target_prefix: Shape (batch size, max target prefix length).
+    :param first_step_mask: Shape (batch_size * beam_size, 1)
+    :return (adjusted) first_steps_masking (batch_size * beam_size, max target prefix length + 1).
+
+    An illustrative example of how first_step_masking is adjusted
+
+    Inputs:
+
+    target_prefix (batch_size = 2, max target prefix length = 2)
+
+    tensor([1 2]
+           [1 0])
+    Note: Two target prefix tokens in the first sentence, \
+    one target prefix token in the second sentence.
+
+    first_step_mask (batch_size = 2 * beam_size = 5, 1)
+
+    tensor([[0],
+    [inf],
+    [inf],
+    [inf],
+    [inf],
+    [0],
+    [inf],
+    [inf],
+    [inf],
+    [inf])
+
+    Output:
+    Adjusted first_step_mask (batch_size * beam_size, max target prefix length + 1):
+
+    tensor([[0 0 0],
+            [inf inf inf],
+            [inf inf inf],
+            [inf inf inf],
+            [inf inf, inf],
+            [0 0 0],
+            [inf inf 0],
+            [inf inf 0],
+            [inf inf 0],
+            [inf inf 0]])
+
+    The concrete steps of what this function does are as follows:
+
+    Step 1: Create a zero masking matrix with shape (batch size, max target prefix length + 1)
+    Fill 1 into this masking matrix based on the target prefix
+
+    target prefix  initialize masking    masking      roll one step to the right
+                   from target prefix    is not 0      and assign 1 at index 0
+        [1 2]    ->    [1 2 0]        -> [1 1 0]  ->           [1 1 1]
+        [1 0]          [1 0 0]           [1 0 0]               [1 1 0]
+
+    Step 2: Adjust first_step_mask based on masking
+
+    masking     expand masking with     expand first_step_mask with max target
+                     beam size         prefix length, fill 0 where masking is 0
+    [1 1 1]  ->      [1 1 1]        ->             [0 0 0]
+    [1 1 0]          [1 1 1]                       [inf inf inf]
+                     [1 1 1]                       [inf inf inf]
+                     [1 1 1]                       [inf inf inf]
+                     [1 1 1]                       [inf inf inf]
+                     [1 1 0]                       [0 0 0]
+                     [1 1 0]                       [inf inf 0]
+                     [1 1 0]                       [inf inf 0]
+                     [1 1 0]                       [inf inf 0]
+                     [1 1 0]                       [inf inf 0]
+    """
+    batch_beam, _  = first_step_mask.size()
+    batch, max_prefix_len = target_prefix.size()
+    beam_size = batch_beam // batch
+    # Step 1
+    masking = pt.zeros((batch, max_prefix_len + 1), device=target_prefix.device)
+    masking[:, :max_prefix_len] = target_prefix
+    masking = pt.clamp(masking, 0., 1.) # force all non zero ids to 1
+    masking = pt.roll(masking, 1, -1)
+    masking[:, 0] = 1.
+
+    # Step 2
+    masking = masking.unsqueeze(1).expand(-1, beam_size, -1).reshape(batch_beam, -1)
+    first_step_mask = first_step_mask.expand(-1, masking.size(-1)).clone()
+    first_step_mask.masked_fill_(masking == 0., 0.)
+    return first_step_mask
+
+
 def parse_metrics_line(line_number: int, line: str) -> Dict[str, Any]:
     """
     Parse a line of metrics into a mappings of key and values.

@@ -43,7 +43,7 @@ seed = random.randint(0, 1000)
 
 
 COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial-learning-rate 0.001" \
-                         " --decode-and-evaluate 0 --label-smoothing 0.0" \
+                         " --decode-and-evaluate 2 --label-smoothing 0.0" \
                          " --optimized-metric perplexity --weight-tying-type src_trg_softmax"
 
 

@@ -118,6 +118,8 @@ class SockeyeModel(pt.nn.Module):
                                                vocab_size=self.config.vocab_target_size,
                                                weight=output_weight)
         if self.inference_only:
+            # Running this layer scripted with a newly initialized model can
+            # cause an overflow error.
             self.output_layer = pt.jit.script(self.output_layer)
 
         self.factor_output_layers = pt.nn.ModuleList()
@@ -129,6 +131,7 @@ class SockeyeModel(pt.nn.Module):
                                         out_features=factor_config.vocab_size,
                                         bias=True)
             self.factor_output_layers.append(output_layer)
+        self.factor_vocab_size = factor_config.vocab_size if self.target_factor_configs else None
 
         self.length_ratio = None  # type: Optional[layers.LengthRatio]
         if self.config.config_length_task is not None:
@@ -181,20 +184,16 @@ class SockeyeModel(pt.nn.Module):
         :return: Encoder outputs, encoded output lengths
         """
 
-        if self.inference_only:
-            if self.traced_embedding_source is None:
-                logger.debug("Tracing embedding_source")
-                self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
-            source_embed = self.traced_embedding_source(inputs)
-            if self.encoder.get_active_branch() not in self.traced_encoder:
-                logger.debug(f"Tracing encoder (branch {self.encoder.get_active_branch()})")
-                self.traced_encoder[self.encoder.get_active_branch()] = \
-                    pt.jit.trace(self.encoder, (source_embed, valid_length))
-            source_encoded, source_encoded_length = \
-                self.traced_encoder[self.encoder.get_active_branch()](source_embed, valid_length)
-        else:
-            source_embed = self.embedding_source(inputs)
-            source_encoded, source_encoded_length = self.encoder(source_embed, valid_length)
+        if self.traced_embedding_source is None:
+            logger.debug("Tracing embedding_source")
+            self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
+        source_embed = self.traced_embedding_source(inputs)
+        if self.encoder.get_active_branch() not in self.traced_encoder:
+            logger.debug(f"Tracing encoder (branch {self.encoder.get_active_branch()})")
+            self.traced_encoder[self.encoder.get_active_branch()] = \
+                pt.jit.trace(self.encoder, (source_embed, valid_length))
+        source_encoded, source_encoded_length = \
+            self.traced_encoder[self.encoder.get_active_branch()](source_embed, valid_length)
         return source_encoded, source_encoded_length
 
     def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None,
@@ -253,29 +252,21 @@ class SockeyeModel(pt.nn.Module):
 
         :return: logits, list of new model states, other target factor logits.
         """
-        if self.inference_only:
-            decode_step_inputs = [step_input, states]
-            if vocab_slice_ids is not None:
-                decode_step_inputs.append(vocab_slice_ids)
-            if self.decoder.get_active_branch() not in self.traced_decode_step:
-                logger.debug(f"Tracing decode step (branch {self.decoder.get_active_branch()})")
-                decode_step_module = _DecodeStep(self.embedding_target,
-                                                 self.decoder,
-                                                 self.output_layer,
-                                                 self.factor_output_layers)
-                self.traced_decode_step[self.decoder.get_active_branch()] = \
-                    pt.jit.trace(decode_step_module, decode_step_inputs)
-            # the traced module returns a flat list of tensors
-            decode_step_outputs = self.traced_decode_step[self.decoder.get_active_branch()](*decode_step_inputs)
-            step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
-            new_states = decode_step_outputs[self.num_target_factors:]
-        else:
-            target_embed = self.embedding_target(step_input.unsqueeze(1))
-            decoder_out, new_states = self.decoder(target_embed, states)
-            decoder_out = decoder_out.squeeze(1)
-            # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
-            step_output = self.output_layer(decoder_out, vocab_slice_ids)
-            target_factor_outputs = [fol(decoder_out) for fol in self.factor_output_layers]
+        decode_step_inputs = [step_input, states]
+        if vocab_slice_ids is not None:
+            decode_step_inputs.append(vocab_slice_ids)
+        if self.decoder.get_active_branch() not in self.traced_decode_step:
+            logger.debug(f"Tracing decode step (branch {self.decoder.get_active_branch()})")
+            decode_step_module = _DecodeStep(self.embedding_target,
+                                                self.decoder,
+                                                self.output_layer,
+                                                self.factor_output_layers)
+            self.traced_decode_step[self.decoder.get_active_branch()] = \
+                pt.jit.trace(decode_step_module, decode_step_inputs)
+        # the traced module returns a flat list of tensors
+        decode_step_outputs = self.traced_decode_step[self.decoder.get_active_branch()](*decode_step_inputs)
+        step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
+        new_states = decode_step_outputs[self.num_target_factors:]
 
         return step_output, new_states, target_factor_outputs
 
@@ -350,7 +341,15 @@ class SockeyeModel(pt.nn.Module):
         :param fname: Path to save parameters to.
         """
         self.apply(layers.interleave_kv)
-        pt.save(self.state_dict(), fname)
+        # Sockeye follows the convention of using the "traced" prefix for
+        # modules that are created at runtime by tracing other modules.
+        # Ex: traced_encoder = trace(encoder, ...)
+        # Traced modules use the same parameters as the original versions so we
+        # filter their names from the state dictionary to avoid saving redundant
+        # copies of their parameters. Copies can also cause errors at loadtime
+        # if the traced modules do not yet exist.
+        filtered_state_dict = {name: param for (name, param) in self.state_dict().items() if 'traced' not in name}
+        pt.save(filtered_state_dict, fname)
         self.apply(layers.separate_kv)
         logging.info('Saved params/state_dict to "%s"', fname)
 
@@ -394,6 +393,10 @@ class SockeyeModel(pt.nn.Module):
                 missing.remove(key)
                 loaded.add(non_branch_key)
         unexpected -= loaded
+
+        # Earlier versions of Sockeye may have saved parameters for traced
+        # modules. These parameters can be safely ignored.
+        unexpected = {key for key in unexpected if 'traced' not in key}
 
         # Check if keys are still missing/extra after handling special cases
         if not allow_missing:

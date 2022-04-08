@@ -11,7 +11,7 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [3.1.2]
+## [3.1.10]
 
 ### Added
 
@@ -23,6 +23,51 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
   - The user can also specify custom weights (`--data-sampling-method custom --data-sampling-custom ...`).
   - TODO: branching layers
   - TODO: t_offset
+
+## [3.1.9]
+
+### Changed
+
+- Clarified usage of `batch_size` in Translator code.
+
+## [3.1.8]
+
+### Fixed
+
+- When saving parameters, SockeyeModel now skips parameters for traced modules because these modules are created at runtime and use the same parameters as non-traced versions. When loading parameters, SockeyeModel ignores parameters for traced modules that may have been saved by earlier versions.
+
+## [3.1.7]
+
+### Changed
+
+- SockeyeModel components are now traced regardless of whether `inference_only` is set, including for the CheckpointDecoder during training.
+
+## [3.1.6]
+
+### Changed
+
+- Moved offsetting of topk scores out of the (traced) TopK module. This allows sending requests of variable
+  batch size to the same Translator/Model/BeamSearch instance.
+
+## [3.1.5]
+
+### Changed
+- Allow PyTorch 1.11 in requirements
+
+## [3.1.4]
+
+### Added
+- Added support for the use of adding target prefix and target prefix factors to the input in JSON format during inference.
+
+## [3.1.3]
+
+### Added
+- Added support for the use of adding source prefixes to the input in JSON format during inference.
+
+## [3.1.2]
+
+### Changed
+- Optimized creation of source length mask by using `expand` instead of `repeat_interleave`.
 
 ## [3.1.1]
 

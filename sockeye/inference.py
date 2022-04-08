@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 
-import numpy as onp
+import numpy as np
 import torch as pt
 
 from . import constants as C
@@ -105,7 +105,7 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
         """
         if forced_max_output_len is not None:
             return forced_max_output_len + C.SPACE_FOR_XOS
-        return int(onp.ceil(factor * input_length))
+        return int(np.ceil(factor * input_length))
 
     return max_input_len, get_max_output_length
 
@@ -130,6 +130,12 @@ class TranslatorInput:
     sentence_id: SentenceId
     tokens: Tokens
     factors: Optional[List[Tokens]] = None
+    source_prefix_tokens: Optional[Tokens] = None
+    source_prefix_factors: Optional[List[Tokens]] = None
+    target_prefix_tokens: Optional[Tokens] = None
+    target_prefix_factors: Optional[List[Tokens]] = None
+    use_target_prefix_all_chunks: Optional[bool] = True
+    keep_target_prefix_key: Optional[bool] = True
     restrict_lexicon: Optional[lexicon.TopKLexicon] = None
     constraints: Optional[List[Tokens]] = None
     avoid_list: Optional[List[Tokens]] = None
@@ -137,11 +143,10 @@ class TranslatorInput:
     active_branch: Optional[int] = None
 
     def __str__(self):
-        return 'TranslatorInput(%s, %s, factors=%s, constraints=%s, avoid=%s)' \
-            % (self.sentence_id, self.tokens, self.factors, self.constraints, self.avoid_list)
+        return f'TranslatorInput({self.sentence_id}, {self.tokens}, factors={self.factors}, source_prefix_tokens={self.source_prefix_tokens}, source_prefix_factors={self.source_prefix_factors}, target_prefix_tokens={self.target_prefix_tokens}, target_prefix_factors={self.target_prefix_factors}, use_target_prefix_all_chunks={self.use_target_prefix_all_chunks}, keep_target_prefix_key={self.keep_target_prefix_key}, constraints={self.constraints}, avoid={self.avoid_list})'
 
     def __len__(self):
-        return len(self.tokens)
+        return len(self.tokens) + self.num_source_prefix_tokens
 
     @property
     def num_factors(self) -> int:
@@ -149,6 +154,45 @@ class TranslatorInput:
         Returns the number of factors of this instance.
         """
         return 1 + (0 if not self.factors else len(self.factors))
+
+    def get_source_prefix_tokens(self) -> Tokens:
+        """
+        Returns the source prefix tokens of this instance.
+        """
+        return self.source_prefix_tokens if self.source_prefix_tokens is not None else []
+
+    @property
+    def num_source_prefix_tokens(self) -> int:
+        """
+        Returns the number of source prefix tokens of this instance.
+        """
+        return len(self.get_source_prefix_tokens())
+
+    def get_target_prefix_tokens(self) -> Tokens:
+        """
+        Returns the target prefix tokens of this instance.
+        """
+        return self.target_prefix_tokens if self.target_prefix_tokens is not None else []
+
+    @property
+    def num_target_prefix_tokens(self) -> int:
+        """
+        Returns the number of target prefix tokens of this instance.
+        """
+        return len(self.get_target_prefix_tokens())
+
+    def get_target_prefix_factors(self) -> List[Tokens]:
+        """
+        Returns the target prefix factors of this instance.
+        """
+        return self.target_prefix_factors if self.target_prefix_factors is not None else [[]]
+
+    @property
+    def num_target_prefix_factors(self) -> int:
+        """
+        Returns the number of target prefix factors of this instance.
+        """
+        return len(self.get_target_prefix_factors()[0])
 
     def chunks(self, chunk_size: int) -> Generator['TranslatorInput', None, None]:
         """
@@ -165,16 +209,26 @@ class TranslatorInput:
                 'with the first chunk, which is probably wrong.',
                 self.sentence_id, len(self.tokens), chunk_size)
 
-        for chunk_id, i in enumerate(range(0, len(self), chunk_size)):
+        for chunk_id, i in enumerate(range(0, len(self) - self.num_source_prefix_tokens, chunk_size)):
             factors = [factor[i:i + chunk_size] for factor in self.factors] if self.factors is not None else None
             # Constrained decoding is not supported for chunked TranslatorInputs. As a fall-back, constraints are
             # assigned to the first chunk
             constraints = self.constraints if chunk_id == 0 else None
+            # Target_prefix_tokens are assigned to all chunks if self.use_target_prefix_all_chunks is True,
+            # otherwise target_prefix_tokens are assigned only to the first chunk
+            target_prefix_tokens = self.target_prefix_tokens if chunk_id == 0 or self.use_target_prefix_all_chunks else None
+            target_prefix_factors = self.target_prefix_factors if chunk_id == 0 or self.use_target_prefix_all_chunks else None
             pass_through_dict = copy.deepcopy(self.pass_through_dict) \
                 if (chunk_id == 0 and self.pass_through_dict is not None) else None
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
+                                  source_prefix_tokens=self.source_prefix_tokens,
+                                  source_prefix_factors=self.source_prefix_factors,
+                                  target_prefix_tokens=target_prefix_tokens,
+                                  target_prefix_factors=self.target_prefix_factors,
+                                  use_target_prefix_all_chunks=self.use_target_prefix_all_chunks,
+                                  keep_target_prefix_key=self.keep_target_prefix_key,
                                   restrict_lexicon=self.restrict_lexicon,
                                   constraints=constraints,
                                   avoid_list=self.avoid_list,
@@ -189,6 +243,12 @@ class TranslatorInput:
                                tokens=self.tokens + [C.EOS_SYMBOL],
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
+                               source_prefix_tokens=self.source_prefix_tokens,
+                               source_prefix_factors=self.source_prefix_factors,
+                               target_prefix_tokens=self.target_prefix_tokens,
+                               target_prefix_factors=self.target_prefix_factors,
+                               use_target_prefix_all_chunks=self.use_target_prefix_all_chunks,
+                               keep_target_prefix_key=self.keep_target_prefix_key,
                                restrict_lexicon=self.restrict_lexicon,
                                constraints=self.constraints,
                                avoid_list=self.avoid_list,
@@ -258,6 +318,21 @@ def make_input_from_dict(sentence_id: SentenceId,
         tokens = input_dict[C.JSON_TEXT_KEY]
         tokens = list(utils.get_tokens(tokens))
         factors = input_dict.get(C.JSON_FACTORS_KEY)
+        source_prefix_tokens = input_dict.get(C.JSON_SOURCE_PREFIX_KEY)
+        source_prefix_tokens = list(utils.get_tokens(source_prefix_tokens)) if source_prefix_tokens is not None else None
+        if source_prefix_tokens is not None and not source_prefix_tokens:
+            logger.warning(f"Empty string is specified as a source prefix for input '{input_dict[C.JSON_SOURCE_PREFIX_KEY]}'.")
+        source_prefix_factors = input_dict.get(C.JSON_SOURCE_PREFIX_FACTORS_KEY)
+        if source_prefix_factors is not None and not source_prefix_tokens:
+            logger.error("Source prefix factors cannot be specified when source prefix is not specified")
+            return _bad_input(sentence_id, reason=str(input_dict))
+        if source_prefix_factors is not None and not factors:
+            logger.error("Source prefix factors cannot be specified when source factors are not specified")
+            return _bad_input(sentence_id, reason=str(input_dict))
+        if source_prefix_tokens is not None and (factors is not None and not source_prefix_factors):
+            logger.error("Source prefix factors need to be also specified together with source factors")
+            return _bad_input(sentence_id, reason=str(input_dict))
+
         if isinstance(factors, list):
             factors = [list(utils.get_tokens(factor)) for factor in factors]
             lengths = [len(f) for f in factors]
@@ -265,6 +340,37 @@ def make_input_from_dict(sentence_id: SentenceId,
                 logger.error("Factors have different length than input text: %d vs. %s", len(tokens), str(lengths))
                 return _bad_input(sentence_id, reason=str(input_dict))
 
+        if isinstance(source_prefix_factors, list):
+            source_prefix_factors = [list(utils.get_tokens(spf)) for spf in source_prefix_factors]
+            for source_prefix_factor in source_prefix_factors:
+                if not source_prefix_factor:
+                    logger.warning(f"Empty list is specified as source prefix factors for input '%s'.",
+                                   input_dict[C.JSON_TEXT_KEY])
+            lengths = [len(source_prefix_factor) for source_prefix_factor in source_prefix_factors]
+            if not all(len(source_prefix_tokens) == length for length in lengths):
+                logger.error("Source prefix has %d tokens but there are %s prefix factors",
+                             len(source_prefix_tokens), str(lengths))
+                return _bad_input(sentence_id, reason=str(input_dict))
+            if len(source_prefix_factors) != len(factors):
+                logger.error("There is mismatch in source factors %d and prefix factors %d",
+                             len(factors), len(source_prefix_factors))
+                return _bad_input(sentence_id, reason=str(input_dict))
+
+        target_prefix_tokens = input_dict.get(C.JSON_TARGET_PREFIX_KEY)
+        target_prefix_tokens = list(utils.get_tokens(target_prefix_tokens)) if target_prefix_tokens is not None else None
+        if target_prefix_tokens is not None and not target_prefix_tokens:
+            logger.warning(f"Empty string is specified as a target prefix for input '{input_dict[C.JSON_TEXT_KEY]}'.")
+
+        target_prefix_factors = input_dict.get(C.JSON_TARGET_PREFIX_FACTORS_KEY)
+        if isinstance(target_prefix_factors, list):
+            target_prefix_factors = [list(utils.get_tokens(tpf)) for tpf in target_prefix_factors]
+            if len(target_prefix_factors) != translator.num_target_factors - 1:
+                logger.error("Must provide target prefix for each target factor. Given: %s required: %s",
+                             len(target_prefix_factors), translator.num_target_factors - 1)
+                return _bad_input(sentence_id, reason=str(input_dict))
+
+        use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
+        keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)
         # Lexicon for vocabulary selection/restriction:
         # This is only populated when using multiple lexicons, in which case the
         # restrict_lexicon key must exist and the value (name) must map to one
@@ -282,7 +388,7 @@ def make_input_from_dict(sentence_id: SentenceId,
                              % (restrict_lexicon_name, ' '.join(sorted(translator.restrict_lexicon))))
                 return _bad_input(sentence_id, reason=str(input_dict))
 
-        # List of phrases to prevent from occuring in the output
+        # List of phrases to prevent from occurring in the output
         avoid_list = input_dict.get(C.JSON_AVOID_KEY)
 
         # List of phrases that must appear in the output
@@ -307,8 +413,15 @@ def make_input_from_dict(sentence_id: SentenceId,
         active_branch = input_dict.get(C.JSON_ACTIVE_BRANCH_KEY)
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
-                               restrict_lexicon=restrict_lexicon, constraints=constraints, avoid_list=avoid_list,
-                               pass_through_dict=input_dict, active_branch=active_branch)
+                               source_prefix_tokens=source_prefix_tokens,
+                               source_prefix_factors=source_prefix_factors,
+                               target_prefix_tokens=target_prefix_tokens,
+                               target_prefix_factors=target_prefix_factors,
+                               use_target_prefix_all_chunks=use_target_prefix_all_chunks,
+                               keep_target_prefix_key=keep_target_prefix_key,
+                               restrict_lexicon=restrict_lexicon, constraints=constraints,
+                               avoid_list=avoid_list, pass_through_dict=input_dict,
+                               active_branch=active_branch)
 
     except Exception as e:
         logger.exception(e, exc_info=True)  # type: ignore
@@ -463,7 +576,7 @@ def empty_translation(add_nbest: bool = False) -> Translation:
     :param add_nbest: Include (empty) nbest_translations in the translation object.
     """
     return Translation(target_ids=[],
-                       scores=[-onp.inf],
+                       scores=[-np.inf],
                        nbest_translations=NBestTranslations([], []) if add_nbest else None)
 
 
@@ -551,8 +664,19 @@ def _expand_nbest_translation(translation: Translation) -> List[Translation]:
     for target_ids, score in zip(translation.nbest_translations.target_ids_list, translation.nbest_translations.scores):
         nbest_list.append(Translation(target_ids, score,
                                       estimated_reference_length=translation.estimated_reference_length))
-
     return nbest_list
+
+
+def _remove_target_prefix_tokens(target_ids: TokenIds, num_target_prefix_tokens: int) -> TokenIds:
+    """
+    Remove target prefix tokens from target token Ids
+
+    :param target_ids: target token Ids of translation of an input
+    :param num_target_prefix_tokens: number of target prefix tokens included in the translation
+    :return: new target_ids
+    """
+    starting_idx = min(len(target_ids), num_target_prefix_tokens)
+    return target_ids[starting_idx:]
 
 
 def _concat_translations(translations: List[Translation],
@@ -572,7 +696,7 @@ def _concat_translations(translations: List[Translation],
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
     estimated_reference_length = None  # type: Optional[float]
-    scores = onp.zeros_like(translations[0].scores)
+    scores = np.zeros_like(translations[0].scores)
 
     for idx, translation in enumerate(translations):
         if idx == len(translations) - 1:
@@ -592,7 +716,7 @@ def _concat_translations(translations: List[Translation],
         # Unnormalize the primary score:
         raw_score = scorer.unnormalize(score, len(translation.target_ids), translation.estimated_reference_length)
         # Accumulate scores element-wise
-        scores = onp.add(scores, [raw_score, *factor_scores])
+        scores = np.add(scores, [raw_score, *factor_scores])
 
     # Re-normalize the primary score
     scores[0] = scorer(scores[0], len(target_ids), estimated_reference_length)
@@ -759,22 +883,33 @@ class Translator:
             # bad input
             if isinstance(trans_input, BadTranslatorInput):
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                            translation=empty_translation(add_nbest=(self.nbest_size > 1))))
+                                                            translation=empty_translation(add_nbest=(
+                                                                    self.nbest_size > 1))))
             # empty input
             elif len(trans_input.tokens) == 0:
                 translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
-                                                            translation=empty_translation(add_nbest=(self.nbest_size > 1))))
+                                                            translation=empty_translation(add_nbest=(
+                                                                    self.nbest_size > 1))))
             else:
-                if len(trans_input.tokens) > self.max_input_length:
+                # take length of source prefix, if used, into account while chunking
+                max_input_length_for_chunking = self.max_input_length - trans_input.num_source_prefix_tokens
+                if max_input_length_for_chunking <= 0:
+                    logger.warning("Input %s has a source prefix with length (%d) that already equals or exceeds "
+                                   "max input length (%d). Return an empty translation instead.",
+                                   trans_input.sentence_id, trans_input.num_source_prefix_tokens, self.max_input_length)
+                    translated_chunks.append(IndexedTranslation(input_idx=trans_input_idx, chunk_idx=0,
+                                                                translation=empty_translation(
+                                                                    add_nbest=(self.nbest_size > 1))))
+                elif len(trans_input.tokens) > max_input_length_for_chunking:
                     # oversized input
                     logger.debug(
                         "Input %s has length (%d) that exceeds max input length (%d). "
                         "Splitting into chunks of size %d.",
                         trans_input.sentence_id, len(trans_input.tokens),
-                        self.max_input_length, self.max_input_length)
+                        max_input_length_for_chunking, max_input_length_for_chunking)
                     chunks = [trans_input_chunk.with_eos()
                               for trans_input_chunk in
-                              trans_input.chunks(self.max_input_length)]
+                              trans_input.chunks(max_input_length_for_chunking)]
                     input_chunks.extend([IndexedTranslatorInput(trans_input_idx, chunk_idx, chunk_input)
                                          for chunk_idx, chunk_input in enumerate(chunks)])
                 else:
@@ -807,7 +942,7 @@ class Translator:
 
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
             with pt.inference_mode():
-                batch_translations = self._translate_np(*self._get_inference_input(translator_inputs))  # type: ignore
+                batch_translations = self._translate_np(*self._get_inference_input(translator_inputs))
 
             # truncate to remove filler translations
             if fill_up_batches and rest > 0:
@@ -825,11 +960,20 @@ class Translator:
         chunks_by_input_idx = itertools.groupby(translated_chunks, key=lambda translation: translation.input_idx)
         for trans_input, (input_idx, translations_for_input_idx) in zip(trans_inputs, chunks_by_input_idx):
             translations_for_input_idx = list(translations_for_input_idx)  # type: ignore
+            num_target_prefix_tokens = trans_input.num_target_prefix_tokens
             if len(translations_for_input_idx) == 1:  # type: ignore
                 translation = translations_for_input_idx[0].translation  # type: ignore
+                if num_target_prefix_tokens > 0 and not trans_input.keep_target_prefix_key:
+                    translation.target_ids = \
+                    _remove_target_prefix_tokens(translation.target_ids, num_target_prefix_tokens)
             else:
                 translations_to_concat = [translated_chunk.translation
                                           for translated_chunk in translations_for_input_idx]
+                if num_target_prefix_tokens > 0 and not trans_input.keep_target_prefix_key:
+                    for i in range(len(translations_to_concat)):
+                        if i == 0 or trans_input.use_target_prefix_all_chunks:
+                            translations_to_concat[i].target_ids = \
+                            _remove_target_prefix_tokens(translations_to_concat[i].target_ids, num_target_prefix_tokens)
                 translation = self._concat_translations(translations_to_concat)
 
             results.append(self._make_result(trans_input, translation))
@@ -843,9 +987,11 @@ class Translator:
 
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[pt.Tensor,
-                                                                           int,
+                                                                           pt.Tensor,
                                                                            Optional[lexicon.TopKLexicon],
                                                                            pt.Tensor,
+                                                                           Optional[pt.Tensor],
+                                                                           Optional[pt.Tensor],
                                                                            Optional[int]]:
         """
         Assembles the numerical data for the batch. This comprises a tensor for the source sentences,
@@ -853,16 +999,23 @@ class Translator:
 
         :param trans_inputs: List of TranslatorInputs.
         :return tensor of source ids (shape=(batch_size, bucket_key, num_factors)),
-                tensor of valid source lengths, lexicon for vocabulary restriction, and a tensor of maximum output
-                lengths.
+                tensor of valid source lengths, lexicon for vocabulary restriction, tensor of maximum output lengths,
+                optional target prefix, and optional target prefix factors.
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
 
+        max_target_prefix_length = max(inp.num_target_prefix_tokens for inp in trans_inputs)
+        max_target_prefix_factors_length = max(inp.num_target_prefix_factors for inp in trans_inputs)
         max_length = max(len(inp) for inp in trans_inputs)
         # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
-        source = onp.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
+        source_np = np.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
+        target_prefix_np = np.zeros((batch_size, max_target_prefix_length), dtype='int32') \
+            if max_target_prefix_length > 0 else None
+        target_prefix_factors_np = np.zeros((batch_size, max_target_prefix_factors_length,
+                                             self.num_target_factors - 1), dtype='int32') \
+            if self.num_target_factors > 1 and max_target_prefix_factors_length > 0 else None
         restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
         active_branch = None  # type: Optional[int]
 
@@ -870,17 +1023,33 @@ class Translator:
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
             max_output_lengths.append(self._get_max_output_length(num_tokens))
-            source[j, :num_tokens, 0] = tokens2ids(trans_input.tokens, self.source_vocabs[0])
-
+            source_np[j, :num_tokens, 0] = tokens2ids(itertools.chain(trans_input.get_source_prefix_tokens(),
+                                                                      trans_input.tokens), self.source_vocabs[0])
+            if target_prefix_np is not None and trans_input.num_target_prefix_tokens > 0:
+                target_prefix_np[j, :trans_input.num_target_prefix_tokens] = \
+                    tokens2ids(trans_input.get_target_prefix_tokens(), self.vocab_targets[0])
+            if target_prefix_factors_np is not None \
+                    and self.num_target_factors > 1 and trans_input.num_target_prefix_factors > 0:
+                for i in range(1, self.num_target_factors):
+                    target_prefix_factors_np[j, :trans_input.num_target_prefix_factors, i - 1] = \
+                        tokens2ids(trans_input.get_target_prefix_factors()[i - 1], self.vocab_targets[i])
             factors = trans_input.factors if trans_input.factors is not None else []
             num_factors = 1 + len(factors)
             if num_factors != self.num_source_factors:
                 logger.warning("Input %d factors, but model(s) expect %d", num_factors,
                                self.num_source_factors)
-            for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
-                # fill in as many factors as there are tokens
-
-                source[j, :num_tokens, i] = tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+            if not trans_input.source_prefix_factors: # no source prefix during inference
+                for i, factor in enumerate(factors[:self.num_source_factors - 1], start=1):
+                    # fill in as many factors as there are tokens
+                    source_np[j, :num_tokens, i] = tokens2ids(factor, self.source_vocabs[i])[:num_tokens]
+            else:
+                for i, zip_of_factor_and_prefix_factor in enumerate(
+                        zip(factors[:self.num_source_factors - 1],
+                            trans_input.source_prefix_factors[:self.num_source_factors - 1]),
+                        start=1):
+                    factor, source_prefix_factor = zip_of_factor_and_prefix_factor
+                    source_np[j, :num_tokens, i] = tokens2ids(itertools.chain(source_prefix_factor, factor),
+                                                              self.source_vocabs[i])[:num_tokens]
 
             # Check if vocabulary selection/restriction is enabled:
             # - First, see if the translator input provides a lexicon (used for multiple lexicons)
@@ -911,11 +1080,23 @@ class Translator:
                         logger.warning('Sentence %s: different active branch specified, will overrule previous. '
                                        'All inputs in batch must use same active branch.' % trans_input.sentence_id)
 
-        source = pt.tensor(source, device=self.device, dtype=pt.int32)  # type: ignore
+        source = pt.tensor(source_np, device=self.device, dtype=pt.int32)
         source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
-        max_output_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)  # type: ignore
+        max_out_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)
+        target_prefix = pt.tensor(target_prefix_np, device=self.device, dtype=pt.int32) \
+            if target_prefix_np is not None else None
+        target_prefix_factors = pt.tensor(target_prefix_factors_np, device=self.device, dtype=pt.int32) \
+            if target_prefix_factors_np is not None else None
 
-        return source, source_length, restrict_lexicon, max_output_lengths, active_branch  # type: ignore
+        # During inference, if C.TARGET_FACTOR_SHIFT is True, predicted target_factors are left-shifted
+        # (see _unshift_target_factors function()) so that they re-align with the words.
+        # With that, target_prefix_factors need to be also right-shifted here if C.TARGET_FACTOR_SHIFT is True so
+        # that when they are shifted back later they would align with words.
+        target_prefix_factors = utils.shift_prefix_factors(target_prefix_factors) \
+            if target_prefix_factors is not None and \
+               C.TARGET_FACTOR_SHIFT else target_prefix_factors
+
+        return source, source_length, restrict_lexicon, max_out_lengths, target_prefix, target_prefix_factors, active_branch
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -998,13 +1179,19 @@ class Translator:
                       source_length: pt.Tensor,
                       restrict_lexicon: Optional[lexicon.TopKLexicon],
                       max_output_lengths: pt.Tensor,
-                      active_branch: Optional[int]) -> List[Translation]:
+                      target_prefix: Optional[pt.Tensor] = None,
+                      target_prefix_factors: Optional[pt.Tensor] = None,
+                      active_branch: Optional[int] = None) -> List[Translation]:
         """
         Translates source of source_length and returns list of Translations.
 
         :param source: Source ids. Shape: (batch_size, bucket_key, num_factors).
         :param source_length: Valid source lengths.
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
+        :param max_output_lengths: Tensor of maximum output lengths per input in source.
+                 Shape: (batch_size,). Dtype: int32.
+        :param target_prefix: Target prefix ids.
+        :param target_prefix_factors: Target prefix factors ids.
 
         :return: List of translations.
         """
@@ -1014,7 +1201,9 @@ class Translator:
         return self._get_best_translations(self._search(source,
                                                         source_length,
                                                         restrict_lexicon,
-                                                        max_output_lengths))
+                                                        max_output_lengths,
+                                                        target_prefix,
+                                                        target_prefix_factors))
 
     def _get_best_translations(self, result: SearchResult) -> List[Translation]:
         """
@@ -1032,12 +1221,12 @@ class Translator:
             estimated_reference_lengths = result.estimated_reference_lengths.cpu().numpy()
         batch_size = best_hyp_indices.shape[0] // self.beam_size
         nbest_translations = []  # type: List[List[Translation]]
-        reference_lengths = estimated_reference_lengths if estimated_reference_lengths is not None \
-                                                        else onp.zeros((self.batch_size * self.beam_size, 1))
+        reference_lengths = estimated_reference_lengths \
+            if estimated_reference_lengths is not None else np.zeros((batch_size * self.beam_size, 1))
         for n in range(0, self.nbest_size):
 
             # Initialize the best_ids to the first item in each batch, plus current nbest index
-            best_ids = onp.arange(n, batch_size * self.beam_size, self.beam_size, dtype='int32')
+            best_ids = np.arange(n, batch_size * self.beam_size, self.beam_size, dtype='int32')
             # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)  # type: ignore
             indices_shape_1 = indices.shape[1]  # pylint: disable=unsubscriptable-object
@@ -1045,7 +1234,7 @@ class Translator:
                     [self._assemble_translation(*x, unshift_target_factors=C.TARGET_FACTOR_SHIFT) for x in
                      zip(best_word_indices[indices,
                                            :,  # get all factors
-                                           onp.arange(indices_shape_1)],
+                                           np.arange(indices_shape_1)],
                          lengths[best_ids],
                          accumulated_scores[best_ids],
                          reference_lengths[best_ids])])  # type: ignore
@@ -1055,7 +1244,7 @@ class Translator:
         return reduced_translations
 
     @staticmethod
-    def _get_best_word_indices_for_kth_hypotheses(ks: onp.ndarray, all_hyp_indices: onp.ndarray) -> onp.ndarray:
+    def _get_best_word_indices_for_kth_hypotheses(ks: np.ndarray, all_hyp_indices: np.ndarray) -> np.ndarray:
         """
         Traverses the matrix of best hypotheses indices collected during beam search in reversed order by
         using the kth hypotheses index as a backpointer.
@@ -1069,7 +1258,7 @@ class Translator:
         """
         batch_size = ks.shape[0]
         num_steps = all_hyp_indices.shape[1]
-        result = onp.zeros((batch_size, num_steps - 1), dtype=all_hyp_indices.dtype)
+        result = np.zeros((batch_size, num_steps - 1), dtype=all_hyp_indices.dtype)
         # first index into the history of the desired hypotheses.
         pointer = all_hyp_indices[ks, -1]
         # for each column/step follow the pointer, starting from the penultimate column/step
@@ -1079,9 +1268,9 @@ class Translator:
         return result
 
     @staticmethod
-    def _assemble_translation(sequence: onp.ndarray,
-                              length: onp.ndarray,
-                              seq_scores: onp.ndarray,
+    def _assemble_translation(sequence: np.ndarray,
+                              length: np.ndarray,
+                              seq_scores: np.ndarray,
                               estimated_reference_length: Optional[float],
                               unshift_target_factors: bool = False) -> Translation:
         """
@@ -1106,7 +1295,7 @@ class Translator:
                            estimated_reference_length=estimated_reference_length)
 
 
-def _unshift_target_factors(sequence: onp.ndarray, fill_last_with: int = C.EOS_ID):
+def _unshift_target_factors(sequence: np.ndarray, fill_last_with: int = C.EOS_ID):
     """
     Shifts back target factors so that they re-align with the words.
 
