@@ -115,6 +115,8 @@ def test_device_args(test_params, expected_params):
               allow_missing_params=False,
               ignore_extra_params=False,
               num_layers=(6, 6),
+              num_branches=None,
+              branch_mapping=None,
               branch_encoder_layers=None,
               branch_decoder_layers=None,
               num_embed=(None, None),

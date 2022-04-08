@@ -675,6 +675,16 @@ def add_model_parameters(params):
                               default=(6, 6),
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
+    model_params.add_argument('--num-branches',
+                              type=int_greater_or_equal(1),
+                              default=None,
+                              help='Number of branches for branching layers. When not specified, the value defaults to '
+                                   'the number of data sources (prepared data directories). Default: %(default)s.')
+    model_params.add_argument('--branch-mapping',
+                              type=list_of_values(greater_or_equal=0),
+                              default=None,
+                              help='List of branch indices for data sources (zero-indexed). When not specified, this '
+                                   'defaults to range(num_branches). Default: %(default)s.')
     model_params.add_argument('--branch-encoder-layers',
                               type=list_of_values(greater_or_equal=0),
                               default=None,

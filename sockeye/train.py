@@ -468,9 +468,13 @@ def create_encoder_config(args: argparse.Namespace,
     :return: The encoder config and the number of hidden units of the encoder.
     """
     encoder_num_layers, _ = args.num_layers
+
     num_branches = 1
-    if args.prepared_data is not None and args.branch_encoder_layers is not None:
-        num_branches = len(args.prepared_data)
+    if args.branch_encoder_layers is not None:
+        if args.num_branches is not None:
+            num_branches = args.num_branches
+        elif args.prepared_data is not None:
+            num_branches = len(args.prepared_data)
 
     encoder_transformer_preprocess, _ = args.transformer_preprocess
     encoder_transformer_postprocess, _ = args.transformer_postprocess
@@ -526,9 +530,13 @@ def create_decoder_config(args: argparse.Namespace,
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
+
     num_branches = 1
-    if args.prepared_data is not None and args.branch_decoder_layers is not None:
-        num_branches = len(args.prepared_data)
+    if args.branch_decoder_layers is not None:
+        if args.num_branches is not None:
+            num_branches = args.num_branches
+        elif args.prepared_data is not None:
+            num_branches = len(args.prepared_data)
 
     _, decoder_transformer_preprocess = args.transformer_preprocess
     _, decoder_transformer_postprocess = args.transformer_postprocess
@@ -1098,6 +1106,12 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             # forward-backward pass
             find_unused_parameters=sockeye_model.num_branches > 1)
 
+    # Map data sources to model branches
+    branch_mapping = args.branch_mapping
+    if branch_mapping is None:
+        branch_mapping = list(range(len(args.prepared_data))) if args.prepared_data is not None else [0]
+    branch_map = dict(enumerate(branch_mapping))
+
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
     trainer = training.EarlyStoppingTrainer(
@@ -1105,6 +1119,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         optimizer_config=optimizer_config,
         sockeye_model=sockeye_model,
         training_model=training_model,
+        branch_map=branch_map,
         optimizer=optimizer,
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
