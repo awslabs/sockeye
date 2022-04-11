@@ -362,6 +362,11 @@ class SockeyeModel(pt.nn.Module):
         # Earlier versions of Sockeye may have saved parameters for traced
         # modules. These parameters can be safely ignored.
         unexpected = [key for key in unexpected if 'traced' not in key]
+        # We also ignore cases where traced modules exist and appear to be
+        # missing parameters. These modules actually use the same parameters as
+        # their original non-traced versions so there are no separate parameters
+        # to load.
+        missing = [key for key in missing if 'traced' not in key]
         if not allow_missing:
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:

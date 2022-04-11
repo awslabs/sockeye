@@ -231,7 +231,10 @@ def _test_parameter_averaging(model_path: str):
 
 def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_path: str):
     """
-    Runs checkpoint decoder on 10% of the dev data and checks whether metric keys are present in the result dict.
+    Runs checkpoint decoder on 10% of the dev data and checks whether metric
+    keys are present in the result dict. Also checks that we can reload model
+    parameters after running the checkpoint decoder (case when using the
+    plateau-reduce scheduler).
     """
     with open(dev_source_path) as dev_fd:
         num_dev_sent = sum(1 for _ in dev_fd)
@@ -254,3 +257,5 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
     assert 'bleu' in cp_metrics
     assert 'chrf' in cp_metrics
     assert 'decode-walltime' in cp_metrics
+
+    model.load_parameters(os.path.join(model_path, C.PARAMS_BEST_NAME), device=pt.device('cpu'))
