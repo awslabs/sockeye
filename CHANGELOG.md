@@ -11,7 +11,7 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [3.1.10]
+## [3.1.11]
 
 ### Added
 
@@ -23,6 +23,12 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
   - The user can also specify custom weights (`--data-sampling-method custom --data-sampling-custom ...`).
   - TODO: branching layers
   - TODO: t_offset
+
+## [3.1.10]
+
+### Fixed
+
+- When loading parameters, SockeyeModel now ignores false positive missing parameters for traced modules. These modules use the same parameters as their original non-traced versions.
 
 ## [3.1.9]
 
