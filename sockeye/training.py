@@ -73,6 +73,7 @@ class TrainerConfig(Config):
     max_seconds: Optional[int] = None
     update_interval: int = 1
     stop_training_on_decoder_failure: bool = False
+    no_reload_on_learning_rate_reduce: bool = False
 
 
 class TrainState:
@@ -572,7 +573,7 @@ class EarlyStoppingTrainer:
                 lr_adjusted = scheduler.new_evaluation_result(has_improved)  # type: ignore
             else:
                 lr_adjusted = False
-            if lr_adjusted and not has_improved:
+            if lr_adjusted and not has_improved and not self.config.no_reload_on_learning_rate_reduce:
                 logger.info("Loading model parameters and optimizer states from best checkpoint: %d",
                             self.state.best_checkpoint)
                 if os.path.exists(self.best_params_fname):
