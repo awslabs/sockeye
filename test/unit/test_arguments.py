@@ -207,6 +207,7 @@ def test_inference_args(test_params, expected_params):
               learning_rate_reduce_factor=0.9,
               learning_rate_reduce_num_not_improved=8,
               learning_rate_warmup=0,
+              no_reload_on_learning_rate_reduce=False,
               fixed_param_names=[],
               fixed_param_strategy=None,
               decode_and_evaluate=500,

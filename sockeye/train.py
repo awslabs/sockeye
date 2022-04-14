@@ -967,7 +967,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                             max_epochs=args.max_num_epochs,
                                             max_seconds=args.max_seconds,
                                             update_interval=args.update_interval,
-                                            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure)
+                                            stop_training_on_decoder_failure=args.stop_training_on_decoder_failure,
+                                            no_reload_on_learning_rate_reduce=args.no_reload_on_learning_rate_reduce)
     if trainer_config.min_epochs is not None and trainer_config.max_epochs is not None:
         check_condition(trainer_config.min_epochs <= trainer_config.max_epochs,
                         "Minimum number of epochs must be smaller than maximum number of epochs")

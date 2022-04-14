@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.13]
+
+### Added
+
+- Added `sockeye-train` argument `--no-reload-on-learning-rate-reduce` that disables reloading the best training checkpoint when reducing the learning rate. This currently only applies to the `plateau-reduce` learning rate scheduler since other schedulers do not reload checkpoints.
+
 ## [3.1.12]
 
 ### Fixed
