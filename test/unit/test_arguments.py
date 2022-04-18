@@ -119,6 +119,7 @@ def test_device_args(test_params, expected_params):
               branch_mapping=None,
               branch_encoder_layers=None,
               branch_decoder_layers=None,
+              branch_output_layers=False,
               num_embed=(None, None),
               source_factors_num_embed=[],
               source_factors_combine=[C.FACTORS_COMBINE_SUM],

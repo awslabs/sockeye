@@ -695,6 +695,11 @@ def add_model_parameters(params):
                               default=None,
                               help='Decoder layers to branch on different data sources (zero-indexed). '
                                    'Default: %(default)s.')
+    model_params.add_argument('--branch-output-layers',
+                              action='store_true',
+                              default=False,
+                              help='Branch output layers on different data sources (zero-indexed). '
+                                   'Default: %(default)s.')
 
     # transformer arguments
     model_params.add_argument('--transformer-model-size',

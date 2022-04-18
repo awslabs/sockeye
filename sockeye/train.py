@@ -734,6 +734,13 @@ def create_model_config(args: argparse.Namespace,
         config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers,
                                                       weight=args.length_task_weight)
 
+    output_layer_num_branches = 1
+    if args.branch_output_layers:
+        if args.num_branches is not None:
+            output_layer_num_branches = args.num_branches
+        elif args.prepared_data is not None:
+            output_layer_num_branches = len(args.prepared_data)
+
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
@@ -744,7 +751,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_length_task=config_length_task,
                                      weight_tying_type=args.weight_tying_type,
                                      lhuc=args.lhuc is not None,
-                                     dtype=C.DTYPE_FP32)
+                                     dtype=C.DTYPE_FP32,
+                                     output_layer_num_branches=output_layer_num_branches)
     return model_config
 
 

@@ -67,6 +67,7 @@ class ModelConfig(Config):
     weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX
     lhuc: bool = False
     dtype: str = C.DTYPE_FP32
+    output_layer_num_branches: int = 1
 
 
 class SockeyeModel(pt.nn.Module):
@@ -93,8 +94,7 @@ class SockeyeModel(pt.nn.Module):
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
-        self.num_branches = max(self.config.config_encoder.num_branches, self.config.config_decoder.num_branches)
-        self._active_branch = 1
+        self._active_branch = 0
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
@@ -114,7 +114,12 @@ class SockeyeModel(pt.nn.Module):
                                                        inference_only=inference_only)
         self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only)
 
-        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+        self.output_layer = layers.BranchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
+                                                     vocab_size=self.config.vocab_target_size,
+                                                     weight=output_weight,
+                                                     num_branches=self.config.output_layer_num_branches) \
+                            if self.config.output_layer_num_branches > 1 else \
+                            layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
                                                weight=output_weight)
         if self.inference_only:
@@ -174,6 +179,9 @@ class SockeyeModel(pt.nn.Module):
             self.encoder.set_active_branch(branch_index)
         if self.decoder.num_branches > 1:
             self.decoder.set_active_branch(branch_index)
+        if self.config.output_layer_num_branches > 1:
+            assert isinstance(self.output_layer, layers.BranchOutputLayer)
+            self.output_layer.set_active_branch(branch_index)
 
     def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
         """
