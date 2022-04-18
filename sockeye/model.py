@@ -17,7 +17,7 @@ import os
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Tuple
+from typing import cast, Dict, List, Optional, Set, Tuple, Union
 
 import torch as pt
 
@@ -94,6 +94,9 @@ class SockeyeModel(pt.nn.Module):
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
+        self.is_branching = any((self.config.config_encoder.num_branches > 1,
+                                 self.config.config_decoder.num_branches > 1,
+                                 self.config.output_layer_num_branches > 1))
         self._active_branch = 0
         self.inference_only = inference_only
         logger.info("%s", self.config)
@@ -537,7 +540,7 @@ class SockeyeModel(pt.nn.Module):
 
     @property
     def output_layer_vocab_size(self) -> int:
-        return self.output_layer.vocab_size
+        return self.config.vocab_target_size
 
     def _cache_wrapper(self, class_func):
         @lru_cache(maxsize=self.forward_pass_cache_size)
@@ -557,7 +560,7 @@ class _DecodeStep(pt.nn.Module):
     def __init__(self,
                  embedding_target: encoder.Embedding,
                  decoder: decoder.Decoder,
-                 output_layer: layers.OutputLayer,
+                 output_layer: pt.nn.Module,
                  factor_output_layers: pt.nn.ModuleList):
         super().__init__()
         self.embedding_target = embedding_target

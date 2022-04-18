@@ -1113,7 +1113,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
             output_device=None if args.use_cpu else device,
             # Branching models only use a subset of the parameters for each
             # forward-backward pass
-            find_unused_parameters=sockeye_model.num_branches > 1)
+            find_unused_parameters=sockeye_model.is_branching)
 
     # Map data sources to model branches
     branch_mapping = args.branch_mapping
