@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.11]
+
+### Fixed
+
+- When resuming training with a fully trained model, `sockeye-train` will correctly exit without creating a duplicate (but separately numbered) checkpoint.
+
 ## [3.1.10]
 
 ### Fixed
