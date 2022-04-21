@@ -64,7 +64,7 @@ class BatchScorer(pt.nn.Module):
 
         # Select the label log probability
         # logprobs and scores: (batch_size, target_seq_len)
-        token_scores = logprobs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze()
+        token_scores = logprobs.gather(dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
         if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
             token_scores = -token_scores
 
@@ -80,7 +80,7 @@ class BatchScorer(pt.nn.Module):
             factor_scores = []  # type: List[pt.Tensor]
             for factor_logit, factor_label in factor_logits_and_labels:
                 factor_logprobs = factor_logit.log_softmax(dim=-1)
-                factor_token_scores = factor_logprobs.gather(dim=-1, index=factor_label.unsqueeze(-1)).squeeze()
+                factor_token_scores = factor_logprobs.gather(dim=-1, index=factor_label.unsqueeze(-1)).squeeze(-1)
                 if self.score_type == C.SCORING_TYPE_NEGLOGPROB:
                     factor_token_scores = -factor_token_scores
                 fs = factor_token_scores.masked_fill_(factor_label == C.PAD_ID, .0).sum(dim=-1, keepdims=True)  # type: ignore
