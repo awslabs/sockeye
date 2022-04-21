@@ -209,7 +209,9 @@ class EarlyStoppingTrainer:
                         self.config.max_updates,
                         self.config.max_checkpoints)
 
-        checkpoint_up_to_date = False
+        # At the start of training, the checkpoint is only up to date if it has
+        # just been loaded (resuming training with an existing model directory).
+        checkpoint_up_to_date = resume_training
         while True:
             if self.config.max_epochs is not None and self.state.epoch == self.config.max_epochs:
                 logger.info("Maximum # of epochs (%s) reached.", self.config.max_epochs)
