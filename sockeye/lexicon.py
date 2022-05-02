@@ -147,7 +147,7 @@ def load_restrict_lexicon(
         # Both lexicon types are serialized as numpy arrays and we distinguish them by their shape
         logger.info("Loaded lexicon from \"%s\" in %.4fs.", path, load_time)
         if len(lex.shape) == 1:
-            lexicon = StaticBlockLexicon()
+            lexicon = StaticBlockLexicon()  # type: RestrictLexicon
             lexicon.load_np(lex)
         elif len(lex.shape) == 2:
             lexicon = TopKLexicon(vocab_source, vocab_target)
@@ -245,7 +245,7 @@ class TopKLexicon(RestrictLexicon):
         # allowed target ids
         return self.get_allowed_trg_ids(src_ids)
 
-    def get_allowed_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
+    def get_allowed_trg_ids(self, src_ids: Optional[np.ndarray] = None) -> np.ndarray:
         """
         Lookup possible target ids for input sequence of source ids.
 
@@ -284,9 +284,9 @@ class StaticBlockLexicon(RestrictLexicon):
                 num_not_in_vocab += 1
                 continue
             block_token_ids.extend(vocab_target[token])
-        block_token_ids = set(block_token_ids)
+        block_token_ids = list(set(block_token_ids))
 
-        self.lex = np.array(list(block_token_ids), dtype='int32')
+        self.lex = np.array(block_token_ids, dtype='int32')
         logger.info("Created static block lexicon with %d tokens, %d skipped because they were not in the vocabulary",
                     len(block_token_ids),
                     num_not_in_vocab)
@@ -350,9 +350,9 @@ def create_block_lexicon(block_tokens: List[str], vocab_target: vocab.Vocab, out
         vocab_target_lower = collections.defaultdict(list)
         for k, v in vocab_target.items():
             vocab_target_lower[k.lower()].append(v)
-        vocab_target = dict(vocab_target_lower)
+        vocab_target_lower_dict = dict(vocab_target_lower)
         block_tokens = [token.lower() for token in block_tokens]
-        vocab_target_for_lexicon = vocab_target_lower
+        vocab_target_for_lexicon = vocab_target_lower_dict
     else:
         vocab_target_for_lexicon = {k: [v] for k, v in vocab_target.items()}
 
