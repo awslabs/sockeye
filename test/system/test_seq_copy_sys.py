@@ -135,19 +135,24 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
 
         # compute metrics
         hypotheses = [json['translation'] for json in data['test_outputs']]
-        hypotheses_restricted = [json['translation'] for json in data['test_outputs_restricted']]
         bleu = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses, references=data['test_targets'])
         chrf = sockeye.evaluate.raw_corpus_chrf(hypotheses=hypotheses, references=data['test_targets'])
-        bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses_restricted,
-                                                         references=data['test_targets'])
+        if 'test_outputs_restricted' in data:
+            hypotheses_restricted = [json['translation'] for json in data['test_outputs_restricted']]
+            bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses_restricted,
+                                                            references=data['test_targets'])
+        else:
+            bleu_restrict = None
 
         logger.info("================")
         logger.info("test results: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
         logger.info("================\n")
+
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
-        assert bleu_restrict >= bleu_thresh
+        if bleu_restrict is not None:
+            assert bleu_restrict >= bleu_thresh
 
 
 SORT_CASES = [
@@ -215,11 +220,14 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
 
         # compute metrics
         hypotheses = [json['translation'] for json in data['test_outputs']]
-        hypotheses_restricted = [json['translation'] for json in data['test_outputs_restricted']]
         bleu = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses, references=data['test_targets'])
         chrf = sockeye.evaluate.raw_corpus_chrf(hypotheses=hypotheses, references=data['test_targets'])
-        bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses_restricted,
-                                                         references=data['test_targets'])
+        if 'test_outputs_restricted' in data:
+            hypotheses_restricted = [json['translation'] for json in data['test_outputs_restricted']]
+            bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses_restricted,
+                                                             references=data['test_targets'])
+        else:
+            bleu_restrict = None
 
         logger.info("================")
         logger.info("test results: %s", name)
@@ -227,4 +235,5 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
         logger.info("================\n")
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
-        assert bleu_restrict >= bleu_thresh
+        if bleu_restrict is not None:
+            assert bleu_restrict >= bleu_thresh
