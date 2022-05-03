@@ -2,7 +2,7 @@
 # NAACL 2022 publication: The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation
 
 This branch contains the code for our publication:
-* Tobias Domhan, Eva Hasler, Ke Tran, Jonay Trenous, Bill Byrne and Felix Hieber. "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation". Proceedings of NAACL-HLT (2022)
+* Tobias Domhan, Eva Hasler, Ke Tran, Sony Trenous, Bill Byrne and Felix Hieber. "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation". Proceedings of NAACL-HLT (2022)
 
 
 ```
@@ -11,7 +11,7 @@ This branch contains the code for our publication:
     author = "Domhan, Tobias  and
       Hasler, Eva  and
       Tran, Ke and
-      Trenous, Jonay and
+      Trenous, Sony and
        Byrne, Bill and
        Hieber, Felix",
     booktitle = "Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies",
