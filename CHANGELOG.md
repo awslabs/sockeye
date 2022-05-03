@@ -15,7 +15,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Added
 - Added the implementation of Neural vocabulary selection to Sockeye as presented in our NAACL 2022 paper "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation" (Tobias Domhan, Eva Hasler, Ke Tran, Jonay Trenous, Bill Byrne and Felix Hieber).
- - To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`. This will train a model with Neural Vocabulary Selection that is automatically used by `sockeye-translate`. If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
+  - To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`. This will train a model with Neural Vocabulary Selection that is automatically used by `sockeye-translate`. If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
 
 ## [3.1.13]
 

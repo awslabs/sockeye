@@ -175,3 +175,13 @@ that can be enabled by setting `--length-task`, respectively, to `ratio` or to `
 Specify `--length-task-layers` to set the number of layers in the prediction MLP.
 The weight of the loss in the global training objective is controlled with `--length-task-weight` (standard cross-entropy loss has weight 1.0).
 During inference the predictions can be used to reward longer translations by enabling `--brevity-penalty-type`.
+
+
+## Neural Vocabulary Selection (NVS)
+
+When Neural Vocabulary Selection (NVS) gets enabled a target bag-of-word model will be trained.
+During decoding the output vocabulary gets reduced to the set of predicted target words speeding up decoding
+This is similar to using `--restrict-lexicon` for `sockeye-translate` with the advantage that no external alignment model is required and that the contextualized hidden encoder representations are used to predict the set of target words.
+To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`.
+This will train a model with NVS that is automatically used by `sockeye-translate`.
+If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.

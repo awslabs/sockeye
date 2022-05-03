@@ -84,11 +84,12 @@ For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
 ## Research with Sockeye
 
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
-If you know more, please let us know or submit a pull request (last updated: April 2022).
+If you know more, please let us know or submit a pull request (last updated: May 2022).
 
 ### 2022
 * Weller-Di Marco, Marion, Matthias Huck, Alexander Fraser. "Modeling Target-Side Morphology in Neural Machine Translation: A Comparison of Strategies
 ". arXiv preprint arXiv:2203.13550 (2022)
+* Tobias Domhan, Eva Hasler, Ke Tran, Jonay Trenous, Bill Byrne and Felix Hieber. "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation". Proceedings of NAACL-HLT (2022)
 
 ### 2021
 
