@@ -24,7 +24,7 @@ from typing import Dict, Generator, List, Optional, Union
 
 import torch as pt
 
-from sockeye.lexicon import TopKLexicon
+from sockeye.lexicon import load_restrict_lexicon, RestrictLexicon
 from sockeye.log import setup_main_logger
 from sockeye.model import load_models
 from sockeye.output_handler import get_output_handler, OutputHandler
@@ -78,22 +78,22 @@ def run_translate(args: argparse.Namespace):
                                                        dtype=args.dtype,
                                                        inference_only=True)
 
-    restrict_lexicon = None  # type: Optional[Union[TopKLexicon, Dict[str, TopKLexicon]]]
+    restrict_lexicon = None  # type: Optional[Union[RestrictLexicon, Dict[str, RestrictLexicon]]]
     if args.restrict_lexicon is not None:
         logger.info(str(args.restrict_lexicon))
         if len(args.restrict_lexicon) == 1:
             # Single lexicon used for all inputs.
-            restrict_lexicon = TopKLexicon(source_vocabs[0], target_vocabs[0])
             # Handle a single arg of key:path or path (parsed as path:path)
-            restrict_lexicon.load(args.restrict_lexicon[0][1], k=args.restrict_lexicon_topk)
+            restrict_lexicon = load_restrict_lexicon(args.restrict_lexicon[0][1], source_vocabs[0], target_vocabs[0],
+                                                     k=args.restrict_lexicon_topk)
+            logger.info(f"Loaded a single lexicon ({args.restrict_lexicon[0][0]}) that will be applied to all inputs.")
         else:
             check_condition(args.json_input,
                             "JSON input is required when using multiple lexicons for vocabulary restriction")
             # Multiple lexicons with specified names
             restrict_lexicon = dict()
             for key, path in args.restrict_lexicon:
-                lexicon = TopKLexicon(source_vocabs[0], target_vocabs[0])
-                lexicon.load(path, k=args.restrict_lexicon_topk)
+                lexicon = load_restrict_lexicon(path, source_vocabs[0], target_vocabs[0], k=args.restrict_lexicon_topk)
                 restrict_lexicon[key] = lexicon
 
     brevity_penalty_weight = args.brevity_penalty_weight

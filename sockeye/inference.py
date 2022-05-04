@@ -136,7 +136,7 @@ class TranslatorInput:
     target_prefix_factors: Optional[List[Tokens]] = None
     use_target_prefix_all_chunks: Optional[bool] = True
     keep_target_prefix_key: Optional[bool] = True
-    restrict_lexicon: Optional[lexicon.TopKLexicon] = None
+    restrict_lexicon: Optional[lexicon.RestrictLexicon] = None
     constraints: Optional[List[Tokens]] = None
     avoid_list: Optional[List[Tokens]] = None
     pass_through_dict: Optional[Dict] = None
@@ -153,7 +153,7 @@ class TranslatorInput:
         Returns the number of factors of this instance.
         """
         return 1 + (0 if not self.factors else len(self.factors))
-
+    
     def get_source_prefix_tokens(self) -> Tokens:
         """
         Returns the source prefix tokens of this instance.
@@ -369,16 +369,11 @@ def make_input_from_dict(sentence_id: SentenceId,
         use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
         keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)
         # Lexicon for vocabulary selection/restriction:
-        # This is only populated when using multiple lexicons, in which case the
-        # restrict_lexicon key must exist and the value (name) must map to one
-        # of the translator's known lexicons.
+        # This is only populated when using multiple lexicons and the lexicon name is given, in which case the
+        # restrict_lexicon key must exist and the value (name) must map to one of the translator's known lexicons.
         restrict_lexicon = None
-        restrict_lexicon_name = input_dict.get(C.JSON_RESTRICT_LEXICON_KEY)
-        if isinstance(translator.restrict_lexicon, dict):
-            if restrict_lexicon_name is None:
-                logger.error("Must specify restrict_lexicon when using multiple lexicons. Choices: %s"
-                             % ' '.join(sorted(translator.restrict_lexicon)))
-                return _bad_input(sentence_id, reason=str(input_dict))
+        restrict_lexicon_name = input_dict.get(C.JSON_RESTRICT_LEXICON_KEY, None)
+        if isinstance(translator.restrict_lexicon, dict) and restrict_lexicon_name is not None:
             restrict_lexicon = translator.restrict_lexicon.get(restrict_lexicon_name, None)
             if restrict_lexicon is None:
                 logger.error("Unknown restrict_lexicon '%s'. Choices: %s"
@@ -731,8 +726,9 @@ class Translator:
     :param source_vocabs: Source vocabularies.
     :param target_vocabs: Target vocabularies.
     :param nbest_size: Size of nbest list of translations.
-    :param restrict_lexicon: Top-k lexicon to use for target vocabulary selection. Can be a dict of
-                             of named lexicons.
+    :param restrict_lexicon: Lexicon to use for target vocabulary selection. Can be a dict of named lexicons. When
+           it is a single lexicon it will be applied to all inputs. If is a Dict the lexicon with the given name will
+           be used or no lexicon be used if the name is None.
     :param strip_unknown_words: If True, removes any <unk> symbols from outputs.
     :param sample: If True, sample from softmax multinomial instead of using topk.
     :param output_scores: Whether the scores will be needed as outputs. If True, scores will be normalized, negative
@@ -747,6 +743,8 @@ class Translator:
     :param max_output_length: Maximum output length this Translator is allowed to decode. If None, value will be taken
            from the model(s). Decodings that do not finish within this limit, will be force-stopped.
            If model(s) do not support given input length it will fall back to what the model(s) support.
+    :param skip_nvs: Manually turn off Neural Vocabulary Selection (NVS) to do a softmax over the full target vocabulary.
+    :param nvs_thresh: The probability threshold for a word to be added to the set of target words. Default: 0.5.
     """
 
     def __init__(self,
@@ -760,16 +758,18 @@ class Translator:
                  target_vocabs: List[vocab.Vocab],
                  beam_size: int = 5,
                  nbest_size: int = 1,
-                 restrict_lexicon: Optional[Union[lexicon.TopKLexicon, Dict[str, lexicon.TopKLexicon]]] = None,
+                 restrict_lexicon: Optional[Union[lexicon.RestrictLexicon, Dict[str, lexicon.RestrictLexicon]]] = None,
                  strip_unknown_words: bool = False,
-                 sample: int = None,
+                 sample: Optional[int] = None,
                  output_scores: bool = False,
                  constant_length_ratio: float = 0.0,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None,
                  prevent_unk: bool = False,
-                 greedy: bool = False) -> None:
+                 greedy: bool = False,
+                 skip_nvs: bool = False,
+                 nvs_thresh: float = 0.5) -> None:
         self.device = device
         self.dtype = models[0].dtype
         self._scorer = scorer
@@ -813,14 +813,16 @@ class Translator:
             scorer=self._scorer,
             constant_length_ratio=constant_length_ratio,
             prevent_unk=prevent_unk,
-            greedy=greedy)
+            greedy=greedy,
+            skip_nvs=skip_nvs,
+            nvs_thresh=nvs_thresh)
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,
                                             scorer=self._scorer)  # type: Callable
 
         logger.info("Translator (%d model(s) beam_size=%d algorithm=%s, beam_search_stop=%s max_input_length=%s "
-                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d dtype=%s)",
+                    "nbest_size=%s ensemble_mode=%s max_batch_size=%d dtype=%s skip_nvs=%s nvs_thresh=%s)",
                     len(self.models),
                     self.beam_size,
                     "GreedySearch" if isinstance(self._search, GreedySearch) else "BeamSearch",
@@ -829,7 +831,9 @@ class Translator:
                     self.nbest_size,
                     "None" if len(self.models) == 1 else ensemble_mode,
                     self.max_batch_size,
-                    self.dtype)
+                    self.dtype,
+                    skip_nvs,
+                    nvs_thresh)
 
     @property
     def max_input_length(self) -> int:
@@ -981,7 +985,7 @@ class Translator:
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[pt.Tensor,
                                                                            pt.Tensor,
-                                                                           Optional[lexicon.TopKLexicon],
+                                                                           Optional[lexicon.RestrictLexicon],
                                                                            pt.Tensor,
                                                                            Optional[pt.Tensor],
                                                                            Optional[pt.Tensor]]:
@@ -1008,7 +1012,7 @@ class Translator:
         target_prefix_factors_np = np.zeros((batch_size, max_target_prefix_factors_length,
                                              self.num_target_factors - 1), dtype='int32') \
             if self.num_target_factors > 1 and max_target_prefix_factors_length > 0 else None
-        restrict_lexicon = None  # type: Optional[lexicon.TopKLexicon]
+        restrict_lexicon = None  # type: Optional[lexicon.RestrictLexicon]
 
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
@@ -1053,14 +1057,13 @@ class Translator:
                 restrict_lexicon = trans_input.restrict_lexicon
             elif self.restrict_lexicon is not None:
                 if isinstance(self.restrict_lexicon, dict):
-                    # This code should not be reachable since the case is checked when creating
-                    # translator inputs. It is included here to guarantee that the translator can
-                    # handle any valid input regardless of whether it was checked at creation time.
-                    logger.warning("Sentence %s: no restrict_lexicon specified for input when using multiple lexicons, "
-                                   "defaulting to first lexicon for entire batch." % trans_input.sentence_id)
-                    restrict_lexicon = list(self.restrict_lexicon.values())[0]
+                    restrict_lexicon = None
                 else:
                     restrict_lexicon = self.restrict_lexicon
+
+        if restrict_lexicon is None and isinstance(self.restrict_lexicon, dict):
+            logger.info("No restrict_lexicon specified for input when using multiple lexicons, "
+                        "will default to not using a restrict lexicon.")
 
         source = pt.tensor(source_np, device=self.device, dtype=pt.int32)
         source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
@@ -1159,7 +1162,7 @@ class Translator:
     def _translate_np(self,
                       source: pt.Tensor,
                       source_length: pt.Tensor,
-                      restrict_lexicon: Optional[lexicon.TopKLexicon],
+                      restrict_lexicon: Optional[lexicon.RestrictLexicon],
                       max_output_lengths: pt.Tensor,
                       target_prefix: Optional[pt.Tensor] = None,
                       target_prefix_factors: Optional[pt.Tensor] = None) -> List[Translation]:

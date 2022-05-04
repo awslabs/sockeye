@@ -74,8 +74,8 @@ class _SingleModelInference(_Inference):
         return [self._model.state_structure()]
 
     def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None):
-        states, predicted_output_length = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
-        return states, predicted_output_length
+        states, predicted_output_length, nvs_prediction = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
+        return states, predicted_output_length, nvs_prediction
 
     def decode_step(self,
                     step_input: pt.Tensor,
@@ -136,13 +136,19 @@ class _EnsembleInference(_Inference):
     def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None):
         model_states = []  # type: List[pt.Tensor]
         predicted_output_lengths = []  # type: List[pt.Tensor]
+        nvs_predictions = []
         for model in self._models:
-            states, predicted_output_length = model.encode_and_initialize(inputs, valid_length, self._const_lr)
+            states, predicted_output_length, nvs_prediction = model.encode_and_initialize(inputs, valid_length, self._const_lr)
+            if nvs_prediction is not None:
+                nvs_predictions.append(nvs_prediction)
+
             predicted_output_lengths.append(predicted_output_length)
             model_states += states
         # average predicted output lengths, (batch, 1)
         predicted_output_lengths = pt.stack(predicted_output_lengths, dim=1).float().mean(dim=1)  # type: ignore
-        return model_states, predicted_output_lengths
+        nvs_prediction = pt.stack(nvs_predictions, dim=1).mean(dim=1) if nvs_predictions else None
+
+        return model_states, predicted_output_lengths, nvs_prediction
 
     def decode_step(self,
                     step_input: pt.Tensor,
@@ -523,17 +529,26 @@ class SortStates(pt.nn.Module):
         return sorted_states
 
 
-def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
+def _get_vocab_slice_ids(restrict_lexicon: lexicon.RestrictLexicon,
                          source_words: pt.Tensor,
                          eos_id: int,
                          beam_size: int,
-                         target_prefix: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, int]:
+                         target_prefix: Optional[pt.Tensor] = None,
+                         output_vocab_size: Optional[int] = None) -> Tuple[pt.Tensor, int]:
     device = source_words.device
-    vocab_slice_ids_np = restrict_lexicon.get_trg_ids(source_words.cpu().int().numpy()) # type: ignore
+    if not restrict_lexicon.is_blocking():
+        vocab_slice_ids_np = restrict_lexicon.get_allowed_trg_ids(source_words.cpu().int().numpy()) # type: ignore
+    else:
+        utils.check_condition(output_vocab_size is not None,
+                              "output_vocab_size required for blocking restrict lexicon.")
+        full_vocab = np.arange(0, output_vocab_size, dtype='int32')
+        source_ids = source_words.cpu().int().numpy() if restrict_lexicon.requires_src_ids() else None
+        vocab_slice_ids_np = np.setdiff1d(full_vocab, restrict_lexicon.get_blocked_trg_ids(source_ids), assume_unique=True)
+
     vocab_slice_ids = pt.tensor(vocab_slice_ids_np, device=device, dtype=pt.int64)
     if target_prefix is not None:
         # Ensuring that target prefix ids are part of vocab_slice_ids
-         vocab_slice_ids = pt.concat([vocab_slice_ids, target_prefix.flatten().type(pt.int64)], -1).unique()
+        vocab_slice_ids = pt.concat([vocab_slice_ids, target_prefix.flatten().type(pt.int64)], -1).unique()
     # Pad to a multiple of 8.
     vocab_slice_ids = pt.nn.functional.pad(vocab_slice_ids,
                                            pad=(0, 7 - ((vocab_slice_ids.size(-1) - 1) % 8)),
@@ -554,6 +569,51 @@ def _get_vocab_slice_ids(restrict_lexicon: Optional[lexicon.TopKLexicon],
     return vocab_slice_ids, vocab_slice_ids_shape
 
 
+def _get_nvs_vocab_slice_ids(
+        nvs_thresh: float,
+        nvs_prediction: pt.Tensor,
+        restrict_lexicon: Optional[lexicon.RestrictLexicon] = None,
+        target_prefix: Optional[pt.Tensor] = None
+    ):
+    """
+    Return the vocab slice ids based on the Neural Vocabulary Selection model's predictions.
+    :param nvs_thresh: The threshold for selecting a word (between 0.0 and 1.0).
+    :param nvs_prediction: Shape: (batch size, vocab_size).
+    :param restrict_lexicon: An optional blocking lexicon to forcefully turn specific words off.
+    :param target_prefix: Shape: (batch size, vocab_size).
+    """
+    nvs_prediction_above_thresh = (nvs_prediction > nvs_thresh)
+    # merge batch dimension (batch size, vocab_size) -> (1, vocab_size)
+    if nvs_prediction_above_thresh.shape[0] > 1:
+        nvs_prediction_above_thresh = pt.any(nvs_prediction_above_thresh, dim=0, keepdim=True)
+
+    if restrict_lexicon is not None:
+        utils.check_condition(
+            restrict_lexicon.is_blocking() and not restrict_lexicon.requires_src_ids(),
+            "Only a blocking, static lexicon is supported when Neural Vocabulary Selection (NVS) is used."
+        )
+        blocked_tokens = pt.from_numpy(restrict_lexicon.get_blocked_trg_ids()).long().to(nvs_prediction_above_thresh.device)
+        nvs_prediction_above_thresh[0, blocked_tokens] = False
+
+    # Add special symbols:
+    pt_symbols = pt.tensor([C.PAD_ID, C.UNK_ID, C.BOS_ID, C.EOS_ID], device=nvs_prediction_above_thresh.device)
+    nvs_prediction_above_thresh[0, pt_symbols] = True
+
+    if target_prefix is not None:
+        nvs_prediction_above_thresh[0, target_prefix.flatten().long()] = True
+
+    bow = nvs_prediction_above_thresh.nonzero(as_tuple=True)[1].unique()
+
+    # pad to a multiple of 8.
+    if len(bow) % 8 != 0:
+        bow = pt.nn.functional.pad(bow, (0, 7 - ((len(bow) - 1) % 8)), mode='constant', value=C.EOS_ID)
+
+    output_vocab_size = bow.shape[0]
+    logger.debug(f'decoder softmax size: {output_vocab_size}')
+
+    return bow, output_vocab_size
+
+
 class GreedySearch(pt.nn.Module):
     """
     Implements greedy search, not supporting various features from the BeamSearch class
@@ -567,7 +627,9 @@ class GreedySearch(pt.nn.Module):
                  device: pt.device,
                  num_source_factors: int,
                  num_target_factors: int,
-                 inference: _SingleModelInference):
+                 inference: _SingleModelInference,
+                 skip_nvs: bool = False,
+                 nvs_thresh: float = 0.5):
         super().__init__()
         self.dtype = dtype
         self.bos_id = bos_id
@@ -580,13 +642,15 @@ class GreedySearch(pt.nn.Module):
         self.num_target_factors = num_target_factors
         self.global_avoid_trie = None
         assert inference._skip_softmax, "skipping softmax must be enabled for GreedySearch"
+        self.skip_nvs = skip_nvs
+        self.nvs_thresh = nvs_thresh
 
         self.work_block = GreedyTop1()
 
     def forward(self,
                 source: pt.Tensor,
                 source_length: pt.Tensor,
-                restrict_lexicon: Optional[lexicon.TopKLexicon] = None,
+                restrict_lexicon: Optional[lexicon.RestrictLexicon] = None,
                 max_output_lengths: pt.Tensor = None,
                 target_prefix: Optional[pt.Tensor] = None,
                 target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
@@ -615,17 +679,23 @@ class GreedySearch(pt.nn.Module):
                                   fill_value=self.bos_id, device=self.device, dtype=pt.int32)
         outputs = []  # type: List[pt.Tensor]
 
-        vocab_slice_ids = None  # type: Optional[pt.Tensor]
-        # If using a top-k lexicon, select param rows for logit computation that correspond to the
-        # target vocab for this sentence.
-        if restrict_lexicon:
-            source_words = source[:, :, 0]
-            vocab_slice_ids, _ = _get_vocab_slice_ids(restrict_lexicon, source_words, self.eos_id,
-                                                      beam_size=1, target_prefix=target_prefix)
-
         # (0) encode source sentence, returns a list
-        model_states, _ = self._inference.encode_and_initialize(source, source_length)
+        model_states, _, nvs_prediction = self._inference.encode_and_initialize(source, source_length)
         # TODO: check for disabled predicted output length
+
+        vocab_slice_ids = None  # type: Optional[pt.Tensor]
+        # If using a top-k lexicon or NVS select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        if nvs_prediction is not None and not self.skip_nvs:
+            vocab_slice_ids, _ = _get_nvs_vocab_slice_ids(self.nvs_thresh, nvs_prediction,
+                                                          restrict_lexicon=restrict_lexicon,
+                                                          target_prefix=target_prefix)
+        elif restrict_lexicon:
+            source_words = source[:, :, 0]
+            vocab_slice_ids, _ = _get_vocab_slice_ids(restrict_lexicon, source_words, self.eos_id, beam_size=1,
+                                                      target_prefix=target_prefix,
+                                                      output_vocab_size=self.output_vocab_size)
+
 
         # Prefix masks, where scores are infinity for all other vocabulary items except target_prefix ids
         prefix_masks, prefix_masks_length = None, 0
@@ -724,7 +794,9 @@ class BeamSearch(pt.nn.Module):
                  inference: _Inference,
                  beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                  sample: Optional[int] = None,
-                 prevent_unk: bool = False) -> None:
+                 prevent_unk: bool = False,
+                 skip_nvs: bool = False,
+                 nvs_thresh: float = 0.5) -> None:
         super().__init__()
         self.beam_size = beam_size
         self.dtype = dtype
@@ -738,6 +810,8 @@ class BeamSearch(pt.nn.Module):
         self.num_source_factors = num_source_factors
         self.num_target_factors = num_target_factors
         self.prevent_unk = prevent_unk
+        self.skip_nvs = skip_nvs
+        self.nvs_thresh = nvs_thresh
 
         self._repeat_states = RepeatStates(beam_size=beam_size, state_structure=self._inference.state_structure())
         self._traced_repeat_states = None  # type: Optional[pt.jit.ScriptModule]
@@ -762,7 +836,7 @@ class BeamSearch(pt.nn.Module):
     def forward(self,
                 source: pt.Tensor,
                 source_length: pt.Tensor,
-                restrict_lexicon: Optional[lexicon.TopKLexicon],
+                restrict_lexicon: Optional[lexicon.RestrictLexicon],
                 max_output_lengths: pt.Tensor,
                 target_prefix: Optional[pt.Tensor] = None,
                 target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
@@ -785,9 +859,6 @@ class BeamSearch(pt.nn.Module):
         # Maximum beam search iterations (determined by longest input with eos)
         max_iterations = int(max_output_lengths.max().item())
         logger.debug("max beam search iterations: %d", max_iterations)
-
-        if self._sample is not None:
-            utils.check_condition(restrict_lexicon is None, "restricted lexicon not available when sampling.")
 
         # General data structure: batch_size * beam_size blocks in total;
         # a full beam for each sentence, followed by the next beam-block for the next sentence and so on
@@ -825,24 +896,8 @@ class BeamSearch(pt.nn.Module):
         factor_scores_accumulated = [pt.zeros(batch_size * self.beam_size, self.num_target_factors - 1,
                                               device=self.device, dtype=self.dtype)]
 
-        output_vocab_size = self.output_vocab_size
-
-        # If using a top-k lexicon, select param rows for logit computation that correspond to the
-        # target vocab for this sentence.
-        vocab_slice_ids = None  # type: Optional[pt.Tensor]
-        if restrict_lexicon:
-            source_words = source[:, :, 0]
-            vocab_slice_ids, output_vocab_size = _get_vocab_slice_ids(restrict_lexicon, source_words, self.eos_id,
-                                                                      beam_size=1, target_prefix=target_prefix)
-
-        pad_dist = pt.full((1, output_vocab_size), fill_value=np.inf, device=self.device, dtype=self.dtype)
-        pad_dist[0, 0] = 0  # [0, inf, inf, ...]
-        eos_dist = pt.full((1, output_vocab_size),
-                           fill_value=np.inf, device=self.device, dtype=self.dtype)
-        eos_dist[:, C.EOS_ID] = 0
-
         # (0) encode source sentence, returns a list
-        model_states, estimated_reference_lengths = self._inference.encode_and_initialize(source, source_length)
+        model_states, estimated_reference_lengths, nvs_prediction = self._inference.encode_and_initialize(source, source_length)
         # repeat states to beam_size
         if self._traced_repeat_states is None:
             logger.debug("Tracing repeat_states")
@@ -850,6 +905,37 @@ class BeamSearch(pt.nn.Module):
         model_states = self._traced_repeat_states(*model_states)
         # repeat estimated_reference_lengths to shape (batch_size * beam_size)
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
+
+        output_vocab_size = self.output_vocab_size
+
+        # If using a lexicon or NVS, select param rows for logit computation that correspond to the
+        # target vocab for this sentence.
+        # NVS additionally can take a blocking lexicon that restricts the output further
+        vocab_slice_ids = None  # type: Optional[pt.Tensor]
+        if nvs_prediction is not None and not self.skip_nvs:
+            vocab_slice_ids, output_vocab_size = _get_nvs_vocab_slice_ids(self.nvs_thresh, nvs_prediction,
+                                                                          restrict_lexicon=restrict_lexicon,
+                                                                          target_prefix=target_prefix)
+        elif restrict_lexicon:
+            source_words = source[:, :, 0]
+            vocab_slice_ids, output_vocab_size = _get_vocab_slice_ids(restrict_lexicon,
+                                                                      source_words,
+                                                                      self.eos_id,
+                                                                      beam_size=self.beam_size,
+                                                                      target_prefix=target_prefix,
+                                                                      output_vocab_size=self.output_vocab_size)
+
+        if self._sample is not None:
+            utils.check_condition(
+                vocab_slice_ids is None,
+                "Vocabulary restriction (via lexicon or NVS) not available when sampling."
+            )
+
+        pad_dist = pt.full((1, output_vocab_size), fill_value=np.inf, device=self.device, dtype=self.dtype)
+        pad_dist[0, 0] = 0  # [0, inf, inf, ...]
+        eos_dist = pt.full((1, output_vocab_size),
+                           fill_value=np.inf, device=self.device, dtype=self.dtype)
+        eos_dist[:, C.EOS_ID] = 0
 
         # Prefix token masks, where scores are infinity for all other vocabulary items except target_prefix ids
         prefix_masks, prefix_masks_length = None, 0
@@ -912,7 +998,7 @@ class BeamSearch(pt.nn.Module):
                     best_hyp_indices = best_hyp_indices + offset
 
             # Map from restricted to full vocab ids if needed
-            if restrict_lexicon:
+            if vocab_slice_ids is not None:
                 best_word_indices = vocab_slice_ids.index_select(0, best_word_indices)
 
             # (4) Normalize the scores of newly finished hypotheses. Note that after this until the
@@ -983,7 +1069,9 @@ def get_search_algorithm(models: List[SockeyeModel],
                          constant_length_ratio: float = 0.0,
                          sample: Optional[int] = None,
                          prevent_unk: bool = False,
-                         greedy: bool = False) -> Union[BeamSearch, GreedySearch]:
+                         greedy: bool = False,
+                         skip_nvs: bool = False,
+                         nvs_thresh: Optional[float] = None) -> Union[BeamSearch, GreedySearch]:
     """
     Returns an instance of BeamSearch or GreedySearch depending.
 
@@ -1007,7 +1095,9 @@ def get_search_algorithm(models: List[SockeyeModel],
             num_target_factors=models[0].num_target_factors,
             inference=_SingleModelInference(model=models[0],
                                             skip_softmax=True,
-                                            constant_length_ratio=0.0))
+                                            constant_length_ratio=0.0),
+            skip_nvs=skip_nvs,
+            nvs_thresh=nvs_thresh)
     else:
         inference = None  # type: Optional[_Inference]
         if len(models) == 1:
@@ -1035,7 +1125,9 @@ def get_search_algorithm(models: List[SockeyeModel],
             num_source_factors=models[0].num_source_factors,
             num_target_factors=models[0].num_target_factors,
             prevent_unk=prevent_unk,
-            inference=inference
+            inference=inference,
+            skip_nvs=skip_nvs,
+            nvs_thresh=nvs_thresh
         )
 
     return search

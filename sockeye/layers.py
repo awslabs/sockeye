@@ -257,10 +257,17 @@ class DotAttentionCell(pt.nn.Module):
         return interleaved_matmul_encdec_valatt(key_values, probs, heads=self.heads)
 
 
-def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int) -> pt.Tensor:
-    lengths = lengths.view(-1, 1).expand(-1, heads).reshape(-1, 1)  # (batch_size * heads, 1)
-    # (batch_size * heads, 1, max_len)
-    return ~(pt.arange(max_length, device=lengths.device).unsqueeze(0) < lengths).view(-1, 1, max_length)
+def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int, expand=True) -> pt.Tensor:
+    """
+        lengths: (batch_size,)
+        expand: Expand to the heads.
+    """
+    # (batch_size, max_len)
+    mask = ~(pt.arange(max_length, device=lengths.device).unsqueeze(0) < lengths.reshape((-1, 1)))
+    if expand:
+        # (batch_size*heads, 1, max_len)
+        mask =  mask.unsqueeze(1).expand(-1, heads, -1).reshape((-1, max_length)).unsqueeze(1)
+    return mask
 
 
 class MultiHeadAttentionBase(pt.nn.Module):

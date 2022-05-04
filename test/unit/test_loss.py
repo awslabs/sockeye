@@ -98,6 +98,64 @@ def test_cross_entropy_loss():
     pt.testing.assert_allclose(logits.grad, expected_logits_grad)
 
 
+def test_label_to_bow():
+    labels = pt.tensor(
+        [
+            [1, 3],
+            [0, 0],
+        ]
+    )
+    bow = sockeye.loss._label_to_bow(labels, num_labels=4)
+    expected_bow = pt.tensor([
+        [0, 1, 0, 1],
+        [1, 0, 0, 0],
+    ])
+    pt.testing.assert_allclose(bow, expected_bow)
+
+
+def test_binary_cross_entropy_loss():
+    vocab_size = 4
+    b = sockeye.loss.BinaryCrossEntropyBowLoss(
+        pos_weight=1,
+        num_labels=vocab_size
+    )
+    assert b.name == C.BINARY_CROSS_ENTROPY
+    assert b.weight == 1.0
+    assert b._dtype == C.DTYPE_FP32
+    assert b.output_name == C.NVS_PRED_NAME
+    assert b.label_name == C.TARGET_LABEL_NAME
+
+    # batch size x num vocab
+    # 2 x 4
+    # Only as single element will contribute to the loss
+    # (as all other predicitons will match the labels so the loss will be ~0)
+    logits = pt.tensor([[-100, 100, -100, 1],
+                        [-100, 100, -100, 100]], dtype=pt.float32, requires_grad=True)
+
+    # (batch_size, num_target_vocabs, num_vocab)
+    # (2, 1, 4)
+    labels = pt.tensor(
+        [
+            [1, 3],
+            [1, 3],
+        ]
+    )
+    batch_size = labels.shape[0]
+
+    loss_value, loss_samples = b({C.NVS_PRED_NAME: logits, 'other_stuff': None},
+                                 {C.TARGET_LABEL_NAME: labels, 'other_stuff': None})
+    loss_value.backward()
+    assert loss_samples.item() == 1  # this loss returns always 1
+    expected_loss = -pt.log(pt.sigmoid(pt.tensor(1))) / vocab_size / batch_size
+    pt.testing.assert_allclose(loss_value, expected_loss)
+    expected_grad = - 1/ (pt.exp(pt.tensor(1)) + 1)  / vocab_size / batch_size 
+    pt.testing.assert_allclose(logits.grad,
+        pt.tensor([[0.0000, 0.0000, 0.0000, expected_grad],
+                   [0.0000, 0.0000, 0.0000, 0.0000]])
+    )
+
+
+
 def test_perplexity_metric():
     ppl = sockeye.loss.PerplexityMetric()
     assert ppl.name == C.PERPLEXITY

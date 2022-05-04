@@ -182,7 +182,7 @@ class TransformerEncoder(Encoder):
                                                                  dropout=config.dropout_prepost,
                                                                  num_hidden=self.config.model_size)
 
-    def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+    def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         # positional embedding
         data = self.pos_embedding(data)
 
@@ -190,8 +190,10 @@ class TransformerEncoder(Encoder):
             data = self.dropout(data)
 
         _, max_len, __ = data.size()
-        # length_mask for source attention masking. Shape: (batch_size * heads, 1, max_len)
-        att_mask = layers.prepare_source_length_mask(valid_length, self.config.attention_heads, max_length=max_len)
+        # length_mask for source attention masking. Shape: (batch_size, max_len)
+        single_head_att_mask = layers.prepare_source_length_mask(valid_length, self.config.attention_heads, max_length=max_len, expand=False)
+        # Shape: (batch_size, max_len) -> (batch_size * heads, 1, max_len)
+        att_mask = single_head_att_mask.unsqueeze(1).expand(-1, self.config.attention_heads, -1).reshape((-1, max_len)).unsqueeze(1)
         att_mask = att_mask.expand(-1, max_len, -1)
 
         data = data.transpose(1, 0)  # batch to time major
@@ -200,7 +202,7 @@ class TransformerEncoder(Encoder):
 
         data = self.final_process(data)
         data = data.transpose(1, 0)  # time to batch major
-        return data, valid_length
+        return data, valid_length, single_head_att_mask
 
     def get_num_hidden(self) -> int:
         """
