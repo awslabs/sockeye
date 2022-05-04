@@ -350,9 +350,8 @@ def create_block_lexicon(block_tokens: List[str], vocab_target: vocab.Vocab, out
         vocab_target_lower = collections.defaultdict(list)
         for k, v in vocab_target.items():
             vocab_target_lower[k.lower()].append(v)
-        vocab_target_lower_dict = dict(vocab_target_lower)
         block_tokens = [token.lower() for token in block_tokens]
-        vocab_target_for_lexicon = vocab_target_lower_dict
+        vocab_target_for_lexicon = dict(vocab_target_lower)
     else:
         vocab_target_for_lexicon = {k: [v] for k, v in vocab_target.items()}
 
