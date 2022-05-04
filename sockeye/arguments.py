@@ -806,9 +806,8 @@ def add_nvs_train_parameters(params):
         '--bow-task-pos-weight',
         type=float_greater_or_equal(0.0),
         default=10,
-        help='The weight of the positive class (the set of words present on the target side) for the BOW loss '
-             'when --neural-vocab-selection is set as x * num_negative_class / num_positive_class where x is the '
-             '--bow-task-pos-weight. Higher values will bias more towards recall, resulting in larger vocabularies '
+        help='The weight of the positive class (the set of words present on the target side) for the BOW loss. '
+             'Higher values will bias more towards recall, resulting in larger vocabularies '
              'at test time trading off larger vocabularies for higher translation quality. Default %(default)s.')
 
 

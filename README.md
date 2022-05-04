@@ -23,7 +23,10 @@ This branch contains the code for our publication:
 ```
 
 
-To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`. This will train a model with Neural Vocabulary Selection that is automatically used by `sockeye-translate`. If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
+To use NVS simply specify `--neural-vocab-selection --bow-task-pos-weight 100000` to `sockeye-train`.
+This will train a model with Neural Vocabulary Selection that is automatically used by `sockeye-translate`.
+If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
+For the NVS model see `sockeye/nvs.py`.
 
 ## Wikiquote test set
 See folder `naacl2022/wikiquote` for the wikiquote test set.

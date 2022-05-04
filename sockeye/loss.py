@@ -287,11 +287,13 @@ class BinaryCrossEntropyBowLoss(Loss):
 
         bow = _label_to_bow(label, self._num_labels)
 
-        # Set automatically using positive and negative counts
-        num_positive = pt.sum(bow).float()
-        num_total = bow.shape[0] * bow.shape[1]
-        num_negative = num_total - num_positive
-        pos_weight = self.pos_weight * num_negative / num_positive
+        # # Set automatically using positive and negative counts
+        # num_positive = pt.sum(bow).float()
+        # num_total = bow.shape[0] * bow.shape[1]
+        # num_negative = num_total - num_positive
+        # pos_weight = self.pos_weight * num_negative / num_positive
+
+        pos_weight = pt.tensor(self.pos_weight, device=label.device)
 
         # instead of normalizing 1/num_labels, as done by the ce block, we want to also 
         # normalize by the virtual positive counts implied by the pos_weight
