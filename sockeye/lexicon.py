@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,15 +12,19 @@
 # permissions and limitations under the License.
 
 import argparse
+import collections
 import os
 import sys
 import time
 import logging
 from itertools import groupby
 from operator import itemgetter
-from typing import Dict, Generator, Tuple, Optional
+from typing import Dict, Generator, List, Tuple, Optional
+from abc import abstractmethod, ABC
 
 import numpy as np
+
+from sockeye.data_io import SequenceReader
 
 from . import arguments
 from . import constants as C
@@ -84,7 +88,76 @@ def read_lexicon(path: str, vocab_source: Dict[str, int], vocab_target: Dict[str
     return lexicon
 
 
-class TopKLexicon:
+class RestrictLexicon(ABC):
+    """
+    Lexicon component that potentially restricts the set of output words.
+
+    If `is_blocking()` is True the set of target ids pose a negative constraint as tokens ids that must not be used on
+    the target side. Conversely, if `is_blocking` is False the lexicon poses a positive constraint of returning the set
+    of allowed target words.
+    """
+
+    lex: Optional[np.ndarray] = None
+
+    def save(self, path: str):
+        """
+        Save lexicon in Numpy array format.  Lexicon will be specific to Sockeye model.
+
+        :param path: Path to Numpy array output file.
+        """
+        assert self.lex is not None, "Lexicon uninitialized, can't be saved."
+        with open(path, 'wb') as out:
+            np.save(out, self.lex)
+        logger.info("Saved lexicon to \"%s\"", path)
+
+    @abstractmethod
+    def load_np(self, lex: np.ndarray, k: Optional[int] = None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def requires_src_ids(self) -> bool:
+        """ If true src_ids are required as an argument to get_trg_ids. Otherwise the set of target ids are source
+        independent and `None` may be passed instead. """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def is_blocking(self) -> bool:
+        """ If true use get_blocked_trg_ids to obtain blocked ids, otherwise use get_allowed_trg_ids to get allowed
+            target ids(inverts the meaning of the target ids)."""
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_allowed_trg_ids(self, src_ids: Optional[np.ndarray] = None) -> np.ndarray:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def get_blocked_trg_ids(self, src_ids: Optional[np.ndarray] = None) -> np.ndarray:
+        raise NotImplementedError()
+
+
+def load_restrict_lexicon(
+        path: str,
+        vocab_source: Optional[Dict[str, int]] = None,
+        vocab_target: Optional[Dict[str, int]] = None,
+        k: Optional[int] = None) -> RestrictLexicon:
+    load_time_start = time.time()
+    with open(path, 'rb') as inp:
+        lex = np.load(inp)
+        load_time = time.time() - load_time_start
+        # Both lexicon types are serialized as numpy arrays and we distinguish them by their shape
+        logger.info("Loaded lexicon from \"%s\" in %.4fs.", path, load_time)
+        if len(lex.shape) == 1:
+            lexicon = StaticBlockLexicon()  # type: RestrictLexicon
+            lexicon.load_np(lex)
+        elif len(lex.shape) == 2:
+            lexicon = TopKLexicon(vocab_source, vocab_target)
+            lexicon.load_np(lex, k=k)
+        else:
+            raise ValueError("Expected a 1d or 2d array.")
+        return lexicon
+
+
+class TopKLexicon(RestrictLexicon):
     """
     Lexicon component that stores the k most likely target words for each source word.  Used during
     decoding to restrict target vocabulary for each source sequence.
@@ -131,15 +204,21 @@ class TopKLexicon:
         logger.info("Created top-k lexicon from \"%s\", k=%d. %d source tokens with fewer than %d translations",
                     path, k, num_insufficient, k)
 
-    def save(self, path: str):
-        """
-        Save lexicon in Numpy array format.  Lexicon will be specific to Sockeye model.
-
-        :param path: Path to Numpy array output file.
-        """
-        with open(path, 'wb') as out:
-            np.save(out, self.lex)
-        logger.info("Saved top-k lexicon to \"%s\"", path)
+    def load_np(self, lex: np.ndarray, k: Optional[int] = None):
+        load_time_start = time.time()
+        loaded_k = lex.shape[1]
+        if k is not None:
+            top_k = min(k, loaded_k)
+            if k > loaded_k:
+                logger.warning("Can not load top-%d translations from lexicon that "
+                               "contains at most %d entries per source.", k, loaded_k)
+        else:
+            top_k = loaded_k
+        self.lex = np.zeros((len(self.vocab_source), top_k), dtype=lex.dtype)
+        for src_id, trg_ids in enumerate(lex):
+            self.lex[src_id, :] = np.sort(trg_ids[:top_k])
+        load_time = time.time() - load_time_start
+        logger.info("Created top-%d lexicon in %.4fs.", top_k, load_time)
 
     def load(self, path: str, k: Optional[int] = None):
         """
@@ -150,22 +229,23 @@ class TopKLexicon:
         """
         load_time_start = time.time()
         with open(path, 'rb') as inp:
-            _lex = np.load(inp)
-        loaded_k = _lex.shape[1]
-        if k is not None:
-            top_k = min(k, loaded_k)
-            if k > loaded_k:
-                logger.warning("Can not load top-%d translations from lexicon that "
-                               "contains at most %d entries per source.", k, loaded_k)
-        else:
-            top_k = loaded_k
-        self.lex = np.zeros((len(self.vocab_source), top_k), dtype=_lex.dtype)
-        for src_id, trg_ids in enumerate(_lex):
-            self.lex[src_id, :] = np.sort(trg_ids[:top_k])
-        load_time = time.time() - load_time_start
-        logger.info("Loaded top-%d lexicon from \"%s\" in %.4fs.", top_k, path, load_time)
+            lex = np.load(inp)
+            load_time = time.time() - load_time_start
+            logger.info("Loaded lexicon from \"%s\" in %.4fs.", path, load_time)
+            return self.load_np(lex, k)
+
+    def requires_src_ids(self):
+        return True
+
+    def is_blocking(self) -> bool:
+        return False
 
     def get_trg_ids(self, src_ids: np.ndarray) -> np.ndarray:
+        # Note: we have this function for backwards compatibility when `get_trg_ids` was the only function that returned
+        # allowed target ids
+        return self.get_allowed_trg_ids(src_ids)
+
+    def get_allowed_trg_ids(self, src_ids: Optional[np.ndarray] = None) -> np.ndarray:
         """
         Lookup possible target ids for input sequence of source ids.
 
@@ -176,6 +256,56 @@ class TopKLexicon:
         trg_ids = np.lib.arraysetops.union1d(self.always_allow, self.lex[unique_src_ids, :].reshape(-1))  # type: ignore
         logger.debug(f"lookup: {trg_ids.shape[0]} unique targets for {unique_src_ids.shape[0]} unique sources")
         return trg_ids
+
+    def get_blocked_trg_ids(self, src_ids):
+        raise NotImplementedError()
+
+
+class StaticBlockLexicon(RestrictLexicon):
+    """
+    A lexicon that blocks a fixed set of target ids independent of the src_ids.
+    """
+
+    def __init__(self, lex: Optional[np.ndarray] = None):
+        if lex is not None:
+            self.lex = lex
+
+    def create(self, block_tokens: List[str], vocab_target: Dict[str, List[int]]):
+        # We do not default to UNK because we want to only block on real tokens
+        # We also exclude any other special symbols
+        block_tokens_set = set(block_tokens)
+        logger.info(f"Creating static block lexicon with tokens: {block_tokens_set}")
+        num_not_in_vocab = 0
+        block_token_ids = []
+        for token in block_tokens:
+            if token in C.VOCAB_SYMBOLS:
+                continue
+            if token not in vocab_target:
+                num_not_in_vocab += 1
+                continue
+            block_token_ids.extend(vocab_target[token])
+        block_token_ids = list(set(block_token_ids))
+
+        self.lex = np.array(block_token_ids, dtype='int32')
+        logger.info("Created static block lexicon with %d tokens, %d skipped because they were not in the vocabulary",
+                    len(block_token_ids),
+                    num_not_in_vocab)
+
+    def load_np(self, lex: np.ndarray, k: Optional[int] = None):
+        self.lex = lex
+    
+    def requires_src_ids(self):
+        return False
+
+    def is_blocking(self):
+        return True
+
+    def get_blocked_trg_ids(self, src_ids: Optional[np.ndarray] = None) -> np.ndarray:
+        assert self.lex is not None, "Lexicon not loaded yet."
+        return self.lex
+
+    def get_allowed_trg_ids(self, src_ids):
+        raise NotImplementedError()
 
 
 def create(args):
@@ -191,6 +321,43 @@ def create(args):
     lexicon = TopKLexicon(vocab_source, vocab_target)
     lexicon.create(args.input, args.k)
     lexicon.save(args.output)
+
+
+
+def create_block_lexicon_from_file(args):
+    setup_main_logger(console=not args.quiet, file_logging=not args.no_logfile, path=args.output + ".log")
+    global logger
+    logger = logging.getLogger('create-block')
+    log_sockeye_version(logger)
+
+    fname = args.input
+    model_path = args.model
+    output_path = args.output
+    with open(fname) as data:
+        block_tokens = list(set(token for line in data for token in line.rstrip().split()))
+        return create_block_lexicon_for_model(block_tokens, model_path, output_path)
+
+
+def create_block_lexicon_for_model(block_tokens: List[str], model_path: str, output_path: str, lowercase: bool = False):
+    vocab_target = vocab.load_target_vocabs(model_path)[0]
+    return create_block_lexicon(block_tokens, vocab_target, output_path, lowercase)
+
+
+def create_block_lexicon(block_tokens: List[str], vocab_target: vocab.Vocab, output_path: str, lowercase: bool = False):
+    if lowercase:
+        # Lowercase vocabulary entries + block words:
+        # lowercased entries map to multiple word ids
+        vocab_target_lower = collections.defaultdict(list)
+        for k, v in vocab_target.items():
+            vocab_target_lower[k.lower()].append(v)
+        block_tokens = [token.lower() for token in block_tokens]
+        vocab_target_for_lexicon = dict(vocab_target_lower)
+    else:
+        vocab_target_for_lexicon = {k: [v] for k, v in vocab_target.items()}
+
+    lexicon = StaticBlockLexicon()
+    lexicon.create(block_tokens, vocab_target_for_lexicon)
+    lexicon.save(output_path)
 
 
 def inspect(args):
@@ -212,7 +379,7 @@ def inspect(args):
             continue
         ids = tokens2ids(tokens, vocab_source)
         print("Input:  n=%d" % len(tokens), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens, ids)))
-        trg_ids = lexicon.get_trg_ids(np.array(ids))
+        trg_ids = lexicon.get_allowed_trg_ids(np.array(ids))
         tokens_trg = [vocab_target_inv.get(trg_id, C.UNK_SYMBOL) for trg_id in trg_ids]
         print("Output: n=%d" % len(tokens_trg), " ".join("%s(%d)" % (tok, i) for tok, i in zip(tokens_trg, trg_ids)))
         print()
@@ -232,6 +399,12 @@ def main():
     arguments.add_lexicon_create_args(params_create)
     arguments.add_logging_args(params_create)
     params_create.set_defaults(func=create)
+
+    params_block = subparams.add_parser('create-block', description="Create block lexicon for use during decoding.")
+    arguments.add_lexicon_args(params_block, is_for_block_lexicon=True)
+    arguments.add_lexicon_create_args(params_block, is_for_block_lexicon=True)
+    arguments.add_logging_args(params_block)
+    params_block.set_defaults(func=create_block_lexicon_from_file)
 
     params_inspect = subparams.add_parser('inspect', description="Inspect top-k lexicon for use during decoding.")
     arguments.add_lexicon_inspect_args(params_inspect)

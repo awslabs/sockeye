@@ -141,7 +141,9 @@ def test_device_args(test_params, expected_params):
               decoder=C.TRANSFORMER_TYPE,
               dtype='float32',
               amp=False,
-              apex_amp=False))
+              apex_amp=False,
+              neural_vocab_selection=None,
+              neural_vocab_selection_block_loss=False))
 ])
 def test_model_parameters(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_model_parameters)
@@ -177,7 +179,9 @@ def test_model_parameters(test_params, expected_params):
                       dtype=None,
                       prevent_unk=False,
                       sample=None,
-                      seed=None)),
+                      seed=None,
+                      nvs_thresh=0.5,
+                      skip_nvs=False)),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)
@@ -236,7 +240,9 @@ def test_inference_args(test_params, expected_params):
               cache_last_best_params=0,
               cache_strategy=C.AVERAGE_BEST,
               cache_metric=C.PERPLEXITY,
-              dry_run=False)),
+              dry_run=False,
+              bow_task_pos_weight=10,
+              bow_task_weight=1.0)),
 ])
 def test_training_arg(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_training_args)

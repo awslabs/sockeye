@@ -56,15 +56,15 @@ def test_topk_lexicon():
         assert np.all(lex.lex == expected_sorted)
 
         # Test lookup
-        trg_ids = lex.get_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int32))
+        trg_ids = lex.get_allowed_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int32))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype=np.int32)
         assert np.all(trg_ids == expected)
 
-        trg_ids = lex.get_trg_ids(np.array([[vocab["b"]]], dtype=np.int32))
+        trg_ids = lex.get_allowed_trg_ids(np.array([[vocab["b"]]], dtype=np.int32))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["b"]], dtype=np.int32)
         assert np.all(trg_ids == expected)
 
-        trg_ids = lex.get_trg_ids(np.array([[vocab["c"]]], dtype=np.int32))
+        trg_ids = lex.get_allowed_trg_ids(np.array([[vocab["c"]]], dtype=np.int32))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS], dtype=np.int32)
         assert np.all(trg_ids == expected)
 
@@ -72,7 +72,7 @@ def test_topk_lexicon():
         small_k = k - 1
         lex.load(json_lex_path, k=small_k)
         assert lex.lex.shape[1] == small_k
-        trg_ids = lex.get_trg_ids(np.array([[vocab["a"]]], dtype=np.int32))
+        trg_ids = lex.get_allowed_trg_ids(np.array([[vocab["a"]]], dtype=np.int32))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a"]], dtype=np.int32)
         assert np.all(trg_ids == expected)
 
@@ -80,6 +80,48 @@ def test_topk_lexicon():
         large_k = k + 1
         lex.load(json_lex_path, k=large_k)
         assert lex.lex.shape[1] == k
-        trg_ids = lex.get_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int32))
+        trg_ids = lex.get_allowed_trg_ids(np.array([[vocab["a"], vocab["c"]]], dtype=np.int32))
         expected = np.array([vocab[symbol] for symbol in C.VOCAB_SYMBOLS + ["a", "b"]], dtype=np.int32)
         assert np.all(trg_ids == expected)
+
+
+def test_create_block_lexicon():
+    vocab = {
+        "test": 0,
+        "TeSt": 1,
+        "foo": 2,
+        "bar": 3,
+        
+    }
+    block_tokens = ["TeSt", "bar"]
+    irrelevant_src_ids = np.array([1, 2, 3, 4])
+
+    with TemporaryDirectory(prefix="test_create_block_lexicon.") as work_dir:
+        out_path = os.path.join(work_dir, "input.lex")
+        sockeye.lexicon.create_block_lexicon(
+            block_tokens,
+            vocab,
+            output_path=out_path,
+            lowercase=False
+        )
+
+        lexicon = sockeye.lexicon.load_restrict_lexicon(out_path)
+        expected = np.array([1, 3], dtype=np.int32)
+        assert np.all(lexicon.lex == expected)
+        assert np.all(lexicon.get_blocked_trg_ids() == expected)
+        assert np.all(lexicon.get_blocked_trg_ids(irrelevant_src_ids) == expected)
+
+    with TemporaryDirectory(prefix="test_create_block_lexicon.") as work_dir:
+        out_path = os.path.join(work_dir, "input.lex")
+        sockeye.lexicon.create_block_lexicon(
+            block_tokens,
+            vocab,
+            output_path=out_path,
+            lowercase=True
+        )
+
+        lexicon = sockeye.lexicon.load_restrict_lexicon(out_path)
+        expected = np.array([0, 1, 3], dtype=np.int32)
+        assert np.all(lexicon.lex == expected)
+        assert np.all(lexicon.get_blocked_trg_ids() == expected)
+        assert np.all(lexicon.get_blocked_trg_ids(irrelevant_src_ids) == expected)

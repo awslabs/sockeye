@@ -33,6 +33,7 @@ from . import vocab
 from .config import Config
 from .encoder import FactorConfig
 from .layers import LengthRatioConfig
+from . import nvs
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,9 @@ class ModelConfig(Config):
     :param weight_tying_type: Determines which weights get tied.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
     :param dtype: Data type of model parameters. Default: float32.
+    :param neural_vocab_selection: When True the model contains a neural vocab selection model that restricts
+                                   the target output vocabulary to speed up inference.
+    :param neural_vocab_selection_block_loss: When true the gradients of the NVS models are blocked before the encoder.
     """
     config_data: data_io.DataConfig
     vocab_source_size: int
@@ -68,6 +72,8 @@ class ModelConfig(Config):
     lhuc: bool = False
     dtype: str = C.DTYPE_FP32
     output_layer_num_branches: int = 1
+    neural_vocab_selection: Optional[str] = None
+    neural_vocab_selection_block_loss: bool = False
 
 
 class SockeyeModel(pt.nn.Module):
@@ -116,6 +122,13 @@ class SockeyeModel(pt.nn.Module):
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder,
                                                        inference_only=inference_only)
         self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only)
+        self.nvs = None
+        if self.config.neural_vocab_selection:
+            self.nvs = nvs.NeuralVocabSelection(
+                model_size=self.config.config_encoder.model_size,
+                vocab_target_size=self.config.vocab_target_size,
+                model_type=self.config.neural_vocab_selection
+            )
 
         self.output_layer = layers.BranchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                      vocab_size=self.config.vocab_target_size,
@@ -186,13 +199,13 @@ class SockeyeModel(pt.nn.Module):
             assert isinstance(self.output_layer, layers.BranchOutputLayer)
             self.output_layer.set_active_branch(branch_index)
 
-    def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
+    def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """
         Encodes the input sequence.
 
         :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
         :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
-        :return: Encoder outputs, encoded output lengths
+        :return: Encoder outputs, encoded output lengths, attention mask
         """
 
         if self.traced_embedding_source is None:
@@ -203,12 +216,13 @@ class SockeyeModel(pt.nn.Module):
             logger.debug(f"Tracing encoder (branch {self.encoder.get_active_branch()})")
             self.traced_encoder[self.encoder.get_active_branch()] = \
                 pt.jit.trace(self.encoder, (source_embed, valid_length))
-        source_encoded, source_encoded_length = \
+        source_encoded, source_encoded_length, att_mask = \
             self.traced_encoder[self.encoder.get_active_branch()](source_embed, valid_length)
-        return source_encoded, source_encoded_length
+        return source_encoded, source_encoded_length, att_mask
 
     def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None,
-                              constant_length_ratio: float = 0.0) -> Tuple[List[pt.Tensor], pt.Tensor]:
+                              constant_length_ratio: float = 0.0) -> Tuple[List[pt.Tensor], pt.Tensor,
+                                                                           Optional[pt.Tensor]]:
         """
         Encodes the input sequence and initializes decoder states (and predicted output lengths if available).
         Used for inference/decoding.
@@ -217,22 +231,27 @@ class SockeyeModel(pt.nn.Module):
         :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
         :param constant_length_ratio: Constant length ratio
         :return: Initial states for the decoder, predicted output length of shape (batch_size,), 0 if not available.
+                 Returns the neural vocabulary selection model prediction if enabled, None otherwise.
         """
 
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
-        source_encoded, source_encoded_lengths = self.encode(inputs, valid_length=valid_length)
+        source_encoded, source_encoded_lengths, att_mask = self.encode(inputs, valid_length=valid_length)
 
         predicted_output_length = self.predict_output_length(source_encoded,
                                                              source_encoded_lengths,
                                                              constant_length_ratio)
         # Decoder init states
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
+        nvs_pred = None
+        if self.nvs is not None:
+            nvs_pred = pt.sigmoid(self.nvs(source_encoded, source_encoded_lengths, att_mask))
 
-        return states, predicted_output_length
+        return states, predicted_output_length, nvs_pred
 
     def _embed_and_encode(self,
                           source: pt.Tensor, source_length: pt.Tensor,
-                          target: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, List[pt.Tensor]]:
+                          target: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor, List[pt.Tensor],
+                                                      Optional[pt.Tensor]]:
         """
         Encode the input sequence, embed the target sequence, and initialize the decoder.
         Used for training.
@@ -240,13 +259,20 @@ class SockeyeModel(pt.nn.Module):
         :param source: Source input data.
         :param source_length: Length of source inputs.
         :param target: Target input data.
-        :return: encoder outputs and lengths, target embeddings, and decoder initial states
+        :return: encoder outputs and lengths, target embeddings, decoder initial states, attention mask and neural
+                 vocab selection prediction (if present, otherwise None).
         """
         source_embed = self.embedding_source(source)
         target_embed = self.embedding_target(target)
-        source_encoded, source_encoded_length = self.encoder(source_embed, source_length)
+        source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
-        return source_encoded, source_encoded_length, target_embed, states
+        nvs = None
+        if self.nvs is not None:
+            source_encoded_for_nvs = source_encoded
+            if self.config.neural_vocab_selection_block_loss:
+                source_encoded_for_nvs = source_encoded.detach()
+            nvs = self.nvs(source_encoded_for_nvs, source_length, att_mask)
+        return source_encoded, source_encoded_length, target_embed, states, nvs
 
     def decode_step(self,
                     step_input: pt.Tensor,
@@ -286,9 +312,10 @@ class SockeyeModel(pt.nn.Module):
         # caching the encoder and embedding forward passes), turn off autograd
         # for the encoder and embeddings to save memory.
         with pt.no_grad() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
-            source_encoded, source_encoded_length, target_embed, states = self.embed_and_encode(source,
-                                                                                                source_length,
-                                                                                                target)
+            source_encoded, source_encoded_length, target_embed, states, nvs_prediction = self.embed_and_encode(
+                source,
+                source_length,
+                target)
 
         target = self.decoder.decode_seq(target_embed, states=states)
 
@@ -302,6 +329,9 @@ class SockeyeModel(pt.nn.Module):
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)
             forward_output[C.LENRATIO_NAME] = self.length_ratio(source_encoded, source_encoded_length)
+
+        if nvs_prediction is not None:
+            forward_output[C.NVS_PRED_NAME] = nvs_prediction
 
         return forward_output
 

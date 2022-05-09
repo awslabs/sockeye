@@ -11,7 +11,7 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [3.1.11]
+## [3.1.999]
 
 ### Added
 
@@ -23,6 +23,30 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
   - The user can also specify custom weights (`--data-sampling-method custom --data-sampling-custom ...`).
   - TODO: branching layers
   - TODO: t_offset
+
+## [3.1.14]
+
+### Added
+- Added the implementation of Neural vocabulary selection to Sockeye as presented in our NAACL 2022 paper "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation" (Tobias Domhan, Eva Hasler, Ke Tran, Sony Trenous, Bill Byrne and Felix Hieber).
+  - To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`. This will train a model with Neural Vocabulary Selection that is automatically used by `sockeye-translate`. If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
+
+## [3.1.13]
+
+### Added
+
+- Added `sockeye-train` argument `--no-reload-on-learning-rate-reduce` that disables reloading the best training checkpoint when reducing the learning rate. This currently only applies to the `plateau-reduce` learning rate scheduler since other schedulers do not reload checkpoints.
+
+## [3.1.12]
+
+### Fixed
+
+- Fix scoring with batches of size 1 (whic may occur when `|data| % batch_size == 1`.
+
+## [3.1.11]
+
+### Fixed
+
+- When resuming training with a fully trained model, `sockeye-train` will correctly exit without creating a duplicate (but separately numbered) checkpoint.
 
 ## [3.1.10]
 

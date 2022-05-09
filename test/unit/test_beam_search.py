@@ -17,6 +17,7 @@ from typing import Tuple
 import numpy as onp
 import pytest
 import torch as pt
+import numpy as np
 
 import sockeye.beam_search
 import sockeye.constants as C
@@ -256,7 +257,8 @@ class _TestInference(sockeye.beam_search._Inference):
         num_decode_step_calls = pt.zeros(1, dtype=pt.int)
         self.states = [internal_lengths, num_decode_step_calls]  # TODO add nested states
         predicted_output_length = pt.ones(batch_size, 1)  # does that work?
-        return self.states, predicted_output_length
+        nvs_prediction = None
+        return self.states, predicted_output_length, nvs_prediction
 
     def decode_step(self,
                     step_input: pt.Tensor,
@@ -341,3 +343,80 @@ def test_beam_search():
     print('internal lengths', inference.states[0])
     pt.testing.assert_allclose(r.lengths, inference.states[0].squeeze(1))
     assert inference.states[1] == max_length
+
+
+def test_get_nvs_vocab_slice_ids():
+    # Batch size 2
+    # Note: the first 4 tokens are special tokens (PAD, UNK etc.)
+    #                             0    1    2    3    4     5    6     7     8    9
+    nvs_prediction = pt.tensor([[0.1, 0.1, 0.1, 0.1, 0.7,  0.0, 0.8,  0.0,  0.0, 0.0],
+                                [0.1, 0.1, 0.1, 0.1, 0.55, 0.0, 0.49, 0.05, 0.0, 0.0]])
+    expected_bow = pt.tensor([0, 1, 2, 3, 4, 6, C.EOS_ID, C.EOS_ID])
+    bow, output_vocab_size = sockeye.beam_search._get_nvs_vocab_slice_ids(nvs_thresh=0.5,
+                                                                          nvs_prediction=nvs_prediction)
+    assert output_vocab_size == expected_bow.shape[0]
+    pt.testing.assert_allclose(bow, expected_bow)
+
+    # Batch size 1
+    #                             0    1    2    3    4     5    6     7     8    9
+    nvs_prediction = pt.tensor([[0.1, 0.1, 0.1, 0.1, 0.7,  0.0, 0.0,  0.8,  0.0, 0.0]])
+    expected_bow = pt.tensor([0, 1, 2, 3, 4, 7, C.EOS_ID, C.EOS_ID])
+    bow, output_vocab_size = sockeye.beam_search._get_nvs_vocab_slice_ids(nvs_thresh=0.5,
+                                                                          nvs_prediction=nvs_prediction)
+    assert output_vocab_size == expected_bow.shape[0]
+    pt.testing.assert_allclose(bow, expected_bow)
+
+    # Batch size 1 + higher thresh
+    #                             0    1    2    3    4     5    6     7     8    9
+    nvs_prediction = pt.tensor([[0.1, 0.1, 0.1, 0.1, 0.7,  0.0, 0.0,  0.8,  0.0, 0.0]])
+    expected_bow = pt.tensor([0, 1, 2, 3, C.EOS_ID, C.EOS_ID, C.EOS_ID, C.EOS_ID])
+    bow, output_vocab_size = sockeye.beam_search._get_nvs_vocab_slice_ids(nvs_thresh=0.9,
+                                                                          nvs_prediction=nvs_prediction)
+    assert output_vocab_size == expected_bow.shape[0]
+    pt.testing.assert_allclose(bow, expected_bow)
+
+    # Batch size 2 + target prefix
+    # Note: the first 4 tokens are special tokens (PAD, UNK etc.)
+    #                             0    1    2    3    4     5    6     7     8    9
+    nvs_prediction = pt.tensor([[0.1, 0.1, 0.1, 0.1, 0.7,  0.0, 0.8,  0.0,  0.0, 0.0],
+                                [0.1, 0.1, 0.1, 0.1, 0.55, 0.0, 0.49, 0.05, 0.0, 0.0]])
+    target_prefix = pt.tensor([[8, 8], [8, 8]])
+    expected_bow = pt.tensor([0, 1, 2, 3, 4, 6, 8, C.EOS_ID])
+    bow, output_vocab_size = sockeye.beam_search._get_nvs_vocab_slice_ids(nvs_thresh=0.5,
+                                                                          nvs_prediction=nvs_prediction,
+                                                                          target_prefix=target_prefix)
+    assert output_vocab_size == expected_bow.shape[0]
+    pt.testing.assert_allclose(bow, expected_bow)
+
+    # Batch size 2 + blocking lexicon
+    # Note: the first 4 tokens are special tokens (PAD, UNK etc.)
+    #                             0    1    2    3    4     5    6     7     8    9
+    nvs_prediction = pt.tensor([[0.1, 0.1, 0.1, 0.1, 0.7,  0.0, 0.8,  0.0,  0.0, 0.0],
+                                [0.1, 0.1, 0.1, 0.1, 0.55, 0.0, 0.49, 0.05, 0.0, 0.0]])
+    expected_bow = pt.tensor([0, 1, 2, 3, 4, C.EOS_ID, C.EOS_ID, C.EOS_ID])
+    restrict_lexicon = sockeye.lexicon.StaticBlockLexicon(
+        np.array([6])
+    )
+    bow, output_vocab_size = sockeye.beam_search._get_nvs_vocab_slice_ids(nvs_thresh=0.5,
+                                                                          nvs_prediction=nvs_prediction,
+                                                                          restrict_lexicon=restrict_lexicon)
+    assert output_vocab_size == expected_bow.shape[0]
+    pt.testing.assert_allclose(bow, expected_bow)
+
+
+def test_get_vocab_slice_ids_blocking():
+    # test _get_vocab_slice_ids when using a blocking lexicon.
+    restrict_lexicon = sockeye.lexicon.StaticBlockLexicon(
+        np.array([3])
+    )
+    source_words = pt.tensor([1, 2, 3])
+    vocab_slice_ids, _ = sockeye.beam_search._get_vocab_slice_ids(
+        restrict_lexicon=restrict_lexicon,
+        source_words=source_words,
+        eos_id=C.EOS_ID,
+        beam_size=5,
+        target_prefix=None,
+        output_vocab_size=6
+    )
+    expected_vocab_slice_ids = pt.tensor([0, 1, 2, 4, 5, C.EOS_ID, C.EOS_ID, C.EOS_ID])
+    pt.testing.assert_allclose(vocab_slice_ids, expected_vocab_slice_ids)

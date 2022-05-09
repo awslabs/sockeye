@@ -750,6 +750,8 @@ def create_model_config(args: argparse.Namespace,
                                      config_decoder=config_decoder,
                                      config_length_task=config_length_task,
                                      weight_tying_type=args.weight_tying_type,
+                                     neural_vocab_selection=args.neural_vocab_selection,
+                                     neural_vocab_selection_block_loss=args.neural_vocab_selection_block_loss,
                                      lhuc=args.lhuc is not None,
                                      dtype=C.DTYPE_FP32,
                                      output_layer_num_branches=output_layer_num_branches)
@@ -797,6 +799,17 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
                                            weight=weight,
                                            output_name=C.LENRATIO_NAME,
                                            label_name=C.LENRATIO_LABEL_NAME))
+
+    if args.neural_vocab_selection:
+        bow_loss = loss.BinaryCrossEntropyBowLoss(name="bow_ce",
+                                                  output_name=C.NVS_PRED_NAME,
+                                                  weight=args.bow_task_weight,
+                                                  pos_weight=args.bow_task_pos_weight,
+                                                  num_labels=all_num_classes[0],
+                                                  label_name=C.TARGET_LABEL_NAME,
+                                                  metric_prefix="bow")
+        losses.append(bow_loss)
+
     return losses
 
 
@@ -881,7 +894,7 @@ def fixed_param_names_from_strategy(config: model.ModelConfig,
             # Any decoder layer.
             return not name.startswith(C.DECODER_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTER_LAYERS:
-            # First and last encoder and decoder layers.
+            # First and last encoder and decoder layers (this excludes output layer and NVS).
             first_encoder_prefix = f'{C.ENCODER_PREFIX}.layers.{0}'
             last_encoder_prefix = f'{C.ENCODER_PREFIX}.layers.{num_encoder_layers - 1}'
             first_decoder_prefix = f'{C.DECODER_PREFIX}.layers.{0}'
@@ -895,7 +908,7 @@ def fixed_param_names_from_strategy(config: model.ModelConfig,
             return not (name.startswith(C.SOURCE_EMBEDDING_PREFIX) or name.startswith(C.TARGET_EMBEDDING_PREFIX))
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_OUTPUT_PROJ:
             # Target output projection.
-            return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX)
+            return not name.startswith(C.DEFAULT_OUTPUT_LAYER_PREFIX) and not name.startswith(C.NVS_LAYER_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_FEED_FORWARD:
             return not (name.endswith("ff.ff1.bias") or name.endswith("ff.ff1.weight") or
                         name.endswith("ff.ff2.bias") or name.endswith("ff.ff2.weight"))
@@ -1092,7 +1105,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     if model_config.config_encoder.num_branches > 1 or model_config.config_decoder.num_branches > 1:
         logger.info('Skipping trace for branching model')
     else:
-        logger.info('Tracing model on validation batch')
+        logger.info('Tracing model on a validation batch')
         batch = validation_iters[0].next().load(device=device)  # pylint: disable=not-callable
         # When using AMP, turn on autocasting when tracing the model so that
         # dtypes will match during AMP training. Disable the weight cache for
