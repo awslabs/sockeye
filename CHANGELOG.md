@@ -21,8 +21,6 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
   - By default, all data sources have an equal chance of being chosen (`--data-sampling-method uniform`).
   - Alternatively, the choice can be weighted by data size (number of sequences) and a temperature parameter (`--data-sampling-method temperature --data-sampling-temperature ...`) as described by [Arivazhagan et al (2019)](https://aclanthology.org/N19-1388/).
   - The user can also specify custom weights (`--data-sampling-method custom --data-sampling-custom ...`).
-  - TODO: branching layers
-  - TODO: t_offset
 
 ## [3.1.14]
 

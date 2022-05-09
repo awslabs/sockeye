@@ -150,7 +150,6 @@ class EarlyStoppingTrainer:
                  optimizer_config: optimizers.OptimizerConfig,
                  sockeye_model: model.SockeyeModel,
                  training_model: torch.nn.Module,
-                 branch_map: Dict[int, int],
                  optimizer: torch.optim.Optimizer,
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss.Loss],
@@ -163,7 +162,6 @@ class EarlyStoppingTrainer:
         self.optimizer_config = optimizer_config
         self.sockeye_model = sockeye_model
         self.training_model = training_model
-        self.branch_map = branch_map
         self.optimizer = optimizer
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
@@ -318,10 +316,6 @@ class EarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
-        # TODO(mdenkows): Right now each batch uses the model branch with the
-        # same index. A data source mapping would allow users to define which
-        # branch is used for each training data source.
-        self.sockeye_model.set_active_branch(self.branch_map[batch.data_source])
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
             # Forward
             outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
@@ -410,14 +404,10 @@ class EarlyStoppingTrainer:
         # When using multiple validation sets, also track per-set metrics
         val_metrics_per_iter = [[lf.create_metric() for lf in self.loss_functions] for _ in validation_iters] \
                                if len(validation_iters) > 1 else None
-        # TODO(mdenkows): Right now each validation iter uses the model branch
-        # with the same index. A data source mapping would allow users to define
-        # which branch is used for each validation set.
         for data_source, validation_iter in enumerate(validation_iters):
             validation_iter.reset()
             for batch in validation_iter:
                 batch = batch.load(device=self.device)
-                self.sockeye_model.set_active_branch(self.branch_map[data_source])
                 with torch.inference_mode():
                     # Forward: use sockeye_model because (traced) training_model
                     # doesn't support eval mode (still runs dropout, etc.)

@@ -786,9 +786,7 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
                             permute: bool = True,
                             sampling_method: str = C.DATA_SAMPLING_UNIFORM,
                             sampling_temperature: float = 1.,
-                            sampling_custom: List[float] = [],
-                            random_rerouting_rate: float = 0,
-                            random_rerouting_method: str = C.DATA_RANDOM_REROUTING_UNIFORM) -> \
+                            sampling_custom: List[float] = []) -> \
                                 Tuple['BaseParallelSampleIter',
                                       List['BaseParallelSampleIter'],
                                       'DataConfig',
@@ -890,9 +888,7 @@ def get_prepared_data_iters(prepared_data_dirs: List[str],
                                                                  for config in config_data_per_iter],
                                              sampling_method=sampling_method,
                                              temperature=sampling_temperature,
-                                             custom=sampling_custom,
-                                             random_rerouting_rate=random_rerouting_rate,
-                                             random_rerouting_method=random_rerouting_method)
+                                             custom=sampling_custom)
     else:
         # Single data dir: use single iterator directly
         train_iter = train_iters[0]  # type: ignore
@@ -1880,17 +1876,13 @@ class MultiParallelSampleIter(BaseParallelSampleIter):
                  sampling_method: str = C.DATA_SAMPLING_UNIFORM,
                  temperature: float = 1.,
                  custom: List[float] = [],
-                 sync_size: int = 8192,
-                 random_rerouting_rate: float = 0,
-                 random_rerouting_method: str = C.DATA_RANDOM_REROUTING_UNIFORM) -> None:
+                 sync_size: int = 8192) -> None:
         self.iters = iters
         self.num_sents_per_iter = num_sents_per_iter
         self.sampling_method = sampling_method
         self.temperature = temperature
         self.custom = custom
         self.sync_size = sync_size
-        self.random_rerouting_rate = random_rerouting_rate
-        self.random_rerouting_method = random_rerouting_method
 
         self.total_num_sents = sum(num_sents_per_iter)
         if utils.is_distributed():
@@ -1942,15 +1934,7 @@ class MultiParallelSampleIter(BaseParallelSampleIter):
         if not next_iter.iter_next():
             next_iter.reset()
         batch = next_iter.next()
-        if self.random_rerouting_rate > 0 and random.random() < self.random_rerouting_rate:
-            if self.random_rerouting_method == C.DATA_RANDOM_REROUTING_UNIFORM:
-                batch.data_source = np.random.choice(range(len(self.iters)))
-            elif self.random_rerouting_method == C.DATA_RANDOM_REROUTING_WEIGHTED:
-                batch.data_source = np.random.choice(range(len(self.iters)), p=self.iter_weights)
-            else:
-                raise ValueError(f'Unknown random rerouting method: {self.random_rerouting_method}')
-        else:
-            batch.data_source = next_iter_i
+        batch.data_source = next_iter_i
         self.num_sents_this_epoch += batch.samples
         return batch
 

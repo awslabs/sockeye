@@ -37,11 +37,6 @@ class Encoder(pt.nn.Module):
     """
 
     @abstractmethod
-    def __init__(self):
-        super().__init__()
-        self.num_branches = 1
-
-    @abstractmethod
     def get_num_hidden(self) -> int:
         """
         :return: The representation size of this encoder.
@@ -170,9 +165,6 @@ class TransformerEncoder(Encoder):
     def __init__(self, config: transformer.TransformerConfig, inference_only: bool = False) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
-        self.num_branches = self.config.num_branches
-        self.branch_layers = set(config.branch_layers if config.branch_layers is not None else [])
-        self._active_branch = 0
 
         self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
 
@@ -183,23 +175,12 @@ class TransformerEncoder(Encoder):
                                                          scale_down_positions=False)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer.TransformerBranchEncoderBlock(config, inference_only=inference_only,
-                                                      num_branches=self.num_branches) if i in self.branch_layers
-            else transformer.TransformerEncoderBlock(config, inference_only=inference_only)
-            for i in range(config.num_layers))
+            transformer.TransformerEncoderBlock(config, inference_only=inference_only)
+            for _ in range(config.num_layers))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  num_hidden=self.config.model_size)
-
-    def get_active_branch(self) -> int:
-        return self._active_branch
-
-    def set_active_branch(self, branch_index: int):
-        self._active_branch = branch_index
-        for layer in self.layers:
-            if isinstance(layer, transformer.TransformerBranchEncoderBlock):
-                layer.set_active_branch(branch_index)
 
     def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         # positional embedding

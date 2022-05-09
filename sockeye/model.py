@@ -17,7 +17,7 @@ import os
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import cast, Dict, List, Optional, Set, Tuple, Union
+from typing import cast, Dict, Optional, Tuple, List
 
 import torch as pt
 
@@ -71,7 +71,6 @@ class ModelConfig(Config):
     weight_tying_type: str = C.WEIGHT_TYING_SRC_TRG_SOFTMAX
     lhuc: bool = False
     dtype: str = C.DTYPE_FP32
-    output_layer_num_branches: int = 1
     neural_vocab_selection: Optional[str] = None
     neural_vocab_selection_block_loss: bool = False
 
@@ -100,10 +99,6 @@ class SockeyeModel(pt.nn.Module):
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
-        self.is_branching = any((self.config.config_encoder.num_branches > 1,
-                                 self.config.config_decoder.num_branches > 1,
-                                 self.config.output_layer_num_branches > 1))
-        self._active_branch = 0
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
@@ -130,12 +125,7 @@ class SockeyeModel(pt.nn.Module):
                 model_type=self.config.neural_vocab_selection
             )
 
-        self.output_layer = layers.BranchOutputLayer(hidden_size=self.decoder.get_num_hidden(),
-                                                     vocab_size=self.config.vocab_target_size,
-                                                     weight=output_weight,
-                                                     num_branches=self.config.output_layer_num_branches) \
-                            if self.config.output_layer_num_branches > 1 else \
-                            layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
+        self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
                                                weight=output_weight)
         if self.inference_only:
@@ -165,10 +155,8 @@ class SockeyeModel(pt.nn.Module):
 
         # traced components (for inference)
         self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
-        # Encoder and decode steps are traced for each active branch (different
-        # subsets of all encoder or decoder layers)
-        self.traced_encoder = {}  # type: Dict[int, pt.jit.ScriptModule]
-        self.traced_decode_step = {}  # type: Dict[int, pt.jit.ScriptModule]
+        self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
+        self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
 
     def cast(self, dtype: str):
         if dtype == C.DTYPE_FP16:
@@ -186,19 +174,6 @@ class SockeyeModel(pt.nn.Module):
     def state_structure(self):
         return self.decoder.state_structure()
 
-    def get_active_branch(self) -> int:
-        return self._active_branch
-
-    def set_active_branch(self, branch_index: int):
-        self._active_branch = branch_index
-        if self.encoder.num_branches > 1:
-            self.encoder.set_active_branch(branch_index)
-        if self.decoder.num_branches > 1:
-            self.decoder.set_active_branch(branch_index)
-        if self.config.output_layer_num_branches > 1:
-            assert isinstance(self.output_layer, layers.BranchOutputLayer)
-            self.output_layer.set_active_branch(branch_index)
-
     def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """
         Encodes the input sequence.
@@ -207,17 +182,14 @@ class SockeyeModel(pt.nn.Module):
         :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
         :return: Encoder outputs, encoded output lengths, attention mask
         """
-
         if self.traced_embedding_source is None:
             logger.debug("Tracing embedding_source")
             self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
         source_embed = self.traced_embedding_source(inputs)
-        if self.encoder.get_active_branch() not in self.traced_encoder:
-            logger.debug(f"Tracing encoder (branch {self.encoder.get_active_branch()})")
-            self.traced_encoder[self.encoder.get_active_branch()] = \
-                pt.jit.trace(self.encoder, (source_embed, valid_length))
-        source_encoded, source_encoded_length, att_mask = \
-            self.traced_encoder[self.encoder.get_active_branch()](source_embed, valid_length)
+        if self.traced_encoder is None:
+            logger.debug("Tracing encoder")
+            self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
+        source_encoded, source_encoded_length, att_mask = self.traced_encoder(source_embed, valid_length)
         return source_encoded, source_encoded_length, att_mask
 
     def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None,
@@ -292,19 +264,17 @@ class SockeyeModel(pt.nn.Module):
         decode_step_inputs = [step_input, states]
         if vocab_slice_ids is not None:
             decode_step_inputs.append(vocab_slice_ids)
-        if self.decoder.get_active_branch() not in self.traced_decode_step:
-            logger.debug(f"Tracing decode step (branch {self.decoder.get_active_branch()})")
+        if self.traced_decode_step is None:
+            logger.debug("Tracing decode step")
             decode_step_module = _DecodeStep(self.embedding_target,
                                                 self.decoder,
                                                 self.output_layer,
                                                 self.factor_output_layers)
-            self.traced_decode_step[self.decoder.get_active_branch()] = \
-                pt.jit.trace(decode_step_module, decode_step_inputs)
+            self.traced_decode_step = pt.jit.trace(decode_step_module, decode_step_inputs)
         # the traced module returns a flat list of tensors
-        decode_step_outputs = self.traced_decode_step[self.decoder.get_active_branch()](*decode_step_inputs)
+        decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
         step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
         new_states = decode_step_outputs[self.num_target_factors:]
-
         return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
@@ -418,42 +388,24 @@ class SockeyeModel(pt.nn.Module):
         except _pickle.UnpicklingError as e:
             logger.error(f"Could not load from '{filename}'. Is this a MXNet parameter file? Please convert first.")
             raise e
-        missing, unexpected = (set(keys) for keys in self.load_state_dict(state_dict, strict=False))
-
-        # Initialize branching layers from existing non-branching versions
-        params = {k: v for k, v in self.named_parameters()}
-        loaded = set()  # type: Set[str]
-        for key in list(missing):
-            fields = key.split('.')
-            if 'branches' in fields:
-                i = fields.index('branches')
-                non_branch_key = '.'.join(fields[:i] + fields[i + 2:])
-                logger.info(f'Initializing parameter [{key}] from [{non_branch_key}]')
-                with pt.no_grad():
-                    params[key].copy_(state_dict[non_branch_key])
-                missing.remove(key)
-                loaded.add(non_branch_key)
-        unexpected -= loaded
-
+        missing, unexpected = self.load_state_dict(state_dict, strict=False)
         # Earlier versions of Sockeye may have saved parameters for traced
         # modules. These parameters can be safely ignored.
-        unexpected = {key for key in unexpected if 'traced' not in key}
+        unexpected = [key for key in unexpected if 'traced' not in key]
         # We also ignore cases where traced modules exist and appear to be
         # missing parameters. These modules actually use the same parameters as
         # their original non-traced versions so there are no separate parameters
         # to load.
-        missing = {key for key in missing if 'traced' not in key}
+        missing = [key for key in missing if 'traced' not in key]
         if not allow_missing:
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:
             utils.check_condition(not unexpected, f"extra keys: {unexpected}")
-
         # Models are saved with interleaved key-value params. If the current
         # model is in training mode, separate the loaded params to match the
         # format used during training.
         if self.training:
             self.apply(layers.separate_kv)
-
         logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
 
     def set_parameters(self,
@@ -570,7 +522,7 @@ class SockeyeModel(pt.nn.Module):
 
     @property
     def output_layer_vocab_size(self) -> int:
-        return self.config.vocab_target_size
+        return self.output_layer.vocab_size
 
     def _cache_wrapper(self, class_func):
         @lru_cache(maxsize=self.forward_pass_cache_size)
@@ -590,7 +542,7 @@ class _DecodeStep(pt.nn.Module):
     def __init__(self,
                  embedding_target: encoder.Embedding,
                  decoder: decoder.Decoder,
-                 output_layer: pt.nn.Module,
+                 output_layer: layers.OutputLayer,
                  factor_output_layers: pt.nn.ModuleList):
         super().__init__()
         self.embedding_target = embedding_target

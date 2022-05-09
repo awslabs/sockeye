@@ -115,39 +115,6 @@ class OutputLayer(pt.nn.Module):
         return F.linear(data, weight, bias)
 
 
-class BranchOutputLayer(pt.nn.Module):
-    """
-    Wraps a group of OutputLayers the represent different model branches. Method
-    calls are routed to the current active branch (layer).
-    """
-    def __init__(self,
-                 hidden_size: int,
-                 vocab_size: int,
-                 weight: Optional[pt.nn.Parameter] = None,
-                 num_branches: int = 1) -> None:
-        super().__init__()
-        self.num_branches = num_branches
-        self.branches = pt.nn.ModuleList(OutputLayer(hidden_size, vocab_size, weight if i == 0 else None)
-                                         for i in range(num_branches))
-        self._active_branch = 0
-
-    @pt.jit.export
-    def get_active_branch(self):
-        return self._active_branch
-
-    @pt.jit.export
-    def set_active_branch(self, branch_index: int):
-        if branch_index < 0 or branch_index >= self.num_branches:
-            raise ValueError(f'Unavailable branch: {branch_index}. Indices range from 0 to {self.num_branches - 1}')
-        self._active_branch = branch_index
-
-    def extra_repr(self) -> str:
-        return self.branches[self._active_branch].extra_repr()
-
-    def forward(self, data: pt.Tensor, vocab_slice_ids: Optional[pt.Tensor] = None) -> pt.Tensor:
-        return self.branches[self._active_branch](data, vocab_slice_ids)
-
-
 @dataclass
 class LengthRatioConfig(config.Config):
     num_layers: int  # Number of layers

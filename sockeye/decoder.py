@@ -81,18 +81,9 @@ class Decoder(pt.nn.Module):
     @abstractmethod
     def __init__(self):
         super().__init__()
-        self.num_branches = 1
 
     @abstractmethod
     def state_structure(self) -> str:
-        raise NotImplementedError()
-
-    @abstractmethod
-    def set_active_branch(self, branch_index: int):
-        raise NotImplementedError()
-
-    @abstractmethod
-    def get_active_branch(self) -> int:
         raise NotImplementedError()
 
     @abstractmethod
@@ -139,10 +130,6 @@ class TransformerDecoder(Decoder):
         pt.nn.Module.__init__(self)
         self.config = config
         self.inference_only = inference_only
-        self.num_branches = self.config.num_branches
-        self.branch_layers = set(config.branch_layers if config.branch_layers is not None else [])
-        self._active_branch = 0
-
         self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
                                                          num_embed=self.config.model_size,
                                                          max_seq_len=self.config.max_seq_len_target,
@@ -151,10 +138,8 @@ class TransformerDecoder(Decoder):
         self.autoregressive_mask = transformer.AutoRegressiveMask()
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer.TransformerBranchDecoderBlock(config, inference_only=inference_only,
-                                                      num_branches=self.num_branches) if i in self.branch_layers
-            else transformer.TransformerDecoderBlock(config, inference_only=inference_only)
-            for i in range(config.num_layers))
+            transformer.TransformerDecoderBlock(config, inference_only=self.inference_only)
+            for _ in range(config.num_layers))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
@@ -177,15 +162,6 @@ class TransformerDecoder(Decoder):
         structure += C.DECODER_STATE * total_num_states
 
         return structure
-
-    def get_active_branch(self) -> int:
-        return self._active_branch
-
-    def set_active_branch(self, branch_index: int):
-        self._active_branch = branch_index
-        for layer in self.layers:
-            if isinstance(layer, transformer.TransformerBranchDecoderBlock):
-                layer.set_active_branch(branch_index)
 
     def init_state_from_encoder(self,
                                 encoder_outputs: pt.Tensor,
@@ -228,7 +204,7 @@ class TransformerDecoder(Decoder):
             states = [steps, source_mask]
             encoder_outputs_t = encoder_outputs.transpose(1, 0)  # time-major layout
             for layer in self.layers:
-                enc_att_kv = layer.get_encoder_projections(encoder_outputs_t)
+                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs_t)
                 states.append(enc_att_kv)
         else:
             # NO encoder projection caching

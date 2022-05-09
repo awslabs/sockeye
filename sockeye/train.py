@@ -327,9 +327,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             batch_sentences_multiple_of=args.batch_sentences_multiple_of,
             sampling_method=args.data_sampling_method,
             sampling_temperature=args.data_sampling_temperature,
-            sampling_custom=args.data_sampling_custom,
-            random_rerouting_rate=args.data_random_rerouting,
-            random_rerouting_method=args.data_random_rerouting_method)
+            sampling_custom=args.data_sampling_custom)
 
         check_condition(all([combine in [C.FACTORS_COMBINE_SUM, C.FACTORS_COMBINE_AVERAGE]
                              for combine in args.source_factors_combine])
@@ -469,13 +467,6 @@ def create_encoder_config(args: argparse.Namespace,
     """
     encoder_num_layers, _ = args.num_layers
 
-    num_branches = 1
-    if args.branch_encoder_layers is not None:
-        if args.num_branches is not None:
-            num_branches = args.num_branches
-        elif args.prepared_data is not None:
-            num_branches = len(args.prepared_data)
-
     encoder_transformer_preprocess, _ = args.transformer_preprocess
     encoder_transformer_postprocess, _ = args.transformer_postprocess
     encoder_transformer_model_size, _ = args.transformer_model_size
@@ -506,9 +497,7 @@ def create_encoder_config(args: argparse.Namespace,
         depth_key_value=encoder_transformer_model_size,
         use_lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         decoder_type=args.decoder,
-        use_glu=args.transformer_feed_forward_use_glu,
-        num_branches=num_branches,
-        branch_layers=args.branch_encoder_layers)
+        use_glu=args.transformer_feed_forward_use_glu)
     encoder_num_hidden = encoder_transformer_model_size
 
     return config_encoder, encoder_num_hidden
@@ -530,13 +519,6 @@ def create_decoder_config(args: argparse.Namespace,
     :return: The config for the decoder.
     """
     _, decoder_num_layers = args.num_layers
-
-    num_branches = 1
-    if args.branch_decoder_layers is not None:
-        if args.num_branches is not None:
-            num_branches = args.num_branches
-        elif args.prepared_data is not None:
-            num_branches = len(args.prepared_data)
 
     _, decoder_transformer_preprocess = args.transformer_preprocess
     _, decoder_transformer_postprocess = args.transformer_postprocess
@@ -568,9 +550,7 @@ def create_decoder_config(args: argparse.Namespace,
         use_lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         depth_key_value=encoder_num_hidden,
         decoder_type=args.decoder,
-        use_glu=args.transformer_feed_forward_use_glu,
-        num_branches=num_branches,
-        branch_layers=args.branch_decoder_layers)
+        use_glu=args.transformer_feed_forward_use_glu)
 
     return config_decoder
 
@@ -734,13 +714,6 @@ def create_model_config(args: argparse.Namespace,
         config_length_task = layers.LengthRatioConfig(num_layers=args.length_task_layers,
                                                       weight=args.length_task_weight)
 
-    output_layer_num_branches = 1
-    if args.branch_output_layers:
-        if args.num_branches is not None:
-            output_layer_num_branches = args.num_branches
-        elif args.prepared_data is not None:
-            output_layer_num_branches = len(args.prepared_data)
-
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
@@ -753,8 +726,7 @@ def create_model_config(args: argparse.Namespace,
                                      neural_vocab_selection=args.neural_vocab_selection,
                                      neural_vocab_selection_block_loss=args.neural_vocab_selection_block_loss,
                                      lhuc=args.lhuc is not None,
-                                     dtype=C.DTYPE_FP32,
-                                     output_layer_num_branches=output_layer_num_branches)
+                                     dtype=C.DTYPE_FP32)
     return model_config
 
 
@@ -831,7 +803,6 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
     lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                              args.initial_learning_rate,
                                              args.learning_rate_t_scale,
-                                             args.learning_rate_t_offset,
                                              args.learning_rate_reduce_factor,
                                              args.learning_rate_reduce_num_not_improved,
                                              args.learning_rate_warmup,
@@ -912,8 +883,6 @@ def fixed_param_names_from_strategy(config: model.ModelConfig,
         if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_FEED_FORWARD:
             return not (name.endswith("ff.ff1.bias") or name.endswith("ff.ff1.weight") or
                         name.endswith("ff.ff2.bias") or name.endswith("ff.ff2.weight"))
-        if strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_BRANCHING:
-            return 'branches' not in name.split('.')
         if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_AND_SOURCE_EMBEDDINGS:
             return name.startswith(C.ENCODER_PREFIX) or name.startswith(C.SOURCE_EMBEDDING_PREFIX)
         if strategy == C.FIXED_PARAM_STRATEGY_ENCODER_HALF_AND_SOURCE_EMBEDDINGS:
@@ -1102,18 +1071,15 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
         training_model, optimizer = apex.amp.initialize(training_model, optimizer, opt_level='O2')
 
-    if model_config.config_encoder.num_branches > 1 or model_config.config_decoder.num_branches > 1:
-        logger.info('Skipping trace for branching model')
-    else:
-        logger.info('Tracing model on a validation batch')
-        batch = validation_iters[0].next().load(device=device)  # pylint: disable=not-callable
-        # When using AMP, turn on autocasting when tracing the model so that
-        # dtypes will match during AMP training. Disable the weight cache for
-        # compatibility with tracing. See:
-        # https://github.com/pytorch/pytorch/pull/63552
-        with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
-            training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
-                                                              batch.target, batch.target_length), strict=False)
+    logger.info('Tracing model on a validation batch')
+    batch = validation_iters[0].next().load(device=device)  # pylint: disable=not-callable
+    # When using AMP, turn on autocasting when tracing the model so that
+    # dtypes will match during AMP training. Disable the weight cache for
+    # compatibility with tracing. See:
+    # https://github.com/pytorch/pytorch/pull/63552
+    with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
+        training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
+                                                            batch.target, batch.target_length), strict=False)
     validation_iters[0].reset()
 
     if utils.is_distributed():
@@ -1123,16 +1089,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         training_model = torch.nn.parallel.DistributedDataParallel(
             training_model,
             device_ids=None if args.use_cpu else [device],
-            output_device=None if args.use_cpu else device,
-            # Branching models only use a subset of the parameters for each
-            # forward-backward pass
-            find_unused_parameters=sockeye_model.is_branching)
-
-    # Map data sources to model branches
-    branch_mapping = args.branch_mapping
-    if branch_mapping is None:
-        branch_mapping = list(range(len(args.prepared_data))) if args.prepared_data is not None else [0]
-    branch_map = dict(enumerate(branch_mapping))
+            output_device=None if args.use_cpu else device)
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
@@ -1141,7 +1098,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         optimizer_config=optimizer_config,
         sockeye_model=sockeye_model,
         training_model=training_model,
-        branch_map=branch_map,
         optimizer=optimizer,
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
