@@ -304,11 +304,6 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         if args.validation_prepared_data is not None:
             utils.check_condition(args.validation_source is None and args.validation_target is None,
                                   valid_raw_or_prepared_error_msg)
-            utils.check_condition(len(args.validation_prepared_data) == 1
-                                  or len(args.validation_prepared_data) == len(args.prepared_data),
-                                  'Either specify a single prepared validation data directory or the same number of '
-                                  'prepared training and validation data directories: %d != 1 or %d'
-                                  % (len(args.validation_prepared_data), len(args.prepared_data)))
         else:
             utils.check_condition(args.validation_source is not None and args.validation_target is not None,
                                   valid_raw_or_prepared_error_msg)
