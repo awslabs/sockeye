@@ -207,7 +207,6 @@ def test_inference_args(test_params, expected_params):
               gradient_clipping_threshold=1.0,
               gradient_clipping_type='none',
               learning_rate_scheduler_type='plateau-reduce',
-              learning_rate_t_scale=1.0,
               learning_rate_reduce_factor=0.9,
               learning_rate_reduce_num_not_improved=8,
               learning_rate_warmup=0,

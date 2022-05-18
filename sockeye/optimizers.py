@@ -19,7 +19,6 @@ import torch
 
 from . import config
 from . import constants as C
-from .lr_scheduler import LearningRateScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +42,6 @@ class OptimizerConfig(config.Config):
     gradient_clipping_type: str = C.GRADIENT_CLIPPING_TYPE_NONE
     gradient_clipping_threshold: Optional[float] = None
     update_interval: int = 1
-
-    lr_scheduler: Optional[LearningRateScheduler] = None
 
 
 def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torch.optim.Optimizer, Dict[str, Any]]:

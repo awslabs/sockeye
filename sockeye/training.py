@@ -151,6 +151,7 @@ class EarlyStoppingTrainer:
                  sockeye_model: model.SockeyeModel,
                  training_model: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
+                 lr_scheduler: Optional[lr_scheduler.LearningRateScheduler],
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss.Loss],
                  device: torch.device,
@@ -163,6 +164,7 @@ class EarlyStoppingTrainer:
         self.sockeye_model = sockeye_model
         self.training_model = training_model
         self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
         self.device = device
@@ -369,9 +371,8 @@ class EarlyStoppingTrainer:
                 torch.nn.utils.clip_grad.clip_grad_norm_(self.training_model.parameters(),
                                                          self.optimizer_config.gradient_clipping_threshold)
             # Set learning rate for current step
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = self.optimizer_config.lr_scheduler(self.state.updates) \
-                    if self.optimizer_config.lr_scheduler is not None else self.optimizer_config.lr
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
             # Update weights and reset gradients
             if self.using_amp:
                 self._scaler.step(self.optimizer)
@@ -543,11 +544,10 @@ class EarlyStoppingTrainer:
         """
         Adjusts the optimizer learning rate if required and logs it.
         """
-        scheduler = self.optimizer_config.lr_scheduler
         lr = self.optimizer_config.lr
-        if scheduler is not None:
-            if issubclass(type(scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
-                lr_adjusted = scheduler.new_evaluation_result(has_improved)  # type: ignore
+        if self.lr_scheduler is not None:
+            if issubclass(type(self.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
+                lr_adjusted = self.lr_scheduler.new_evaluation_result(has_improved)  # type: ignore
             else:
                 lr_adjusted = False
             if lr_adjusted and not has_improved and not self.config.no_reload_on_learning_rate_reduce:
@@ -557,7 +557,8 @@ class EarlyStoppingTrainer:
                     self.sockeye_model.load_parameters(filename=self.best_params_fname, device=self.device)
                 if os.path.exists(self.best_optimizer_state_fname):
                     self._load_optimizer_state(self.best_optimizer_state_fname)
-            lr = scheduler.lr
+            # Assume same learning rate for all param groups
+            lr = self.lr_scheduler.get_last_lr()[0]
         logger.info("Checkpoint [%d]\tLearning-rate=%.6f", self.state.checkpoint, lr)
 
     def _write_and_log_metrics(self,
@@ -568,8 +569,8 @@ class EarlyStoppingTrainer:
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
         """
         data = {"epoch": self.state.epoch,
-                "learning-rate": (self.optimizer_config.lr if self.optimizer_config.lr_scheduler is None
-                                  else self.optimizer_config.lr_scheduler.lr),
+                "learning-rate": (self.optimizer_config.lr if self.lr_scheduler is None
+                                  else self.lr_scheduler.get_last_lr()[0]),
                 "time-elapsed": self.state.time_elapsed,
                 "max-gpu-memory": torch.cuda.max_memory_allocated(self.device),
                 "converged": self.state.converged,
@@ -617,16 +618,14 @@ class EarlyStoppingTrainer:
         logger.info('Loaded optimizer state from "%s"', fname)
 
     def _save_lr_scheduler(self, fname):
-        if self.optimizer_config.lr_scheduler is not None:
-            with open(fname, "wb") as fp:
-                pickle.dump(self.optimizer_config.lr_scheduler, fp)
-            logger.info("Saved '%s' to '%s'", self.optimizer_config.lr_scheduler, fname)
+        if self.lr_scheduler is not None:
+            torch.save(self.lr_scheduler.state_dict(), fname)
+            logger.info("Saved '%s' to '%s'", self.lr_scheduler, fname)
 
     def _load_lr_scheduler(self, fname):
-        if os.path.exists(fname):
-            with open(fname, "rb") as fp:
-                self.optimizer_config.lr_scheduler = pickle.load(fp)
-            logger.info("Loaded '%s' from '%s'", self.optimizer_config.lr_scheduler, fname)
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.load_state_dict(torch.load(fname))
+            logger.info("Loaded '%s' from '%s'", self.lr_scheduler, fname)
 
     def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
