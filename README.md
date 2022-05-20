@@ -7,7 +7,7 @@ This branch contains the code for our publication:
 
 ```
 @inproceedings{domhan-etal-2022,
-    title = "The Devil is in the Details:On the Pitfalls of Vocabulary Selection in Neural Machine Translation",
+    title = "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation",
     author = "Domhan, Tobias  and
       Hasler, Eva  and
       Tran, Ke and
