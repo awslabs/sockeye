@@ -39,7 +39,7 @@ class _Inference(ABC):
     @abstractmethod
     def encode_and_initialize(self,
                               inputs: pt.Tensor,
-                              valid_length: Optional[pt.Tensor] = None):
+                              valid_length: pt.Tensor):
         raise NotImplementedError()
 
     @abstractmethod
@@ -73,7 +73,7 @@ class _SingleModelInference(_Inference):
     def state_structure(self) -> List:
         return [self._model.state_structure()]
 
-    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None):
+    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: pt.Tensor):
         states, predicted_output_length, nvs_prediction = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
         return states, predicted_output_length, nvs_prediction
 
@@ -133,7 +133,7 @@ class _EnsembleInference(_Inference):
     def state_structure(self) -> List:
         return [model.state_structure() for model in self._models]
 
-    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None):
+    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: pt.Tensor):
         model_states = []  # type: List[pt.Tensor]
         predicted_output_lengths = []  # type: List[pt.Tensor]
         nvs_predictions = []
