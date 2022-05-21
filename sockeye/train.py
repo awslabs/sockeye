@@ -1010,10 +1010,12 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                             args.max_updates)
     _lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs) if lr_scheduler_class is not None else None
 
+    losses = create_losses(args, all_num_classes=target_vocab_sizes)
+
     # This starts as a reference to the original Sockeye model. It is
     # sequentially transformed/wrapped to produce the model instance used for
     # training.
-    training_model = sockeye_model  # type: torch.nn.Module
+    model_object = training.ModelWithLoss(model=sockeye_model, losses=losses)  # type: torch.nn.Module
 
     if args.apex_amp:
         try:
@@ -1024,34 +1026,21 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # Optimization level 2 runs the entire model in FP16 mode with FP32
         # master weights and loss scaling. See:
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
-        training_model, optimizer = apex.amp.initialize(training_model, optimizer, opt_level='O2')
-
-    logger.info('Tracing model on a validation batch')
-    batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
-    # When using AMP, turn on autocasting when tracing the model so that
-    # dtypes will match during AMP training. Disable the weight cache for
-    # compatibility with tracing. See:
-    # https://github.com/pytorch/pytorch/pull/63552
-    with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
-        training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
-                                                          batch.target, batch.target_length), strict=False)
-    eval_iter.reset()
+        model_object, optimizer = apex.amp.initialize(model_object, optimizer, opt_level='O2')
 
     if utils.is_distributed():
         # In distributed mode, wrap the traced model with a distributed
         # data-parallel model that shares (averages) gradients with models
         # in other worker processes.
-        training_model = torch.nn.parallel.DistributedDataParallel(training_model,
-                                                                   device_ids=None if args.use_cpu else [device],
-                                                                   output_device=None if args.use_cpu else device)
-
-    losses = create_losses(args, all_num_classes=target_vocab_sizes)
+        model_object = torch.nn.parallel.DistributedDataParallel(model_object,
+                                                                 device_ids=None if args.use_cpu else [device],
+                                                                 output_device=None if args.use_cpu else device)
 
     trainer = training.EarlyStoppingTrainer(
         config=trainer_config,
         optimizer_config=optimizer_config,
         sockeye_model=sockeye_model,
-        training_model=training_model,
+        model_object=model_object,
         optimizer=optimizer,
         lr_scheduler=_lr_scheduler,
         zero_grad_kwargs=zero_grad_kwargs,
