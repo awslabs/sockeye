@@ -13,7 +13,7 @@
 
 from dataclasses import dataclass
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Type
 
 import torch
 
@@ -44,15 +44,15 @@ class OptimizerConfig(config.Config):
     update_interval: int = 1
 
 
-def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torch.optim.Optimizer, Dict[str, Any]]:
+def get_optimizer(config: OptimizerConfig) -> Tuple[Type[torch.optim.Optimizer], Dict[str, Any], Dict[str, Any]]:
     """
-    Create an optimizer for a Sockeye model using the specified config settings.
+    Get optimizer class, kwargs, and `zero_grad()` kwargs using the specified
+    config settings.
 
-    :param model: Sockeye model.
     :param config: Optimizer config.
 
-    :return: Tuple of an Optimizer and the kwargs dict for calling that
-             optimizer's `zero_grad()` method.
+    :return: Tuple of Optimizer class, its kwargs dictionary, and the kwargs
+             dictionary for calling that optimizer's `zero_grad()` method.
     """
     adam_impl = torch.optim.Adam
     sgd_impl = torch.optim.SGD
@@ -75,9 +75,9 @@ def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torc
                            'faster GPU training: https://github.com/NVIDIA/apex')
 
     if config.name == C.OPTIMIZER_ADAM:
-        return adam_impl(model.parameters(), lr=config.lr, betas=config.betas, eps=config.eps,
-                         weight_decay=config.weight_decay), zero_grad_kwargs
+        return adam_impl, {'lr': config.lr, 'betas':config.betas, 'eps': config.eps,
+                           'weight_decay': config.weight_decay}, zero_grad_kwargs
     elif config.name == C.OPTIMIZER_SGD:
-        return sgd_impl(model.parameters(), lr=config.lr, momentum=config.momentum,
-                        weight_decay=config.weight_decay), zero_grad_kwargs
+        return sgd_impl, {'lr': config.lr, 'momentum': config.momentum,
+                          'weight_decay': config.weight_decay}, zero_grad_kwargs
     raise ValueError(f'Unknown optimizer: {config.name}')

@@ -999,7 +999,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     utils.log_parameters(sockeye_model)
 
-    optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
+    optimizer_class, optimizer_kwargs, zero_grad_kwargs = optimizers.get_optimizer(optimizer_config)
+    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs)
 
     lr_scheduler_class, lr_scheduler_kwargs = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                                                             args.initial_learning_rate,
