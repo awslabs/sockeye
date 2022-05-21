@@ -952,6 +952,12 @@ def add_training_args(params):
                                    '`torchrun --nproc_per_node N -m sockeye.train`. Increasing the number of processes '
                                    'multiplies the effective batch size (ex: batch_size 2560 with `--nproc_per_node 4` '
                                    'gives effective batch size 10240).')
+    train_params.add_argument('--local_rank',
+                               type=int_greater_or_equal(0),
+                               default=None,
+                               help='The DeepSpeed launcher (`deepspeed`) automatically adds this argument. When it is '
+                                    'present, training runs in DeepSpeed mode. This argument does not need to be '
+                                    'specified manually.')
 
     train_params.add_argument('--initial-learning-rate',
                               type=float,

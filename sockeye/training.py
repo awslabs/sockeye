@@ -78,7 +78,10 @@ class ModelWithLoss(torch.nn.Module):
             logger.debug('Tracing SockeyeModel')
             self.traced_model = torch.jit.trace(self.model, (source, source_length,
                                                              target, target_length), strict=False)
-        model_outputs = self.traced_model(source, source_length, target, target_length)
+        model_outputs = self.model(source, source_length, target, target_length)
+        # Guarantee model outputs are in FP32 to avoid overflow (inf) when
+        # computing loss
+        model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
         loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
         sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
@@ -189,6 +192,7 @@ class EarlyStoppingTrainer:
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss.Loss],
                  device: torch.device,
+                 using_deepspeed: bool = False,
                  using_amp: bool = False,
                  using_apex_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
@@ -202,12 +206,13 @@ class EarlyStoppingTrainer:
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
         self.device = device
+        self.using_deepspeed = using_deepspeed
         self.using_amp = using_amp
-        if using_amp:
+        if using_amp and not using_deepspeed:
             self._scaler = torch.cuda.amp.GradScaler()
         self.using_apex_amp = using_apex_amp
         self.state = None  # type: Optional[TrainState]
-        self._speedometer = Speedometer(frequency=C.MEASURE_SPEED_EVERY, auto_reset=False)
+        self._speedometer = Speedometer(frequency=10, auto_reset=False)
         self._custom_metrics_logger = custom_metrics_logger
         self._tflogger = TensorboardLogger(logdir=os.path.join(self.config.output_dir, C.TENSORBOARD_NAME))
         self.checkpoint_callback = checkpoint_callback
@@ -351,21 +356,31 @@ class EarlyStoppingTrainer:
         :return: List loss values.
         """
         batch = batch.load(device=self.device)
-        with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
+        with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp \
+        and not self.using_deepspeed else utils.no_context():  # type: ignore
             # Forward + loss
             sum_losses, loss_values, num_samples = self.model_object(batch.source, batch.source_length,
                                                                      batch.target, batch.target_length, batch.labels)
-            if self.config.update_interval > 1:
-                sum_losses = sum_losses / self.config.update_interval
-        # Backward. PyTorch AMP and Apex AMP use different loss scaling APIs.
-        if self.using_amp:
-            sum_losses = self._scaler.scale(sum_losses)
-        if self.using_apex_amp:
-            with apex.amp.scale_loss(sum_losses, self.optimizer,
-                                     delay_unscale=not is_update_batch) as scaled_sum_losses:
-                scaled_sum_losses.backward()
+        # Backward
+        if self.using_deepspeed:
+            # DeepSpeed backward. DeepSpeed handles all loss scaling.
+            self.model_object.backward(sum_losses)
         else:
-            sum_losses.backward()  # type: ignore
+            if self.config.update_interval > 1:
+                # Scale loss by number of batches per update
+                sum_losses = sum_losses / self.config.update_interval
+            if self.using_amp:
+                # PyTorch AMP loss scaling
+                sum_losses = self._scaler.scale(sum_losses)
+            if self.using_apex_amp:
+                # Apex AMP loss scaling
+                with apex.amp.scale_loss(sum_losses, self.optimizer,
+                                         delay_unscale=not is_update_batch) as scaled_sum_losses:
+                    # Apex AMP backward
+                    scaled_sum_losses.backward()
+            else:
+                # PyTorch (with/without AMP) backward
+                sum_losses.backward()  # type: ignore
         return loss_values, num_samples
 
     def _step(self, batch: data_io.Batch) -> bool:
@@ -375,21 +390,22 @@ class EarlyStoppingTrainer:
         # the optimizer to update model weights. Every Nth batch is an update
         # batch.
         is_update_batch = self.state.batches % self.config.update_interval == 0
+        self.state.updates += 1 if is_update_batch else 0
 
         # Forward/loss/backward (compute gradients). In distributed mode,
         # workers accumulate gradients locally for N-1 batches (no_sync), then
         # average the accumulated gradients across workers during the update
         # batch.
         with (self.model_object.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
-        else utils.no_context()):
+        and not self.using_deepspeed else utils.no_context()):
             loss_values, num_samples = self._forward_backward(batch, is_update_batch)
 
         for loss_func, loss_value, num_samples in zip(self.loss_functions, loss_values, num_samples):
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
-        did_grad_step = False
-        if is_update_batch:
-            self.state.updates += 1
+        if self.using_deepspeed:
+            self.model_object.step()
+        elif is_update_batch:
             if self.using_amp:
                 self._scaler.unscale_(self.optimizer)
             # Clip gradients
@@ -409,11 +425,10 @@ class EarlyStoppingTrainer:
             else:
                 self.optimizer.step()
             self.optimizer.zero_grad(**self.zero_grad_kwargs)
-            did_grad_step = True
 
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
-        return did_grad_step
+        return is_update_batch
 
     def _evaluate(self, checkpoint: int, data_iter,
                   checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss.LossMetric]:
@@ -694,9 +709,9 @@ class EarlyStoppingTrainer:
         self._save_lr_scheduler(lr_scheduler_fname)
 
         # (6) AMP grad scaler state
-        if self.using_amp:
+        if self.using_amp and not self.using_deepspeed:
             torch.save(self._scaler.state_dict(), os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME))
-        if self.using_apex_amp:
+        if self.using_apex_amp and not self.using_deepspeed:
             torch.save(apex.amp.state_dict(), os.path.join(training_state_dirname, C.APEX_AMP_STATE_NAME))
 
         # First we rename the existing directory to minimize the risk of state
@@ -747,10 +762,10 @@ class EarlyStoppingTrainer:
         self._load_lr_scheduler(lr_scheduler_fname)
 
         # (6) AMP grad scaler state
-        if self.using_amp:
+        if self.using_amp and not self.using_deepspeed:
             self._scaler.load_state_dict(
                 torch.load(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME)))
-        if self.using_apex_amp:
+        if self.using_apex_amp and not self.using_deepspeed:
             apex.amp.load_state_dict(torch.load(os.path.join(self.training_state_dirname, C.APEX_AMP_STATE_NAME)))
 
         logger.info("Training State: epoch=%d, checkpoint=%d batches=%d updates=%d best_metric=%.2f, " \

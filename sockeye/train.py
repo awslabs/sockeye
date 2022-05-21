@@ -25,7 +25,7 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import cast, Callable, Optional, Dict, List, Tuple
+from typing import Any, cast, Callable, Optional, Dict, List, Tuple
 
 import torch
 import torch.distributed
@@ -130,6 +130,11 @@ def check_arg_compatibility(args: argparse.Namespace):
     if args.dtype != C.DTYPE_FP32:
         logger.warning('Specifying a non-float32 dtype to sockeye.train has no effect. Use --amp or --apex-amp for '
                        'mixed precision training.')
+
+    if args.local_rank is not None:
+        check_condition(not args.apex_amp and args.learning_rate_scheduler_type != C.LR_SCHEDULER_PLATEAU_REDUCE,
+                        'DeepSpeed mode does not support the following: --apex-amp, --learning-rate-scheduler-type '
+                        f'{C.LR_SCHEDULER_PLATEAU_REDUCE}')
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -757,6 +762,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
 
     config = optimizers.OptimizerConfig(name=args.optimizer,
                                         running_on_gpu=not args.use_cpu,
+                                        using_deepspeed=args.local_rank is not None,
                                         lr=args.initial_learning_rate,
                                         betas=args.optimizer_betas,
                                         eps=args.optimizer_eps,
@@ -860,7 +866,25 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                 each time a checkpoint has been reached
     """
 
-    if args.dist:
+    # The DeepSpeed launcher automatically adds `--local_rank=N` to the CLI args
+    # when launching processes. When this arg specified, run in DeepSpeed mode.
+    using_deepspeed = False
+    if args.local_rank is not None:
+        try:
+            import deepspeed
+            using_deepspeed = True
+        except:
+            raise RuntimeError('To train models with DeepSpeed (https://www.deepspeed.ai/), '
+                               'install the module with `pip install deepspeed`.')
+
+    # When running distributed training, initializing the process group is a
+    # prerequisite for all inter-process communication.
+    if using_deepspeed:
+        check_condition(args.local_rank == utils.get_local_rank(),
+                        f'Mismatch between local rank argument and environment variable: {args.local_rank} != '
+                        f'{utils.get_local_rank()}')
+        deepspeed.init_distributed()
+    elif args.dist:
         torch.distributed.init_process_group(torch.distributed.Backend.GLOO if args.use_cpu
                                              else torch.distributed.Backend.NCCL)
 
@@ -982,7 +1006,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     sockeye_model = model.SockeyeModel(
         model_config,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
-    sockeye_model.to(device)
+    # Move the model to the training device unless using DeepSpeed, which moves
+    # the model automatically.
+    if not using_deepspeed:
+        sockeye_model.to(device)
     sockeye_model.apply(model.initialize_parameters)
 
     # Load starting parameters if specified
@@ -1000,7 +1027,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     utils.log_parameters(sockeye_model)
 
     optimizer_class, optimizer_kwargs, zero_grad_kwargs = optimizers.get_optimizer(optimizer_config)
-    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs)
+    # Create the optimizer unless using DeepSpeed, which handles its own
+    # optimizer creation.
+    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs) if not using_deepspeed else None
 
     lr_scheduler_class, lr_scheduler_kwargs = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                                                             args.initial_learning_rate,
@@ -1012,12 +1041,41 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
-    # This starts as a reference to the original Sockeye model. It is
-    # sequentially transformed/wrapped to produce the model instance used for
-    # training.
+    # This starts as a ModelWithLoss instance. It is sequentially wrapped to
+    # produce the model object used for forward passes and (in some
+    # configurations) backward passes during training.
     model_object = training.ModelWithLoss(model=sockeye_model, losses=losses)  # type: torch.nn.Module
 
-    if args.apex_amp:
+    if using_deepspeed:
+        ds_config = {
+            'train_micro_batch_size_per_gpu': args.batch_size,
+            'gradient_accumulation_steps': args.update_interval,
+            'optimizer': {
+                'type': optimizer_class.__name__,
+                'params': optimizer_kwargs,
+            },
+            'steps_per_print': args.update_interval * args.checkpoint_interval,
+        }
+        if args.amp:
+            ds_config['fp16'] = {
+                'enabled': True,
+                'initial_scale_power': 18,
+            }
+        if optimizer_config.gradient_clipping_type != C.GRADIENT_CLIPPING_TYPE_NONE:
+            ds_config['gradient_clipping'] = optimizer_config.gradient_clipping_threshold
+        # Wrap the model object with a DeepSpeed engine that automatically
+        # handles many aspects of distributed training.
+        model_object, optimizer, _, _lr_scheduler = deepspeed.initialize(model=model_object,
+                                                                         model_parameters=sockeye_model.parameters(),
+                                                                         lr_scheduler=_lr_scheduler,
+                                                                         config=ds_config)
+        # At each time step, DeepSpeed calls `optimizer.step()` before
+        # `lr_scheduler.step()`. Adjust for this by stepping the learning rate
+        # scheduler once (from t=0 to t=1) before training starts. This way
+        # optimizer step 1 uses the learning rate for t=1, optimizer step 2 uses
+        # the learning rate for t=2, etc.
+        _lr_scheduler.step()
+    elif args.apex_amp:
         try:
             import apex.amp
         except ImportError:
@@ -1028,10 +1086,11 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
         model_object, optimizer = apex.amp.initialize(model_object, optimizer, opt_level='O2')
 
-    if utils.is_distributed():
-        # In distributed mode, wrap the traced model with a distributed
-        # data-parallel model that shares (averages) gradients with models
-        # in other worker processes.
+    if utils.is_distributed() and not using_deepspeed:
+        # In distributed mode, wrap the model object with a distributed data-
+        # parallel container that shares (averages) gradients with models in
+        # other worker processes. This is not required when using DeepSpeed,
+        # which automatically handles model synchronization between processes.
         model_object = torch.nn.parallel.DistributedDataParallel(model_object,
                                                                  device_ids=None if args.use_cpu else [device],
                                                                  output_device=None if args.use_cpu else device)
@@ -1046,6 +1105,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
         device=device,
+        using_deepspeed=using_deepspeed,
         using_amp=args.amp,
         using_apex_amp=args.apex_amp,
         custom_metrics_logger=custom_metrics_logger,

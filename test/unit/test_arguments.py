@@ -193,6 +193,7 @@ def test_inference_args(test_params, expected_params):
               optimizer_betas=(0.9, 0.999),
               optimizer_eps=1e-08,
               dist=False,
+              local_rank=None,
               min_samples=None,
               max_samples=None,
               min_updates=None,
