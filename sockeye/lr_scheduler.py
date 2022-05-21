@@ -13,7 +13,7 @@
 
 import logging
 from math import sqrt
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
 
@@ -29,18 +29,31 @@ class LearningRateScheduler:
     optimizer instance using an API that is compatible with PyTorch and
     DeepSpeed.
 
-    :param optimizer: Optimizer.
+    :param optimizer: Optimizer. If None, `LearningRateScheduler(optimizer)`
+                      must be called before running `step()`.
     :param base_lr: Base learning rate.
     :param warmup: Number of initial updates during which the learning rate
                    linearly increases.
     """
-    def __init__(self, optimizer: torch.optim.Optimizer, base_lr: float = 1.0, warmup: int = 0) -> None:
+    def __init__(self,
+                 optimizer: Optional[torch.optim.Optimizer] = None,
+                 base_lr: float = 1.0,
+                 warmup: int = 0) -> None:
         self.optimizer = optimizer
         self.base_lr = base_lr
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
         self.warmup = warmup
         self._t = 0
         self._last_lr = None  # type: Optional[List[float]]
+
+    def __call__(self, optimizer: torch.optim.Optimizer) -> 'LearningRateScheduler':
+        """
+        DeepSpeed compatibility method: associate otherwise initialized learning
+        rate scheduler with an optimizer.
+        """
+        assert self.optimizer is None, 'This learning rate scheduler is already associated with an optimizer.'
+        self.optimizer = optimizer
+        return self
 
     def __repr__(self) -> str:
         return self.__class__.__name__
@@ -72,6 +85,7 @@ class LearningRateScheduler:
         :param t: Manually specify the time step instead of automatically
                   incrementing the previous value.
         """
+        assert self.optimizer is not None, 'This learning rate scheduler is not associated with an optimizer.'
         if t is None:
             t = self._t + 1
         self._t = t
@@ -220,17 +234,15 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
         return [lr for _ in self.optimizer.param_groups]
 
 
-def get_lr_scheduler(optimizer: torch.optim.Optimizer,
-                     scheduler_type: str,
+def get_lr_scheduler(scheduler_type: str,
                      base_learning_rate: float,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
                      learning_rate_warmup: int = 0,
-                     max_updates: Optional[int] = None) -> Optional[LearningRateScheduler]:
+                     max_updates: Optional[int] = None) -> Tuple[Optional[Type[LearningRateScheduler]], Dict[str, Any]]:
     """
-    Creates a learning rate scheduler for the specified optimizer.
+    Get learning rate scheduler class and kwargs.
 
-    :param optimizer: Optimizer.
     :param scheduler_type: Scheduler type.
     :param base_lr: Base learning rate.
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
@@ -242,21 +254,17 @@ def get_lr_scheduler(optimizer: torch.optim.Optimizer,
 
     :raises: ValueError if unknown scheduler_type
 
-    :return: Learning rate scheduler.
+    :return: Tuple of LearningRateScheduler class and kwargs dictionary.
     """
     if scheduler_type is None or scheduler_type == C.LR_SCHEDULER_NONE:
-        return None
+        return None, {}
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
-        return LearningRateSchedulerInvSqrtDecay(optimizer=optimizer,
-                                                 base_lr=base_learning_rate,
-                                                 warmup=learning_rate_warmup)
+        return LearningRateSchedulerInvSqrtDecay, {'base_lr': base_learning_rate, 'warmup': learning_rate_warmup}
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
         assert max_updates is not None, "The total number of training updates (--max-updates) must be specified when " \
                                         "using the linear decay learning rate scheduler."
-        return LearningRateSchedulerLinearDecay(optimizer=optimizer,
-                                                base_lr=base_learning_rate,
-                                                total_steps=max_updates,
-                                                warmup=learning_rate_warmup)
+        return LearningRateSchedulerLinearDecay, {'base_lr': base_learning_rate, 'total_steps': max_updates,
+                                                  'warmup': learning_rate_warmup}
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
@@ -265,7 +273,9 @@ def get_lr_scheduler(optimizer: torch.optim.Optimizer,
         if learning_rate_reduce_factor >= 1.0:
             logger.warning("Not using %s learning rate scheduling: learning_rate_reduce_factor == 1.0",
                            C.LR_SCHEDULER_PLATEAU_REDUCE)
-            return None
-        return LearningRateSchedulerPlateauReduce(optimizer, base_learning_rate, learning_rate_reduce_factor,
-                                                  learning_rate_reduce_num_not_improved, learning_rate_warmup)
+            return None, {}
+        return LearningRateSchedulerPlateauReduce, {'base_lr': base_learning_rate,
+                                                    'reduce_factor': learning_rate_reduce_factor,
+                                                    'reduce_num_not_improved': learning_rate_reduce_num_not_improved,
+                                                    'warmup': learning_rate_warmup}
     raise ValueError("Unknown learning rate scheduler type %s." % scheduler_type)

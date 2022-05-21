@@ -1001,13 +1001,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
 
-    _lr_scheduler = lr_scheduler.get_lr_scheduler(optimizer,
-                                                  args.learning_rate_scheduler_type,
-                                                  args.initial_learning_rate,
-                                                  args.learning_rate_reduce_factor,
-                                                  args.learning_rate_reduce_num_not_improved,
-                                                  args.learning_rate_warmup,
-                                                  args.max_updates)
+    lr_scheduler_class, lr_scheduler_kwargs = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                                                            args.initial_learning_rate,
+                                                                            args.learning_rate_reduce_factor,
+                                                                            args.learning_rate_reduce_num_not_improved,
+                                                                            args.learning_rate_warmup,
+                                                                            args.max_updates)
+    _lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs) if lr_scheduler_class is not None else None
 
     # This starts as a reference to the original Sockeye model. It is
     # sequentially transformed/wrapped to produce the model instance used for
