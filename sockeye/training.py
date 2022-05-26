@@ -78,9 +78,10 @@ class ModelWithLoss(torch.nn.Module):
             logger.debug('Tracing SockeyeModel')
             self.traced_model = torch.jit.trace(self.model, (source, source_length,
                                                              target, target_length), strict=False)
-        model_outputs = self.model(source, source_length, target, target_length)
-        # Guarantee model outputs are in FP32 to avoid overflow (inf) when
-        # computing loss
+        model_outputs = self.traced_model(source, source_length, target, target_length)
+        # Convert model outputs to float32 (if they aren't already) before
+        # computing losses. Computing losses in float16 can lead to overflow
+        # (inf).
         model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
         loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
@@ -364,7 +365,7 @@ class EarlyStoppingTrainer:
         # Backward
         if self.using_deepspeed:
             # DeepSpeed backward. DeepSpeed handles all loss scaling.
-            self.model_object.backward(sum_losses)
+            self.model_object.backward(sum_losses)  # type: ignore
         else:
             if self.config.update_interval > 1:
                 # Scale loss by number of batches per update
@@ -404,7 +405,7 @@ class EarlyStoppingTrainer:
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
         if self.using_deepspeed:
-            self.model_object.step()
+            self.model_object.step()  # type: ignore
         elif is_update_batch:
             if self.using_amp:
                 self._scaler.unscale_(self.optimizer)
@@ -446,9 +447,10 @@ class EarlyStoppingTrainer:
         for batch in data_iter:
             batch = batch.load(device=self.device)
             with torch.inference_mode():
-                # Forward: use sockeye_model because (traced) training_model
-                # doesn't support eval mode (still runs dropout, etc.)
+                # Forward
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
+                # Require model outputs to be float32 for validation loss
+                outputs = {output_name: output.to(torch.float32) for (output_name, output) in outputs.items()}
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
                 # Update validation metrics for batch

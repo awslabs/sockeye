@@ -952,12 +952,6 @@ def add_training_args(params):
                                    '`torchrun --nproc_per_node N -m sockeye.train`. Increasing the number of processes '
                                    'multiplies the effective batch size (ex: batch_size 2560 with `--nproc_per_node 4` '
                                    'gives effective batch size 10240).')
-    train_params.add_argument('--local_rank',
-                               type=int_greater_or_equal(0),
-                               default=None,
-                               help='The DeepSpeed launcher (`deepspeed`) automatically adds this argument. When it is '
-                                    'present, training runs in DeepSpeed mode. This argument does not need to be '
-                                    'specified manually.')
 
     train_params.add_argument('--initial-learning-rate',
                               type=float,
@@ -1006,7 +1000,6 @@ def add_training_args(params):
                               help='Do not reload the best training checkpoint when reducing the learning rate. '
                                    'Default: %(default)s.')
 
-
     train_params.add_argument('--fixed-param-strategy',
                               default=None,
                               choices=C.FIXED_PARAM_STRATEGY_CHOICES,
@@ -1017,6 +1010,36 @@ def add_training_args(params):
                               default=[],
                               nargs='*',
                               help="Manually specify names of parameters to fix during training. Default: %(default)s.")
+
+    # DeepSpeed arguments
+    train_params.add_argument('--local_rank',
+                               type=int_greater_or_equal(0),
+                               default=None,
+                               help='The DeepSpeed launcher (`deepspeed`) automatically adds this argument. When it is '
+                                    'present, training runs in DeepSpeed mode. This argument does not need to be '
+                                    'specified manually.')
+    train_params.add_argument('--deepspeed-config',
+                              type=regular_file(),
+                              default=None,
+                              help='JSON config file that fully specifies DeepSpeed settings. When using this '
+                                   'argument, no other configuration settings are passed to the DeepSpeed engine. See: '
+                                   'https://www.deepspeed.ai/docs/config-json/. Default: %(default)s.')
+    train_params.add_argument('--deepspeed-fp16',
+                              action='store_true',
+                              default=False,
+                              help='Run the model in float16 mode with float32 master weights and dynamic loss '
+                                   'scaling. This is similar to --apex-amp. Default: %(default)s.')
+    train_params.add_argument('--deepspeed-zero',
+                              type=int_greater_or_equal(0),
+                              default=None,
+                              help='Enable ZeRO memory optimizations for the specified stage. 1: partition optimizer '
+                                   'states, 2: also partition gradients, 3: also partition parameters (Rajbhandari et '
+                                   'al. 2019, arxiv.org/abs/1910.02054v3). Default: %(default)s.')
+    train_params.add_argument('--deepspeed-offload-optimizer',
+                              action='store_true',
+                              default=False,
+                              help='Offload optimizer states to the CPU when using ZeRO stage 2+ (Rajbhandari et al. '
+                                   '2021, arxiv.org/abs/2104.07857). Default: %(default)s.')
 
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=500,

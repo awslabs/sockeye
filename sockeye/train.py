@@ -25,7 +25,7 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Any, cast, Callable, Optional, Dict, List, Tuple
+from typing import Any, cast, Callable, Optional, Dict, List, Tuple, Type
 
 import torch
 import torch.distributed
@@ -132,9 +132,14 @@ def check_arg_compatibility(args: argparse.Namespace):
                        'mixed precision training.')
 
     if args.local_rank is not None:
-        check_condition(not args.apex_amp and args.learning_rate_scheduler_type != C.LR_SCHEDULER_PLATEAU_REDUCE,
-                        'DeepSpeed mode does not support the following: --apex-amp, --learning-rate-scheduler-type '
-                        f'{C.LR_SCHEDULER_PLATEAU_REDUCE}')
+        check_condition(args.deepspeed_zero is None or args.deepspeed_zero < 3,
+                        'Sockeye currently supports ZeRO stages 1 and 2.')
+        check_condition(not args.amp and not args.apex_amp,
+                        'DeepSpeed mode does not support --amp or --apex-amp. Use --deepspeed-fp16.')
+        check_condition(not (args.learning_rate_scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE
+                             and not args.no_reload_on_learning_rate_reduce),
+                        'DeepSpeed mode does not support learning rate schedulers that reload checkpoints. Use a '
+                        'different --learning-rate-scheduler-type or specify --no-reload-on-learning-rate-reduce.')
 
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
@@ -780,6 +785,58 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
     return config
 
 
+def create_deepspeed_config(args: argparse.Namespace,
+                            optimizer_config: optimizers.OptimizerConfig,
+                            optimizer_class: Type[torch.optim.Optimizer],
+                            optimizer_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generates a DeepSpeed config dictionary from training arguments. See:
+    https://www.deepspeed.ai/docs/config-json/
+
+    :param args: Arguments as returned by argparse.
+    :param optimizer_config: Optimizer config.
+    :param optimizer_class: Optimizer class.
+    :param optimizer_kwargs: Optimizer kwargs.
+
+    :return: Dictionary of config options that can be used to initialize the
+             DeepSpeed engine.
+    """
+    ds_config = {
+        'train_micro_batch_size_per_gpu': args.batch_size,
+        'gradient_accumulation_steps': args.update_interval,
+        'optimizer': {
+            'type': optimizer_class.__name__,
+            'params': optimizer_kwargs,
+        },
+        'steps_per_print': args.update_interval * args.checkpoint_interval,
+    }
+    if args.deepspeed_fp16:
+        ds_config.update({
+            'fp16': {
+                'enabled': True,
+                'initial_scale_power': 18,
+            },
+        })
+    if optimizer_config.gradient_clipping_type != C.GRADIENT_CLIPPING_TYPE_NONE:
+        ds_config.update({
+            'gradient_clipping': optimizer_config.gradient_clipping_threshold,
+        })
+    if args.deepspeed_zero is not None:
+        zero_config = {
+            'stage': args.deepspeed_zero,
+        }
+        if args.deepspeed_offload_optimizer:
+            zero_config.update({
+                'offload_optimizer': {
+                    'device': 'cpu',
+                },
+            })
+        ds_config.update({
+            'zero_optimization': zero_config,
+        })
+    return ds_config
+
+
 def unset_requires_grad_for_fixed_params(config: model.ModelConfig,
                                          params: Dict[str, torch.nn.parameter.Parameter],
                                          fixed_param_names: List[str],
@@ -1047,22 +1104,11 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     model_object = training.ModelWithLoss(model=sockeye_model, losses=losses)  # type: torch.nn.Module
 
     if using_deepspeed:
-        ds_config = {
-            'train_micro_batch_size_per_gpu': args.batch_size,
-            'gradient_accumulation_steps': args.update_interval,
-            'optimizer': {
-                'type': optimizer_class.__name__,
-                'params': optimizer_kwargs,
-            },
-            'steps_per_print': args.update_interval * args.checkpoint_interval,
-        }
-        if args.amp:
-            ds_config['fp16'] = {
-                'enabled': True,
-                'initial_scale_power': 18,
-            }
-        if optimizer_config.gradient_clipping_type != C.GRADIENT_CLIPPING_TYPE_NONE:
-            ds_config['gradient_clipping'] = optimizer_config.gradient_clipping_threshold
+        # If a DeepSpeed config file is specified, use it directly. Otherwise,
+        # create a config dictionary from training arguments.
+        ds_config = args.deepspeed_config
+        if ds_config is None:
+            ds_config = create_deepspeed_config(args, optimizer_config, optimizer_class, optimizer_kwargs)
         # Wrap the model object with a DeepSpeed engine that automatically
         # handles many aspects of distributed training.
         model_object, optimizer, _, _lr_scheduler = deepspeed.initialize(model=model_object,
@@ -1075,7 +1121,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # optimizer step 1 uses the learning rate for t=1, optimizer step 2 uses
         # the learning rate for t=2, etc.
         _lr_scheduler.step()
-    elif args.apex_amp:
+
+    if args.apex_amp:
         try:
             import apex.amp
         except ImportError:
