@@ -17,46 +17,84 @@ import pytest
 import sockeye.rerank as rerank
 
 
-@pytest.mark.parametrize("hypotheses, reference, expected_output, metric", [
-    (["No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
+@pytest.mark.parametrize("source, hypotheses, reference, expected_output, metric", [
+    # test bleu as metric
+    ("El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     ["No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
       "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
      "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
      ['No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament',
       'No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament'], "bleu"),
     # test chrf as metric
-    (["No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
+    ("El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     ["No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
       "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
      "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
      ['No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament',
       'No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament'], "chrf"),
     # test empty hypothesis
-    (["",
+    ("El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     ["",
       "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
      "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
      ['No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament',
-      ''], "bleu")
+      ''], "bleu"),
 ])
-def test_rerank_hypotheses(hypotheses, reference, expected_output, metric):
+def test_rerank_hypotheses(source, hypotheses, reference, expected_output, metric):
     reranker = rerank.Reranker(metric=metric, return_score=False)
     hypotheses = {'sentence_id': 0,
+                  'text': source,
                   'translation': '',
                   'translations': hypotheses}
-    reranked_hypotheses = reranker.rerank(hypotheses, reference)
+    reranked_hypotheses = reranker.rerank(hypotheses, reference, source)
     assert reranked_hypotheses['translations'] == expected_output
 
 
-@pytest.mark.parametrize("hypotheses, reference, expected_scores", [
-    (["Completely different",
+@pytest.mark.parametrize("source, hypotheses, scores, reference, expected_output, metric", [
+    # test isometric-ratio as metric
+    ("El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     ["No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
+      "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
+     [[0.377], [0.455]],
+     "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
+     ['No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament',
+      'No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament'],
+     "isometric-ratio"),
+    # test isometric-lc
+    ("El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     ["No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
+      "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
+     [[0.377], [0.455]],
+     "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
+     ['No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament',
+      'No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament'],
+     "isometric-lc"),
+])
+def test_rerank_hypotheses_isometric(source, hypotheses, scores, reference, expected_output, metric):
+    reranker = rerank.Reranker(metric=metric, return_score=False)
+    hypotheses = {'sentence_id': 0,
+                  'text': source,
+                  'translation': '',
+                  'scores': scores,
+                  'translations': hypotheses}
+    reranked_hypotheses = reranker.rerank(hypotheses, reference, source)
+    assert reranked_hypotheses['translations'] == expected_output
+
+
+@pytest.mark.parametrize("source, hypotheses, reference, expected_scores", [
+    ("El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     ["Completely different",
       "No Liber@@ ating Ty@@ mo@@ sh@@ en@@ ko by Parliament"],
      "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
      [61.69564583930634, 0.0])
 ])
-def test_rerank_return_score(hypotheses, reference, expected_scores):
+def test_rerank_return_score(source, hypotheses, reference, expected_scores):
     reranker = rerank.Reranker(metric="bleu", return_score=True)
     hypotheses = {'sentence_id': 0,
+                  'text': source,
                   'translation': '',
                   'translations': hypotheses}
-    reranked_hypotheses = reranker.rerank(hypotheses, reference)
+    reranked_hypotheses = reranker.rerank(hypotheses, reference, source)
     assert 'scores' in reranked_hypotheses
     actual_scores = reranked_hypotheses['scores']
     assert np.allclose(actual_scores, expected_scores)

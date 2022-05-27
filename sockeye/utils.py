@@ -615,3 +615,52 @@ def all_gather_object(obj: T) -> List[T]:
     obj_list = [None] * torch.distributed.get_world_size()  # type: List[T]
     torch.distributed.all_gather_object(obj_list, obj)
     return obj_list
+
+
+def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: list = []) -> int:
+    """Count sequence length (char, tokens) with optional replace tokens.
+    If count_type not char, count tokens."""
+    if len(replace_tokens) >= 1:
+        for r in replace_tokens:
+            sample = sample.replace(r, '')
+    if count_type != 'char':
+        return len(sample)
+    else:
+        return len(sample.replace(' ', ''))
+
+
+def compute_isometric_score(hypothesis: str, hypothesis_score: float,
+                            source: str, isometric_metric: str, alpha: float) -> float:
+    """
+    Compute hypothesis to source isometric scores using sample 'count_type' length
+    and isometric metric (ratio, diff, lc).
+        - isometric-diff: https://aclanthology.org/W19-5210.pdf
+        - isometric-ratio/lc: https://arxiv.org/pdf/2110.03847.pdf
+    :return isometric score
+    """
+    count_type = 'char' # constant for isometric scoring
+    replace_tokens = C.TOKEN_SEGMENTATION_MARKERS
+
+    hypothesis_len = count_seq_len(hypothesis, count_type, replace_tokens)
+    source_len = count_seq_len(source, count_type, replace_tokens)
+
+    if isometric_metric == C.RERANK_ISOMETRIC_LC:
+        abs_len_diff = abs(hypothesis_len - source_len)
+        isometric_score = (abs_len_diff*100) / source_len
+
+        return isometric_score
+    else:
+        if isometric_metric == C.RERANK_ISOMETRIC_RATIO:
+            abs_ratio = abs(hypothesis_len/source_len)
+            synchrony_score = float(1/(1 + abs_ratio))
+
+        if isometric_metric == C.RERANK_ISOMETRIC_DIFF:
+            abs_diff = abs(hypothesis_len - source_len)
+            synchrony_score = float(1/(1 + abs_diff))
+
+        # isometric score, if alpha=0.0 takes model prediction score
+        pred_sub_score = (1 - alpha) * float(hypothesis_score)
+        synchrony_sub_score = alpha * synchrony_score
+        isometric_score = pred_sub_score + synchrony_sub_score
+
+        return isometric_score
