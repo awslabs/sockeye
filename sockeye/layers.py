@@ -409,10 +409,6 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
             self.interleave_kv()
         return super().train(mode)
 
-    def _load_from_state_dict(self, *args):
-        self.kv_interleaved = True  # see SockeyeModel.save_parameters(): models store kv weight in interleaved format
-        super()._load_from_state_dict(*args)
-
     @property
     def num_state_tensors(self) -> int:
         """ Number of state tensors returned by the layer """
@@ -533,10 +529,6 @@ class MultiHeadAttention(MultiHeadAttentionBase):
             # eval/inference operates in interleaved format
             self.interleave_kv()
         return super().train(mode)
-
-    def _load_from_state_dict(self, *args):
-        self.kv_interleaved = True  # see SockeyeModel.save_parameters(): models store kv weight in interleaved format
-        super()._load_from_state_dict(*args)
 
     def forward(self,
                 queries: pt.Tensor,

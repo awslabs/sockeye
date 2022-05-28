@@ -132,8 +132,8 @@ def check_arg_compatibility(args: argparse.Namespace):
                        'mixed precision training.')
 
     if args.local_rank is not None:
-        check_condition(args.deepspeed_zero is None or args.deepspeed_zero < 3,
-                        'Sockeye currently supports ZeRO stages 1 and 2.')
+        check_condition(args.deepspeed_zero is not None and 1 <= args.deepspeed_zero <= 2,
+                        'Sockeye currently supports DeepSpeed with ZeRO stages 1 and 2. Use --deepspeed-zero N.')
         check_condition(not args.amp and not args.apex_amp,
                         'DeepSpeed mode does not support --amp or --apex-amp. Use --deepspeed-fp16.')
         check_condition(not (args.learning_rate_scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE
@@ -929,6 +929,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     if args.local_rank is not None:
         try:
             import deepspeed
+            import deepspeed.utils.zero_to_fp32
             using_deepspeed = True
         except:
             raise RuntimeError('To train models with DeepSpeed (https://www.deepspeed.ai/), '
