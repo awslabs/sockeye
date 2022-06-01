@@ -42,7 +42,7 @@ class Reranker:
     :param isometric_alpha: Factor for reranking with isometric criteria.
     """
 
-    def __init__(self, metric: str, isometric_alpha: float, return_score: bool = False) -> None:
+    def __init__(self, metric: str, isometric_alpha: float = 0.5, return_score: bool = False) -> None:
         self.metric = metric
         self.isometric_alpha = isometric_alpha
         self.return_score = return_score
@@ -121,7 +121,7 @@ def rerank(args: argparse.Namespace):
 
     :param args: Namespace object holding CLI arguments.
     """
-    reranker = Reranker(args.metric, args.return_score, args.isometric_alpha)
+    reranker = Reranker(args.metric, args.isometric_alpha, args.return_score)
     output_stream = sys.stdout if args.output is None else utils.smart_open(args.output, mode='w')
     logger.info("Hypotheses re-ranking using criterion: '%s' " % args.metric)
 

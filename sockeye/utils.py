@@ -617,17 +617,17 @@ def all_gather_object(obj: T) -> List[T]:
     return obj_list
 
 
-def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: List = []) -> int:
+def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optional[List] = None) -> int:
     """
-    Count sequence length, after replacing word segmentation token/s.
+    Count sequence length, after replacing (optional) token/s.
     """
-    if len(replace_tokens) >= 1:
-        for r in replace_tokens:
-            sample = sample.replace(r, '')
-    if count_type == 'char':
-        return len(sample.replace(' ', ''))
-    else:
-        return len(sample.split(' '))
+    if replace_tokens is not None:
+        for tokens in replace_tokens:
+            sample = sample.replace(tokens, '')
+    if count_type == C.SEQ_LEN_IN_CHARACTERS:
+        return len(sample.replace(C.TOKEN_SEPARATOR, ''))
+    if count_type == C.SEQ_LEN_IN_TOKENS:
+        return len(sample.split(C.TOKEN_SEPARATOR))
 
 
 def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: str,
@@ -639,7 +639,7 @@ def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: st
         - isometric-ratio/lc: https://arxiv.org/pdf/2110.03847.pdf
     :return isometric score
     """
-    count_type = 'char'  # for isometric scoring, count length in characters
+    count_type = C.SEQ_LEN_IN_CHARACTERS  # for isometric scoring, count length in characters
     replace_tokens = C.TOKEN_SEGMENTATION_MARKERS
 
     hypothesis_len = count_seq_len(hypothesis, count_type, replace_tokens)

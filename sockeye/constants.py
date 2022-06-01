@@ -347,6 +347,11 @@ TOKEN_SEGMENTATION_SW = "@@"  # sub-word nmt
 TOKEN_SEGMENTATION_SP = "▁"   # sentence piece
 TOKEN_SEGMENTATION_MARKERS = [TOKEN_SEGMENTATION_SW, TOKEN_SEGMENTATION_SP]
 
+# sequence length count types
+SEQ_LEN_IN_CHARACTERS = "char"
+SEQ_LEN_IN_TOKENS = "token"
+SEQ_LEN_IN_WORDS = "word"  # use case: merge sub-words to original word before counting
+
 # scoring
 SCORING_TYPE_NEGLOGPROB = 'neglogprob'
 SCORING_TYPE_LOGPROB = 'logprob'
