@@ -631,7 +631,7 @@ def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: List = 
 
 
 def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: str,
-                            isometric_metric: str = 'isometric-ratio', isometric_alpha: float = 0.5):  # -> float:
+                            isometric_metric: str = 'isometric-ratio', isometric_alpha: float = 0.5) -> float:
     """
     Compute hypothesis to source isometric score using sample char length
     and isometric metric (ratio, diff, lc).

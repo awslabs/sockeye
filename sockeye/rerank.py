@@ -66,7 +66,6 @@ class Reranker:
             self.ranking_indices = partial(self._get_ranking_indices, kind='mergesort', order='descending')
 
 
-
     def rerank(self, hypotheses: Dict[str, Any], reference: str) -> Dict[str, Any]:
         """
         Reranks a set of hypotheses that belong to one single reference
