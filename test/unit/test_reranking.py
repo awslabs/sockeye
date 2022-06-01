@@ -41,12 +41,12 @@ import sockeye.rerank as rerank
       ''], "bleu"),
 ])
 def test_rerank_hypotheses(source, hypotheses, reference, expected_output, metric):
-    reranker = rerank.Reranker(metric=metric, return_score=False)
+    reranker = rerank.Reranker(metric=metric, isometric_alpha=0.5, return_score=False)
     hypotheses = {'sentence_id': 0,
                   'text': source,
                   'translation': '',
                   'translations': hypotheses}
-    reranked_hypotheses = reranker.rerank(hypotheses, reference, source)
+    reranked_hypotheses = reranker.rerank(hypotheses, reference)
     assert reranked_hypotheses['translations'] == expected_output
 
 
@@ -71,13 +71,13 @@ def test_rerank_hypotheses(source, hypotheses, reference, expected_output, metri
      "isometric-lc"),
 ])
 def test_rerank_hypotheses_isometric(source, hypotheses, scores, reference, expected_output, metric):
-    reranker = rerank.Reranker(metric=metric, return_score=False)
+    reranker = rerank.Reranker(metric=metric, isometric_alpha=0.5, return_score=False)
     hypotheses = {'sentence_id': 0,
                   'text': source,
                   'translation': '',
                   'scores': scores,
                   'translations': hypotheses}
-    reranked_hypotheses = reranker.rerank(hypotheses, reference, source)
+    reranked_hypotheses = reranker.rerank(hypotheses, reference)
     assert reranked_hypotheses['translations'] == expected_output
 
 
@@ -89,12 +89,12 @@ def test_rerank_hypotheses_isometric(source, hypotheses, scores, reference, expe
      [61.69564583930634, 0.0])
 ])
 def test_rerank_return_score(source, hypotheses, reference, expected_scores):
-    reranker = rerank.Reranker(metric="bleu", return_score=True)
+    reranker = rerank.Reranker(metric="bleu", isometric_alpha=0.5, return_score=True)
     hypotheses = {'sentence_id': 0,
                   'text': source,
                   'translation': '',
                   'translations': hypotheses}
-    reranked_hypotheses = reranker.rerank(hypotheses, reference, source)
+    reranked_hypotheses = reranker.rerank(hypotheses, reference)
     assert 'scores' in reranked_hypotheses
     actual_scores = reranked_hypotheses['scores']
     assert np.allclose(actual_scores, expected_scores)

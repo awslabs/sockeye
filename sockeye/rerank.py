@@ -39,10 +39,12 @@ class Reranker:
 
     :param metric: Sentence-level metric such as smoothed BLEU.
     :param return_score: If True, also return the sentence-level score.
+    :param isometric_alpha: Factor for reranking with isometric criteria.
     """
 
-    def __init__(self, metric: str, return_score: bool = False) -> None:
+    def __init__(self, metric: str, isometric_alpha: float, return_score: bool = False) -> None:
         self.metric = metric
+        self.isometric_alpha = isometric_alpha
         self.return_score = return_score
 
         if self.metric == C.RERANK_BLEU:
@@ -53,42 +55,39 @@ class Reranker:
         elif self.metric == C.RERANK_CHRF:
             self.scoring_function = sacrebleu.sentence_chrf  # type: ignore
         elif self.metric.startswith(C.RERANK_ISOMETRIC):
-            self.scoring_function = utils.compute_isometric_score  # type: ignore
+            self.scoring_function = partial(utils.compute_isometric_score, isometric_metric=self.metric,
+                                            isometric_alpha=self.isometric_alpha)  # type: ignore
         else:
             raise utils.SockeyeError("Scoring metric '%s' unknown. Choices are: %s" % (metric, C.RERANK_METRICS))
 
+        if self.metric == C.RERANK_ISOMETRIC_LC:
+            self.ranking_indices = partial(self._get_ranking_indices, kind='mergesort', order='ascending')
+        else:
+            self.ranking_indices = partial(self._get_ranking_indices, kind='mergesort', order='descending')
 
-    def rerank(self, hypotheses: Dict[str, Any], reference: str, source: str,
-               isometric_alpha: float = 0.5) -> Dict[str, Any]:
+
+
+    def rerank(self, hypotheses: Dict[str, Any], reference: str) -> Dict[str, Any]:
         """
         Reranks a set of hypotheses that belong to one single reference
         translation. Uses stable sorting.
 
         :param hypotheses: Nbest translations.
         :param reference: A single string with the actual reference translation.
-        :param source: A single string with the source sentence.
-        :param isometric_alpha: For re-ranking using isometric translation criterion.
         :return: Nbest translations sorted by reranking scores.
         """
-
         if self.metric == C.RERANK_BLEU or self.metric == C.RERANK_CHRF:
             scores = [self.scoring_function(hypothesis, [reference]).score for
                       hypothesis in hypotheses['translations']]
-            # BLEU,CHRF - the higher, the better
-            ranking = self._get_ranking_indices(scores, kind='mergesort', descending=True)
+            # BLEU, CHRF - the higher, the better
+            ranking = self.ranking_indices(scores)
 
         if self.metric.startswith(C.RERANK_ISOMETRIC):
-            scores = [self.scoring_function(hypothesis, hypothesis_score[0], source,
-                                            self.metric, isometric_alpha)
-                      for hypothesis, hypothesis_score in
-                      zip(hypotheses['translations'], hypotheses['scores'])]
-
-            if self.metric == C.RERANK_ISOMETRIC_LC:
-                # isometric-lc - the smaller, the better
-                ranking = self._get_ranking_indices(scores, kind='mergesort', descending=False)
-            else:
-                # isometric-ratio - the higher, the better
-                ranking = self._get_ranking_indices(scores, kind='mergesort', descending=True)
+            source = hypotheses['text']
+            scores = [self.scoring_function(hypothesis, hypothesis_score[0], source) for
+                      hypothesis, hypothesis_score in zip(hypotheses['translations'], hypotheses['scores'])]
+            # isometric-lc - the smaller, the better
+            ranking = self.ranking_indices(scores)
 
         reranked_hypotheses = self._sort_by_ranking(hypotheses, ranking)
         if self.return_score:
@@ -98,8 +97,8 @@ class Reranker:
         return reranked_hypotheses
 
     @staticmethod
-    def _get_ranking_indices(scores, kind='mergesort', descending=False):
-        if descending:
+    def _get_ranking_indices(scores: List, kind: str = 'mergesort', order: str = 'descending') -> List:
+        if order == 'descending':
             return list(np.argsort(scores, kind=kind)[::-1])
         else:
             return list(np.argsort(scores, kind=kind))
@@ -123,7 +122,7 @@ def rerank(args: argparse.Namespace):
 
     :param args: Namespace object holding CLI arguments.
     """
-    reranker = Reranker(args.metric, args.return_score)
+    reranker = Reranker(args.metric, args.return_score, args.isometric_alpha)
     output_stream = sys.stdout if args.output is None else utils.smart_open(args.output, mode='w')
     logger.info("Hypotheses re-ranking using criterion: '%s' " % args.metric)
 
@@ -136,16 +135,12 @@ def rerank(args: argparse.Namespace):
             utils.check_condition('translations' in hypotheses,
                                   "Reranking requires nbest JSON input with 'translations' key present.")
             num_hypotheses = len(hypotheses['translations'])
-            source = hypotheses['text']
 
             if not num_hypotheses > 1:
                 logger.info("Line %d contains %d hypotheses. Nothing to rerank.", i, num_hypotheses)
                 reranked_hypotheses = hypotheses
             else:
-                reranked_hypotheses = reranker.rerank(hypotheses,
-                                                          reference,
-                                                          source,
-                                                          isometric_alpha=args.isometric_alpha)
+                reranked_hypotheses = reranker.rerank(hypotheses, reference)
 
             if args.output_best:
                 best_hypothesis = reranked_hypotheses['translations'][0] if num_hypotheses else ''
@@ -159,7 +154,7 @@ def rerank(args: argparse.Namespace):
                     for h in range(num_hypotheses):
                         best_hypothesis = reranked_hypotheses['translations'][h]
 
-                        if best_hypothesis == '':
+                        if not best_hypothesis:
                             continue
                         else:
                             logger.warning('Line %d: blank hypothesis replaced by line [%d] non-blank '
