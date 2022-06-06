@@ -21,6 +21,7 @@ To use this feature pass a criterion (`isometric-ratio, isometric-diff, isometri
 ## [3.1.15]
 
 ### Fixed
+
 - Fix type of valid_length to be pt.Tensor instead of Optional[pt.Tensor] = None for jit tracing
 
 ## [3.1.14]
