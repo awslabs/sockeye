@@ -626,12 +626,15 @@ def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optiona
             sample = sample.replace(tokens, '')
     if count_type == C.SEQ_LEN_IN_CHARACTERS:
         return len(sample.replace(C.TOKEN_SEPARATOR, ''))
-    if count_type == C.SEQ_LEN_IN_TOKENS:
+    elif count_type == C.SEQ_LEN_IN_TOKENS:
         return len(sample.split(C.TOKEN_SEPARATOR))
+    else:
+        raise SockeyeError("Sequence length count type '%s' unknown. "
+                           "Choices are: %s" % (count_type, [C.SEQ_LEN_IN_CHARACTERS, C.SEQ_LEN_IN_TOKENS]))
 
 
 def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: str,
-                            isometric_metric: str = 'isometric-ratio', isometric_alpha: float = 0.5) -> float:
+                            isometric_metric: str = 'isometric-ratio', isometric_alpha: float = 0.5):
     """
     Compute hypothesis to source isometric score using sample char length
     and isometric metric (ratio, diff, lc).
