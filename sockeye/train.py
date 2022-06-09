@@ -31,6 +31,14 @@ import torch
 import torch.distributed
 import torch.distributed.elastic.multiprocessing.errors
 
+# Optional imports. Import errors are not an issue because these modules are
+# only used when certain settings are activated. We check that these modules
+# can be imported before activating the settings.
+try:
+    import deepspeed
+except ImportError:
+    pass
+
 from . import arguments
 from . import checkpoint_decoder
 from . import constants as C
@@ -132,8 +140,6 @@ def check_arg_compatibility(args: argparse.Namespace):
                        'mixed precision training.')
 
     if args.local_rank is not None:
-        check_condition(args.deepspeed_zero is not None and 1 <= args.deepspeed_zero <= 2,
-                        'Sockeye currently supports DeepSpeed with ZeRO stages 1 and 2. Use --deepspeed-zero N.')
         check_condition(not args.amp and not args.apex_amp,
                         'DeepSpeed mode does not support --amp or --apex-amp. Use --deepspeed-fp16.')
         check_condition(not (args.learning_rate_scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE
@@ -214,6 +220,10 @@ def create_checkpoint_decoder(
         sample_size = -1
 
     if sample_size == 0:
+        return None
+
+    if utils.using_deepspeed():
+        logger.info('Turning off checkpoint decoder when using DeepSpeed')
         return None
 
     cpd = checkpoint_decoder.CheckpointDecoder(
@@ -767,7 +777,6 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
 
     config = optimizers.OptimizerConfig(name=args.optimizer,
                                         running_on_gpu=not args.use_cpu,
-                                        using_deepspeed=args.local_rank is not None,
                                         lr=args.initial_learning_rate,
                                         betas=args.optimizer_betas,
                                         eps=args.optimizer_eps,
@@ -788,7 +797,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
 def create_deepspeed_config(args: argparse.Namespace,
                             optimizer_config: optimizers.OptimizerConfig,
                             optimizer_class: Type[torch.optim.Optimizer],
-                            optimizer_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+                            optimizer_kwargs: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
     """
     Generates a DeepSpeed config dictionary from training arguments. See:
     https://www.deepspeed.ai/docs/config-json/
@@ -798,8 +807,9 @@ def create_deepspeed_config(args: argparse.Namespace,
     :param optimizer_class: Optimizer class.
     :param optimizer_kwargs: Optimizer kwargs.
 
-    :return: Dictionary of config options that can be used to initialize the
-             DeepSpeed engine.
+    :return: Tuple: dictionary of config options that can be used to initialize
+             the DeepSpeed engine and boolean indicating whether the JIT tracing
+             can be used during training.
     """
     ds_config = {
         'train_micro_batch_size_per_gpu': args.batch_size,
@@ -810,31 +820,50 @@ def create_deepspeed_config(args: argparse.Namespace,
         },
         'steps_per_print': args.update_interval * args.checkpoint_interval,
     }
+
     if args.deepspeed_fp16:
-        ds_config.update({
+        utils.update_dict(ds_config, {
             'fp16': {
                 'enabled': True,
                 'initial_scale_power': 18,
             },
         })
+
     if optimizer_config.gradient_clipping_type != C.GRADIENT_CLIPPING_TYPE_NONE:
-        ds_config.update({
+        utils.update_dict(ds_config, {
             'gradient_clipping': optimizer_config.gradient_clipping_threshold,
         })
-    if args.deepspeed_zero is not None:
-        zero_config = {
-            'stage': args.deepspeed_zero,
-        }
-        if args.deepspeed_offload_optimizer:
-            zero_config.update({
+
+    if args.deepspeed_zero == C.DEEPSPEED_ZERO_STAGE_INF:
+        utils.update_dict(ds_config, {
+            'zero_optimization': {
+                'stage': C.DEEPSPEED_ZERO_STAGE_3,
+                'overlap_comm': True,
+                'offload_param': {
+                    'device': 'cpu',
+                    'pin_memory': True,
+                },
                 'offload_optimizer': {
                     'device': 'cpu',
+                    'pin_memory': True,
                 },
-            })
-        ds_config.update({
-            'zero_optimization': zero_config,
+            },
         })
-    return ds_config
+    else:
+        utils.update_dict(ds_config, {
+            'zero_optimization': {
+                'stage': args.deepspeed_zero,
+            }
+        })
+
+    # JSON config has highest priority
+    if args.deepspeed_config is not None:
+        utils.update_dict(ds_config, args.deepspeed_config)
+
+    # Stage 3 (including infinity) is not compatible with JIT tracing
+    use_trace = ds_config['zero_optimization']['stage'] != C.DEEPSPEED_ZERO_STAGE_3
+
+    return ds_config, use_trace
 
 
 def unset_requires_grad_for_fixed_params(config: model.ModelConfig,
@@ -923,26 +952,18 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                 each time a checkpoint has been reached
     """
 
-    # The DeepSpeed launcher automatically adds `--local_rank=N` to the CLI args
-    # when launching processes. When this arg specified, run in DeepSpeed mode.
-    using_deepspeed = False
-    if args.local_rank is not None:
-        try:
-            import deepspeed
-            import deepspeed.utils.zero_to_fp32
-            using_deepspeed = True
-        except:
-            raise RuntimeError('To train models with DeepSpeed (https://www.deepspeed.ai/), '
-                               'install the module with `pip install deepspeed`.')
-
     # When running distributed training, initializing the process group is a
     # prerequisite for all inter-process communication.
-    if using_deepspeed:
+
+    # The DeepSpeed launcher automatically adds `--local_rank=N` to the CLI args
+    # when launching processes. When this arg specified, run in DeepSpeed mode.
+    if args.local_rank is not None:
+        utils.init_deepspeed()
         check_condition(args.local_rank == utils.get_local_rank(),
                         f'Mismatch between local rank argument and environment variable: {args.local_rank} != '
                         f'{utils.get_local_rank()}')
-        deepspeed.init_distributed()
     elif args.dist:
+        # Otherwise use PyTorch's standard distributed mode
         torch.distributed.init_process_group(torch.distributed.Backend.GLOO if args.use_cpu
                                              else torch.distributed.Backend.NCCL)
 
@@ -1066,7 +1087,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
     # Move the model to the training device unless using DeepSpeed, which moves
     # the model automatically.
-    if not using_deepspeed:
+    if not utils.using_deepspeed():
         sockeye_model.to(device)
     sockeye_model.apply(model.initialize_parameters)
 
@@ -1084,10 +1105,12 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     utils.log_parameters(sockeye_model)
 
+    losses = create_losses(args, all_num_classes=target_vocab_sizes)
+
     optimizer_class, optimizer_kwargs, zero_grad_kwargs = optimizers.get_optimizer(optimizer_config)
     # Create the optimizer unless using DeepSpeed, which handles its own
     # optimizer creation.
-    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs) if not using_deepspeed else None
+    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs) if not utils.using_deepspeed() else None
 
     lr_scheduler_class, lr_scheduler_kwargs = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                                                             args.initial_learning_rate,
@@ -1097,19 +1120,17 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                             args.max_updates)
     _lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs) if lr_scheduler_class is not None else None
 
-    losses = create_losses(args, all_num_classes=target_vocab_sizes)
+    ds_config, use_trace = None, True
+    if utils.using_deepspeed():
+        ds_config, use_trace = create_deepspeed_config(args, optimizer_config, optimizer_class, optimizer_kwargs)
 
     # This starts as a ModelWithLoss instance. It is sequentially wrapped to
     # produce the model object used for forward passes and (in some
     # configurations) backward passes during training.
-    model_object = training.ModelWithLoss(model=sockeye_model, losses=losses)  # type: torch.nn.Module
+    model_object = training.ModelWithLoss(sockeye_model=sockeye_model, losses=losses,
+                                          use_trace=use_trace)  # type: torch.nn.Module
 
-    if using_deepspeed:
-        # If a DeepSpeed config file is specified, use it directly. Otherwise,
-        # create a config dictionary from training arguments.
-        ds_config = args.deepspeed_config
-        if ds_config is None:
-            ds_config = create_deepspeed_config(args, optimizer_config, optimizer_class, optimizer_kwargs)
+    if utils.using_deepspeed():
         # Wrap the model object with a DeepSpeed engine that automatically
         # handles many aspects of distributed training.
         model_object, optimizer, _, _lr_scheduler = deepspeed.initialize(model=model_object,
@@ -1134,7 +1155,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
         model_object, optimizer = apex.amp.initialize(model_object, optimizer, opt_level='O2')
 
-    if utils.is_distributed() and not using_deepspeed:
+    if utils.is_distributed() and not utils.using_deepspeed():
         # In distributed mode, wrap the model object with a distributed data-
         # parallel container that shares (averages) gradients with models in
         # other worker processes. This is not required when using DeepSpeed,
@@ -1153,7 +1174,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
         device=device,
-        using_deepspeed=using_deepspeed,
         using_amp=args.amp,
         using_apex_amp=args.apex_amp,
         custom_metrics_logger=custom_metrics_logger,

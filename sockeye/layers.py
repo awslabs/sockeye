@@ -19,6 +19,14 @@ from typing import List, Optional, Tuple
 import torch as pt
 import torch.nn.functional as F
 
+# Optional imports. Import errors are not an issue because these modules are
+# only used when certain settings are activated. We check that these modules
+# can be imported before activating the settings.
+try:
+    import deepspeed
+except ImportError:
+    pass
+
 from sockeye import constants as C, utils
 from . import config
 
@@ -377,23 +385,37 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     def separate_kv(self):
         """ write kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention) """
         assert self.kv_interleaved
-        with pt.no_grad():
-            kv = self.ff_in.weight.data[self.depth:, :]
-            k, v = kv.view(self.heads, 2 * self.depth_per_head, self.depth).split(
-                self.depth_per_head, dim=1)
-            k = k.reshape(self.depth, self.depth)
-            v = v.reshape(self.depth, self.depth)
-        self.ff_in.weight.data[self.depth:, :] = pt.cat((k, v), dim=0)
+        # Pattern used for all separate/interleave methods:
+        # - When using DeepSpeed, use a context manager that gathers all weights
+        #   for the current layer (potentially sharded across workers) to the
+        #   current process. The primary worker modifies the weights and
+        #   automatically broadcasts them back to secondary workers to be
+        #   re-sharded when the context manager exits.
+        # - When not using DeepSpeed, all workers apply the same changes to
+        #   their local copies of the full weights.
+        with deepspeed.zero.GatheredParameters(self.ff_in.weight,
+                                               modifier_rank=0) if utils.using_deepspeed() else utils.no_context():
+            if utils.is_primary_worker() or not utils.using_deepspeed():
+                with pt.no_grad():
+                    kv = self.ff_in.weight.data[self.depth:, :]
+                    k, v = kv.view(self.heads, 2 * self.depth_per_head, self.depth).split(
+                        self.depth_per_head, dim=1)
+                    k = k.reshape(self.depth, self.depth)
+                    v = v.reshape(self.depth, self.depth)
+                self.ff_in.weight.data[self.depth:, :] = pt.cat((k, v), dim=0)
         self.kv_interleaved = False
 
     def interleave_kv(self):
         """ write kv input projection parameters in interleaved format (compatible with interleaved matmul) """
         assert not self.kv_interleaved
-        with pt.no_grad():
-            _, k, v = self.ff_in.weight.data.split(self.depth, dim=0)
-            k = k.reshape(self.heads, -1, self.depth)
-            v = v.reshape(self.heads, -1, self.depth)
-        self.ff_in.weight.data[self.depth:, :] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self.depth)
+        with deepspeed.zero.GatheredParameters(self.ff_in.weight,
+                                               modifier_rank=0) if utils.using_deepspeed() else utils.no_context():
+            if utils.is_primary_worker() or not utils.using_deepspeed():
+                with pt.no_grad():
+                    _, k, v = self.ff_in.weight.data.split(self.depth, dim=0)
+                    k = k.reshape(self.heads, -1, self.depth)
+                    v = v.reshape(self.heads, -1, self.depth)
+                self.ff_in.weight.data[self.depth:, :] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self.depth)
         self.kv_interleaved = True
 
     def train(self, mode: bool = True):
@@ -499,22 +521,28 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     def separate_kv(self):
         """ Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
         assert self.kv_interleaved
-        with pt.no_grad():
-            k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self._depth_key_value).split(
-                self.depth_per_head, dim=1)
-            k = k.reshape(self.depth, self._depth_key_value)
-            v = v.reshape(self.depth, self._depth_key_value)
-        self.ff_kv.weight.data[:] = pt.cat((k, v), dim=0)
+        with deepspeed.zero.GatheredParameters(self.ff_kv.weight,
+                                               modifier_rank=0) if utils.using_deepspeed() else utils.no_context():
+            if utils.is_primary_worker() or not utils.using_deepspeed():
+                with pt.no_grad():
+                    k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self._depth_key_value).split(
+                        self.depth_per_head, dim=1)
+                    k = k.reshape(self.depth, self._depth_key_value)
+                    v = v.reshape(self.depth, self._depth_key_value)
+                self.ff_kv.weight.data[:] = pt.cat((k, v), dim=0)
         self.kv_interleaved = False
 
     def interleave_kv(self):
         """ Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
         assert not self.kv_interleaved
-        with pt.no_grad():
-            k, v = self.ff_kv.weight.data.split(self.depth, dim=0)
-            k = k.reshape(self.heads, -1, self.depth)
-            v = v.reshape(self.heads, -1, self.depth)
-        self.ff_kv.weight.data[:] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self._depth_key_value)
+        with deepspeed.zero.GatheredParameters(self.ff_kv.weight,
+                                               modifier_rank=0) if utils.using_deepspeed() else utils.no_context():
+            if utils.is_primary_worker() or not utils.using_deepspeed():
+                with pt.no_grad():
+                    k, v = self.ff_kv.weight.data.split(self.depth, dim=0)
+                    k = k.reshape(self.heads, -1, self.depth)
+                    v = v.reshape(self.heads, -1, self.depth)
+                self.ff_kv.weight.data[:] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self._depth_key_value)
         self.kv_interleaved = True
 
     def train(self, mode: bool = True):

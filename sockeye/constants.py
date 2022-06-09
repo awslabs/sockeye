@@ -165,6 +165,7 @@ TRAINING_STATE_DIRNAME = "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
 TRAINING_STATE_DEEPSPEED = "deepspeed"
+TRAINING_STATE_TEMP_DEEPSPEED = "tmp.deepspeed"
 
 OPT_STATE_LAST = "optimizer_last.pkl"
 OPT_STATE_BEST = "optimizer_best.pkl"
@@ -203,6 +204,13 @@ INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
 TRAIN_ARGS_CHECKPOINT_INTERVAL = "--checkpoint-interval"
 TRAIN_ARGS_STOP_ON_DECODER_FAILURE = "--stop-training-on-decoder-failure"
+
+DEEPSPEED_ZERO_STAGE_1 = 1
+DEEPSPEED_ZERO_STAGE_2 = 2
+DEEPSPEED_ZERO_STAGE_3 = 3
+DEEPSPEED_ZERO_STAGE_INF = "inf"
+DEEPSPEED_ZERO_STAGES = [DEEPSPEED_ZERO_STAGE_1, DEEPSPEED_ZERO_STAGE_2, DEEPSPEED_ZERO_STAGE_3,
+                         DEEPSPEED_ZERO_STAGE_INF]
 
 # Used to delimit factors on STDIN for inference
 DEFAULT_FACTOR_DELIMITER = '|'

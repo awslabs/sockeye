@@ -30,8 +30,8 @@ import torch
 import torch.distributed
 
 # Optional imports. Import errors are not an issue because these modules are
-# only used when certain trainer settings are activated. We check that these
-# modules can be imported before creating the trainer.
+# only used when certain settings are activated. We check that these modules
+# can be imported before activating the settings.
 try:
     import deepspeed
     import deepspeed.utils.zero_to_fp32
@@ -61,27 +61,29 @@ class ModelWithLoss(torch.nn.Module):
     """
     Wraps a SockeyeModel and its Losses. Traces the model on demand.
 
-    :param model: SockeyeModel.
+    :param sockeye_model: SockeyeModel.
     :param losses: List of Loss objects.
+    :param use_trace: Whether to trace the SockeyeModel (Default: True).
 
     :return: Tuple of summed loss, list of loss values, and list of number of
              samples.
     """
-    def __init__(self, model: model.SockeyeModel, losses: List[loss.Loss]) -> None:
+    def __init__(self, sockeye_model: model.SockeyeModel, losses: List[loss.Loss], use_trace: bool = True) -> None:
         super().__init__()
-        self.model = model
-        self.traced_model = None  # type: Optional[torch.jit.ScriptModule]
+        self.sockeye_model = sockeye_model
+        self.training_model = None  # type: Optional[torch.nn.Module]
         self.losses = losses
+        self.use_trace = use_trace
 
     def load_state_dict(self, state_dict: 'OrderedDict[str, torch.Tensor]', *args, **kwargs):
         """
-        Ignore missing/unexpected keys for traced modules when loading state.
-        These keys point to the same parameters as the corresponding non-traced
-        versions that are included in the state dictionary.
+        Ignore missing/unexpected keys for the training model when loading
+        state. These keys point to the same parameters as the original
+        SockeyeModel versions that are included in the state dictionary.
         """
         incompatible_keys = super().load_state_dict(state_dict, strict=False)
-        missing = [key for key in incompatible_keys.missing_keys if 'traced' not in key]
-        unexpected = [key for key in incompatible_keys.unexpected_keys if 'traced' not in key]
+        missing = [key for key in incompatible_keys.missing_keys if not key.startswith('training_model')]
+        unexpected = [key for key in incompatible_keys.unexpected_keys if not key.startswith('training_model')]
         utils.check_condition(not missing, f'Missing keys: {missing}')
         utils.check_condition(not unexpected, f'Extra keys: {unexpected}')
 
@@ -92,11 +94,14 @@ class ModelWithLoss(torch.nn.Module):
                 labels: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor,
                                                           List[torch.Tensor],
                                                           List[torch.Tensor]]:
-        if self.traced_model is None:
-            logger.debug('Tracing SockeyeModel')
-            self.traced_model = torch.jit.trace(self.model, (source, source_length,
-                                                             target, target_length), strict=False)
-        model_outputs = self.traced_model(source, source_length, target, target_length)
+        if self.training_model is None:
+            if self.use_trace:
+                logger.debug('Tracing SockeyeModel')
+                self.training_model = torch.jit.trace(self.sockeye_model, (source, source_length,
+                                                                           target, target_length), strict=False)
+            else:
+                self.training_model = self.sockeye_model
+        model_outputs = self.training_model(source, source_length, target, target_length)
         # Convert model outputs to float32 (if they aren't already) before
         # computing losses. Computing losses in float16 can lead to overflow
         # (inf).
@@ -211,7 +216,6 @@ class EarlyStoppingTrainer:
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss.Loss],
                  device: torch.device,
-                 using_deepspeed: bool = False,
                  using_amp: bool = False,
                  using_apex_amp: bool = False,
                  custom_metrics_logger: Optional[Callable] = None,
@@ -225,9 +229,8 @@ class EarlyStoppingTrainer:
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
         self.device = device
-        self.using_deepspeed = using_deepspeed
         self.using_amp = using_amp
-        if using_amp and not using_deepspeed:
+        if using_amp and not utils.using_deepspeed():
             self._scaler = torch.cuda.amp.GradScaler()
         self.using_apex_amp = using_apex_amp
         self.state = None  # type: Optional[TrainState]
@@ -255,6 +258,9 @@ class EarlyStoppingTrainer:
             if utils.is_primary_worker():
                 self.sockeye_model.save_config(self.config.output_dir)
                 self.sockeye_model.save_version(self.config.output_dir)
+            if utils.using_deepspeed():
+                self._deepspeed_save_parameters(self.current_params_fname)
+            elif utils.is_primary_worker():
                 self.sockeye_model.save_parameters(self.current_params_fname)
             logger.info("Training started.")
 
@@ -337,8 +343,6 @@ class EarlyStoppingTrainer:
         metrics and update the best known parameters accordingly.
         """
         self.state.checkpoint += 1
-        # All workers call this method
-        self._save_params()
         train_metrics = [lf.metric for lf in self.loss_functions]
         logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                     self.state.checkpoint, self.state.updates, self.state.epoch,
@@ -353,13 +357,19 @@ class EarlyStoppingTrainer:
         self.state.diverged = self._determine_divergence(val_metrics)
         self._adjust_learning_rate(has_improved)
         if utils.is_primary_worker():
+            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+        # When using DeepSpeed, all workers participate in saving the training
+        # state and model parameters. Otherwise these methods are a no-op for
+        # secondary workers.
+        self._save_training_state(train_iter)
+        self._save_params(use_checkpoint=True)
+        if utils.is_primary_worker():
             if has_improved:
                 self._update_best_params()
-                self._save_optimizer_state(self.best_optimizer_state_fname)
-                self._save_lr_scheduler(self.best_lr_scheduler_fname)
-            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
-        # All workers call this method
-        self._save_training_state(train_iter)
+                if not utils.using_deepspeed():
+                    # DeepSpeed mode does not support checkpoint reloading
+                    self._save_optimizer_state(self.best_optimizer_state_fname)
+                    self._save_lr_scheduler(self.best_lr_scheduler_fname)
         for metric in train_metrics:
             metric.reset()
         if self.checkpoint_callback:
@@ -376,12 +386,12 @@ class EarlyStoppingTrainer:
         """
         batch = batch.load(device=self.device)
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp \
-        and not self.using_deepspeed else utils.no_context():  # type: ignore
+        and not utils.using_deepspeed() else utils.no_context():  # type: ignore
             # Forward + loss
             sum_losses, loss_values, num_samples = self.model_object(batch.source, batch.source_length,
                                                                      batch.target, batch.target_length, batch.labels)
         # Backward
-        if self.using_deepspeed:
+        if utils.using_deepspeed():
             # DeepSpeed backward. DeepSpeed handles all loss scaling.
             self.model_object.backward(sum_losses)  # type: ignore
         else:
@@ -416,13 +426,13 @@ class EarlyStoppingTrainer:
         # average the accumulated gradients across workers during the update
         # batch.
         with (self.model_object.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
-        and not self.using_deepspeed else utils.no_context()):
+        and not utils.using_deepspeed() else utils.no_context()):
             loss_values, num_samples = self._forward_backward(batch, is_update_batch)
 
         for loss_func, loss_value, num_samples in zip(self.loss_functions, loss_values, num_samples):
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
-        if self.using_deepspeed:
+        if utils.using_deepspeed():
             self.model_object.step()  # type: ignore
         elif is_update_batch:
             if self.using_amp:
@@ -457,7 +467,12 @@ class EarlyStoppingTrainer:
         :return: List of validation metrics, same order as self.loss_functions.
         """
         # Switch model to eval mode (disable dropout, etc.) to score validation
-        # set and run checkpoint decoder.
+        # set and run checkpoint decoder. When using DeepSpeed parameter
+        # sharding, all workers need to switch their SockeyeModel modules
+        # between train and eval mode at the same time because it includes
+        # interleaving/separating attention parameters that are sharded across
+        # workers. The primary worker gathers and modifies the parameters, then
+        # broadcasts them to secondary workers.
         self.sockeye_model.eval()
 
         data_iter.reset()
@@ -465,7 +480,9 @@ class EarlyStoppingTrainer:
         for batch in data_iter:
             batch = batch.load(device=self.device)
             with torch.inference_mode():
-                # Forward
+                # Forward. When using DeepSpeed parameter sharding, all workers
+                # need to run their forward passes at the same time, even when
+                # we only use the result from the primary worker.
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
                 # Require model outputs to be float32 for validation loss
                 outputs = {output_name: output.to(torch.float32) for (output_name, output) in outputs.items()}
@@ -475,21 +492,21 @@ class EarlyStoppingTrainer:
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
                 loss_metric.update(loss_value.item(), num_samples.item())
 
-        # Primary worker optionally runs the checkpoint decoder
-        decoder_metrics = {}  # type: Dict[str, float]
-        if utils.is_primary_worker() and checkpoint_decoder is not None:
-            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
-            decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
-        # Broadcast decoder metrics (if any) from primary worker to secondary
-        # workers
+        if utils.is_primary_worker():
+            # Primary worker runs checkpoint decoder
+            decoder_metrics = {}  # type: Dict[str, float]
+            if checkpoint_decoder is not None:
+                output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
+                decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
+            # Add decoder metrics (if any) to validation metrics
+            for metric_name, metric_value in decoder_metrics.items():
+                assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
+                metric = loss.LossMetric(name=metric_name)
+                metric.update(metric_value, num_samples=1)
+                val_metrics.append(metric)
         if utils.is_distributed():
-            decoder_metrics = utils.broadcast_object(decoder_metrics)
-        # Add decoder metrics (if any) to validation metrics
-        for metric_name, metric_value in decoder_metrics.items():
-            assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
-            metric = loss.LossMetric(name=metric_name)
-            metric.update(metric_value, num_samples=1)
-            val_metrics.append(metric)
+            # Primary worker's evaluation is authoritative
+            val_metrics = utils.broadcast_object(val_metrics)
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
@@ -510,21 +527,9 @@ class EarlyStoppingTrainer:
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
-                # In distributed mode, the primary worker makes an authoritative
-                # check of whether the metric value has improved and broadcasts
-                # the result to secondary workers. Non-determinism in the order
-                # of GPU operations can lead to slight numeric variations across
-                # workers, causing potential desync if each worker makes its own
-                # check for key training decisions (reducing learning rate,
-                # early stopping, etc.).
-                if utils.is_primary_worker():
-                    # Authoritative check
-                    value_is_better = utils.metric_value_is_better(value,
-                                                                   self.state.best_metric,
-                                                                   self.config.early_stopping_metric)
-                if utils.is_distributed():
-                    # Broadcast result
-                    value_is_better = utils.broadcast_object(value_is_better)
+                value_is_better = utils.metric_value_is_better(value,
+                                                               self.state.best_metric,
+                                                               self.config.early_stopping_metric)
                 if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
@@ -663,38 +668,53 @@ class EarlyStoppingTrainer:
         os.symlink(actual_best_params_fname, self.best_params_fname)
         logger.info("'%s' now points to '%s'", self.best_params_fname, actual_best_params_fname)
 
-    def _save_params(self):
+    def _deepspeed_save_parameters(self, fname: str, use_checkpoint: bool = False):
         """
-        Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
+        Save a regular float32 Sockeye parameter file when using DeepSpeed.
+
+        :param use_checkpoint: Read parameters from the latest checkpoint
+                               instead of creating a new temporary checkpoint.
         """
-        if self.using_deepspeed:
-            # Compatibility: Save regular Sockeye parameter checkpoints when
-            # using DeepSpeed (float32, expected format).
-            training_state_dirname = os.path.join(self.config.output_dir, C.TRAINING_STATE_TEMP_DIRNAME)
+        if use_checkpoint:
+            training_state_dirname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_DEEPSPEED)
+        else:
+            # Create a temporary checkpoint directory
+            training_state_dirname = os.path.join(self.config.output_dir, C.TRAINING_STATE_TEMP_DEEPSPEED)
             if utils.is_primary_worker() and not os.path.exists(training_state_dirname):
-                os.mkdir(training_state_dirname)
+                os.makedirs(training_state_dirname)
             torch.distributed.barrier()
-            # Write a temporary DeepSpeed checkpoint
+            # All workers: save local shard of float32 parameters
             self.model_object.save_checkpoint(training_state_dirname)  # type: ignore
-            if utils.is_primary_worker():
-                # Gather the float32 params on CPU
-                state_dict = deepspeed.utils.zero_to_fp32.get_fp32_state_dict_from_zero_checkpoint(
-                    training_state_dirname)
-                # Strip the first prefix from each param name to match the
-                # SockeyeModel's names:
-                # Ex: 'model.encoder.layers...' -> 'encoder.layers...'
-                state_dict = {name[name.find('.') + 1:]: param for (name, param) in state_dict.items()}
-                # Create a temporary CPU SockeyeModel
-                cpu_model = model.SockeyeModel(self.sockeye_model.config)
-                # Load the float32 params. Use non-strict mode because shared
-                # and constant params are not included in the DeepSpeed-
-                # generated state dict.
-                cpu_model.load_state_dict(state_dict, strict=False)
-                # Save the float32 params to disk
-                cpu_model.save_parameters(self.current_params_fname)
-                shutil.rmtree(training_state_dirname)
+        if utils.is_primary_worker():
+            # Primary worker: gather the float32 params on CPU
+            state_dict = deepspeed.utils.zero_to_fp32.get_fp32_state_dict_from_zero_checkpoint(training_state_dirname)
+            # Strip the first prefix from each param name to match the
+            # SockeyeModel's names:
+            # Ex: 'model.encoder.layers...' -> 'encoder.layers...'
+            state_dict = {name[name.find('.') + 1:]: param for (name, param) in state_dict.items()}
+            # Create a temporary CPU SockeyeModel
+            cpu_model = model.SockeyeModel(self.sockeye_model.config)
+            # Load the float32 params. Use non-strict mode because shared
+            # and constant params are not included in the DeepSpeed-
+            # generated state dict.
+            cpu_model.load_state_dict(state_dict, strict=False)
+            # Save the float32 params to disk
+            cpu_model.save_parameters(fname)
+            # Remove the temporary checkpoint directory if one exists
+            shutil.rmtree(os.path.join(self.config.output_dir, C.TRAINING_STATE_TEMP_DEEPSPEED), ignore_errors=True)
+
+    def _save_params(self, use_checkpoint: bool = False):
+        """
+        Saves model parameters at current checkpoint and optionally cleans up
+        older parameter files to save disk space.
+
+        :param use_checkpoint: When using DeepSpeed, read parameters from the
+                               latest checkpoint instead of creating a new
+                               temporary checkpoint.
+        """
+        if utils.using_deepspeed():
+            self._deepspeed_save_parameters(self.current_params_fname, use_checkpoint=use_checkpoint)
         elif utils.is_primary_worker():
-            # Non-DeepSpeed training: primary worker saves parameters
             self.sockeye_model.save_parameters(self.current_params_fname)
         if utils.is_primary_worker():
             cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
@@ -731,7 +751,7 @@ class EarlyStoppingTrainer:
         if utils.is_distributed():
             torch.distributed.barrier()
 
-        if self.using_deepspeed:
+        if utils.using_deepspeed():
             # DeepSpeed saves parameters, optimizer state, and learning rate
             # scheduler in a single checkpoint file. All workers need to call
             # `save_checkpoint()`.
@@ -800,7 +820,7 @@ class EarlyStoppingTrainer:
         Loads the full training state from disk.
         :param train_iter: training data iterator.
         """
-        if self.using_deepspeed:
+        if utils.using_deepspeed():
             # DeepSpeed loads parameters, optimizer state, and learning rate
             # scheduler from a single checkpoint file.
             _, _ = self.model_object.load_checkpoint(os.path.join(self.training_state_dirname,

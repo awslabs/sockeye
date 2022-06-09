@@ -19,6 +19,7 @@ import torch
 
 from . import config
 from . import constants as C
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,6 @@ class OptimizerConfig(config.Config):
     # Optimizer
     name: str
     running_on_gpu: bool = False
-    using_deepspeed: bool = False
 
     # Adam default values
     lr: float = 0.001
@@ -63,7 +63,7 @@ def get_optimizer(config: OptimizerConfig) -> Tuple[Type[torch.optim.Optimizer],
 
     # Use Apex's fused optimizers if Apex is available and we aren't using
     # DeepSpeed, which includes its own optimizers.
-    if config.running_on_gpu and not config.using_deepspeed:
+    if config.running_on_gpu and not utils.using_deepspeed():
         try:
             from apex.optimizers import FusedAdam, FusedSGD
             adam_impl = FusedAdam

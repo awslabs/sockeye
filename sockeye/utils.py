@@ -581,6 +581,18 @@ def create_pool(max_processes):
         return multiprocessing.pool.Pool(processes=max_processes)
 
 
+def update_dict(dest: Dict[Any, Any], source: Dict[Any, Any]):
+    for key in source:
+        if isinstance(source[key], dict):
+            if key not in dest:
+                dest[key] = {}
+            if not isinstance(dest[key], dict):
+                raise ValueError(f'Type mismatch for key {key}: {type(source[key])} vs {type(dest[key])}')
+            update_dict(dest[key], source[key])
+        else:
+            dest[key] = source[key]
+
+
 def is_distributed() -> bool:
     return torch.distributed.is_initialized()
 
@@ -615,3 +627,30 @@ def all_gather_object(obj: T) -> List[T]:
     obj_list = [None] * torch.distributed.get_world_size()  # type: List[T]
     torch.distributed.all_gather_object(obj_list, obj)
     return obj_list
+
+
+# DeepSpeed does not appear to have a straightforward way to determine whether
+# it has been initialized. We track this ourselves with the following global
+# variable and functions.
+_using_deepspeed = False
+
+
+def init_deepspeed():
+    """
+    Make sure all of the DeepSpeed modules we use can be imported, initialize
+    DeepSpeed, and set the global variable that tracks initialization state.
+    """
+    global _using_deepspeed
+    try:
+        import deepspeed
+        import deepspeed.utils.zero_to_fp32
+        deepspeed.init_distributed()
+        _using_deepspeed = True
+    except:
+        raise RuntimeError('To train models with DeepSpeed (https://www.deepspeed.ai/), '
+                           'install the module with `pip install deepspeed`.')
+
+
+def using_deepspeed() -> bool:
+    """Check whether DeepSpeed has been initialized via this module"""
+    return _using_deepspeed
