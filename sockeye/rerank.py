@@ -51,7 +51,7 @@ class Reranker:
             # "add-k" smoothing is the best-performing method implemented in
             # sacrebleu.  See "Method 2" results from Chen and Cherry
             # (http://aclweb.org/anthology/W14-3346)
-            self.scoring_function = partial(sacrebleu.sentence_bleu, smooth_method='add-k')
+            self.scoring_function = partial(sacrebleu.sentence_bleu, smooth_method='add-k')  # type: ignore
         elif self.metric == C.RERANK_CHRF:
             self.scoring_function = sacrebleu.sentence_chrf  # type: ignore
         elif self.metric.startswith(C.RERANK_ISOMETRIC):
