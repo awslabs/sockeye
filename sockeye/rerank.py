@@ -51,12 +51,12 @@ class Reranker:
             # "add-k" smoothing is the best-performing method implemented in
             # sacrebleu.  See "Method 2" results from Chen and Cherry
             # (http://aclweb.org/anthology/W14-3346)
-            self.scoring_function = partial(sacrebleu.sentence_bleu, 'add-k')  # type: ignore
+            self.scoring_function = partial(sacrebleu.sentence_bleu, smooth_method='add-k')
         elif self.metric == C.RERANK_CHRF:
             self.scoring_function = sacrebleu.sentence_chrf  # type: ignore
         elif self.metric.startswith(C.RERANK_ISOMETRIC):
             self.scoring_function = partial(utils.compute_isometric_score, isometric_metric=self.metric,
-                                            isometric_alpha=self.isometric_alpha)  # type: ignore
+                                            isometric_alpha=self.isometric_alpha)
         else:
             raise utils.SockeyeError("Scoring metric '%s' unknown. Choices are: %s" % (metric, C.RERANK_METRICS))
 
@@ -83,6 +83,7 @@ class Reranker:
 
         if self.metric.startswith(C.RERANK_ISOMETRIC):
             source = hypotheses['text']
+            # pylint: disable=redundant-keyword-arg
             scores = [self.scoring_function(hypothesis, hypothesis_score[0], source) for
                       hypothesis, hypothesis_score in zip(hypotheses['translations'], hypotheses['scores'])]
             # isometric-lc - the smaller, the better
