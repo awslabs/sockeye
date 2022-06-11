@@ -20,6 +20,7 @@ from . import initial_setup
 initial_setup.handle_env_cli_arg()
 
 import argparse
+import json
 import logging
 import os
 import shutil
@@ -858,7 +859,8 @@ def create_deepspeed_config(args: argparse.Namespace,
 
     # JSON config has highest priority
     if args.deepspeed_config is not None:
-        utils.update_dict(ds_config, args.deepspeed_config)
+        with utils.smart_open(args.deepspeed_config) as inp:
+            utils.update_dict(ds_config, json.load(inp))
 
     # Stage 3 (including infinity) is not compatible with JIT tracing
     use_trace = ds_config['zero_optimization']['stage'] != C.DEEPSPEED_ZERO_STAGE_3
