@@ -174,7 +174,7 @@ class SockeyeModel(pt.nn.Module):
     def state_structure(self):
         return self.decoder.state_structure()
 
-    def encode(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
+    def encode(self, inputs: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """
         Encodes the input sequence.
 
@@ -192,7 +192,7 @@ class SockeyeModel(pt.nn.Module):
         source_encoded, source_encoded_length, att_mask = self.traced_encoder(source_embed, valid_length)
         return source_encoded, source_encoded_length, att_mask
 
-    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: Optional[pt.Tensor] = None,
+    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: pt.Tensor,
                               constant_length_ratio: float = 0.0) -> Tuple[List[pt.Tensor], pt.Tensor,
                                                                            Optional[pt.Tensor]]:
         """
@@ -200,7 +200,7 @@ class SockeyeModel(pt.nn.Module):
         Used for inference/decoding.
 
         :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
-        :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :param valid_length: Tensor of sequence lengths within this batch. Shape: (batch_size,)
         :param constant_length_ratio: Constant length ratio
         :return: Initial states for the decoder, predicted output length of shape (batch_size,), 0 if not available.
                  Returns the neural vocabulary selection model prediction if enabled, None otherwise.
