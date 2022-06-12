@@ -839,7 +839,6 @@ def create_deepspeed_config(args: argparse.Namespace,
         utils.update_dict(ds_config, {
             'zero_optimization': {
                 'stage': C.DEEPSPEED_ZERO_STAGE_3,
-                'overlap_comm': True,
                 'offload_param': {
                     'device': 'cpu',
                     'pin_memory': True,
