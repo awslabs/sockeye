@@ -99,9 +99,9 @@ class Reranker:
     @staticmethod
     def _get_ranking_indices(scores: List, kind: str = 'mergesort', order: str = 'descending') -> List:
         if order == 'descending':
-            return list(np.argsort(scores, kind=kind)[::-1])
+            return list(np.argsort(scores, kind=kind)[::-1])  # type: ignore
         else:
-            return list(np.argsort(scores, kind=kind))
+            return list(np.argsort(scores, kind=kind))  # type: ignore
 
     @staticmethod
     def _sort_by_ranking(hypotheses: Dict[str, Any], ranking: List[int]) -> Dict[str, Any]:
