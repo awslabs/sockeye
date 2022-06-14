@@ -20,6 +20,7 @@ from . import initial_setup
 initial_setup.handle_env_cli_arg()
 
 import argparse
+import gc
 import json
 import logging
 import os
@@ -43,6 +44,7 @@ except ImportError:
 from . import arguments
 from . import checkpoint_decoder
 from . import constants as C
+from . import convert_deepspeed
 from . import data_io
 from . import encoder
 from . import layers
@@ -798,7 +800,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
 def create_deepspeed_config(args: argparse.Namespace,
                             optimizer_config: optimizers.OptimizerConfig,
                             optimizer_class: Type[torch.optim.Optimizer],
-                            optimizer_kwargs: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+                            optimizer_kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """
     Generates a DeepSpeed config dictionary from training arguments. See:
     https://www.deepspeed.ai/docs/config-json/
@@ -808,16 +810,21 @@ def create_deepspeed_config(args: argparse.Namespace,
     :param optimizer_class: Optimizer class.
     :param optimizer_kwargs: Optimizer kwargs.
 
-    :return: Tuple: dictionary of config options that can be used to initialize
-             the DeepSpeed engine and boolean indicating whether the JIT tracing
-             can be used during training.
+    :return: Dictionary of config options that can be used to initialize the
+             DeepSpeed engine.
     """
+
+    utils.check_condition(utils.using_deepspeed(), 'Initialize DeepSpeed before generating the config')
+
     ds_config = {
         'train_micro_batch_size_per_gpu': args.batch_size,
         'gradient_accumulation_steps': args.update_interval,
         'optimizer': {
             'type': optimizer_class.__name__,
             'params': optimizer_kwargs,
+        },
+        'zero_optimization': {
+            'stage': utils.deepspeed_zero_stage(),
         },
         'steps_per_print': args.update_interval * args.checkpoint_interval,
     }
@@ -835,36 +842,30 @@ def create_deepspeed_config(args: argparse.Namespace,
             'gradient_clipping': optimizer_config.gradient_clipping_threshold,
         })
 
-    if args.deepspeed_zero == C.DEEPSPEED_ZERO_STAGE_INF:
-        utils.update_dict(ds_config, {
-            'zero_optimization': {
-                'stage': C.DEEPSPEED_ZERO_STAGE_3,
-                'offload_param': {
-                    'device': 'cpu',
-                    'pin_memory': True,
+    if args.deepspeed_zero_offload:
+        if utils.deepspeed_zero_stage() >= 2:
+            utils.update_dict(ds_config, {
+                'zero_optimization': {
+                    'offload_optimizer': {
+                        'device': 'cpu',
+                    },
                 },
-                'offload_optimizer': {
-                    'device': 'cpu',
-                    'pin_memory': True,
+            })
+        if utils.deepspeed_zero_stage() == 3:
+            utils.update_dict(ds_config, {
+                'zero_optimization': {
+                    'offload_param': {
+                        'device': 'cpu',
+                    },
                 },
-            },
-        })
-    else:
-        utils.update_dict(ds_config, {
-            'zero_optimization': {
-                'stage': args.deepspeed_zero,
-            }
-        })
+            })
 
     # JSON config has highest priority
     if args.deepspeed_config is not None:
         with utils.smart_open(args.deepspeed_config) as inp:
             utils.update_dict(ds_config, json.load(inp))
 
-    # Stage 3 (including infinity) is not compatible with JIT tracing
-    use_trace = ds_config['zero_optimization']['stage'] != C.DEEPSPEED_ZERO_STAGE_3
-
-    return ds_config, use_trace
+    return ds_config
 
 
 def unset_requires_grad_for_fixed_params(config: model.ModelConfig,
@@ -959,7 +960,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # The DeepSpeed launcher automatically adds `--local_rank=N` to the CLI args
     # when launching processes. When this arg specified, run in DeepSpeed mode.
     if args.local_rank is not None:
-        utils.init_deepspeed()
+        utils.init_deepspeed(zero_stage=args.deepspeed_zero_stage)
         check_condition(args.local_rank == utils.get_local_rank(),
                         f'Mismatch between local rank argument and environment variable: {args.local_rank} != '
                         f'{utils.get_local_rank()}')
@@ -1083,13 +1084,18 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     optimizer_config = create_optimizer_config(args)
 
-    sockeye_model = model.SockeyeModel(
-        model_config,
-        train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
+    # For ZeRO stage 3, DeepSpeed makes changes to modules at creation time to
+    # support parameter offloading.
+    with deepspeed.zero.Init() if utils.deepspeed_zero_stage() == 3 else utils.no_context():
+        sockeye_model = model.SockeyeModel(
+            model_config,
+            train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
+
     # Move the model to the training device unless using DeepSpeed, which moves
     # the model automatically.
     if not utils.using_deepspeed():
         sockeye_model.to(device)
+
     sockeye_model.apply(model.initialize_parameters)
 
     # Load starting parameters if specified
@@ -1104,7 +1110,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                          fixed_param_names=args.fixed_param_names,
                                          fixed_param_strategy=args.fixed_param_strategy)
 
-    utils.log_parameters(sockeye_model)
+    if utils.deepspeed_zero_stage() < 3:
+        # TODO: Support logging parameters with ZeRO stage 3
+        utils.log_parameters(sockeye_model)
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
@@ -1121,15 +1129,13 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                             args.max_updates)
     _lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs) if lr_scheduler_class is not None else None
 
-    ds_config, use_trace = None, True
-    if utils.using_deepspeed():
-        ds_config, use_trace = create_deepspeed_config(args, optimizer_config, optimizer_class, optimizer_kwargs)
+    ds_config = create_deepspeed_config(args, optimizer_config,
+                                        optimizer_class, optimizer_kwargs) if utils.using_deepspeed() else None
 
     # This starts as a ModelWithLoss instance. It is sequentially wrapped to
     # produce the model object used for forward passes and (in some
     # configurations) backward passes during training.
-    model_object = training.ModelWithLoss(sockeye_model=sockeye_model, losses=losses,
-                                          use_trace=use_trace)  # type: torch.nn.Module
+    model_object = training.ModelWithLoss(sockeye_model=sockeye_model, losses=losses)  # type: torch.nn.Module
 
     if utils.using_deepspeed():
         # Wrap the model object with a DeepSpeed engine that automatically
@@ -1185,8 +1191,23 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     if utils.is_primary_worker():
         checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
 
+    # Clean up GPU and CPU memory used during initialization
+    torch.cuda.empty_cache()
+    gc.collect()
+
     training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
                                  checkpoint_decoder=checkpoint_decoder)
+
+    if utils.using_deepspeed() and utils.is_primary_worker():
+        # Free the memory used during training
+        del model_object
+        del sockeye_model
+        torch.cuda.empty_cache()
+        gc.collect()
+        # Convert parameter directories (DeepSpeed checkpoints) into parameter
+        # files (regular float32). This does not affect the DeepSpeed checkpoint
+        # stored as part of the training state that enables continuing training.
+        convert_deepspeed.convert_model_checkpoints(trainer_config.output_dir, keep_deepspeed=False)
 
     return training_state
 

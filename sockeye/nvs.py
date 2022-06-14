@@ -12,8 +12,8 @@
 # permissions and limitations under the License.
 
 import torch as pt
-from . import constants as C
 
+from . import constants as C
 
 class NeuralVocabSelection(pt.nn.Module):
     def __init__(

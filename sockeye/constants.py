@@ -153,7 +153,6 @@ VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
-PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
 DECODE_OUT_NAME = "decode.output.{{factor}}.{checkpoint:05d}"
 DECODE_IN_NAME = "decode.source.{factor}"
 DECODE_REF_NAME = "decode.target.{factor}"
@@ -205,12 +204,7 @@ TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
 TRAIN_ARGS_CHECKPOINT_INTERVAL = "--checkpoint-interval"
 TRAIN_ARGS_STOP_ON_DECODER_FAILURE = "--stop-training-on-decoder-failure"
 
-DEEPSPEED_ZERO_STAGE_1 = 1
-DEEPSPEED_ZERO_STAGE_2 = 2
-DEEPSPEED_ZERO_STAGE_3 = 3
-DEEPSPEED_ZERO_STAGE_INF = "inf"
-DEEPSPEED_ZERO_STAGES = [DEEPSPEED_ZERO_STAGE_1, DEEPSPEED_ZERO_STAGE_2, DEEPSPEED_ZERO_STAGE_3,
-                         DEEPSPEED_ZERO_STAGE_INF]
+DEEPSPEED_ZERO_STAGES = [1, 2, 3]
 
 # Used to delimit factors on STDIN for inference
 DEFAULT_FACTOR_DELIMITER = '|'

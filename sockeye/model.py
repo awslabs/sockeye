@@ -21,6 +21,14 @@ from typing import cast, Dict, Optional, Tuple, List
 
 import torch as pt
 
+# Optional imports. Import errors are not an issue because these modules are
+# only used when certain settings are activated. We check that these modules
+# can be imported before activating the settings.
+try:
+    import deepspeed
+except ImportError:
+    pass
+
 from sockeye import __version__
 from . import constants as C
 from . import data_io
@@ -596,21 +604,33 @@ def initialize_parameters(module: pt.nn.Module):
     For some background on the equivalence of mx.init.Xavier and pt.nn.init.xavier_uniform_, see
     https://jamesmccaffrey.wordpress.com/2020/11/20/the-gain-parameter-
     """
-    if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
-        pt.nn.init.xavier_uniform_(module.weight, gain=1)
-        if module.bias is not None:
-            pt.nn.init.zeros_(module.bias)
-    elif isinstance(module, pt.nn.Embedding):
-        pt.nn.init.uniform_(module.weight, -0.07, 0.07)
-    elif isinstance(module, pt.nn.LayerNorm):
-        if module.elementwise_affine:
-            pt.nn.init.ones_(module.weight)
-            pt.nn.init.zeros_(module.bias)
-    elif isinstance(module, layers.LHUC):
-        pt.nn.init.uniform_(module.weight, a=0.1)
-    elif isinstance(module, layers.PositionalEmbeddings):
-        if module.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-            pt.nn.init.xavier_uniform(module.weight, gain=1.0)
+    # When using ZeRO stage 3, each submodule's parameters are sharded across
+    # workers. When initializing a submodule's parameters, use a context manager
+    # that gathers the full parameters to the current worker (process) and
+    # automatically broadcasts them when it exits. The primary worker
+    # initializes the parameters, which are then broadcast to secondary workers
+    # and re-sharded.
+    with deepspeed.zero.GatheredParameters(module.weight, modifier_rank=0) \
+    if utils.deepspeed_zero_stage() == 3 and hasattr(module, 'weight') else utils.no_context(), \
+    deepspeed.zero.GatheredParameters(module.bias, modifier_rank=0) \
+    if utils.deepspeed_zero_stage() == 3 and hasattr(module, 'bias') else utils.no_context():
+        if utils.deepspeed_zero_stage() == 3 and not utils.is_primary_worker():
+            return
+        if isinstance(module, pt.nn.Linear) or isinstance(module, layers.OutputLayer):
+            pt.nn.init.xavier_uniform_(module.weight, gain=1)
+            if module.bias is not None:
+                pt.nn.init.zeros_(module.bias)
+        elif isinstance(module, pt.nn.Embedding):
+            pt.nn.init.uniform_(module.weight, -0.07, 0.07)
+        elif isinstance(module, pt.nn.LayerNorm):
+            if module.elementwise_affine:
+                pt.nn.init.ones_(module.weight)
+                pt.nn.init.zeros_(module.bias)
+        elif isinstance(module, layers.LHUC):
+            pt.nn.init.uniform_(module.weight, a=0.1)
+        elif isinstance(module, layers.PositionalEmbeddings):
+            if module.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+                pt.nn.init.xavier_uniform(module.weight, gain=1.0)
 
 
 def load_model(model_folder: str,

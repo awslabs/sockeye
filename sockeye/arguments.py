@@ -1030,14 +1030,19 @@ def add_training_args(params):
                               default=False,
                               help='Run the model in float16 mode with float32 master weights and dynamic loss '
                                    'scaling. This is similar to --apex-amp. Default: %(default)s.')
-    train_params.add_argument('--deepspeed-zero',
+    train_params.add_argument('--deepspeed-zero-stage',
+                              type=int,
                               choices=C.DEEPSPEED_ZERO_STAGES,
-                              default=C.DEEPSPEED_ZERO_STAGE_1,
+                              default=1,
                               help='Enable ZeRO memory optimizations for the specified stage. 1: partition optimizer '
                                    'states, 2: also partition gradients, 3: also partition parameters (Rajbhandari et '
-                                   'al. 2019, arxiv.org/abs/1910.02054v3), inf: also offload parameters and the '
-                                   'optimizer to CPU (Rajbhandari et al. 2021, arxiv.org/abs/2104.07857). '
-                                   'Default: %(default)s.')
+                                   'al. 2019, arxiv.org/abs/1910.02054v3). Default: %(default)s.')
+    train_params.add_argument('--deepspeed-zero-offload',
+                              action='store_true',
+                              default=False,
+                              help='Offload the optimizer (ZeRO stage 2+) and parameters (ZeRO stage 3) to CPU '
+                                   '(Rajbhandari et al. 2021, arxiv.org/abs/2104.07857).  Default: %(default)s.')
+
 
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=500,

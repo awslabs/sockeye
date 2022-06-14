@@ -386,16 +386,15 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         """ write kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention) """
         assert self.kv_interleaved
         # Pattern used for all separate/interleave methods:
-        # - When using DeepSpeed, use a context manager that gathers all weights
-        #   for the current layer (potentially sharded across workers) to the
-        #   current process. The primary worker modifies the weights and
-        #   automatically broadcasts them back to secondary workers to be
-        #   re-sharded when the context manager exits.
-        # - When not using DeepSpeed, all workers apply the same changes to
-        #   their local copies of the full weights.
-        with deepspeed.zero.GatheredParameters(self.ff_in.weight,
-                                               modifier_rank=0) if utils.using_deepspeed() else utils.no_context():
-            if utils.is_primary_worker() or not utils.using_deepspeed():
+        # - When using ZeRO stage 3, use a context manager that gathers all
+        #   weights for the current layer to the current process. The primary
+        #   worker modifies the weights and automatically broadcasts them back
+        #   to secondary workers to be sharded when the context manager exits.
+        # - Otherwise, all workers apply the same changes to their local copies
+        #   of the full weights.
+        with deepspeed.zero.GatheredParameters(self.ff_in.weight, modifier_rank=0) \
+        if utils.deepspeed_zero_stage() == 3 else utils.no_context():
+            if utils.is_primary_worker() or utils.deepspeed_zero_stage() < 3:
                 with pt.no_grad():
                     kv = self.ff_in.weight.data[self.depth:, :]
                     k, v = kv.view(self.heads, 2 * self.depth_per_head, self.depth).split(
@@ -408,9 +407,9 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     def interleave_kv(self):
         """ write kv input projection parameters in interleaved format (compatible with interleaved matmul) """
         assert not self.kv_interleaved
-        with deepspeed.zero.GatheredParameters(self.ff_in.weight,
-                                               modifier_rank=0) if utils.using_deepspeed() else utils.no_context():
-            if utils.is_primary_worker() or not utils.using_deepspeed():
+        with deepspeed.zero.GatheredParameters(self.ff_in.weight, modifier_rank=0) \
+        if utils.deepspeed_zero_stage() == 3 else utils.no_context():
+            if utils.is_primary_worker() or utils.deepspeed_zero_stage() < 3:
                 with pt.no_grad():
                     _, k, v = self.ff_in.weight.data.split(self.depth, dim=0)
                     k = k.reshape(self.heads, -1, self.depth)
@@ -420,13 +419,15 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
 
     def train(self, mode: bool = True):
         """
-        Overrides super().train() to ensure key-value parameters are stored in non-interleaved format during training
-        and interleaved format during inference (mod.eval()).
+        Overrides super().train() to ensure key-value parameters are stored in
+        non-interleaved format during training and interleaved format during
+        inference (mod.eval()). The exception is ZeRO stage 3, which always uses
+        interleaved parameters.
         """
-        if mode and self.kv_interleaved:
+        if mode and self.kv_interleaved and utils.deepspeed_zero_stage() < 3:
             # training operates with non-interleaved format
             self.separate_kv()
-        elif not mode and not self.kv_interleaved:
+        elif not mode and not self.kv_interleaved and utils.deepspeed_zero_stage() < 3:
             # eval/inference operates in interleaved format
             self.interleave_kv()
         return super().train(mode)
@@ -463,7 +464,10 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :return: tensor of shape (max_length, batch, output_depth).
         """
-        if self.training:  # use fused multi-head attention op during training
+        # Use fused multi-head attention op during training unless also using
+        # ZeRO stage 3. Calling functional multi-head attention with parameter
+        # sharding appears to trigger a memory leak.
+        if self.training and utils.deepspeed_zero_stage() < 3:
             assert not self.kv_interleaved
             contexts, _ = F.multi_head_attention_forward(query=inputs, key=inputs, value=inputs,
                                                          embed_dim_to_check=self.depth, num_heads=self.heads,
@@ -521,9 +525,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     def separate_kv(self):
         """ Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
         assert self.kv_interleaved
-        with deepspeed.zero.GatheredParameters(self.ff_kv.weight,
-                                               modifier_rank=0) if utils.using_deepspeed() else utils.no_context():
-            if utils.is_primary_worker() or not utils.using_deepspeed():
+        with deepspeed.zero.GatheredParameters(self.ff_kv.weight, modifier_rank=0) \
+        if utils.deepspeed_zero_stage() == 3 else utils.no_context():
+            if utils.is_primary_worker() or utils.deepspeed_zero_stage() < 3:
                 with pt.no_grad():
                     k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self._depth_key_value).split(
                         self.depth_per_head, dim=1)
@@ -535,9 +539,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     def interleave_kv(self):
         """ Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
         assert not self.kv_interleaved
-        with deepspeed.zero.GatheredParameters(self.ff_kv.weight,
-                                               modifier_rank=0) if utils.using_deepspeed() else utils.no_context():
-            if utils.is_primary_worker() or not utils.using_deepspeed():
+        with deepspeed.zero.GatheredParameters(self.ff_kv.weight, modifier_rank=0) \
+        if utils.deepspeed_zero_stage() == 3 else utils.no_context():
+            if utils.is_primary_worker() or utils.deepspeed_zero_stage() < 3:
                 with pt.no_grad():
                     k, v = self.ff_kv.weight.data.split(self.depth, dim=0)
                     k = k.reshape(self.heads, -1, self.depth)
@@ -547,13 +551,15 @@ class MultiHeadAttention(MultiHeadAttentionBase):
 
     def train(self, mode: bool = True):
         """
-        Overrides super().train() to ensure key-value parameters are stored in non-interleaved format during training
-        and interleaved format during inference (mod.eval()).
+        Overrides super().train() to ensure key-value parameters are stored in
+        non-interleaved format during training and interleaved format during
+        inference (mod.eval()). The exception is ZeRO stage 3, which always uses
+        interleaved parameters.
         """
-        if mode and self.kv_interleaved:
+        if mode and self.kv_interleaved and utils.deepspeed_zero_stage() < 3:
             # training operates with non-interleaved format
             self.separate_kv()
-        elif not mode and not self.kv_interleaved:
+        elif not mode and not self.kv_interleaved and utils.deepspeed_zero_stage() < 3:
             # eval/inference operates in interleaved format
             self.interleave_kv()
         return super().train(mode)
@@ -575,7 +581,10 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :param projected_memory_kv: Optional previously projected memory keys and values.
         :return: tensor of shape (query_seq_len, batch, output_depth).
         """
-        if self.training:  # use fused multi-head attention op during training
+        # Use fused multi-head attention op during training unless also using
+        # ZeRO stage 3. Calling functional multi-head attention with parameter
+        # sharding appears to trigger a memory leak.
+        if self.training and utils.deepspeed_zero_stage() < 3:
             assert not self.kv_interleaved
             assert projected_memory_kv is None, "caching not supported in training"
             contexts, _ = F.multi_head_attention_forward(query=queries, key=key_values, value=key_values,

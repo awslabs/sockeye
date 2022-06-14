@@ -76,6 +76,7 @@ else:
 entry_points = {
     'console_scripts': [
         'sockeye-average = sockeye.average:main',
+        'sockeye-convert-deepspeed = sockeye.convert_deepspeed:main',
         'sockeye-embeddings = sockeye.embeddings:main',
         'sockeye-evaluate = sockeye.evaluate:main',
         'sockeye-lexicon = sockeye.lexicon:main',

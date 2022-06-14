@@ -33,6 +33,14 @@ import numpy as np
 import torch as pt
 import torch.distributed
 
+# Optional imports. Import errors are not an issue because these modules are
+# only used when certain settings are activated. We check that these modules
+# can be imported before activating the settings.
+try:
+    import deepspeed
+except ImportError:
+    pass
+
 from . import __version__, constants as C
 from .log import log_sockeye_version, log_torch_version
 
@@ -629,23 +637,26 @@ def all_gather_object(obj: T) -> List[T]:
     return obj_list
 
 
-# DeepSpeed does not appear to have a straightforward way to determine whether
-# it has been initialized. We track this ourselves with the following global
-# variable and functions.
+# Track whether DeepSpeed has been initialized and what ZeRO stage we're using
 _using_deepspeed = False
+_deepspeed_zero_stage = 0
 
-
-def init_deepspeed():
+def init_deepspeed(zero_stage: int):
     """
     Make sure all of the DeepSpeed modules we use can be imported, initialize
-    DeepSpeed, and set the global variable that tracks initialization state.
+    DeepSpeed, and set the global variables that track initialization and
+    declared ZeRO stage.
+
+    :param zero_stage: The ZeRO stage we'll use throughout training.
     """
     global _using_deepspeed
+    global _deepspeed_zero_stage
     try:
         import deepspeed
         import deepspeed.utils.zero_to_fp32
         deepspeed.init_distributed()
         _using_deepspeed = True
+        _deepspeed_zero_stage = zero_stage
     except:
         raise RuntimeError('To train models with DeepSpeed (https://www.deepspeed.ai/), '
                            'install the module with `pip install deepspeed`.')
@@ -654,3 +665,8 @@ def init_deepspeed():
 def using_deepspeed() -> bool:
     """Check whether DeepSpeed has been initialized via this module"""
     return _using_deepspeed
+
+
+def deepspeed_zero_stage() -> int:
+    """Check which ZeRO stage we've declared"""
+    return _deepspeed_zero_stage

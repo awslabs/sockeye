@@ -33,11 +33,6 @@ import torch.distributed
 # only used when certain settings are activated. We check that these modules
 # can be imported before activating the settings.
 try:
-    import deepspeed
-    import deepspeed.utils.zero_to_fp32
-except ImportError:
-    pass
-try:
     import apex.amp
 except ImportError:
     pass
@@ -63,17 +58,15 @@ class ModelWithLoss(torch.nn.Module):
 
     :param sockeye_model: SockeyeModel.
     :param losses: List of Loss objects.
-    :param use_trace: Whether to trace the SockeyeModel (Default: True).
 
     :return: Tuple of summed loss, list of loss values, and list of number of
              samples.
     """
-    def __init__(self, sockeye_model: model.SockeyeModel, losses: List[loss.Loss], use_trace: bool = True) -> None:
+    def __init__(self, sockeye_model: model.SockeyeModel, losses: List[loss.Loss]) -> None:
         super().__init__()
         self.sockeye_model = sockeye_model
         self.training_model = None  # type: Optional[torch.nn.Module]
         self.losses = losses
-        self.use_trace = use_trace
 
     def load_state_dict(self, state_dict: 'OrderedDict[str, torch.Tensor]', *args, **kwargs):
         """
@@ -95,12 +88,13 @@ class ModelWithLoss(torch.nn.Module):
                                                           List[torch.Tensor],
                                                           List[torch.Tensor]]:
         if self.training_model is None:
-            if self.use_trace:
-                logger.debug('Tracing SockeyeModel')
+            if utils.deepspeed_zero_stage() == 3:
+                logger.info('Skipping SockeyeModel trace when using ZeRO stage 3')
+                self.training_model = self.sockeye_model
+            else:
+                logger.info('Tracing SockeyeModel')
                 self.training_model = torch.jit.trace(self.sockeye_model, (source, source_length,
                                                                            target, target_length), strict=False)
-            else:
-                self.training_model = self.sockeye_model
         model_outputs = self.training_model(source, source_length, target, target_length)
         # Convert model outputs to float32 (if they aren't already) before
         # computing losses. Computing losses in float16 can lead to overflow
@@ -258,10 +252,7 @@ class EarlyStoppingTrainer:
             if utils.is_primary_worker():
                 self.sockeye_model.save_config(self.config.output_dir)
                 self.sockeye_model.save_version(self.config.output_dir)
-            if utils.using_deepspeed():
-                self._deepspeed_save_parameters(self.current_params_fname)
-            elif utils.is_primary_worker():
-                self.sockeye_model.save_parameters(self.current_params_fname)
+            self._save_params(use_checkpoint=False)
             logger.info("Training started.")
 
         tic = time.time()
@@ -668,52 +659,28 @@ class EarlyStoppingTrainer:
         os.symlink(actual_best_params_fname, self.best_params_fname)
         logger.info("'%s' now points to '%s'", self.best_params_fname, actual_best_params_fname)
 
-    def _deepspeed_save_parameters(self, fname: str, use_checkpoint: bool = False):
-        """
-        Save a regular float32 Sockeye parameter file when using DeepSpeed.
-
-        :param use_checkpoint: Read parameters from the latest checkpoint
-                               instead of creating a new temporary checkpoint.
-        """
-        if use_checkpoint:
-            training_state_dirname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_DEEPSPEED)
-        else:
-            # Create a temporary checkpoint directory
-            training_state_dirname = os.path.join(self.config.output_dir, C.TRAINING_STATE_TEMP_DEEPSPEED)
-            if utils.is_primary_worker() and not os.path.exists(training_state_dirname):
-                os.makedirs(training_state_dirname)
-            torch.distributed.barrier()
-            # All workers: save local shard of float32 parameters
-            self.model_object.save_checkpoint(training_state_dirname)  # type: ignore
-        if utils.is_primary_worker():
-            # Primary worker: gather the float32 params on CPU
-            state_dict = deepspeed.utils.zero_to_fp32.get_fp32_state_dict_from_zero_checkpoint(training_state_dirname)
-            # Strip the first prefix from each param name to match the
-            # SockeyeModel's names:
-            # Ex: 'model.encoder.layers...' -> 'encoder.layers...'
-            state_dict = {name[name.find('.') + 1:]: param for (name, param) in state_dict.items()}
-            # Create a temporary CPU SockeyeModel
-            cpu_model = model.SockeyeModel(self.sockeye_model.config)
-            # Load the float32 params. Use non-strict mode because shared
-            # and constant params are not included in the DeepSpeed-
-            # generated state dict.
-            cpu_model.load_state_dict(state_dict, strict=False)
-            # Save the float32 params to disk
-            cpu_model.save_parameters(fname)
-            # Remove the temporary checkpoint directory if one exists
-            shutil.rmtree(os.path.join(self.config.output_dir, C.TRAINING_STATE_TEMP_DEEPSPEED), ignore_errors=True)
 
     def _save_params(self, use_checkpoint: bool = False):
         """
         Saves model parameters at current checkpoint and optionally cleans up
         older parameter files to save disk space.
 
-        :param use_checkpoint: When using DeepSpeed, read parameters from the
-                               latest checkpoint instead of creating a new
-                               temporary checkpoint.
+        :param use_checkpoint: When using DeepSpeed, copy files from the latest
+                               checkpoint instead of creating a new checkpoint.
         """
         if utils.using_deepspeed():
-            self._deepspeed_save_parameters(self.current_params_fname, use_checkpoint=use_checkpoint)
+            # Copy or create a deepspeed checkpoint that can be used to generate
+            # a regular Sockeye parameter file at the end of training.
+            if use_checkpoint:
+                if utils.is_primary_worker():
+                    shutil.copytree(src=os.path.join(self.training_state_dirname, C.TRAINING_STATE_DEEPSPEED),
+                                    dst=self.current_params_fname)
+            else:
+                if utils.is_primary_worker():
+                    os.mkdir(self.current_params_fname)
+                torch.distributed.barrier()
+                # All workers save their local shards of the float32 parameters.
+                self.model_object.save_checkpoint(self.current_params_fname)  # type: ignore
         elif utils.is_primary_worker():
             self.sockeye_model.save_parameters(self.current_params_fname)
         if utils.is_primary_worker():
@@ -1068,7 +1035,11 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files and n not in top_n:
                 try:
-                    os.remove(param_fname_n)
+                    if os.path.isdir(param_fname_n):
+                        # DeepSpeed mode initially saves checkpoint directories
+                        shutil.rmtree(param_fname_n)
+                    else:
+                        os.remove(param_fname_n)
                 except FileNotFoundError:
                     # This can be occur on file systems with higher latency,
                     # such as distributed file systems.  While repeated
