@@ -39,21 +39,32 @@ class Reranker:
 
     :param metric: Sentence-level metric such as smoothed BLEU.
     :param return_score: If True, also return the sentence-level score.
+    :param isometric_alpha: Factor for reranking with isometric criteria.
     """
 
-    def __init__(self, metric: str,
-                 return_score: bool = False) -> None:
-        if metric == C.RERANK_BLEU:
+    def __init__(self, metric: str, isometric_alpha: float = 0.5, return_score: bool = False) -> None:
+        self.metric = metric
+        self.isometric_alpha = isometric_alpha
+        self.return_score = return_score
+
+        if self.metric == C.RERANK_BLEU:
             # "add-k" smoothing is the best-performing method implemented in
             # sacrebleu.  See "Method 2" results from Chen and Cherry
             # (http://aclweb.org/anthology/W14-3346)
             self.scoring_function = partial(sacrebleu.sentence_bleu, smooth_method='add-k')
-        elif metric == C.RERANK_CHRF:
+        elif self.metric == C.RERANK_CHRF:
             self.scoring_function = sacrebleu.sentence_chrf  # type: ignore
+        elif self.metric.startswith(C.RERANK_ISOMETRIC):
+            self.scoring_function = partial(utils.compute_isometric_score, isometric_metric=self.metric,
+                                            isometric_alpha=self.isometric_alpha)
         else:
             raise utils.SockeyeError("Scoring metric '%s' unknown. Choices are: %s" % (metric, C.RERANK_METRICS))
 
-        self.return_score = return_score
+        if self.metric == C.RERANK_ISOMETRIC_LC:
+            self.ranking_indices = partial(self._get_ranking_indices, kind='mergesort', order='ascending')
+        else:
+            self.ranking_indices = partial(self._get_ranking_indices, kind='mergesort', order='descending')
+
 
     def rerank(self, hypotheses: Dict[str, Any], reference: str) -> Dict[str, Any]:
         """
@@ -64,12 +75,33 @@ class Reranker:
         :param reference: A single string with the actual reference translation.
         :return: Nbest translations sorted by reranking scores.
         """
-        scores = [self.scoring_function(hypothesis, [reference]).score for hypothesis in hypotheses['translations']]
-        ranking = list(np.argsort(scores, kind='mergesort')[::-1])  # descending
+        if self.metric == C.RERANK_BLEU or self.metric == C.RERANK_CHRF:
+            scores = [self.scoring_function(hypothesis, [reference]).score for
+                      hypothesis in hypotheses['translations']]
+            # BLEU, CHRF - the higher, the better
+            ranking = self.ranking_indices(scores)
+
+        if self.metric.startswith(C.RERANK_ISOMETRIC):
+            source = hypotheses['text']
+            # pylint: disable=redundant-keyword-arg
+            scores = [self.scoring_function(hypothesis, hypothesis_score[0], source) for
+                      hypothesis, hypothesis_score in zip(hypotheses['translations'], hypotheses['scores'])]
+            # isometric-lc - the smaller, the better
+            ranking = self.ranking_indices(scores)
+
         reranked_hypotheses = self._sort_by_ranking(hypotheses, ranking)
         if self.return_score:
             reranked_hypotheses['scores'] = [scores[i] for i in ranking]
+            reranked_hypotheses['score'] = reranked_hypotheses['scores'][0]
+
         return reranked_hypotheses
+
+    @staticmethod
+    def _get_ranking_indices(scores: List, kind: str = 'mergesort', order: str = 'descending') -> List:
+        if order == 'descending':
+            return list(np.argsort(scores, kind=kind)[::-1])  # type: ignore
+        else:
+            return list(np.argsort(scores, kind=kind))  # type: ignore
 
     @staticmethod
     def _sort_by_ranking(hypotheses: Dict[str, Any], ranking: List[int]) -> Dict[str, Any]:
@@ -90,8 +122,9 @@ def rerank(args: argparse.Namespace):
 
     :param args: Namespace object holding CLI arguments.
     """
-    reranker = Reranker(args.metric, args.return_score)
+    reranker = Reranker(args.metric, args.isometric_alpha, args.return_score)
     output_stream = sys.stdout if args.output is None else utils.smart_open(args.output, mode='w')
+    logger.info("Hypotheses re-ranking using criterion: '%s' " % args.metric)
 
     with utils.smart_open(args.reference) as reference, utils.smart_open(args.hypotheses) as hypotheses:
         for i, (reference_line, hypothesis_line) in enumerate(zip(reference, hypotheses), 1):
@@ -111,9 +144,23 @@ def rerank(args: argparse.Namespace):
 
             if args.output_best:
                 best_hypothesis = reranked_hypotheses['translations'][0] if num_hypotheses else ''
+
                 if not best_hypothesis and args.output_reference_instead_of_blank:
                     logger.warning('Line %d: replacing blank hypothesis with reference.', i)
                     best_hypothesis = reference
+
+                # get best non-blank hypothesis, when reference is not used
+                if not best_hypothesis and args.output_best_non_blank and num_hypotheses > 1:
+                    for h in range(num_hypotheses):
+                        best_hypothesis = reranked_hypotheses['translations'][h]
+
+                        if not best_hypothesis:
+                            continue
+                        else:
+                            logger.warning('Line %d: blank hypothesis replaced by line [%d] non-blank '
+                                           'hypothesis: %s .', h - 1, h, best_hypothesis)
+                            break
+
                 print(best_hypothesis, file=output_stream)
             else:
                 print(json.dumps(reranked_hypotheses, sort_keys=True), file=output_stream)
@@ -131,7 +178,8 @@ def main():
 
     params = argparse.ArgumentParser(description="Rerank nbest lists of translations."
                                                  " Reranking sorts a list of hypotheses according"
-                                                 " to their score compared to a common reference.")
+                                                 " to their score compared to a common reference or"
+                                                 "source sentence.")
     arguments.add_rerank_args(params)
     args = params.parse_args()
 

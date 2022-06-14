@@ -615,3 +615,56 @@ def all_gather_object(obj: T) -> List[T]:
     obj_list = [None] * torch.distributed.get_world_size()  # type: List[T]
     torch.distributed.all_gather_object(obj_list, obj)
     return obj_list
+
+
+def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optional[List] = None) -> int:
+    """
+    Count sequence length, after replacing (optional) token/s.
+    """
+    if replace_tokens is not None:
+        for tokens in replace_tokens:
+            sample = sample.replace(tokens, '')
+    if count_type == C.SEQ_LEN_IN_CHARACTERS:
+        return len(sample.replace(C.TOKEN_SEPARATOR, ''))
+    elif count_type == C.SEQ_LEN_IN_TOKENS:
+        return len(sample.split(C.TOKEN_SEPARATOR))
+    else:
+        raise SockeyeError("Sequence length count type '%s' unknown. "
+                           "Choices are: %s" % (count_type, [C.SEQ_LEN_IN_CHARACTERS, C.SEQ_LEN_IN_TOKENS]))
+
+
+def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: str,
+                            isometric_metric: str = 'isometric-ratio', isometric_alpha: float = 0.5):
+    """
+    Compute hypothesis to source isometric score using sample char length
+    and isometric metric (ratio, diff, lc).
+        - isometric-diff: https://aclanthology.org/W19-5210.pdf
+        - isometric-ratio/lc: https://arxiv.org/pdf/2110.03847.pdf
+    :return isometric score
+    """
+    count_type = C.SEQ_LEN_IN_CHARACTERS  # for isometric scoring, count length in characters
+    replace_tokens = C.TOKEN_SEGMENTATION_MARKERS
+
+    hypothesis_len = count_seq_len(hypothesis, count_type, replace_tokens)
+    source_len = count_seq_len(source, count_type, replace_tokens)
+
+    if isometric_metric == C.RERANK_ISOMETRIC_LC:
+        abs_len_diff = abs(hypothesis_len - source_len)
+        isometric_score = (abs_len_diff*100) / source_len if source_len else abs_len_diff*100
+
+        return isometric_score
+    else:
+        if isometric_metric == C.RERANK_ISOMETRIC_RATIO:
+            len_ratio = hypothesis_len/source_len if source_len else hypothesis_len
+            synchrony_score = float(1/(1 + len_ratio))
+
+        if isometric_metric == C.RERANK_ISOMETRIC_DIFF:
+            abs_len_diff = abs(hypothesis_len - source_len)
+            synchrony_score = float(1/(1 + abs_len_diff))
+
+        # isometric score, if alpha=0.0 takes model prediction score
+        pred_sub_score = (1 - isometric_alpha) * float(hypothesis_score)
+        synchrony_sub_score = isometric_alpha * synchrony_score
+        isometric_score = pred_sub_score + synchrony_sub_score
+
+        return isometric_score

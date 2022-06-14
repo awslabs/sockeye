@@ -369,3 +369,51 @@ def test_adjust_first_step_masking():
                                         [np.inf, np.inf, np.inf, np.inf, np.inf],
                                         [np.inf, np.inf, np.inf, np.inf, np.inf]])
     assert pt.equal(adjust_first_step_mask, utils.adjust_first_step_masking(target_prefix, first_step_mask)) == True
+
+
+@pytest.mark.parametrize("sample, count_type, replace_tokens, expected_seq_len", [
+    # count_seq char
+    ("▁Bonob os , ▁like ▁humans , ▁love ▁to ▁play ▁throughout ▁their ▁entire ▁lives . "
+     "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
+     C.SEQ_LEN_IN_CHARACTERS,
+     C.TOKEN_SEGMENTATION_MARKERS,
+     106),
+    # count_seq token
+    ("▁Bonob os , ▁like ▁humans , ▁love ▁to ▁play ▁throughout ▁their ▁entire ▁lives . "
+     "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
+     C.SEQ_LEN_IN_TOKENS,
+     C.TOKEN_SEGMENTATION_MARKERS,
+     26),
+    # count_seq char without replacing
+    ("▁Bonob os , ▁like ▁humans , ▁love ▁to ▁play ▁throughout ▁their ▁entire ▁lives . "
+     "Parliament Does Not Support Amendment Fre@@ eing Ty@@ mo@@ sh@@ en@@ ko",
+     C.SEQ_LEN_IN_CHARACTERS,
+     "",
+     126)
+])
+def test_count_seq_len(sample, count_type, replace_tokens, expected_seq_len):
+    assert  utils.count_seq_len(sample, count_type, replace_tokens) == expected_seq_len
+
+
+@pytest.mark.parametrize("hypothesis, hypothesis_score, source, metric, alpha, expected_score", [
+    ("No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
+     0.377,
+     "El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     "isometric-ratio",
+     0.7,
+     0.4322176470588236),
+    ("No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
+     0.377,
+     "El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     "isometric-diff",
+     0.7,
+     0.2131),
+    ("No Liber@@ ation for Ty@@ mo@@ sh@@ en@@ ko by Parliament",
+     0.377,
+     "El Parlamento no lib@@ era a Ty@@ mo@@ sh@@ en@@ ko",
+     "isometric-lc",
+     0.7,
+     19.35483870967742),
+    ])
+def test_rerank_hypotheses_isometric(hypothesis, hypothesis_score, source, metric, alpha, expected_score):
+    assert utils.compute_isometric_score(hypothesis,hypothesis_score,source,metric,alpha) == expected_score
