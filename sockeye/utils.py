@@ -526,6 +526,9 @@ def log_parameters(model: pt.nn.Module):
     """
     Logs information about model parameters.
     """
+    if deepspeed_zero_stage() == 3:
+        logger.info(f'# of parameters: {deepspeed.runtime.zero.partition_parameters.param_count}')
+        return
     fixed_parameter_names = []
     learned_parameter_names = []
     total_learned = 0

@@ -1110,9 +1110,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                          fixed_param_names=args.fixed_param_names,
                                          fixed_param_strategy=args.fixed_param_strategy)
 
-    if utils.deepspeed_zero_stage() < 3:
-        # TODO: Support logging parameters with ZeRO stage 3
-        utils.log_parameters(sockeye_model)
+    utils.log_parameters(sockeye_model)
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
