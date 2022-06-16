@@ -311,12 +311,24 @@ def add_rerank_args(params):
                                required=False,
                                default=C.RERANK_BLEU,
                                choices=C.RERANK_METRICS,
-                               help="Sentence-level metric used to compare each nbest translation to the reference."
+                               help="Sentence-level metric used to compare each nbest translation to the reference or "
+                                    "the source."
+                                    "Default: %(default)s.")
+    rerank_params.add_argument("--isometric-alpha",
+                               required=False,
+                               type=float_greater_or_equal(0.0),
+                               default=0.5,
+                               help="Alpha factor used for reranking (--isometric-[ratio/diff]) nbest list. "
+                                    "Requires optimization on dev set."
                                     "Default: %(default)s.")
     rerank_params.add_argument("--output", "-o", default=None, help="File to write output to. Default: STDOUT.")
     rerank_params.add_argument("--output-best",
                                action="store_true",
                                help="Output only the best hypothesis from each nbest list.")
+    rerank_params.add_argument("--output-best-non-blank",
+                               action="store_true",
+                               help="When outputting only the best hypothesis (--output-best) and the best hypothesis "
+                                    "is a blank line, output following non-blank best from the nbest list.")
     rerank_params.add_argument("--output-reference-instead-of-blank",
                                action="store_true",
                                help="When outputting only the best hypothesis (--output-best) and the best hypothesis "
