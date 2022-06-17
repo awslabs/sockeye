@@ -11,10 +11,22 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.9999]
+
+### Added
+
+- Added training support for [DeepSpeed](https://www.deepspeed.ai/).
+  - Installation: `pip install deepspeed`
+  - Usage: `deepspeed --no_python ... sockeye-train ...`
+  - Run in FP16 mode with `--deepspeed-fp16`.
+  - Set Zero Redundancy Optimizer (ZeRO) stage ([Rajbhandari et al., 2019](https://arxiv.org/abs/1910.02054v3)) with `--deepspeed-zero-stage N`.
+  - Offload optimizer states and parameters to CPU memory ([Rajbhandari et al., 2021](https://arxiv.org/abs/2104.07857)) with `--deepspeed-zero-offload`.
+  - Specify arbitrary [DeepSpeed config options](https://www.deepspeed.ai/docs/config-json/) in a JSON file with `--deepspeed-config FILE`.
+
 ## [3.1.16]
 
 ### Added
-- Added nbest list reranking options using isometric translation criteria as proposed in an ICASSP 2021 paper https://arxiv.org/abs/2110.03847. 
+- Added nbest list reranking options using isometric translation criteria as proposed in an ICASSP 2021 paper https://arxiv.org/abs/2110.03847.
 To use this feature pass a criterion (`isometric-ratio, isometric-diff, isometric-lc`) when specifying `--metric`.
 - Added `--output-best-non-blank` to output non-blank best hypothesis from the nbest list.
 
