@@ -676,7 +676,7 @@ class EarlyStoppingTrainer:
                     shutil.copytree(src=os.path.join(self.training_state_dirname, C.TRAINING_STATE_DEEPSPEED),
                                     dst=self.current_params_fname)
             else:
-                if utils.is_primary_worker():
+                if utils.is_primary_worker() and not os.path.exists(self.current_params_fname):
                     os.mkdir(self.current_params_fname)
                 torch.distributed.barrier()
                 # All workers save their local shards of the float32 parameters.
