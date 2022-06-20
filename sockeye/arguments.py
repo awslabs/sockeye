@@ -1049,11 +1049,16 @@ def add_training_args(params):
                               help='Enable ZeRO memory optimizations for the specified stage. 1: partition optimizer '
                                    'states, 2: also partition gradients, 3: also partition parameters (Rajbhandari et '
                                    'al. 2019, arxiv.org/abs/1910.02054v3). Default: %(default)s.')
-    train_params.add_argument('--deepspeed-zero-offload',
+    train_params.add_argument('--deepspeed-zero-offload-optimizer',
                               action='store_true',
                               default=False,
-                              help='Offload the optimizer (ZeRO stage 2+) and parameters (ZeRO stage 3) to CPU '
-                                   '(Rajbhandari et al. 2021, arxiv.org/abs/2104.07857).  Default: %(default)s.')
+                              help='Offload the optimizer to CPU when using ZeRO stage 2+ (Ren et al. 2021, '
+                                   'arxiv.org/abs/2101.06840). Default: %(default)s.')
+    train_params.add_argument('--deepspeed-zero-offload-param',
+                              action='store_true',
+                              default=False,
+                              help='Offload parameters to CPU memory when using ZeRO stage 3 (Ren et al. 2021, '
+                                   'arxiv.org/abs/2101.06840). Default: %(default)s.')
 
 
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,

@@ -842,8 +842,7 @@ def create_deepspeed_config(args: argparse.Namespace,
             'gradient_clipping': optimizer_config.gradient_clipping_threshold,
         })
 
-    if args.deepspeed_zero_offload:
-        if utils.deepspeed_zero_stage() >= 2:
+    if args.deepspeed_zero_offload_optimizer and utils.deepspeed_zero_stage() >= 2:
             utils.update_dict(ds_config, {
                 'zero_optimization': {
                     'offload_optimizer': {
@@ -851,7 +850,8 @@ def create_deepspeed_config(args: argparse.Namespace,
                     },
                 },
             })
-        if utils.deepspeed_zero_stage() == 3:
+
+    if args.deepspeed_zero_offload_param and utils.deepspeed_zero_stage() == 3:
             utils.update_dict(ds_config, {
                 'zero_optimization': {
                     'offload_param': {
