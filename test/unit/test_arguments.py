@@ -24,8 +24,16 @@ from itertools import zip_longest
 
 
 def test_simple_dict():
-    dict_str = 'beta1:0.9,beta2:0.999,epsilon:1e-8,lazy_update:true'
-    expected = {'beta1': 0.9, 'beta2': 0.999, 'epsilon': 1e-8, 'lazy_update': True}
+    dict_str = 'a:True,b:true,' \
+               'c:False,d.e:FALSE,' \
+               'f.g:1,h.i:234,' \
+               'j.k.l:1.,m.n.o:.1,p:1e-10,' \
+               'q:`~!@#$%^&*()-_=+[{]}\\|;\'"<.>/?,r:str'
+    expected = {'a': True, 'b': True,
+                'c': False, 'd.e': False,
+                'f.g': 1, 'h.i': 234,
+                'j.k.l': 1., 'm.n.o': .1, 'p': 1e-10,
+                'q': '`~!@#$%^&*()-_=+[{]}\\|;\'"<.>/?', 'r': 'str'}
     parse = arguments.simple_dict()
     assert parse(dict_str) == expected
 
@@ -215,6 +223,7 @@ def test_inference_args(test_params, expected_params):
               fixed_param_strategy=None,
               local_rank=None,
               deepspeed_config=None,
+              deepspeed_config_entries=None,
               deepspeed_fp16=False,
               deepspeed_zero_stage=1,
               deepspeed_zero_offload_optimizer=False,

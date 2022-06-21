@@ -194,7 +194,7 @@ def simple_dict() -> Callable:
     """
     A simple dictionary format that does not require spaces or quoting.
 
-    Supported types: bool, int, float
+    Supported types: bool, int, float, str (that doesn't parse as other types)
 
     :return: A method that can be used as a type in argparse.
     """
@@ -206,9 +206,12 @@ def simple_dict() -> Callable:
                 return True
             if value.lower() == "false":
                 return False
-            if "." in value or "e" in value:
+            if value.isdigit():
+                return int(value)
+            try:
                 return float(value)
-            return int(value)
+            except:
+                return value
 
         _dict = dict()
         try:
@@ -1035,7 +1038,14 @@ def add_training_args(params):
                               default=None,
                               help='JSON config file that specifies arbitrary DeepSpeed settings (see '
                                    'https://www.deepspeed.ai/docs/config-json/). The entries in this '
-                                   'config override setting specified by other --deepspeed-* args. '
+                                   'config override setting specified by other --deepspeed-* args except for '
+                                   '--deepspeed-config-entries. Default: %(default)s.')
+    train_params.add_argument('--deepspeed-config-entries',
+                              type=simple_dict(),
+                              default=None,
+                              help='DeepSpeed config options in the form "dot_delimited_key:value,..." (e.g., '
+                                   '"zero_optimization.stage:3,zero_optimization.offload_optimizer.device:cpu"). These '
+                                   'entries override setting specified by other --deepspeed-* args. '
                                    'Default: %(default)s.')
     train_params.add_argument('--deepspeed-fp16',
                               action='store_true',

@@ -860,10 +860,14 @@ def create_deepspeed_config(args: argparse.Namespace,
                 },
             })
 
-    # JSON config has highest priority
+    # JSON config file has the second highest priority
     if args.deepspeed_config is not None:
         with utils.smart_open(args.deepspeed_config) as inp:
             utils.update_dict(ds_config, json.load(inp))
+
+    # String form entries have the highest priority
+    if args.deepspeed_config_entries is not None:
+        utils.update_dict_with_prefix_kv(ds_config, args.deepspeed_config_entries)
 
     return ds_config
 

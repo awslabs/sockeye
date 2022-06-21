@@ -603,6 +603,25 @@ def update_dict(dest: Dict[Any, Any], source: Dict[Any, Any]):
         else:
             dest[key] = source[key]
 
+def update_dict_with_prefix_kv(dest: Dict[Any, Any], prefix_kv: Dict[Any, Any]):
+    """
+    Update a dictionary in place with prefix key-value dictionary.
+
+    :param dest: Dictionary to update.
+    :param prefix_kv: Dictionary of prefix keys and values. Prefix keys have the
+                      form [prefix.]key (e.g., prefix_field1.prefix_field2.key).
+    """
+    for keys, value in prefix_kv.items():
+        split_keys = keys.split('.')
+        prefix = split_keys[:-1]
+        key = split_keys[-1]
+        _dict = dest
+        for prefix_field in prefix:
+            if prefix_field not in _dict:
+                _dict[prefix_field] = {}
+            _dict = _dict[prefix_field]
+        _dict[key] = value
+
 
 def is_distributed() -> bool:
     return torch.distributed.is_initialized()
