@@ -807,8 +807,8 @@ class SafeLayerNorm(pt.nn.LayerNorm):
         super().__init__(*args, **kwargs)
 
     def forward(self, input: pt.Tensor) -> pt.Tensor:
-        return F.layer_norm(input.float(),
+        return F.layer_norm(input.to(pt.float32),
                             self.normalized_shape,
-                            self.weight.float(),
-                            self.bias.float(),
+                            self.weight.to(pt.float32),
+                            self.bias.to(pt.float32),
                             self.eps).to(input.dtype)

@@ -226,7 +226,7 @@ class TransformerProcessBlock(pt.nn.Module):
                  num_hidden: int = 0) -> None:
         super().__init__()
         self.sequence = sequence
-        self.layer_norm = None
+        self.layer_norm = None  # type: Optional[pt.nn.LayerNorm]
         if 'n' in sequence:
             if utils.using_deepspeed():
                 # Use safe layer norm (float32, default epsilon) when running

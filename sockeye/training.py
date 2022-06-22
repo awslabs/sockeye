@@ -96,9 +96,8 @@ class ModelWithLoss(torch.nn.Module):
                 self.training_model = torch.jit.trace(self.sockeye_model, (source, source_length,
                                                                            target, target_length), strict=False)
         model_outputs = self.training_model(source, source_length, target, target_length)
-        # Convert model outputs to float32 (if they aren't already) before
-        # computing losses. Computing losses in float16 can lead to overflow
-        # (inf).
+        # Guarantee model outputs are float32 before computing losses.
+        # Computing losses in float16 can lead to overflow.
         model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
         loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
