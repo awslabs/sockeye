@@ -88,8 +88,8 @@ class ModelWithLoss(torch.nn.Module):
                                                           List[torch.Tensor],
                                                           List[torch.Tensor]]:
         if self.training_model is None:
-            if utils.deepspeed_zero_stage() == 3:
-                logger.info('Skipping SockeyeModel trace when using ZeRO stage 3')
+            if utils.using_deepspeed():
+                logger.info('Skipping SockeyeModel trace when using DeepSpeed')
                 self.training_model = self.sockeye_model
             else:
                 logger.info('Tracing SockeyeModel')
