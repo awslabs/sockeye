@@ -796,3 +796,19 @@ class SSRU(AutoregressiveLayer):
         cell_state, last_step_state = self.cell_state_transform(previous_states, weighted_inputs, forget_rates)
 
         return self.relu(cell_state), last_step_state
+
+
+class SafeLayerNorm(pt.nn.LayerNorm):
+    """
+    Version of LayerNorm that always runs in float32 to avoid overflow. See:
+    https://github.com/pytorch/pytorch/issues/66707
+    """
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    def forward(self, input: pt.Tensor) -> pt.Tensor:
+        return F.layer_norm(input.float(),
+                            self.normalized_shape,
+                            self.weight.float(),
+                            self.bias.float(),
+                            self.eps).to(input.dtype)

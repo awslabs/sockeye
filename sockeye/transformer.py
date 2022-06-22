@@ -20,6 +20,7 @@ import torch as pt
 import sockeye.layers
 from sockeye import constants as C
 from . import config
+from . import utils
 
 
 @dataclass
@@ -227,9 +228,14 @@ class TransformerProcessBlock(pt.nn.Module):
         self.sequence = sequence
         self.layer_norm = None
         if 'n' in sequence:
-            # do not use Apex' FusedLayerNorm because of
-            # https://github.com/huggingface/transformers/issues/9377
-            self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
+            if utils.using_deepspeed():
+                # Use safe layer norm (float32, default epsilon) when running
+                # DeepSpeed to avoid overflow during float16 training.
+                self.layer_norm = sockeye.layers.SafeLayerNorm(num_hidden)
+            else:
+                # Do not use Apex's FusedLayerNorm because of
+                # https://github.com/huggingface/transformers/issues/9377
+                self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
         self.dropout = dropout
         if dropout > 0.0:
             self.drop = pt.nn.Dropout(p=dropout)
