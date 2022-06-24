@@ -20,6 +20,7 @@ import torch as pt
 import sockeye.layers
 from sockeye import constants as C
 from . import config
+from . import utils
 
 
 @dataclass
@@ -229,7 +230,10 @@ class TransformerProcessBlock(pt.nn.Module):
         if 'n' in sequence:
             # do not use Apex' FusedLayerNorm because of
             # https://github.com/huggingface/transformers/issues/9377
-            self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06)
+            # Use a larger epsilon value (PyTorch default) when running
+            # DeepSpeed. Small epsilon values can cause NaN values in float16
+            # mode. See: https://github.com/pytorch/pytorch/issues/41527
+            self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-5 if utils.using_deepspeed() else 1e-06)
         self.dropout = dropout
         if dropout > 0.0:
             self.drop = pt.nn.Dropout(p=dropout)
