@@ -255,9 +255,7 @@ class DotAttentionCell(pt.nn.Module):
         if mask is not None:
             logits = logits.masked_fill(mask, -C.LARGE_VALUES[logits.dtype])
 
-        # Use safe (float32) softmax when running DeepSpeed to avoid overflow in
-        # float16 mode.
-        probs = safe_softmax(logits, dim=-1) if utils.using_deepspeed() else F.softmax(logits, dim=-1)
+        probs = F.softmax(logits, dim=-1)
 
         probs = self.dropout(probs) if self.dropout is not None else probs
 
