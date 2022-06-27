@@ -1140,12 +1140,16 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     model_object = training.ModelWithLoss(sockeye_model=sockeye_model, losses=losses)  # type: torch.nn.Module
 
     if utils.using_deepspeed():
+        assert ds_config is not None
         # Wrap the model object with a DeepSpeed engine that automatically
         # handles many aspects of distributed training.
         model_object, optimizer, _, _lr_scheduler = deepspeed.initialize(model=model_object,
                                                                          model_parameters=sockeye_model.parameters(),
                                                                          lr_scheduler=_lr_scheduler,
                                                                          config=ds_config)
+        fp16_config = ds_config.get('fp16', None)
+        if fp16_config is not None and fp16_config.get('enabled', False):
+            optimizer.loss_scaler.raise_error_at_min_scale = False
         # At each time step, DeepSpeed calls `optimizer.step()` before
         # `lr_scheduler.step()`. Adjust for this by stepping the learning rate
         # scheduler once (from t=0 to t=1) before training starts. This way
