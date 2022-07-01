@@ -225,6 +225,7 @@ def test_inference_args(test_params, expected_params):
               deepspeed_config=None,
               deepspeed_config_entries=None,
               deepspeed_fp16=False,
+              deepspeed_bf16=False,
               deepspeed_zero_stage=1,
               deepspeed_zero_offload_optimizer=False,
               deepspeed_zero_offload_param=False,

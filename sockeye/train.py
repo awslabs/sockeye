@@ -837,6 +837,13 @@ def create_deepspeed_config(args: argparse.Namespace,
             },
         })
 
+    if args.deepspeed_bf16:
+        utils.update_dict(ds_config, {
+            'bf16': {
+                'enabled': True,
+            },
+        })
+
     if optimizer_config.gradient_clipping_type != C.GRADIENT_CLIPPING_TYPE_NONE:
         utils.update_dict(ds_config, {
             'gradient_clipping': optimizer_config.gradient_clipping_threshold,

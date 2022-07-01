@@ -18,7 +18,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 - Added training support for [DeepSpeed](https://www.deepspeed.ai/).
   - Installation: `pip install deepspeed`
   - Usage: `deepspeed --no_python ... sockeye-train ...`
-  - Run in FP16 mode with `--deepspeed-fp16`.
+  - Run in FP16 mode with `--deepspeed-fp16` or BF16 mode with `--deepspeed-bf16`.
   - Set Zero Redundancy Optimizer (ZeRO) stage ([Rajbhandari et al., 2019](https://arxiv.org/abs/1910.02054v3)) with `--deepspeed-zero-stage N`.
   - Offload optimizer and parameters to CPU ([Ren et al., 2021](https://arxiv.org/abs/2101.06840)) with `--deepspeed-zero-offload-optimizer` (stage 2+) and `--deepspeed-zero-offload-param` (stage 3).
   - Specify arbitrary [DeepSpeed config options](https://www.deepspeed.ai/docs/config-json/) in a JSON file with `--deepspeed-config FILE` or as a string with `--deepspeed-config-entries STR`.

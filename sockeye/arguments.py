@@ -1052,6 +1052,11 @@ def add_training_args(params):
                               default=False,
                               help='Run the model in float16 mode with float32 master weights and dynamic loss '
                                    'scaling. This is similar to --apex-amp. Default: %(default)s.')
+    train_params.add_argument('--deepspeed-bf16',
+                              action='store_true',
+                              default=False,
+                              help='Run the model in bfloat16 mode, which does not require loss scaling. '
+                                   'Default: %(default)s.')
     train_params.add_argument('--deepspeed-zero-stage',
                               type=int,
                               choices=C.DEEPSPEED_ZERO_STAGES,
