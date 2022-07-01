@@ -194,7 +194,9 @@ def simple_dict() -> Callable:
     """
     A simple dictionary format that does not require spaces or quoting.
 
-    Supported types: bool, int, float, str (that doesn't parse as other types)
+    Format: key1:value1,key2:value2,...
+
+    Supported types: bool, int, float, str (that doesn't parse as other types).
 
     :return: A method that can be used as a type in argparse.
     """
@@ -219,8 +221,7 @@ def simple_dict() -> Callable:
                 key, value = entry.split(":")
                 _dict[key] = _parse(value)
         except ValueError:
-            raise argparse.ArgumentTypeError("Specify argument dictionary as key1:value1,key2:value2,..."
-                                             " Supported types: bool, int, float.")
+            raise argparse.ArgumentTypeError("Specify argument dictionary as key1:value1,key2:value2,...")
         return _dict
 
     return parse

@@ -164,7 +164,6 @@ TRAINING_STATE_DIRNAME = "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
 TRAINING_STATE_DEEPSPEED = "deepspeed"
-TRAINING_STATE_TEMP_DEEPSPEED = "tmp.deepspeed"
 
 OPT_STATE_LAST = "optimizer_last.pkl"
 OPT_STATE_BEST = "optimizer_best.pkl"

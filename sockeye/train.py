@@ -1213,7 +1213,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         del sockeye_model
         torch.cuda.empty_cache()
         gc.collect()
-        # Convert parameter directories (DeepSpeed checkpoints) into parameter
+        # Convert parameter directories (DeepSpeed checkpoints) to parameter
         # files (regular float32). This does not affect the DeepSpeed checkpoint
         # stored as part of the training state that enables continuing training.
         convert_deepspeed.convert_model_checkpoints(trainer_config.output_dir, keep_deepspeed=False)
