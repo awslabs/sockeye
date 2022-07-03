@@ -282,11 +282,18 @@ LENGTH_TASK_LENGTH = 'length'
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
-DTYPE_INT8 = 'int8'
+DTYPE_BF16 = 'bfloat16'
 DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
+DTYPE_INT8 = 'int8'
+DTYPE_INT32 = 'int32'
 LARGE_POSITIVE_VALUE = 99999999.
 LARGE_VALUES = {
+    # Rounds to 1.0014e+08
+    # https://en.wikipedia.org/wiki/Bfloat16_floating-point_format#Range_and_precision
+    DTYPE_BF16: LARGE_POSITIVE_VALUE,
+    pt.bfloat16: LARGE_POSITIVE_VALUE,
+
     # Something at the middle of 32768<x<65519. Will be rounded to a multiple of 32.
     # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP16: 49152.0,
@@ -294,7 +301,7 @@ LARGE_VALUES = {
     pt.float16: 49152.0,
 
     # Will be rounded to 1.0e8.
-    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
+    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP32: LARGE_POSITIVE_VALUE,
     np.float32: LARGE_POSITIVE_VALUE,
     pt.float32: LARGE_POSITIVE_VALUE
