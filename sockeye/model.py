@@ -152,7 +152,7 @@ class SockeyeModel(pt.nn.Module):
                                                    num_layers=self.config.config_length_task.num_layers)
 
         # TODO: Create in dtype instead of casting
-        dtype = utils.str_to_torch_dtype(config.dtype)
+        dtype = utils.get_torch_dtype(config.dtype)
         self.dtype = dtype
         self.cast(dtype)
 
@@ -161,7 +161,10 @@ class SockeyeModel(pt.nn.Module):
         self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
 
-    def cast(self, dtype: pt.dtype):
+    def cast(self, dtype: Union[pt.dtype, str]):
+        dtype = utils.get_torch_dtype(dtype)
+        if self.dtype == dtype:
+            return
         # Cast model parameters and update model dtype
         if dtype in {pt.bfloat16, pt.float16, pt.float32}:
             logger.info(f'Casting SockeyeModel to dtype {dtype}')
@@ -638,9 +641,6 @@ def load_model(model_folder: str,
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :return: List of models, source vocabularies, target vocabularies.
     """
-    if isinstance(dtype, str):
-        dtype = utils.str_to_torch_dtype(dtype)
-
     source_vocabs = vocab.load_source_vocabs(model_folder)
     target_vocabs = vocab.load_target_vocabs(model_folder)
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
@@ -671,7 +671,7 @@ def load_model(model_folder: str,
     if set_grad_req_null:
         model.eval()
 
-    if dtype is None or dtype == model_config.dtype:
+    if dtype is None:
         logger.info("Model dtype: %s" % model.dtype)
     else:
         model.cast(dtype)
@@ -713,9 +713,6 @@ def load_models(device: pt.device,
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
-    if isinstance(dtype, str):
-        dtype = utils.str_to_torch_dtype(dtype)
-
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
     load_time_start = time.time()
     models = []  # type: List[SockeyeModel]

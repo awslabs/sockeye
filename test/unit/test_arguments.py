@@ -86,9 +86,8 @@ def test_logging_args(test_params, expected_params):
 
 
 @pytest.mark.parametrize('test_params,expected_params', [
-    ('--model model --output output',
+    ('--model model',
      dict(model='model',
-          output='output',
           dtype=C.DTYPE_FP16)),
 ])
 def test_quantize_args(test_params, expected_params):

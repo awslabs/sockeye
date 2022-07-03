@@ -524,11 +524,12 @@ _STRING_TO_TORCH_DTYPE = {
 }
 
 
-def str_to_torch_dtype(s: str) -> pt.dtype:
-    dtype = _STRING_TO_TORCH_DTYPE.get(s, None)
-    if dtype is None:
-        raise ValueError(f'Unknown dtype string: {s}')
-    return dtype
+def get_torch_dtype(dtype: Union[pt.dtype, str]) -> pt.dtype:
+    if isinstance(dtype, pt.dtype):
+        return dtype
+    if dtype in _STRING_TO_TORCH_DTYPE:
+        return _STRING_TO_TORCH_DTYPE[dtype]
+    raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
 
 
 def log_parameters(model: pt.nn.Module):
