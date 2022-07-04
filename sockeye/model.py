@@ -99,6 +99,7 @@ class SockeyeModel(pt.nn.Module):
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
+        self.dtype = utils.get_torch_dtype(config.dtype)
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
@@ -110,24 +111,26 @@ class SockeyeModel(pt.nn.Module):
         # source & target embeddings, potentially shared/tied
         source_embedding, target_embedding, output_weight = self._get_embeddings()
 
-        self.embedding_source = encoder.Embedding(config.config_embed_source, embedding=source_embedding)
-        self.embedding_target = encoder.Embedding(config.config_embed_target, embedding=target_embedding)
+        self.embedding_source = encoder.Embedding(config.config_embed_source, embedding=source_embedding,
+                                                  dtype=self.dtype)
+        self.embedding_target = encoder.Embedding(config.config_embed_target, embedding=target_embedding,
+                                                  dtype=self.dtype)
 
         # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder.get_transformer_encoder(self.config.config_encoder,
-                                                       inference_only=inference_only)
-        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only)
+        self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
+                                                       dtype=self.dtype)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, dtype=self.dtype)
         self.nvs = None
         if self.config.neural_vocab_selection:
-            self.nvs = nvs.NeuralVocabSelection(
-                model_size=self.config.config_encoder.model_size,
-                vocab_target_size=self.config.vocab_target_size,
-                model_type=self.config.neural_vocab_selection
-            )
+            self.nvs = nvs.NeuralVocabSelection(model_size=self.config.config_encoder.model_size,
+                                                vocab_target_size=self.config.vocab_target_size,
+                                                model_type=self.config.neural_vocab_selection,
+                                                dtype=self.dtype)
 
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
-                                               weight=output_weight)
+                                               weight=output_weight,
+                                               dtype=self.dtype)
         if self.inference_only:
             # Running this layer scripted with a newly initialized model can
             # cause an overflow error.
@@ -140,7 +143,8 @@ class SockeyeModel(pt.nn.Module):
             # TODO also consider weight tying with target factor input embeddings
             output_layer = pt.nn.Linear(in_features=self.decoder.get_num_hidden(),
                                         out_features=factor_config.vocab_size,
-                                        bias=True)
+                                        bias=True,
+                                        dtype=self.dtype)
             self.factor_output_layers.append(output_layer)
         self.factor_vocab_size = factor_config.vocab_size if self.target_factor_configs else None
 
@@ -149,17 +153,27 @@ class SockeyeModel(pt.nn.Module):
             utils.check_condition(self.config.config_length_task.weight > 0.0,
                                   'Auxiliary length task requested, but its loss weight is zero')
             self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
-                                                   num_layers=self.config.config_length_task.num_layers)
-
-        # TODO: Create in dtype instead of casting
-        dtype = utils.get_torch_dtype(config.dtype)
-        self.dtype = dtype
-        self.cast(dtype)
+                                                   num_layers=self.config.config_length_task.num_layers,
+                                                   dtype=self.dtype)
 
         # traced components (for inference)
         self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
+
+        # Make sure all parameters are in the model's specified dtype. Warn when
+        # conversion is required. This is a no-op when all submodules are
+        # instantiated using the model's dtype.
+        mismatched_dtype_params = [(name, param.dtype) for name, param in self.named_parameters()
+                                   if param.dtype != self.dtype]
+        self.to(self.dtype)
+        if mismatched_dtype_params:
+            logger.warn('Some parameters were created in a different dtype and then converted to the SockeyeModel\'s '
+                        'dtype. This works but can cause memory spikes when creating/loading models. To avoid this, '
+                        'pass the SockeyeModel\'s dtype when instantiating all submodules. Converted parameters:')
+            for name, dtype in mismatched_dtype_params:
+                logger.warn(f'{name}: {dtype} -> {self.dtype}')
+
 
     def cast(self, dtype: Union[pt.dtype, str]):
         dtype = utils.get_torch_dtype(dtype)
@@ -464,7 +478,8 @@ class SockeyeModel(pt.nn.Module):
         source_grad_sparse = self.config.config_embed_source.allow_sparse_grad and not tie_weights
         source_embedding = pt.nn.Embedding(self.config.config_embed_source.vocab_size,
                                            self.config.config_embed_source.num_embed,
-                                           sparse=source_grad_sparse)
+                                           sparse=source_grad_sparse,
+                                           dtype=self.dtype)
 
         if share_embed:
             target_embedding = source_embedding
@@ -472,7 +487,8 @@ class SockeyeModel(pt.nn.Module):
             target_grad_sparse = self.config.config_embed_target.allow_sparse_grad and not tie_weights
             target_embedding = pt.nn.Embedding(self.config.config_embed_target.vocab_size,
                                                self.config.config_embed_target.num_embed,
-                                               sparse=target_grad_sparse)
+                                               sparse=target_grad_sparse,
+                                               dtype=self.dtype)
 
         if tie_weights:
             output_weight = target_embedding.weight  # type: ignore
@@ -657,7 +673,6 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    # TODO: pass dtype to all submodules
     model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
                          forward_pass_cache_size=forward_pass_cache_size)
 

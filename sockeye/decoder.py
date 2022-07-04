@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 DecoderConfig = Union[TransformerConfig]  # type: ignore
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False) -> 'Decoder':
-    return Decoder.get_decoder(config, inference_only)
+def get_decoder(config: DecoderConfig, inference_only: bool = False, dtype: Optional[pt.dtype] = None) -> 'Decoder':
+    return Decoder.get_decoder(config=config, inference_only=inference_only, dtype=dtype)
 
 
 class Decoder(pt.nn.Module):
@@ -63,12 +63,13 @@ class Decoder(pt.nn.Module):
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool) -> 'Decoder':
+    def get_decoder(cls, config: DecoderConfig, inference_only: bool, dtype: Optional[pt.dtype] = None) -> 'Decoder':
         """
         Creates decoder based on config type.
 
         :param config: Decoder config.
         :param inference_only: Create a decoder that is only used for inference.
+        :param dtype: Torch data type for parameters.
 
         :return: Decoder instance.
         """
@@ -76,7 +77,7 @@ class Decoder(pt.nn.Module):
         if config_type not in cls.__registry:
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
         decoder_cls = cls.__registry[config_type]
-        return decoder_cls(config=config, inference_only=inference_only)  # type: ignore
+        return decoder_cls(config=config, inference_only=inference_only, dtype=dtype)  # type: ignore
 
     @abstractmethod
     def __init__(self):
@@ -123,9 +124,13 @@ class TransformerDecoder(Decoder):
     :param config: Transformer configuration.
     :param inference_only: Only use the model for inference enabling some optimizations,
                            such as disabling the auto-regressive mask.
+    :param dtype: Torch data type for parameters.
     """
 
-    def __init__(self, config: TransformerConfig, inference_only: bool = False) -> None:
+    def __init__(self,
+                 config: TransformerConfig,
+                 inference_only: bool = False,
+                 dtype: Optional[pt.dtype] = None) -> None:
         Decoder.__init__(self)
         pt.nn.Module.__init__(self)
         self.config = config
@@ -134,16 +139,18 @@ class TransformerDecoder(Decoder):
                                                          num_embed=self.config.model_size,
                                                          max_seq_len=self.config.max_seq_len_target,
                                                          scale_up_input=True,
-                                                         scale_down_positions=False)
+                                                         scale_down_positions=False,
+                                                         dtype=dtype)
         self.autoregressive_mask = transformer.AutoRegressiveMask()
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer.TransformerDecoderBlock(config, inference_only=self.inference_only)
+            transformer.TransformerDecoderBlock(config, inference_only=self.inference_only, dtype=dtype)
             for _ in range(config.num_layers))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
-                                                                 num_hidden=self.config.model_size)
+                                                                 num_hidden=self.config.model_size,
+                                                                 dtype=dtype)
         if self.config.dropout_prepost > 0.0:
             self.dropout = pt.nn.Dropout(p=self.config.dropout_prepost, inplace=inference_only)
 
