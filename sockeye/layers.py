@@ -43,9 +43,9 @@ class LHUC(pt.nn.Module):
     :param num_hidden: Number of hidden units of the layer to be modified.
     """
 
-    def __init__(self, num_hidden: int) -> None:
+    def __init__(self, num_hidden: int, dtype: Optional[pt.dtype] = None) -> None:
         super().__init__()
-        self.weight = pt.nn.Parameter(pt.Tensor(num_hidden,))
+        self.weight = pt.nn.Parameter(pt.empty(num_hidden, dtype=dtype))
 
     def forward(self, data: pt.Tensor) -> pt.Tensor:
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
@@ -63,22 +63,24 @@ class OutputLayer(pt.nn.Module):
     :param hidden_size: Input hidden size.
     :param vocab_size: Target vocabulary size.
     :param weight: Optional shared weight Parameter.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
                  hidden_size: int,
                  vocab_size: int,
-                 weight: Optional[pt.nn.Parameter] = None) -> None:
+                 weight: Optional[pt.nn.Parameter] = None,
+                 dtype: Optional[pt.dtype] = None) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.in_features = hidden_size
         self.out_features = vocab_size
 
         if weight is None:
-            self.weight = pt.nn.Parameter(pt.Tensor(vocab_size, hidden_size))
+            self.weight = pt.nn.Parameter(pt.empty(vocab_size, hidden_size, dtype=dtype))
         else:
             self.weight = weight
-        self.bias = pt.nn.Parameter(pt.Tensor(vocab_size))
+        self.bias = pt.nn.Parameter(pt.empty(vocab_size, dtype=dtype))
 
         self.previous_slice_ids = pt.empty(0)
         self.reduced_weight = pt.empty(0)
@@ -127,11 +129,13 @@ class LengthRatio(pt.nn.Module):
 
     :param hidden_size: Encoder hidden size.
     :param num_layers: Number of layers.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
                  hidden_size: int,
-                 num_layers: int) -> None:
+                 num_layers: int,
+                 dtype: Optional[pt.dtype] = None) -> None:
         utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
         super().__init__()
         self.num_layers = num_layers
@@ -139,9 +143,9 @@ class LengthRatio(pt.nn.Module):
 
         modules = []  # type: List[pt.nn.Module]
         for _ in range(num_layers - 1):
-            modules.append(pt.nn.Linear(in_features=hidden_size, out_features=hidden_size))
+            modules.append(pt.nn.Linear(in_features=hidden_size, out_features=hidden_size, dtype=dtype))
             modules.append(pt.nn.Tanh())
-        modules.append(pt.nn.Linear(in_features=hidden_size, out_features=1))
+        modules.append(pt.nn.Linear(in_features=hidden_size, out_features=1, dtype=dtype))
         modules.append(pt.nn.Softplus())  # SoftReLU activation to ensure positiveness of the predicted length ratio
         self.layers = pt.nn.Sequential(*modules)
 
@@ -277,13 +281,15 @@ class MultiHeadAttentionBase(pt.nn.Module):
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
-    :param dropout: Dropout probability on attention scores
+    :param dropout: Dropout probability on attention scores.
+    :param dtype: Torch data type for parameters.
     """
     def __init__(self,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0) -> None:
+                 dropout: float = 0.0,
+                 dtype: Optional[pt.dtype] = None) -> None:
         super().__init__()
         utils.check_condition(depth_att % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
@@ -293,7 +299,7 @@ class MultiHeadAttentionBase(pt.nn.Module):
         self.depth_per_head = self.depth // self.heads
 
         self.dot_att = DotAttentionCell(dropout=dropout, heads=heads)
-        self.ff_out = pt.nn.Linear(in_features=depth_att, out_features=depth_out, bias=False)
+        self.ff_out = pt.nn.Linear(in_features=depth_att, out_features=depth_out, bias=False, dtype=dtype)
 
     def _attend(self,
                 queries: pt.Tensor,
@@ -357,18 +363,20 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
-    :param dropout: Dropout probability on attention scores
+    :param dropout: Dropout probability on attention scores.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
-                 dropout: float = 0.0) -> None:
-        super().__init__(depth_att, heads, depth_out, dropout)
+                 dropout: float = 0.0,
+                 dtype: Optional[pt.dtype] = None) -> None:
+        super().__init__(depth_att, heads, depth_out, dropout, dtype)
 
         self.depth_att = depth_att
-        self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False)
+        self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False, dtype=dtype)
         self._drop_p = dropout
         # indicates whether self.ff_in.weight of shape (depth_att * 3, depth_key_value) is in interleaved format or not.
         # Interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
@@ -482,7 +490,8 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param depth_key_value: Dimension of input key and value vectors.
-    :param dropout: Dropout probability on attention scores
+    :param dropout: Dropout probability on attention scores.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
@@ -490,10 +499,11 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 depth_key_value: int = 512) -> None:
-        super().__init__(depth_att, heads, depth_out, dropout)
-        self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False)
-        self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False)
+                 depth_key_value: int = 512,
+                 dtype: Optional[pt.dtype] = None) -> None:
+        super().__init__(depth_att, heads, depth_out, dropout, dtype)
+        self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False, dtype=dtype)
+        self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False, dtype=dtype)
         self._drop_p = dropout
         self._depth_key_value = depth_key_value
         # indicates whether self.ff_kv.weight of shape (depth_att * 2, depth_key_value) is in interleaved format or not.
@@ -623,6 +633,7 @@ class PositionalEmbeddings(pt.nn.Module):
     :param max_seq_len: Maximum sequence length.
     :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
     :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
@@ -630,7 +641,8 @@ class PositionalEmbeddings(pt.nn.Module):
                  num_embed: int,
                  max_seq_len: int,
                  scale_up_input: bool,
-                 scale_down_positions: bool) -> None:
+                 scale_down_positions: bool,
+                 dtype: Optional[pt.dtype] = None) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
                                                   "is however %d." % num_embed)
         super().__init__()
@@ -644,9 +656,11 @@ class PositionalEmbeddings(pt.nn.Module):
             weight = get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
             if self.scale_down_positions:
                 weight *= self.num_embed ** -0.5
+            if dtype is not None:
+                weight = weight.to(dtype)
             self.weight = pt.nn.Parameter(weight, requires_grad=False)
         elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-            self.weight = pt.nn.Parameter(pt.Tensor(self.max_seq_len, self.num_embed))
+            self.weight = pt.nn.Parameter(pt.empty(self.max_seq_len, self.num_embed, dtype=dtype))
         else:
             raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
 
@@ -699,9 +713,10 @@ class SSRU(AutoregressiveLayer):
         h is the output of the unit.
 
     :param model_size: number of hidden units
-    :param inference_only: flag used to indicate execution at inference time
+    :param inference_only: flag used to indicate execution at inference time.
+    :param dtype: Torch data type for parameters.
     """
-    def __init__(self, model_size: int, inference_only: bool) -> None:
+    def __init__(self, model_size: int, inference_only: bool, dtype: Optional[pt.dtype] = None) -> None:
         super().__init__()
         self.model_size = model_size
         self.inference_only = inference_only
@@ -709,10 +724,10 @@ class SSRU(AutoregressiveLayer):
         self.cell_state_transform = self._inference_cell_state_transform \
                                     if inference_only else self._training_cell_state_transform
 
-        self.forget_gate = pt.nn.Linear(in_features=model_size, out_features=model_size, bias=True)
+        self.forget_gate = pt.nn.Linear(in_features=model_size, out_features=model_size, bias=True, dtype=dtype)
         self.forget_gate_act = pt.nn.Sigmoid()
 
-        self.linear = pt.nn.Linear(in_features=model_size, out_features=model_size, bias=False)
+        self.linear = pt.nn.Linear(in_features=model_size, out_features=model_size, bias=False, dtype=dtype)
 
         self.relu = pt.nn.ReLU(inplace=False)  # inplace=False because we need to non-activated data as well
 

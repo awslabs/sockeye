@@ -499,19 +499,37 @@ def metric_value_is_better(new: float, old: float, metric: str) -> bool:
 
 
 _DTYPE_TO_STRING = {
-    np.float32: 'float32',
-    np.float16: 'float16',
-    np.int8: 'int8',
-    np.int32: 'int32',
-    pt.float32: 'float32',
-    pt.float16: 'float16',
-    pt.int32: 'int32',
-    pt.int8: 'int8',
+    np.float16: C.DTYPE_FP16,
+    np.float32: C.DTYPE_FP32,
+    np.int8: C.DTYPE_INT8,
+    np.int32: C.DTYPE_INT32,
+    pt.bfloat16: C.DTYPE_BF16,
+    pt.float16: C.DTYPE_FP16,
+    pt.float32: C.DTYPE_FP32,
+    pt.int8: C.DTYPE_INT8,
+    pt.int32: C.DTYPE_INT32,
 }
 
 
-def _print_dtype(dtype):
+def dtype_to_str(dtype):
     return _DTYPE_TO_STRING.get(dtype, str(dtype))
+
+
+_STRING_TO_TORCH_DTYPE = {
+    C.DTYPE_BF16: pt.bfloat16,
+    C.DTYPE_FP16: pt.float16,
+    C.DTYPE_FP32: pt.float32,
+    C.DTYPE_INT8: pt.int8,
+    C.DTYPE_INT32: pt.int32,
+}
+
+
+def get_torch_dtype(dtype: Union[pt.dtype, str]) -> pt.dtype:
+    if isinstance(dtype, pt.dtype):
+        return dtype
+    if dtype in _STRING_TO_TORCH_DTYPE:
+        return _STRING_TO_TORCH_DTYPE[dtype]
+    raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
 
 
 def log_parameters(model: pt.nn.Module):
@@ -525,7 +543,7 @@ def log_parameters(model: pt.nn.Module):
     visited = defaultdict(list)
     for name, module in model.named_modules(remove_duplicate=False):
         for param_name, param in module.named_parameters(prefix=name, recurse=False):
-            repr = "%s [%s, %s]" % (name, tuple(param.shape), _print_dtype(param.dtype))
+            repr = "%s [%s, %s]" % (name, tuple(param.shape), dtype_to_str(param.dtype))
             size = param.shape.numel()
             if not param.requires_grad:
                 fixed_parameter_names.append(repr)

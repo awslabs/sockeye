@@ -11,20 +11,24 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+from typing import Optional
+
 import torch as pt
+
 from . import constants as C
 
 
 class NeuralVocabSelection(pt.nn.Module):
-    def __init__(
-        self, model_size: int, vocab_target_size: int,
-        model_type: str = C.NVS_TYPE_LOGIT_MAX,
-    ):
+    def __init__(self,
+                 model_size: int,
+                 vocab_target_size: int,
+                 model_type: str = C.NVS_TYPE_LOGIT_MAX,
+                 dtype: Optional[pt.dtype] = None) -> None:
         super().__init__()
         self.vocab_target_size = vocab_target_size
         self.model_type = model_type
 
-        self.project_vocab = pt.nn.Linear(model_size, vocab_target_size, bias=True)
+        self.project_vocab = pt.nn.Linear(model_size, vocab_target_size, bias=True, dtype=dtype)
 
     def forward(self, source_encoded: pt.Tensor, source_length: pt.Tensor, att_mask: pt.Tensor):
         if self.model_type == C.NVS_TYPE_LOGIT_MAX:

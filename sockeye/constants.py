@@ -142,7 +142,6 @@ JSON_ENCODING = "utf-8"
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
-CONFIG_NAME_FLOAT32 = CONFIG_NAME + ".float32"
 LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_PREFIX = "vocab.src"
@@ -153,7 +152,6 @@ VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
-PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
 DECODE_OUT_NAME = "decode.output.{{factor}}.{checkpoint:05d}"
 DECODE_IN_NAME = "decode.source.{factor}"
 DECODE_REF_NAME = "decode.target.{factor}"
@@ -282,11 +280,18 @@ LENGTH_TASK_LENGTH = 'length'
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
-DTYPE_INT8 = 'int8'
+DTYPE_BF16 = 'bfloat16'
 DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
+DTYPE_INT8 = 'int8'
+DTYPE_INT32 = 'int32'
 LARGE_POSITIVE_VALUE = 99999999.
 LARGE_VALUES = {
+    # Rounds to 1.0014e+08
+    # https://en.wikipedia.org/wiki/Bfloat16_floating-point_format#Range_and_precision
+    DTYPE_BF16: LARGE_POSITIVE_VALUE,
+    pt.bfloat16: LARGE_POSITIVE_VALUE,
+
     # Something at the middle of 32768<x<65519. Will be rounded to a multiple of 32.
     # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP16: 49152.0,
@@ -294,7 +299,7 @@ LARGE_VALUES = {
     pt.float16: 49152.0,
 
     # Will be rounded to 1.0e8.
-    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
+    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP32: LARGE_POSITIVE_VALUE,
     np.float32: LARGE_POSITIVE_VALUE,
     pt.float32: LARGE_POSITIVE_VALUE

@@ -153,7 +153,7 @@ class TranslatorInput:
         Returns the number of factors of this instance.
         """
         return 1 + (0 if not self.factors else len(self.factors))
-    
+
     def get_source_prefix_tokens(self) -> Tokens:
         """
         Returns the source prefix tokens of this instance.
@@ -684,7 +684,7 @@ def _concat_translations(translations: List[Translation],
     # Concatenation of all target ids without BOS and EOS
     target_ids = []
     estimated_reference_length = None  # type: Optional[float]
-    scores = np.zeros_like(translations[0].scores)
+    scores = np.zeros_like(translations[0].scores)  # type: np.ndarray
 
     for idx, translation in enumerate(translations):
         if idx == len(translations) - 1:
