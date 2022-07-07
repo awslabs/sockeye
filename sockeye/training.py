@@ -23,7 +23,7 @@ import shutil
 import time
 from collections import deque, OrderedDict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Iterable, Tuple, Union, Set
+from typing import Any, Callable, Dict, List, Mapping, Optional, Iterable, Tuple, Union, Set
 
 import numpy as np
 import torch
@@ -68,7 +68,7 @@ class ModelWithLoss(torch.nn.Module):
         self.training_model = None  # type: Optional[torch.nn.Module]
         self.losses = losses
 
-    def load_state_dict(self, state_dict: 'OrderedDict[str, torch.Tensor]', *args, **kwargs):
+    def load_state_dict(self, state_dict: Mapping[str, torch.Tensor], *args, **kwargs):
         """
         Ignore missing/unexpected keys for the training model when loading
         state. These keys point to the same parameters as the original
