@@ -23,6 +23,13 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
   - Offload optimizer and parameters to CPU ([Ren et al., 2021](https://arxiv.org/abs/2101.06840)) with `--deepspeed-zero-offload-optimizer` (stage 2+) and `--deepspeed-zero-offload-param` (stage 3).
   - Specify arbitrary [DeepSpeed config options](https://www.deepspeed.ai/docs/config-json/) in a JSON file with `--deepspeed-config FILE` or as a string with `--deepspeed-config-entries STR`.
 
+## [3.1.17]
+
+### Added
+
+- Added support for offline model quantization with `sockeye-quantize`.
+  - Pre-quantizing a model avoids the load-time memory spike of runtime quantization. For example, a float16 model loads directly as float16 instead of loading as float32 then casting to float16.
+
 ## [3.1.16]
 
 ### Added

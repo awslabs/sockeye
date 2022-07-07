@@ -93,6 +93,15 @@ def test_logging_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_logging_args)
 
 
+@pytest.mark.parametrize('test_params,expected_params', [
+    ('--model model',
+     dict(model='model',
+          dtype=C.DTYPE_FP16)),
+])
+def test_quantize_args(test_params, expected_params):
+    _test_args(test_params, expected_params, arguments.add_quantize_args)
+
+
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(device_id=0,
               use_cpu=False,

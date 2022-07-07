@@ -10,14 +10,14 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
-import _pickle
+
 import copy
 import logging
 import os
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import cast, Dict, Optional, Tuple, List
+from typing import cast, Dict, List, Optional, Tuple, Union
 
 import torch as pt
 
@@ -63,7 +63,7 @@ class ModelConfig(Config):
     :param config_length_task: Optional length task configuration.
     :param weight_tying_type: Determines which weights get tied.
     :param lhuc: LHUC (Vilar 2018) is applied at some part of the model.
-    :param dtype: Data type of model parameters. Default: float32.
+    :param dtype: Data type (string) of model parameters. Default: float32.
     :param neural_vocab_selection: When True the model contains a neural vocab selection model that restricts
                                    the target output vocabulary to speed up inference.
     :param neural_vocab_selection_block_loss: When true the gradients of the NVS models are blocked before the encoder.
@@ -107,6 +107,7 @@ class SockeyeModel(pt.nn.Module):
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
+        self.dtype = utils.get_torch_dtype(config.dtype)
         self.inference_only = inference_only
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
@@ -118,24 +119,26 @@ class SockeyeModel(pt.nn.Module):
         # source & target embeddings, potentially shared/tied
         source_embedding, target_embedding, output_weight = self._get_embeddings()
 
-        self.embedding_source = encoder.Embedding(config.config_embed_source, embedding=source_embedding)
-        self.embedding_target = encoder.Embedding(config.config_embed_target, embedding=target_embedding)
+        self.embedding_source = encoder.Embedding(config.config_embed_source, embedding=source_embedding,
+                                                  dtype=self.dtype)
+        self.embedding_target = encoder.Embedding(config.config_embed_target, embedding=target_embedding,
+                                                  dtype=self.dtype)
 
         # encoder & decoder first (to know the decoder depth)
-        self.encoder = encoder.get_transformer_encoder(self.config.config_encoder,
-                                                       inference_only=inference_only)
-        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only)
+        self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
+                                                       dtype=self.dtype)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, dtype=self.dtype)
         self.nvs = None
         if self.config.neural_vocab_selection:
-            self.nvs = nvs.NeuralVocabSelection(
-                model_size=self.config.config_encoder.model_size,
-                vocab_target_size=self.config.vocab_target_size,
-                model_type=self.config.neural_vocab_selection
-            )
+            self.nvs = nvs.NeuralVocabSelection(model_size=self.config.config_encoder.model_size,
+                                                vocab_target_size=self.config.vocab_target_size,
+                                                model_type=self.config.neural_vocab_selection,
+                                                dtype=self.dtype)
 
         self.output_layer = layers.OutputLayer(hidden_size=self.decoder.get_num_hidden(),
                                                vocab_size=self.config.vocab_target_size,
-                                               weight=output_weight)
+                                               weight=output_weight,
+                                               dtype=self.dtype)
         if self.inference_only:
             # Running this layer scripted with a newly initialized model can
             # cause an overflow error.
@@ -148,7 +151,8 @@ class SockeyeModel(pt.nn.Module):
             # TODO also consider weight tying with target factor input embeddings
             output_layer = pt.nn.Linear(in_features=self.decoder.get_num_hidden(),
                                         out_features=factor_config.vocab_size,
-                                        bias=True)
+                                        bias=True,
+                                        dtype=self.dtype)
             self.factor_output_layers.append(output_layer)
         self.factor_vocab_size = factor_config.vocab_size if self.target_factor_configs else None
 
@@ -157,27 +161,48 @@ class SockeyeModel(pt.nn.Module):
             utils.check_condition(self.config.config_length_task.weight > 0.0,
                                   'Auxiliary length task requested, but its loss weight is zero')
             self.length_ratio = layers.LengthRatio(hidden_size=self.encoder.get_num_hidden(),
-                                                   num_layers=self.config.config_length_task.num_layers)
-        self.dtype = pt.float32
-        self.cast(config.dtype)
+                                                   num_layers=self.config.config_length_task.num_layers,
+                                                   dtype=self.dtype)
 
         # traced components (for inference)
         self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
 
-    def cast(self, dtype: str):
-        if dtype == C.DTYPE_FP16:
-            self.half()
-            self.dtype = pt.float16
-        elif dtype == C.DTYPE_INT8:
+        # Make sure all parameters are in the model's specified dtype. Warn when
+        # conversion is required. This is a no-op when all submodules are
+        # instantiated using the model's dtype.
+        mismatched_dtype_params = [(name, param.dtype) for name, param in self.named_parameters()
+                                   if param.dtype != self.dtype]
+        self.to(self.dtype)
+        if mismatched_dtype_params:
+            logger.warn('Some parameters were created in a different dtype and then converted to the SockeyeModel\'s '
+                        'dtype. This works but can cause memory spikes when creating/loading models. To avoid this, '
+                        'pass the SockeyeModel\'s dtype when instantiating all submodules. Converted parameters:')
+            for name, dtype in mismatched_dtype_params:
+                logger.warn(f'{name}: {dtype} -> {self.dtype}')
+
+
+    def cast(self, dtype: Union[pt.dtype, str]):
+        dtype = utils.get_torch_dtype(dtype)
+        if self.dtype == dtype:
+            return
+        # Cast model parameters and update model dtype
+        if dtype in {pt.bfloat16, pt.float16, pt.float32}:
+            logger.info(f'Casting SockeyeModel to dtype {dtype}')
+            self.to(dtype)
+            self.dtype = dtype
+        elif dtype == pt.int8:
             logger.info("Dynamic quantization to int8 for (fused) Linear layers")
             # TODO: figure out int8 quantization of OutputLayer, supporting weight tying & vocabulary selection
             quant_mapping = {pt.nn.Linear: pt.nn.quantized.dynamic.Linear}
             pt.quantization.quantize_dynamic(self, {pt.nn.Linear}, dtype=pt.qint8, inplace=self.inference_only,
                                              mapping=quant_mapping)
+            # Dynamic quantization does not change model dtype
         else:
-            self.dtype = pt.float32
+            raise ValueError(f'Unsupported SockeyeModel dtype: {dtype}')
+        # Update model config to reflect model's new dtype
+        self.config.dtype = utils.dtype_to_str(self.dtype)
 
     def state_structure(self):
         return self.decoder.state_structure()
@@ -374,7 +399,7 @@ class SockeyeModel(pt.nn.Module):
 
     def load_parameters(self,
                         filename: str,
-                        device: Optional[pt.device] = None,
+                        device: Optional[pt.device] = pt.device('cpu'),
                         allow_missing: bool = False,
                         ignore_extra: bool = False):
         """
@@ -382,7 +407,7 @@ class SockeyeModel(pt.nn.Module):
         See https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-model-for-inference
 
         :param filename: Path to parameter file
-        :param device: Torch device to load parameters to
+        :param device: Torch device to load parameters to. Default: cpu.
         :param allow_missing: Whether to silently skip loading parameters not represents in the file. Default: False.
         :param ignore_extra: Whether to silently ignore parameters from the file that are not part of this Module.
                              Default: False.
@@ -391,11 +416,7 @@ class SockeyeModel(pt.nn.Module):
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                         "This is either not a model directory or the first training "
                                                         "checkpoint has not happened yet." % filename)
-        try:
-            state_dict = pt.load(filename, map_location=device)
-        except _pickle.UnpicklingError as e:
-            logger.error(f"Could not load from '{filename}'. Is this a MXNet parameter file? Please convert first.")
-            raise e
+        state_dict = pt.load(filename, map_location=device)
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         # Earlier versions of Sockeye may have saved parameters for traced
         # modules. These parameters can be safely ignored.
@@ -417,7 +438,7 @@ class SockeyeModel(pt.nn.Module):
         # to match the format used during training.
         if self.training:
             self.apply(layers.separate_kv)
-        logger.info('Loaded params from "%s" to "%s"', filename, pt.device('cpu') if device is None else device)
+        logger.info('Loaded params from "%s" to "%s"', filename, device)
 
     def set_parameters(self,
                        new_params: Dict[str, pt.nn.Parameter],
@@ -468,7 +489,8 @@ class SockeyeModel(pt.nn.Module):
         source_grad_sparse = self.config.config_embed_source.allow_sparse_grad and not tie_weights
         source_embedding = pt.nn.Embedding(self.config.config_embed_source.vocab_size,
                                            self.config.config_embed_source.num_embed,
-                                           sparse=source_grad_sparse)
+                                           sparse=source_grad_sparse,
+                                           dtype=self.dtype)
 
         if share_embed:
             target_embedding = source_embedding
@@ -476,7 +498,8 @@ class SockeyeModel(pt.nn.Module):
             target_grad_sparse = self.config.config_embed_target.allow_sparse_grad and not tie_weights
             target_embedding = pt.nn.Embedding(self.config.config_embed_target.vocab_size,
                                                self.config.config_embed_target.num_embed,
-                                               sparse=target_grad_sparse)
+                                               sparse=target_grad_sparse,
+                                               dtype=self.dtype)
 
         if tie_weights:
             output_weight = target_embedding.weight  # type: ignore
@@ -634,8 +657,8 @@ def initialize_parameters(module: pt.nn.Module):
 
 
 def load_model(model_folder: str,
-               device: pt.device,
-               dtype: Optional[str] = None,
+               device: Optional[pt.device] = pt.device('cpu'),
+               dtype: Optional[Union[pt.dtype, str]] = None,
                checkpoint: Optional[int] = None,
                inference_only: bool = False,
                train_decoder_only: bool = False,
@@ -648,7 +671,7 @@ def load_model(model_folder: str,
     :param model_folder: Model folder.
     :param device: Torch device to load model to.
     :param checkpoint: Checkpoint to use. If none, uses best checkpoint.
-    :param dtype: Optional data type to use. If None, will be inferred from stored model.
+    :param dtype: Optional data type (torch.dtype or str) to use. If None, will be inferred from stored model.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
@@ -657,9 +680,6 @@ def load_model(model_folder: str,
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :return: List of models, source vocabularies, target vocabularies.
     """
-    assert dtype in (None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8), \
-        f"dtype must be one of {C.DTYPE_FP32}, {C.DTYPE_FP16}, or {C.DTYPE_INT8}"
-
     source_vocabs = vocab.load_source_vocabs(model_folder)
     target_vocabs = vocab.load_target_vocabs(model_folder)
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
@@ -689,7 +709,7 @@ def load_model(model_folder: str,
     if set_grad_req_null:
         model.eval()
 
-    if dtype is None or dtype == model_config.dtype:
+    if dtype is None:
         logger.info("Model dtype: %s" % model.dtype)
     else:
         model.cast(dtype)
@@ -709,7 +729,7 @@ def load_model(model_folder: str,
 def load_models(device: pt.device,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
-                dtype: Optional[str] = C.DTYPE_FP32,
+                dtype: Optional[Union[pt.dtype, str]] = None,
                 inference_only: bool = False,
                 train_decoder_only: bool = False,
                 allow_missing: bool = False,
@@ -722,7 +742,7 @@ def load_models(device: pt.device,
     :param device: PyTorch device.
     :param model_folders: List of model folders to load models from.
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
-    :param dtype: Optional data type to use. If None, will be inferred from stored model.
+    :param dtype: Optional data type (torch.dtype or str) to use. If None, will be inferred from stored model.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.

@@ -392,6 +392,20 @@ def add_logging_args(params):
                                 help='Console log level for secondary workers. Default: %(default)s.')
 
 
+def add_quantize_args(params):
+    params = params.add_argument_group('Quantization')
+    params.add_argument('--model', '-m',
+                        required=True,
+                        help=f'Model (directory) to quantize in place. "{C.PARAMS_BEST_NAME}" will be replaced with a '
+                             f'quantized version and "{C.CONFIG_NAME}" will be updated with the new dtype. The '
+                             'original files will be backed up with suffixes indicating the starting dtype (e.g., '
+                             f'"{C.PARAMS_BEST_NAME}.{C.DTYPE_FP32}" and "{C.CONFIG_NAME}.{C.DTYPE_FP32}").')
+    params.add_argument('--dtype',
+                        default=C.DTYPE_FP16,
+                        choices=[C.DTYPE_BF16, C.DTYPE_FP16, C.DTYPE_FP32],
+                        help='Target data type for quantization. Default: %(default)s.')
+
+
 def add_training_data_args(params, required=False):
     params.add_argument(C.TRAINING_ARG_SOURCE, '-s',
                         required=required,
