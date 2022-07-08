@@ -76,6 +76,7 @@ def run_translate(args: argparse.Namespace):
                                                        model_folders=args.models,
                                                        checkpoints=args.checkpoints,
                                                        dtype=args.dtype,
+                                                       safe_clamp=args.safe_clamp,
                                                        inference_only=True)
 
     restrict_lexicon = None  # type: Optional[Union[RestrictLexicon, Dict[str, RestrictLexicon]]]
