@@ -1370,6 +1370,11 @@ def add_inference_args(params):
 
     decode_params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                                help="Data type. Default: %(default)s infers from saved model.")
+    decode_params.add_argument('--safe-clamp', action='store_true',
+                               help='Clamp outputs for transformer attention, feed-forward, and process blocks to '
+                                    'large values for their dtypes. This can prevent inf/nan values when running '
+                                    'float16 inference with a bfloat16-trained model. See: '
+                                    'https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139')
 
 
 def add_length_penalty_args(params):

@@ -98,17 +98,20 @@ class SockeyeModel(pt.nn.Module):
 
     :param config: Model configuration.
     :param inference_only: Use the model only for inference, enabling optimizations.
+    :param safe_clamp: Avoid inf/-inf by clamping outputs to large values for their dtype.
     """
 
     def __init__(self,
                  config: ModelConfig,
                  inference_only: bool = False,
+                 safe_clamp: bool = False,
                  train_decoder_only: bool = False,
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
         self.config = copy.deepcopy(config)
         self.dtype = utils.get_torch_dtype(config.dtype)
         self.inference_only = inference_only
+        self.safe_clamp = safe_clamp
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
         self.forward_pass_cache_size = forward_pass_cache_size
@@ -126,8 +129,9 @@ class SockeyeModel(pt.nn.Module):
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
-                                                       dtype=self.dtype)
-        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, dtype=self.dtype)
+                                                       safe_clamp=safe_clamp, dtype=self.dtype)
+        self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only,
+                                           safe_clamp=safe_clamp, dtype=self.dtype)
         self.nvs = None
         if self.config.neural_vocab_selection:
             self.nvs = nvs.NeuralVocabSelection(model_size=self.config.config_encoder.model_size,
@@ -659,6 +663,7 @@ def initialize_parameters(module: pt.nn.Module):
 def load_model(model_folder: str,
                device: Optional[pt.device] = pt.device('cpu'),
                dtype: Optional[Union[pt.dtype, str]] = None,
+               safe_clamp: bool = False,
                checkpoint: Optional[int] = None,
                inference_only: bool = False,
                train_decoder_only: bool = False,
@@ -672,6 +677,7 @@ def load_model(model_folder: str,
     :param device: Torch device to load model to.
     :param checkpoint: Checkpoint to use. If none, uses best checkpoint.
     :param dtype: Optional data type (torch.dtype or str) to use. If None, will be inferred from stored model.
+    :param safe_clamp: Avoid inf/-inf by clamping outputs to large values for their dtype.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
@@ -696,8 +702,8 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
-                         forward_pass_cache_size=forward_pass_cache_size)
+    model = SockeyeModel(model_config, inference_only=inference_only, safe_clamp=safe_clamp,
+                         train_decoder_only=train_decoder_only, forward_pass_cache_size=forward_pass_cache_size)
 
     model.load_parameters(filename=params_fname,
                           device=device,
@@ -730,6 +736,7 @@ def load_models(device: pt.device,
                 model_folders: List[str],
                 checkpoints: Optional[List[int]] = None,
                 dtype: Optional[Union[pt.dtype, str]] = None,
+                safe_clamp: bool = False,
                 inference_only: bool = False,
                 train_decoder_only: bool = False,
                 allow_missing: bool = False,
@@ -743,6 +750,7 @@ def load_models(device: pt.device,
     :param model_folders: List of model folders to load models from.
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
     :param dtype: Optional data type (torch.dtype or str) to use. If None, will be inferred from stored model.
+    :param safe_clamp: Avoid inf/-inf by clamping outputs to large values for their dtype.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
@@ -766,6 +774,7 @@ def load_models(device: pt.device,
         model, src_vcbs, trg_vcbs = load_model(model_folder,
                                                device=device,
                                                dtype=dtype,
+                                               safe_clamp=safe_clamp,
                                                checkpoint=checkpoint,
                                                inference_only=inference_only,
                                                train_decoder_only=train_decoder_only,

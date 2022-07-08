@@ -290,6 +290,8 @@ class MultiHeadAttentionBase(pt.nn.Module):
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores.
+    :param safe_clamp: Avoid inf/-inf by clamping outputs to large values for
+                       their dtype.
     :param dtype: Torch data type for parameters.
     """
     def __init__(self,
@@ -297,6 +299,7 @@ class MultiHeadAttentionBase(pt.nn.Module):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
+                 safe_clamp: bool = False,
                  dtype: Optional[pt.dtype] = None) -> None:
         super().__init__()
         utils.check_condition(depth_att % heads == 0,
@@ -305,6 +308,7 @@ class MultiHeadAttentionBase(pt.nn.Module):
         self.heads = heads
         self.depth_out = depth_out
         self.depth_per_head = self.depth // self.heads
+        self.safe_clamp = safe_clamp
 
         self.dot_att = DotAttentionCell(dropout=dropout, heads=heads)
         self.ff_out = pt.nn.Linear(in_features=depth_att, out_features=depth_out, bias=False, dtype=dtype)
@@ -327,6 +331,9 @@ class MultiHeadAttentionBase(pt.nn.Module):
 
         # (query_max_length, batch, output_depth)
         contexts = self.ff_out(contexts)
+
+        if self.safe_clamp:
+            contexts = pt.clamp(contexts, min=-C.LARGE_VALUES[contexts.dtype], max=C.LARGE_VALUES[contexts.dtype])
 
         return contexts
 
@@ -372,6 +379,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores.
+    :param safe_clamp: Avoid inf/-inf by clamping outputs to large values for
+                       their dtype.
     :param dtype: Torch data type for parameters.
     """
 
@@ -380,8 +389,9 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
+                 safe_clamp: bool = False,
                  dtype: Optional[pt.dtype] = None) -> None:
-        super().__init__(depth_att, heads, depth_out, dropout, dtype)
+        super().__init__(depth_att, heads, depth_out, dropout, safe_clamp, dtype)
 
         self.depth_att = depth_att
         self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False, dtype=dtype)
@@ -513,6 +523,8 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     :param depth_out: Output depth / number of output units.
     :param depth_key_value: Dimension of input key and value vectors.
     :param dropout: Dropout probability on attention scores.
+    :param safe_clamp: Avoid inf/-inf by clamping outputs to large values for
+                       their dtype.
     :param dtype: Torch data type for parameters.
     """
 
@@ -522,8 +534,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  depth_out: int = 512,
                  dropout: float = 0.0,
                  depth_key_value: int = 512,
+                 safe_clamp: bool = False,
                  dtype: Optional[pt.dtype] = None) -> None:
-        super().__init__(depth_att, heads, depth_out, dropout, dtype)
+        super().__init__(depth_att, heads, depth_out, dropout, safe_clamp, dtype)
         self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False, dtype=dtype)
         self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False, dtype=dtype)
         self._drop_p = dropout

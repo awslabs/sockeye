@@ -25,8 +25,9 @@ from . import transformer
 
 def get_transformer_encoder(config: transformer.TransformerConfig,
                             inference_only: bool = False,
+                            safe_clamp: bool = False,
                             dtype: Optional[pt.dtype] = None):
-    return TransformerEncoder(config=config, inference_only=inference_only, dtype=dtype)
+    return TransformerEncoder(config=config, inference_only=inference_only, safe_clamp=safe_clamp, dtype=dtype)
 
 
 get_encoder = get_transformer_encoder
@@ -171,6 +172,7 @@ class TransformerEncoder(Encoder):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  inference_only: bool = False,
+                 safe_clamp: bool = False,
                  dtype: Optional[pt.dtype] = None) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
@@ -185,12 +187,16 @@ class TransformerEncoder(Encoder):
                                                          dtype=dtype)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer.TransformerEncoderBlock(config, inference_only=inference_only, dtype=dtype)
+            transformer.TransformerEncoderBlock(config,
+                                                inference_only=inference_only,
+                                                safe_clamp=safe_clamp,
+                                                dtype=dtype)
             for _ in range(config.num_layers))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  num_hidden=self.config.model_size,
+                                                                 safe_clamp=safe_clamp,
                                                                  dtype=dtype)
 
     def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
