@@ -1100,6 +1100,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     with deepspeed.zero.Init() if utils.deepspeed_zero_stage() == 3 else utils.no_context():
         sockeye_model = model.SockeyeModel(
             model_config,
+            clamp_to_dtype=args.clamp_to_dtype,
             train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
 
     # Move the model to the training device unless using DeepSpeed, which moves
