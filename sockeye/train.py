@@ -990,6 +990,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     sockeye_model = model.SockeyeModel(
         model_config,
+        clamp_to_dtype=args.clamp_to_dtype,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
     sockeye_model.to(device)
     sockeye_model.apply(model.initialize_parameters)
