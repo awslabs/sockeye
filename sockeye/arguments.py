@@ -762,7 +762,6 @@ def add_model_parameters(params):
 
     model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
                               help="Data type.")
-    # dtype-related safe clamp argument
     add_clamp_to_dtype_arg(model_params)
 
     model_params.add_argument('--amp',
@@ -1324,7 +1323,6 @@ def add_inference_args(params):
 
     decode_params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                                help="Data type. Default: %(default)s infers from saved model.")
-    # dtype-related safe clamp argument
     add_clamp_to_dtype_arg(decode_params)
 
 
