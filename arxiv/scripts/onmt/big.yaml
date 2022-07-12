@@ -1,0 +1,76 @@
+# Meta opts:
+## IO
+save_data: onmt/data
+overwrite: False
+
+### vocab:
+src_vocab: onmt/vocab.shared
+tgt_vocab: onmt/vocab.shared
+vocab_size_multiple: 8
+src_words_min_frequency: 2
+tgt_words_min_frequency: 2
+share_vocab: True
+n_sample: 0
+
+#### Filter
+src_seq_length: 96
+tgt_seq_length: 96
+
+# Corpus opts:
+data:
+    corpus_1:
+        path_src: train.src.bpe.filter
+        path_tgt: train.trg.bpe.filter
+    valid:
+        path_src: dev.src.bpe
+        path_tgt: dev.trg.bpe
+
+# Model configuration
+save_model: onmt/big
+keep_checkpoint: 50
+save_checkpoint_steps: 500
+average_decay: 0
+seed: 1
+report_every: 100
+train_steps: 25000
+valid_steps: 500
+
+queue_size: 10000
+bucket_size: 32768
+world_size: 8
+gpu_ranks: [0, 1, 2, 3, 4, 5, 6, 7]
+batch_type: "tokens"
+batch_size: 3584
+valid_batch_size: 8
+batch_size_multiple: 1
+max_generator_batches: 0
+accum_count: [14]
+accum_steps: [0]
+
+model_dtype: "fp16"
+apex_opt_level: "O2"
+optim: "fusedadam"
+learning_rate: 0.06325
+warmup_steps: 4000
+decay_method: "rsqrt"
+adam_beta2: 0.98
+max_grad_norm: 0
+label_smoothing: 0.1
+param_init: 0
+param_init_glorot: true
+normalization: "tokens"
+
+encoder_type: transformer
+decoder_type: transformer
+enc_layers: 6
+dec_layers: 6
+heads: 16
+rnn_size: 1024
+word_vec_size: 1024
+transformer_ff: 4096
+dropout_steps: [0]
+dropout: [0.1]
+attention_dropout: [0.1]
+share_decoder_embeddings: true
+share_embeddings: true
+position_encoding: true
