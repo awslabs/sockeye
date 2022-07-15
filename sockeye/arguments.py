@@ -1362,9 +1362,9 @@ def add_brevity_penalty_args(params):
 def add_clamp_to_dtype_arg(params):
     params.add_argument('--clamp-to-dtype',
                         action='store_true',
-                        help='Clamp outputs for transformer attention, feed-forward, and process blocks to the min/max '
-                             'finite values for the current dtype. This can prevent inf/nan values from overflow when '
-                             'running large models in float16 mode. See: '
+                        help='Clamp outputs of transformer attention, feed-forward networks, and process blocks to the '
+                             'min/max finite values for the current dtype. This can prevent inf/nan values from '
+                             'overflow when running large models in float16 mode. See: '
                              'https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139')
 
 

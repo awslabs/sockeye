@@ -283,7 +283,7 @@ class MultiHeadAttentionBase(pt.nn.Module):
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores.
     :param dtype: Torch data type for parameters.
-    :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max finite
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
                            values for their dtype.
     """
     def __init__(self,
@@ -372,7 +372,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores.
     :param dtype: Torch data type for parameters.
-    :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max finite
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
                            values for their dtype.
     """
 
@@ -502,7 +502,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     :param depth_key_value: Dimension of input key and value vectors.
     :param dropout: Dropout probability on attention scores.
     :param dtype: Torch data type for parameters.
-    :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max finite
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
                            values for their dtype.
     """
 
@@ -728,7 +728,7 @@ class SSRU(AutoregressiveLayer):
     :param model_size: number of hidden units
     :param inference_only: flag used to indicate execution at inference time.
     :param dtype: Torch data type for parameters.
-    :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max finite
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
                            values for their dtype.
     """
     def __init__(self,
@@ -811,7 +811,7 @@ class SSRU(AutoregressiveLayer):
 def clamp_to_dtype_min_max(data: pt.Tensor) -> pt.Tensor:
     """
     Clamp a tensor's values to the min and max for its dtype. This effectively
-    pushes overflowed (infinite) values back to the maximum finite value.
+    pushes overflowed (infinite) values back into the finite range.
 
     See: https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139
     """

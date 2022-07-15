@@ -15,7 +15,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Added
 
-- Added `sockeye-train` and `sockeye-translate` option `--clamp-to-dtype` that clamps outputs for transformer attention, feed-forward, and process blocks to the min/max finite values for the current dtype. This can prevent inf/nan values from overflow when running large models in float16 mode. See: https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139
+- Added `sockeye-train` and `sockeye-translate` option `--clamp-to-dtype` that clamps outputs of transformer attention, feed-forward networks, and process blocks to the min/max finite values for the current dtype. This can prevent inf/nan values from overflow when running large models in float16 mode. See: https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139
 
 ## [3.1.17]
 

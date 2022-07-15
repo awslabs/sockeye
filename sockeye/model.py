@@ -90,7 +90,7 @@ class SockeyeModel(pt.nn.Module):
 
     :param config: Model configuration.
     :param inference_only: Use the model only for inference, enabling optimizations.
-    :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max finite values for their dtype.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite values for their dtype.
     """
 
     def __init__(self,
@@ -654,7 +654,7 @@ def load_model(model_folder: str,
     :param device: Torch device to load model to.
     :param checkpoint: Checkpoint to use. If none, uses best checkpoint.
     :param dtype: Optional data type (torch.dtype or str) to use. If None, will be inferred from stored model.
-    :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max finite values for their dtype.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite values for their dtype.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
@@ -727,7 +727,7 @@ def load_models(device: pt.device,
     :param model_folders: List of model folders to load models from.
     :param checkpoints: List of checkpoints to use for each model in model_folders. Use None to load best checkpoint.
     :param dtype: Optional data type (torch.dtype or str) to use. If None, will be inferred from stored model.
-    :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max finite values for their dtype.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite values for their dtype.
     :param inference_only: Use the model only for inference, enabling optimizations.
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
