@@ -23,6 +23,12 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
   - Offload optimizer and parameters to CPU ([Ren et al., 2021](https://arxiv.org/abs/2101.06840)) with `--deepspeed-zero-offload-optimizer` (stage 2+) and `--deepspeed-zero-offload-param` (stage 3).
   - Specify arbitrary [DeepSpeed config options](https://www.deepspeed.ai/docs/config-json/) in a JSON file with `--deepspeed-config FILE` or as a string with `--deepspeed-config-entries STR`.
 
+## [3.1.18]
+
+### Added
+
+- Added `sockeye-train` and `sockeye-translate` option `--clamp-to-dtype` that clamps outputs of transformer attention, feed-forward networks, and process blocks to the min/max finite values for the current dtype. This can prevent inf/nan values from overflow when running large models in float16 mode. See: https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139
+
 ## [3.1.17]
 
 ### Added

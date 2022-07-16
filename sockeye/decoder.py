@@ -77,7 +77,7 @@ class Decoder(pt.nn.Module):
         :param config: Decoder config.
         :param inference_only: Create a decoder that is only used for inference.
         :param dtype: Torch data type for parameters.
-        :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max
+        :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max
                                finite values for their dtype.
 
         :return: Decoder instance.
@@ -135,7 +135,7 @@ class TransformerDecoder(Decoder):
     :param inference_only: Only use the model for inference enabling some optimizations,
                            such as disabling the auto-regressive mask.
     :param dtype: Torch data type for parameters.
-    :param clamp_to_dtype: Avoid inf/-inf by clamping outputs to min/max finite
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
                            values for their dtype.
     """
 
