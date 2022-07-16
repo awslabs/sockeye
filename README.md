@@ -65,6 +65,11 @@ For faster GPU training, install [NVIDIA Apex](https://github.com/NVIDIA/apex). 
 
 For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
 
+##### Sockeye 3.x
+
+> Felix Hieber, Michael Denkowski, Tobias Domhan, Barbara Darques Barros, Celina Dong Ye, Xing Niu, Cuong Hoang, Ke Tran, Benjamin Hsu, Maria Nadejde, Surafel Lakew, Prashant Mathur, Marcello Federico, Anna Currey.
+> [Sockeye 3: Fast Neural Machine Translation with PyTorch](https://arxiv.org/abs/2207.05851). ArXiv e-prints.
+
 ##### Sockeye 2.x
 
 > Tobias Domhan, Michael Denkowski, David Vilar, Xing Niu, Felix Hieber, Kenneth Heafield.
