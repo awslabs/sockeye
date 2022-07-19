@@ -1126,12 +1126,14 @@ def add_train_cli_args(params):
     add_training_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_knn_args(params) # for kNN MT
 
 
 def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_knn_args(params)  # for kNN MT
 
 
 def add_score_cli_args(params):
