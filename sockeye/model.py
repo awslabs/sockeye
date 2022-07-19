@@ -14,6 +14,7 @@
 import copy
 import logging
 import os
+import pdb
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -311,6 +312,7 @@ class SockeyeModel(pt.nn.Module):
         # caching the encoder and embedding forward passes), turn off autograd
         # for the encoder and embeddings to save memory.
         with pt.no_grad() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
+            pdb.set_trace()
             source_encoded, source_encoded_length, target_embed, states, nvs_prediction = self.embed_and_encode(
                 source,
                 source_length,
@@ -333,6 +335,16 @@ class SockeyeModel(pt.nn.Module):
             forward_output[C.NVS_PRED_NAME] = nvs_prediction
 
         return forward_output
+
+    def get_decoder_states(self, source, source_length, target, target_length):
+        with pt.no_grad() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
+            source_encoded, source_encoded_length, target_embed, states, nvs_prediction = self.embed_and_encode(
+                source,
+                source_length,
+                target)
+
+        decoder_states = self.decoder.decode_seq(target_embed, states=states)
+        return decoder_states
 
     def predict_output_length(self,
                               source_encoded: pt.Tensor,
