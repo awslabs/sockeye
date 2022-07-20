@@ -1457,7 +1457,6 @@ def add_build_vocab_args(params):
     add_vocab_args(params)
     add_process_pool_args(params)
 
-
 def add_build_knn_index_args(params):
     params.add_argument('-i', '--input-file',
                         required=True,
