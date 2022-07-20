@@ -25,24 +25,30 @@ from typing import Dict, Iterable, List, Optional, Tuple, Callable
 #from torch import long
 #from itertools import chain, islice
 
-class IndexType(Enum):
-    IndexFlatL2 = 1
+logger = logging.getLogger(__name__)
 
 @dataclass
 class KNNConfig(config.Config):
     index_size: int
-    dimention: int
-    data_type: np.dtype
-    index_type: IndexType
-
-logger = logging.getLogger(__name__)
+    dimension: int
+    data_type: str  # must be primitive type
+    index_type: str  # must be primitive type
 
 
-def get_faiss_index(config: KNNConfig):
-    switch = {
-        IndexType.IndexFlatL2.name : faiss.IndexFlatL2(config["dimention"])
-    }
-    return switch.get(config["index_type"])
+def get_numpy_dtype(config):
+    if config.data_type == "float16":
+        return np.float16
+    if config.data_type == "float32":
+        return np.float32
+    if config.data_type == "int16":
+        return np.int16
+    raise NotImplementedError
+
+
+def get_faiss_index(config):
+    if config.index_type == "IndexFlatL2":
+        return faiss.IndexFlatL2(config.dimension)
+    raise NotImplementedError
 
 
 def build_from_path(input_file: str, output_file: str, config: KNNConfig):
@@ -63,6 +69,7 @@ def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     logger.info(f"index.ntotal: {index.ntotal}")
     faiss.write_index(index, output_file) # Dump index to output file
     return index
+
 
 def get_index_file_path(input_file: str) -> str:
     return f"{input_file}.knn.idx"

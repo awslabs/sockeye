@@ -12,9 +12,11 @@
 # permissions and limitations under the License.
 
 import argparse
+import codecs
 import logging
 import os
 from typing import Dict, List
+from abc import abstractclassmethod, abstractmethod
 
 import faiss
 import numpy as np
@@ -28,6 +30,7 @@ from .log import setup_main_logger
 from .model import SockeyeModel, load_model
 from .vocab import Vocab
 from .utils import check_condition
+from .knn import KNNConfig, IndexType
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = logging.getLogger(__name__)
@@ -49,9 +52,11 @@ class BlockMMapStorage:
         self.tail_idx = 0  # where the next entry should be inserted
         self.size = 0  # size of storage already assigned
 
+    @abstractmethod
     def open(self, initial_size: int, block_size: int) -> None:
         pass
 
+    @abstractmethod
     def add(self, array: np.ndarray) -> None:
         pass
 
@@ -109,16 +114,26 @@ class StateDumper:
         self.state_dump_file = None
         self.words_dump_file = None
 
+        # info for KNNConfig
+        self.dump_size = 0
+        self.dimension = None
+        self.data_type = None
+
+
     @staticmethod
     def probe_token_count(target: str) -> int:
         token_count = 0
-        with open(target) as f:
+        with codecs.open(target, 'r', 'utf-8') as f:
             for line in f:
-                token_count += (len(line.strip().split(' ')) + 2)  # TODO: +2 for BOS and EOS?
+                token_count += (len(line.strip().split(' ')) + 1)  # +1 for EOS
         return token_count
 
     def init_dump_file(self, initial_size: int) -> None:
-        self.state_dump_file = NumpyMemmapStorage(self.dump_prefix + ".states.npy", self.model.config.config_decoder.model_size, np.float16)  # TODO: shouldn't hard-code dtype
+        self.dump_size = 0
+        self.dimension = self.model.config.config_decoder.model_size
+        self.data_type = np.float16  # TODO: shouldn't hard-code dtype
+
+        self.state_dump_file = NumpyMemmapStorage(self.dump_prefix + ".states.npy", self.dimension, self.data_type)  # TODO: shouldn't hard-code dtype
         self.words_dump_file = NumpyMemmapStorage(self.dump_prefix + ".words.npy", 1, np.int16)  # TODO: shouldn't hard-code dtype
         self.state_dump_file.open(initial_size, 1)
         self.words_dump_file.open(initial_size, 1)
@@ -155,10 +170,15 @@ class StateDumper:
             pad_mask = (batch.target != C.PAD_ID).squeeze()  # shape: (batch, seq_length)
             flat_target = batch.target[pad_mask].cpu().detach().numpy()
             flat_states = decoder_states[pad_mask].cpu().detach().numpy()
+            self.dump_size += flat_target.shape[0]
 
             # dump
             self.state_dump_file.add(flat_states)
             self.words_dump_file.add(flat_target)
+
+    def save_config(self):
+        config = KNNConfig(self.dump_size, self.dimension, self.data_type.__name__, IndexType.IndexFlatL2)
+        config.save(self.dump_prefix + ".conf.yaml")
 
 
 def main():
@@ -211,6 +231,7 @@ def dump(args: argparse.Namespace):
     dumper = StateDumper(model, source_vocabs, target_vocabs, args.dump_prefix, max_seq_len_source, max_seq_len_target, device)
     dumper.init_dump_file(StateDumper.probe_token_count(targets[0]))  # TODO: assuming targets[0] is the text file, the rest are factors
     dumper.build_states_and_dump(sources, targets, args.batch_size)
+    dumper.save_config()
 
 
 if __name__ == "__main__":
