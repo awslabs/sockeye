@@ -1179,6 +1179,36 @@ def add_score_cli_args(params):
     add_logging_args(params)
 
 
+def add_state_dumping_args(params):
+    add_training_data_args(params, required=True)
+    add_vocab_args(params)
+    add_device_args(params)
+    add_batch_args(params, default_batch_size=56, default_batch_type=C.BATCH_TYPE_SENTENCE)
+
+    decode_params = params.add_argument_group("Decoder state dumping parameters")
+
+    params.add_argument("--model", "-m", required=True,
+                        help="Model directory containing trained model.")
+
+    params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
+                        type=multiple_values(num_values=2, greater_or_equal=1),
+                        default=None,
+                        help='Maximum sequence length in tokens.'
+                             'Use "x:x" to specify separate values for src&tgt. Default: Read from model.')
+
+    # common params with translate CLI
+    add_length_penalty_args(params)
+    add_brevity_penalty_args(params)
+
+    params.add_argument("--dump-prefix", "-do", default=None,
+                        help="File to dump the decoder states")
+
+    params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
+                        help="Data type. Default: %(default)s infers from saved model.")
+
+    add_logging_args(params)
+
+
 def add_inference_args(params):
     decode_params = params.add_argument_group("Inference parameters")
 

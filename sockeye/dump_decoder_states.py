@@ -69,7 +69,7 @@ class NumpyMemmapStorage(BlockMMapStorage):
         So we have to pre-estimate how many entries we need and put it down as initial_size.
         If we end up adding more entries to the memmap than initially claimed, we'll have to bail out.
         """
-        assert self.mmap != None
+        assert self.mmap is not None
         num_entries, num_dim = array.shape
         assert num_dim == self.num_dim
 
@@ -93,7 +93,7 @@ class StateDumper:
                  model: SockeyeModel,
                  source_vocabs: List[Vocab],
                  target_vocabs: List[Vocab],
-                 dump_path: str,
+                 dump_prefix: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
                  device: pt.device) -> None:
@@ -105,19 +105,21 @@ class StateDumper:
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
 
+        self.dump_prefix = dump_prefix
         self.state_dump_file = None
         self.words_dump_file = None
 
     @staticmethod
-    def probe_token_count(self, target: str) -> None:
+    def probe_token_count(target: str) -> int:
         token_count = 0
         with open(target) as f:
             for line in f:
-                token_count += len(line.strip().split(' '))  # TODO: +2 for BOS and EOS?
+                token_count += (len(line.strip().split(' ')) + 2)  # TODO: +2 for BOS and EOS?
+        return token_count
 
     def init_dump_file(self, initial_size: int) -> None:
-        self.state_dump_file = NumpyMemmapStorage(self.dump_path, self.model.config.config_decoder.model_size, np.float16)  # TODO: shouldn't hard-code dtype
-        self.words_dump_file = NumpyMemmapStorage(self.dump_path, 1, np.int16)  # TODO: shouldn't hard-code dtype
+        self.state_dump_file = NumpyMemmapStorage(self.dump_prefix + ".states.npy", self.model.config.config_decoder.model_size, np.float16)  # TODO: shouldn't hard-code dtype
+        self.words_dump_file = NumpyMemmapStorage(self.dump_prefix + ".words.npy", 1, np.int16)  # TODO: shouldn't hard-code dtype
         self.state_dump_file.open(initial_size, 1)
         self.words_dump_file.open(initial_size, 1)
 
@@ -144,14 +146,15 @@ class StateDumper:
             # get decoder states
             batch = batch.load(self.device)
             model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
-            if self.traced_model is None:
-                self.traced_get_decode_states = pt.jit.trace(self.model.get_decoder_states, model_inputs, strict=False)
-            decoder_states = self.traced_get_decode_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
+            # if self.traced_get_decode_states is None:
+            #     self.traced_get_decode_states = pt.jit.trace(self.model.get_decoder_states, model_inputs, strict=False)
+            # decoder_states = self.traced_get_decode_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
+            decoder_states = self.model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
 
             # flatten batch and sent_len dimensions, remove pads on the target
-            pad_mask = [ batch.target != C.PAD_ID ]
-            flat_target = batch.target[pad_mask]
-            flat_states = decoder_states[pad_mask]
+            pad_mask = (batch.target != C.PAD_ID).squeeze()  # shape: (batch, seq_length)
+            flat_target = batch.target[pad_mask].cpu().detach().numpy()
+            flat_states = decoder_states[pad_mask].cpu().detach().numpy()
 
             # dump
             self.state_dump_file.add(flat_states)
@@ -160,7 +163,7 @@ class StateDumper:
 
 def main():
     params = arguments.ConfigArgumentParser(description='Score data with an existing model.')
-    arguments.add_score_cli_args(params)
+    arguments.add_state_dumping_args(params)
     args = params.parse_args()
     check_condition(args.batch_type == C.BATCH_TYPE_SENTENCE, "Batching by number of words is not supported")
 
@@ -205,7 +208,7 @@ def dump(args: argparse.Namespace):
                     "Number of target inputs/factors provided (%d) does not match number of target factors "
                     "required by the model (%d)" % (len(targets), model.num_target_factors))
 
-    dumper = StateDumper(model, source_vocabs, target_vocabs, args.dump_path, max_seq_len_source, max_seq_len_target, device)
+    dumper = StateDumper(model, source_vocabs, target_vocabs, args.dump_prefix, max_seq_len_source, max_seq_len_target, device)
     dumper.init_dump_file(StateDumper.probe_token_count(targets[0]))  # TODO: assuming targets[0] is the text file, the rest are factors
     dumper.build_states_and_dump(sources, targets, args.batch_size)
 
