@@ -19,6 +19,7 @@ import os
 import sys
 import types
 from typing import Any, Callable, Dict, List, Tuple, Optional
+from numpy import dtype
 
 import yaml
 
@@ -1423,3 +1424,16 @@ def add_build_vocab_args(params):
     params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
     add_vocab_args(params)
     add_process_pool_args(params)
+
+
+def add_build_knn_index_args(params):
+    params.add_argument('-i', '--input-file',
+                        required=True,
+                        default=None,
+                        type=str,
+                        help='The input file path.')
+    params.add_argument('-c', '--config-file',
+                        required=True,
+                        default=512,
+                        type=str,
+                        help='The config yaml file path.')
