@@ -1468,3 +1468,4 @@ def add_build_knn_index_args(params):
                         default=512,
                         type=str,
                         help='The config yaml file path.')
+
