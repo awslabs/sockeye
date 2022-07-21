@@ -1379,11 +1379,6 @@ def add_inference_args(params):
                                help="Data type. Default: %(default)s infers from saved model.")
     add_clamp_to_dtype_arg(decode_params)
 
-    # knn arguments
-    decode_params.add_argument('--knn-index',
-                               default=False,
-                               help='Optionally use a KNN index during inference to retrieve similar hidden states and corresponding target tokens.')
-
 
 def add_length_penalty_args(params):
     params.add_argument('--length-penalty-alpha',
@@ -1461,6 +1456,24 @@ def add_build_vocab_args(params):
     params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
     add_vocab_args(params)
     add_process_pool_args(params)
+
+
+def add_knn_args(params):
+    knn_params = params.add_argument_group("kNN MT parameters")
+
+    knn_params.add_argument('--knn-cache-size',
+                            type=int,
+                            default=0)
+
+    knn_params.add_argument('--knn-cache-alpha',
+                            type=float,
+                            default=0.0)
+
+    knn_params.add_argument('--knn-index',
+                            type=str,
+                            help='Optionally use a KNN index during inference to retrieve similar hidden states and corresponding target tokens.',
+                            default="")
+
 
 def add_build_knn_index_args(params):
     params.add_argument('-i', '--input-file',
