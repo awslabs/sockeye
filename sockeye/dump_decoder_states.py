@@ -30,7 +30,7 @@ from .log import setup_main_logger
 from .model import SockeyeModel, load_model
 from .vocab import Vocab
 from .utils import check_condition
-from .knn import KNNConfig, IndexType
+from .knn import KNNConfig
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ class StateDumper:
         self.source_vocabs = source_vocabs
         self.target_vocabs = target_vocabs
         self.device = device
-        self.traced_get_decode_states = None
+        self.traced_model = None
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
 
@@ -119,17 +119,15 @@ class StateDumper:
         self.dimension = None
         self.data_type = None
 
-
     @staticmethod
-    def probe_token_count(target: str) -> int:
+    def probe_token_count(target: str, max_seq_len: int) -> int:
         token_count = 0
         with codecs.open(target, 'r', 'utf-8') as f:
             for line in f:
-                token_count += (len(line.strip().split(' ')) + 1)  # +1 for EOS
+                token_count += min(len(line.strip().split(' ')) + 1, max_seq_len)  # +1 for EOS
         return token_count
 
     def init_dump_file(self, initial_size: int) -> None:
-        self.dump_size = 0
         self.dimension = self.model.config.config_decoder.model_size
         self.data_type = np.float16  # TODO: shouldn't hard-code dtype
 
@@ -161,23 +159,24 @@ class StateDumper:
             # get decoder states
             batch = batch.load(self.device)
             model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
-            # if self.traced_get_decode_states is None:
-            #     self.traced_get_decode_states = pt.jit.trace(self.model.get_decoder_states, model_inputs, strict=False)
-            # decoder_states = self.traced_get_decode_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
-            decoder_states = self.model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
+            if self.traced_model is None:
+                trace_inputs = {'get_decoder_states': model_inputs}
+                self.traced_model = pt.jit.trace_module(self.model, trace_inputs, strict=False)
+            decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
+            # decoder_states = self.model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
 
             # flatten batch and sent_len dimensions, remove pads on the target
-            pad_mask = (batch.target != C.PAD_ID).squeeze()  # shape: (batch, seq_length)
+            pad_mask = (batch.target != C.PAD_ID).squeeze(2)  # shape: (batch, seq_length)
             flat_target = batch.target[pad_mask].cpu().detach().numpy()
             flat_states = decoder_states[pad_mask].cpu().detach().numpy()
-            self.dump_size += flat_target.shape[0]
+            # self.dump_size += flat_target.shape[0]
 
             # dump
             self.state_dump_file.add(flat_states)
             self.words_dump_file.add(flat_target)
 
     def save_config(self):
-        config = KNNConfig(self.dump_size, self.dimension, self.data_type.__name__, IndexType.IndexFlatL2)
+        config = KNNConfig(self.dump_size, self.dimension, self.data_type.__name__, "")
         config.save(self.dump_prefix + ".conf.yaml")
 
 
@@ -229,7 +228,8 @@ def dump(args: argparse.Namespace):
                     "required by the model (%d)" % (len(targets), model.num_target_factors))
 
     dumper = StateDumper(model, source_vocabs, target_vocabs, args.dump_prefix, max_seq_len_source, max_seq_len_target, device)
-    dumper.init_dump_file(StateDumper.probe_token_count(targets[0]))  # TODO: assuming targets[0] is the text file, the rest are factors
+    dumper.dump_size = StateDumper.probe_token_count(targets[0], max_seq_len_target)  # TODO: Yikes -- shouldn't be setting attributes this way
+    dumper.init_dump_file(dumper.dump_size)  # TODO: assuming targets[0] is the text file, the rest are factors
     dumper.build_states_and_dump(sources, targets, args.batch_size)
     dumper.save_config()
 

@@ -59,9 +59,9 @@ def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     :param index_type: The index type.
     :return: The faiss index object.
     """
-    index_size = config["index_size"]
-    dimention = config["dimention"]
-    data_type = config["data_type"]
+    index_size = config.index_size
+    dimention = config.dimension
+    data_type = get_numpy_dtype(config)
     index = get_faiss_index(config) # initialize the index
     logger.info(f"index.is_trained: {index.is_trained}")
     keys = np.memmap(input_file, dtype=data_type, mode='r', shape=(index_size, dimention)) # load key vectors from the memmap file
