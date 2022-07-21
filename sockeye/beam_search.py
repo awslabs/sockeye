@@ -83,10 +83,18 @@ class _SingleModelInference(_Inference):
                     vocab_slice_ids: Optional[pt.Tensor] = None,
                     target_prefix_factor_mask: Optional[pt.Tensor] = None,
                     factor_vocab_size: Optional[int] = None):
-        logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
+        logits, knn_probs, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
-            logits = pt.log_softmax(logits, dim=-1)
-        scores = -logits  # shape: (batch*beam, output_vocab_size/len(vocab_slice_ids))
+            if knn_probs is not None:
+                lmbda = 0.8
+                probs = pt.log(lmbda * pt.softmax(logits, dim=-1) + (1-lmbda) * knn_probs)
+            else:
+                probs = pt.log_softmax(logits, dim=-1)
+        else:
+            assert knn_probs is None, "Can't skip softmax with KNN."
+            probs = logits
+
+        scores = -probs  # shape: (batch*beam, output_vocab_size/len(vocab_slice_ids))
 
         target_factors = None  # type: Optional[pt.Tensor]
         if target_factor_outputs:

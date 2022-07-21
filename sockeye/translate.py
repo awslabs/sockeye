@@ -69,12 +69,14 @@ def run_translate(args: argparse.Namespace):
 
     device = init_device(args, logger)
     logger.info(f"Translate Device: {device}")
+    knn_index = args.knn_index
     models, source_vocabs, target_vocabs = load_models(device=device,
                                                        model_folders=args.models,
                                                        checkpoints=args.checkpoints,
                                                        dtype=args.dtype,
                                                        clamp_to_dtype=args.clamp_to_dtype,
                                                        inference_only=True)
+                                                       knn_index=knn_index)
 
     restrict_lexicon = None  # type: Optional[Union[RestrictLexicon, Dict[str, RestrictLexicon]]]
     if args.restrict_lexicon is not None:

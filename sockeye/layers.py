@@ -117,6 +117,32 @@ class OutputLayer(pt.nn.Module):
         return F.linear(data, weight, bias)
 
 
+class KNN(pt.nn.Module):
+    def __init__(self, keys_index, vals, vocab_size, k=3, temperature=10) -> None:
+        super().__init__()
+        self.keys_index = keys_index
+        self.vals = vals
+        self.vocab_size = vocab_size
+        self.k = k
+        self.temperature = temperature
+
+    @pt.jit.ignore
+    def forward(self, data: pt.Tensor):
+        # TODO: figure out why despite the `import faiss.contrib.torch_utils` we can't call FAISS directly
+        distances, indices = self.keys_index.search(data.numpy(), self.k)
+        # Map indices to tokens
+        y = self.vals[indices]
+        distances = pt.from_numpy(distances).to(device=data.device)
+        y = pt.from_numpy(y).to(device=data.device).long()
+        # TODO: alternatively compute the l2 distance
+
+        probs = pt.softmax(-distances / self.temperature, dim=-1)
+        # For now we just use the distances, but we should
+        full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device)
+        full_probs.scatter_(src=probs, index=y, dim=-1)
+        return full_probs
+
+
 @dataclass
 class LengthRatioConfig(config.Config):
     num_layers: int  # Number of layers

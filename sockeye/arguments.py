@@ -1379,6 +1379,11 @@ def add_inference_args(params):
                                help="Data type. Default: %(default)s infers from saved model.")
     add_clamp_to_dtype_arg(decode_params)
 
+    # knn arguments
+    decode_params.add_argument('--knn-index',
+                               default=False,
+                               help='Optionally use a KNN index during inference to retrieve similar hidden states and corresponding target tokens.')
+
 
 def add_length_penalty_args(params):
     params.add_argument('--length-penalty-alpha',
