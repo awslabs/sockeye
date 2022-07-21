@@ -156,6 +156,9 @@ class StateDumper:
         )
 
         for batch_no, batch in enumerate(data_iter, 1):
+            if (batch_no + 1) % 1000 == 0:
+                logger.info("At batch number {0}".format(batch_no + 1))
+
             # get decoder states
             batch = batch.load(self.device)
             model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
