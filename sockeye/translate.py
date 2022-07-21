@@ -112,9 +112,6 @@ def run_translate(args: argparse.Namespace):
     else:
         raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
-    for model in models:
-        model.eval()
-
     scorer = inference.CandidateScorer(
         length_penalty_alpha=args.length_penalty_alpha,
         length_penalty_beta=args.length_penalty_beta,

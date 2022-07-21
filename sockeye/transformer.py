@@ -88,17 +88,25 @@ class TransformerEncoderBlock(pt.nn.Module):
         if config.use_lhuc:
             self.lhuc = sockeye.layers.LHUC(config.model_size, dtype=dtype)
 
-    def forward(self, data: pt.Tensor, att_mask: pt.Tensor = None) -> pt.Tensor:
+    def forward(self,
+                data: pt.Tensor,
+                att_mask: pt.Tensor = None,
+                mha_qkv_bias: Optional[pt.Tensor] = None,
+                mha_proj_bias: Optional[pt.Tensor] = None,) -> pt.Tensor:
         """
         :param data: Input tensor of shape (length, batch_size, hidden)
         :param att_mask: Optional data length mask of shape (batch_size * self.heads, 1, length)
                          to mask self-attention scores. True for padding positions.
+        :param mha_qkv_bias: Zeros for native multi-head attention qkv_bias (model_size * 3,).
+        :param mha_proj_bias: Zeros for native multi-head attention proj_bias (model_size,).
         """
         # self-attention
         data_self_att, _ = self.self_attention(inputs=self.pre_self_attention(data),
                                                previous_states=None,
                                                mask=att_mask,
-                                               bias=None)
+                                               bias=None,
+                                               mha_qkv_bias=mha_qkv_bias,
+                                               mha_proj_bias=mha_proj_bias)
         data = self.post_self_attention(data_self_att, data)
 
         # feed-forward

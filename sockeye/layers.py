@@ -439,7 +439,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         # shape: (length, batch, key_depth + value_depth)
         return 0, batch_size, self.depth_out * 2
 
-    def forward(self, inputs: pt.Tensor, previous_states: Optional[pt.Tensor] = None, mask: Optional[pt.Tensor] = None, **args) -> Tuple[pt.Tensor, pt.Tensor]:  # type: ignore
+    def forward(self, inputs: pt.Tensor, previous_states: Optional[pt.Tensor] = None, mask: Optional[pt.Tensor] = None, **kwargs) -> Tuple[pt.Tensor, pt.Tensor]:  # type: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -453,7 +453,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :return: tensor of shape (max_length, batch, output_depth).
         """
-        if self.training:  # use fused multi-head attention op during training
+        if self.training:
+            # Training: Use regular PyTorch multi-head attention
             assert not self.kv_interleaved
             contexts, _ = F.multi_head_attention_forward(query=inputs, key=inputs, value=inputs,
                                                          embed_dim_to_check=self.depth, num_heads=self.heads,
@@ -472,7 +473,22 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
                                                          k_proj_weight=None,
                                                          v_proj_weight=None)
             return contexts, contexts  # dummy return
-        else:  # during inference multi-head attention with interleaved key-value parameters is used
+        elif not self.kv_interleaved:
+            # Encoder inference with new enough version of PyTorch (indicated by
+            # non-interleaved params): Use native multi-head attention
+            contexts, _ = pt._native_multi_head_attention(query=inputs, key=inputs, value=inputs,
+                                                          embed_dim=self.depth,
+                                                          num_head=self.heads,
+                                                          qkv_weight=self.ff_in.weight,
+                                                          qkv_bias=kwargs['mha_qkv_bias'],
+                                                          proj_weight=self.ff_out.weight,
+                                                          proj_bias=kwargs['mha_proj_bias'],
+                                                          mask=mask,
+                                                          need_weights=False)
+            return contexts, contexts  # dummy return
+        else:
+            # Decoder inference: Use Sockeye multi-head attention with
+            # interleaved key-value parameters
             proj = self.ff_in(inputs)
             queries, states = proj.split((self.depth_att, 2 * self.depth_att), dim=2)
 

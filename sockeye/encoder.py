@@ -174,6 +174,13 @@ class TransformerEncoder(Encoder):
                  dtype: Optional[pt.dtype] = None) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
+        self.inference_only = inference_only
+        self.using_native_mha = self.inference_only and hasattr(pt, '_native_multi_head_attention')
+        if self.using_native_mha:
+            # Native multi-head attention requires biases. We create a single
+            # set of zero (no-op) biases to use across layers.
+            self.register_buffer('mha_qkv_bias', pt.zeros(self.config.model_size * 3), persistent=False)
+            self.register_buffer('mha_proj_bias', pt.zeros(self.config.model_size), persistent=False)
 
         self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
 
@@ -203,16 +210,26 @@ class TransformerEncoder(Encoder):
         _, max_len, __ = data.size()
         # length_mask for source attention masking. Shape: (batch_size, max_len)
         single_head_att_mask = layers.prepare_source_length_mask(valid_length, self.config.attention_heads, max_length=max_len, expand=False)
-        # Shape: (batch_size, max_len) -> (batch_size * heads, 1, max_len)
-        att_mask = single_head_att_mask.unsqueeze(1).expand(-1, self.config.attention_heads, -1).reshape((-1, max_len)).unsqueeze(1)
-        att_mask = att_mask.expand(-1, max_len, -1)
+        if not self.using_native_mha:
+            # Shape: (batch_size, max_len) -> (batch_size * heads, 1, max_len)
+            att_mask = single_head_att_mask.unsqueeze(1).expand(-1, self.config.attention_heads, -1).reshape((-1, max_len)).unsqueeze(1)
+            att_mask = att_mask.expand(-1, max_len, -1)
+        else:
+            att_mask = single_head_att_mask
 
-        data = data.transpose(1, 0)  # batch to time major
+        if not self.using_native_mha:
+            data = data.transpose(1, 0)  # batch to time major
+
         for layer in self.layers:
-            data = layer(data, att_mask=att_mask)
+            data = layer(data, att_mask=att_mask,
+                         mha_qkv_bias=self.mha_qkv_bias if self.using_native_mha else None,
+                         mha_proj_bias=self.mha_proj_bias if self.using_native_mha else None)
 
         data = self.final_process(data)
-        data = data.transpose(1, 0)  # time to batch major
+
+        if not self.using_native_mha:
+            data = data.transpose(1, 0)  # time to batch major
+
         return data, valid_length, single_head_att_mask
 
     def get_num_hidden(self) -> int:

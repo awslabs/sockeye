@@ -686,6 +686,10 @@ def load_model(model_folder: str,
     if set_grad_req_null:
         model.eval()
 
+    if inference_only and hasattr(pt, '_native_multi_head_attention'):
+        # Turn on encoder native multi-head attention
+        model.encoder.apply(layers.separate_kv)
+
     if dtype is None:
         logger.info("Model dtype: %s" % model.dtype)
     else:
