@@ -50,7 +50,7 @@ def train_data_sampling(keys, index_type: str):
     # Might implement more sophistic algorithms such as for PQIndex:
     # train_size = index.pq.cp.max_points_per_centroid * config.nlist
     train_size = 500000
-    return keys[train_size]
+    return keys[:train_size]
 
 def get_faiss_index(config: KNNConfig, keys: np.array):
     # Initialize faiss index
@@ -61,9 +61,9 @@ def get_faiss_index(config: KNNConfig, keys: np.array):
     if not index.is_trained:
         logger.info(f"index.is_trained: {index.is_trained}")
         logger.info(f"Train index: sampling input keys ...")
-        training_size = train_data_sampling(keys, config.index_type)
-        logger.info(f"Training size: {training_size}")
-        sample = keys[:training_size].astype(np.float32)
+        train_data = train_data_sampling(keys, config.index_type)
+        logger.info(f"Training size: {train_data.shape[0]}")
+        sample = train_data.astype(np.float32)
         logger.info(f"Train index: sampling input keys ... completed.")
         logger.info(f"Train index: training ...")
         index.train(sample)
