@@ -34,10 +34,6 @@ class KNNConfig(config.Config):
     dimension: int
     data_type: str  # must be primitive type
     index_type: str  # must be primitive type
-    m: int
-    nbits: int
-    nlist: int
-    nprobe: int        
 
 
 def get_numpy_dtype(config):
@@ -49,29 +45,26 @@ def get_numpy_dtype(config):
         return np.int16
     raise NotImplementedError
 
+def train_data_sampling(keys, index_type: str):
+    # Hard code to 500,000 for now.
+    # Might implement more sophistic algorithms such as for PQIndex:
+    # train_size = index.pq.cp.max_points_per_centroid * config.nlist
+    train_size = 500000
+    return keys[train_size]
 
 def get_faiss_index(config: KNNConfig, keys: np.array):
     # Initialize faiss index
     index_size = config.index_size
-    if config.index_type == "IndexFlatL2":
-        return faiss.IndexFlatL2(config.dimension)
-    elif config.index_type == "IndexIVFPQ":
-        quantizer = faiss.IndexFlatL2(config.dimension)
-        index = faiss.IndexIVFPQ(quantizer, config.dimension, config.nlist, config.m, config.nbits)
-    else:
-        raise NotImplementedError
+    index = faiss.index_factory(config.dimension, config.index_type)
 
     # Train if needed
     if not index.is_trained:
         logger.info(f"index.is_trained: {index.is_trained}")
-        logger.info(f"Train index: sampling ...")
-        training_size = index.pq.cp.max_points_per_centroid * config.nlist
+        logger.info(f"Train index: sampling input keys ...")
+        training_size = train_data_sampling(keys, config.index_type)
         logger.info(f"Training size: {training_size}")
-#        sample_indices = np.random.choice(keys, training_size, replace=False)
-#        sample_indices.sort()
-#        sample = keys[sample_indices].astype(np.float32)
         sample = keys[:training_size].astype(np.float32)
-        logger.info(f"Train index: sampling ... completed.")
+        logger.info(f"Train index: sampling input keys ... completed.")
         logger.info(f"Train index: training ...")
         index.train(sample)
         logger.info(f"Train index: training ... completed.")
