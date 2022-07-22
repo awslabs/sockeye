@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import cast, Dict, List, Optional, Tuple, Union
 
+import cachetools
 import torch as pt
 
 from sockeye import __version__
@@ -627,6 +628,7 @@ class _DecodeStep(pt.nn.Module):
         knn_output = None
         if self.knn is not None:
             assert vocab_slice_ids is None, "vocab_slice_ids are currently not supported."
+
             knn_output = self.knn(decoder_out)
             # lmbda = 0.8
             # # TODO: step_output is logits! -> So we need to merge outside
@@ -690,7 +692,9 @@ def load_model(model_folder: str,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
                forward_pass_cache_size: int = 0,
-               knn_index: Optional[str] = None) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
+               knn_index: Optional[str] = None,
+               knn_cache_size: Optional[int] = 0,
+               knn_cache_alpha: Optional[float] = 0.0) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Load a model from model_folder.
 
@@ -732,7 +736,19 @@ def load_model(model_folder: str,
                           allow_missing=allow_missing,
                           ignore_extra=False)
 
-    model.load_knn_index(knn_index)
+    if knn_index is not None:
+
+        # only build cache if knn_cache_size is not zero
+        if knn_cache_size > 0:
+            model.knn_cache = cachetools.LRUCache(knn_cache_size)
+            model.knn_cache_alpha = knn_cache_alpha
+            logger.info(f'kNN cache with size {model.knn_cache.maxsize}, alpha {model.knn_cache_alpha}')
+        else:
+            # do this so we can run without caching
+            model.knn_cache = None
+            logger.info('kNN cache disabled')
+
+        model.load_knn_index(knn_index)
 
     model.to(device)
 
@@ -766,7 +782,9 @@ def load_models(device: pt.device,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
                 forward_pass_cache_size: int = 0,
-                knn_index: Optional[str] = None) -> Tuple[List[SockeyeModel],
+                knn_index: Optional[str] = None,
+                knn_cache_size: Optional[int] = 0,
+                knn_cache_alpha: Optional[float] = 0.0) -> Tuple[List[SockeyeModel],
                                                            List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Loads a list of models for inference.
@@ -807,7 +825,9 @@ def load_models(device: pt.device,
                                                allow_missing=allow_missing,
                                                set_grad_req_null=set_grad_req_null,
                                                forward_pass_cache_size=forward_pass_cache_size,
-                                               knn_index=knn_index)
+                                               knn_index=knn_index,
+                                               knn_cache_size=knn_cache_size,
+                                               knn_cache_alpha=knn_cache_alpha)
         models.append(model)
         source_vocabs.append(src_vcbs)
         target_vocabs.append(trg_vcbs)
