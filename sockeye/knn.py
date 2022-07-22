@@ -13,11 +13,12 @@
 import argparse
 from abc import abstractmethod
 from dataclasses import dataclass
-from enum import Enum
 import faiss
 import logging
+import math
 import numpy as np
 import os
+import random
 from sockeye import config, utils, constants as C
 from sockeye.log import setup_main_logger
 from typing import Dict, Iterable, List, Optional, Tuple, Callable
@@ -33,6 +34,10 @@ class KNNConfig(config.Config):
     dimension: int
     data_type: str  # must be primitive type
     index_type: str  # must be primitive type
+    m: int
+    nbits: int
+    nlist: int
+    nprobe: int        
 
 
 def get_numpy_dtype(config):
@@ -45,11 +50,45 @@ def get_numpy_dtype(config):
     raise NotImplementedError
 
 
-def get_faiss_index(config):
+def get_faiss_index(config: KNNConfig, keys: np.array):
+    # Initialize faiss index
+    index_size = config.index_size
     if config.index_type == "IndexFlatL2":
         return faiss.IndexFlatL2(config.dimension)
-    raise NotImplementedError
+    elif config.index_type == "IndexIVFPQ":
+        quantizer = faiss.IndexFlatL2(config.dimension)
+        index = faiss.IndexIVFPQ(quantizer, config.dimension, config.nlist, config.m, config.nbits)
 
+    # Train if needed
+    if not index.is_trained:
+        logger.info(f"index.is_trained: {index.is_trained}")
+        logger.info(f"Train index: sampling ...")
+        training_size = index.pq.cp.max_points_per_centroid * config.nlist
+        logger.info(f"Training size: {training_size}")
+#        sample_indices = np.random.choice(keys, training_size, replace=False)
+#        sample_indices.sort()
+#        sample = keys[sample_indices].astype(np.float32)
+        sample = keys[:training_size].astype(np.float32)
+        logger.info(f"Train index: sampling ... completed.")
+        logger.info(f"Train index: training ...")
+        index.train(sample)
+        logger.info(f"Train index ... completed.")
+
+    # Add keys to faiss index
+    logger.info(f"index.is_trained: {index.is_trained}")
+    utils.check_condition(index.is_trained, f"Index must be trained before adding keys!")
+    chunk_size = 1024 * 1024
+    chunk_count = math.ceil(index_size / chunk_size)
+    for chunk_num in range(chunk_count):
+        chunk_start = chunk_num * chunk_size
+        index.add(keys[chunk_start : chunk_start + chunk_size].astype(np.float32)) # add vectors to the index
+        logger.info(f"Added key chunk [{chunk_num} / {chunk_size}] to the trained index.")
+    if config.index_type == "IndexIVFPQ":
+        index.nprobe = config.nprobe 
+    logger.info(f"Add keys to the trained index ... completed.")
+    logger.info(f"index.ntotal: {index.ntotal}")
+
+    raise NotImplementedError
 
 def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     """
@@ -57,18 +96,15 @@ def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     :param output_file: Path to the output index file.
     :param config: The KNNConfig object.
     :param index_type: The index type.
-    :return: The faiss index object.
+    :return: The faiss index object and the keys' top 5 vectors
     """
     index_size = config.index_size
     dimention = config.dimension
     data_type = get_numpy_dtype(config)
-    index = get_faiss_index(config) # initialize the index
-    logger.info(f"index.is_trained: {index.is_trained}")
-    keys = np.memmap(input_file, dtype=data_type, mode='r', shape=(index_size, dimention)) # load key vectors from the memmap file
-    index.add(keys) # add vectors to the index
-    logger.info(f"index.ntotal: {index.ntotal}")
+    keys = np.memmap(input_file, dtype=data_type, mode='r', shape=(index_size, dimention)) # load key vectors from the memmap file. Faiss index supports np.float32 only.
+    index = get_faiss_index(config, keys)
     faiss.write_index(index, output_file) # Dump index to output file
-    return index
+    return index, keys[:5]
 
 
 def get_index_file_path(input_file: str) -> str:
@@ -88,8 +124,9 @@ def build_index(args: argparse.Namespace):
     knn_config = KNNConfig.load(config_file)
     logger.info(f"Config: {knn_config}")
 
-    build_from_path(input_file, index_file, knn_config)
+    index, top_5_keys = build_from_path(input_file, index_file, knn_config)
     logger.info(f"Index file is saved to: {index_file}.")
+    return index, top_5_keys, index_file
 
 
 def load_from_path(index_file: str):
@@ -118,7 +155,11 @@ def main():
     arguments.add_build_knn_index_args(params)
     arguments.add_logging_args(params)
     args = params.parse_args()
-    build_index(args)
+    index, top_5_keys, index_file = build_index(args)
+    index = load_from_path(index_file)
+    distances, indices = search_index(index, top_5_keys, 4)
+    logger.info(f"Indices:\n {indices}")
+    logger.info(f"Distances:\n {distances}")
 
 
 if __name__ == "__main__":
