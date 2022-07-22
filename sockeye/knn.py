@@ -94,9 +94,9 @@ def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     dimention = config.dimension
     data_type = get_numpy_dtype(config)
     keys = np.memmap(input_file, dtype=data_type, mode='r', shape=(index_size, dimention)) # load key vectors from the memmap file. Faiss index supports np.float32 only.
-#    index = get_faiss_index(config, keys)
-#    faiss.write_index(index, output_file) # Dump index to output file
-    return None, keys[:5]
+    index = get_faiss_index(config, keys)
+    faiss.write_index(index, output_file) # Dump index to output file
+    return index, keys[:5]
 
 
 def get_index_file_path(input_file: str) -> str:
@@ -140,6 +140,7 @@ def search_index(index, query_keys: np.ndarray, k: int) -> Tuple[np.ndarray, np.
     """
     return index.search(query_keys, k)
 
+
 def index_sanity_check(index_file: str, query_keys, validate_col, expected_indices, expected_distances):
     index = load_from_path(index_file)
     distances, indices = search_index(index, query_keys.astype(np.float32), 4)
@@ -150,7 +151,7 @@ def index_sanity_check(index_file: str, query_keys, validate_col, expected_indic
         raise Exception(f"Expected indices {expected_indices} but got {actual_indices}.")
     actual_distances = indices[:,validate_col]
     if( not (actual_distances==np.array(expected_distances)).all()):
-        raise Exception(f"Expected indices {expected_indices} but got {actual_indices}.")
+        raise Exception(f"Expected indices {expected_distances} but got {actual_distances}.")
 
 
 def main():
@@ -161,6 +162,7 @@ def main():
     args = params.parse_args()
     index, top_5_keys, index_file = build_index(args)
     index_sanity_check(index_file, top_5_keys, 0, [0,1,2,3,4], [0,0,0,0,0])
+
 
 if __name__ == "__main__":
     main()
