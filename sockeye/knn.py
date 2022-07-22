@@ -34,7 +34,7 @@ class KNNConfig(config.Config):
     dimension: int
     data_type: str  # must be primitive type
     index_type: str  # must be primitive type
-
+    train_data_size: int
 
 def get_numpy_dtype(config):
     if config.data_type == "float16":
@@ -45,12 +45,11 @@ def get_numpy_dtype(config):
         return np.int16
     raise NotImplementedError
 
-def train_data_sampling(keys, index_type: str):
-    # Hard code to 2,000,000 for now.
-    # Might implement more sophistic algorithms such as for PQIndex:
-    # train_size = index.pq.cp.max_points_per_centroid * config.nlist
-    train_size = 2000000
-    return keys[:train_size]
+def train_data_sampling(keys, train_data_size: int):
+    # Sampling the memmap file is very slow.
+    # Hard code to take from the top for now.
+    # Might implement sampling in the future
+    return keys[:train_data_size]
 
 def get_faiss_index(config: KNNConfig, keys: np.array):
     # Initialize faiss index
@@ -61,7 +60,7 @@ def get_faiss_index(config: KNNConfig, keys: np.array):
     if not index.is_trained:
         logger.info(f"index.is_trained: {index.is_trained}")
         logger.info(f"Train index: sampling input keys ...")
-        train_data = train_data_sampling(keys, config.index_type)
+        train_data = train_data_sampling(keys, config.train_data_size)
         logger.info(f"Training size: {train_data.shape[0]}")
         sample = train_data.astype(np.float32)
         logger.info(f"Train index: sampling input keys ... completed.")
@@ -78,9 +77,7 @@ def get_faiss_index(config: KNNConfig, keys: np.array):
     for chunk_num in range(chunk_count):
         chunk_start = chunk_num * chunk_size
         index.add(keys[chunk_start : chunk_start + chunk_size].astype(np.float32)) # add vectors to the index
-        logger.info(f"Added chunk [{chunk_num} / {chunk_count}].")
-    if config.index_type == "IndexIVFPQ":
-        index.nprobe = config.nprobe 
+        logger.info(f"Added chunk [{chunk_num + 1} / {chunk_count}].")
     logger.info(f"Add keys to the trained index ... completed.")
     logger.info(f"index.ntotal: {index.ntotal}")
     return index
@@ -97,9 +94,9 @@ def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     dimention = config.dimension
     data_type = get_numpy_dtype(config)
     keys = np.memmap(input_file, dtype=data_type, mode='r', shape=(index_size, dimention)) # load key vectors from the memmap file. Faiss index supports np.float32 only.
-    index = get_faiss_index(config, keys)
-    faiss.write_index(index, output_file) # Dump index to output file
-    return index, keys[:5]
+#    index = get_faiss_index(config, keys)
+#    faiss.write_index(index, output_file) # Dump index to output file
+    return None, keys[:5]
 
 
 def get_index_file_path(input_file: str) -> str:
@@ -143,6 +140,18 @@ def search_index(index, query_keys: np.ndarray, k: int) -> Tuple[np.ndarray, np.
     """
     return index.search(query_keys, k)
 
+def index_sanity_check(index_file: str, query_keys, validate_col, expected_indices, expected_distances):
+    index = load_from_path(index_file)
+    distances, indices = search_index(index, query_keys.astype(np.float32), 4)
+    logger.info(f"Indices:\n {indices}")
+    logger.info(f"Distances:\n {distances}")
+    actual_indices = indices[:,0]
+    if( not (actual_indices==np.array(expected_indices)).all()):
+        raise Exception(f"Expected indices {expected_indices} but got {actual_indices}.")
+    actual_distances = indices[:,validate_col]
+    if( not (actual_distances==np.array(expected_distances)).all()):
+        raise Exception(f"Expected indices {expected_indices} but got {actual_indices}.")
+
 
 def main():
     from . import arguments
@@ -151,11 +160,7 @@ def main():
     arguments.add_logging_args(params)
     args = params.parse_args()
     index, top_5_keys, index_file = build_index(args)
-    index = load_from_path(index_file)
-    distances, indices = search_index(index, top_5_keys.astype(np.float32), 4)
-    logger.info(f"Indices:\n {indices}")
-    logger.info(f"Distances:\n {distances}")
-
+    index_sanity_check(index_file, top_5_keys, 0, [0,1,2,3,4], [0,0,0,0,0])
 
 if __name__ == "__main__":
     main()
