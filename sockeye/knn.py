@@ -82,7 +82,7 @@ def get_faiss_index(config: KNNConfig, keys: np.array):
     for chunk_num in range(chunk_count):
         chunk_start = chunk_num * chunk_size
         index.add(keys[chunk_start : chunk_start + chunk_size].astype(np.float32)) # add vectors to the index
-        logger.info(f"Added key chunk [{chunk_num} / {chunk_size}] to the trained index.")
+        logger.info(f"Added key chunk [{chunk_num} / {chunk_count}] to the trained index.")
     if config.index_type == "IndexIVFPQ":
         index.nprobe = config.nprobe 
     logger.info(f"Add keys to the trained index ... completed.")
