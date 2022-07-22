@@ -46,10 +46,10 @@ def get_numpy_dtype(config):
     raise NotImplementedError
 
 def train_data_sampling(keys, index_type: str):
-    # Hard code to 500,000 for now.
+    # Hard code to 2,000,000 for now.
     # Might implement more sophistic algorithms such as for PQIndex:
     # train_size = index.pq.cp.max_points_per_centroid * config.nlist
-    train_size = 500000
+    train_size = 2000000
     return keys[:train_size]
 
 def get_faiss_index(config: KNNConfig, keys: np.array):
