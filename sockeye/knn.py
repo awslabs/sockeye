@@ -107,7 +107,7 @@ def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     keys = np.memmap(input_file, dtype=data_type, mode='r', shape=(index_size, dimention)) # load key vectors from the memmap file. Faiss index supports np.float32 only.
     index = get_faiss_index(config, keys)
     faiss.write_index(index, output_file) # Dump index to output file
-    return index, keys[:5].astype
+    return index, keys[:5]
 
 
 def get_index_file_path(input_file: str) -> str:
