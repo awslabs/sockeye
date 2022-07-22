@@ -58,6 +58,8 @@ def get_faiss_index(config: KNNConfig, keys: np.array):
     elif config.index_type == "IndexIVFPQ":
         quantizer = faiss.IndexFlatL2(config.dimension)
         index = faiss.IndexIVFPQ(quantizer, config.dimension, config.nlist, config.m, config.nbits)
+    else:
+        raise NotImplementedError
 
     # Train if needed
     if not index.is_trained:
@@ -72,23 +74,24 @@ def get_faiss_index(config: KNNConfig, keys: np.array):
         logger.info(f"Train index: sampling ... completed.")
         logger.info(f"Train index: training ...")
         index.train(sample)
-        logger.info(f"Train index ... completed.")
+        logger.info(f"Train index: training ... completed.")
 
     # Add keys to faiss index
     logger.info(f"index.is_trained: {index.is_trained}")
     utils.check_condition(index.is_trained, f"Index must be trained before adding keys!")
+    logger.info(f"Add keys to the trained index ... ")
     chunk_size = 1024 * 1024
     chunk_count = math.ceil(index_size / chunk_size)
     for chunk_num in range(chunk_count):
         chunk_start = chunk_num * chunk_size
         index.add(keys[chunk_start : chunk_start + chunk_size].astype(np.float32)) # add vectors to the index
-        logger.info(f"Added key chunk [{chunk_num} / {chunk_count}] to the trained index.")
+        logger.info(f"Added chunk [{chunk_num} / {chunk_count}].")
+        break
     if config.index_type == "IndexIVFPQ":
         index.nprobe = config.nprobe 
     logger.info(f"Add keys to the trained index ... completed.")
     logger.info(f"index.ntotal: {index.ntotal}")
-
-    raise NotImplementedError
+    return index
 
 def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     """
@@ -104,7 +107,7 @@ def build_from_path(input_file: str, output_file: str, config: KNNConfig):
     keys = np.memmap(input_file, dtype=data_type, mode='r', shape=(index_size, dimention)) # load key vectors from the memmap file. Faiss index supports np.float32 only.
     index = get_faiss_index(config, keys)
     faiss.write_index(index, output_file) # Dump index to output file
-    return index, keys[:5]
+    return index, keys[:5].astype
 
 
 def get_index_file_path(input_file: str) -> str:
@@ -157,7 +160,7 @@ def main():
     args = params.parse_args()
     index, top_5_keys, index_file = build_index(args)
     index = load_from_path(index_file)
-    distances, indices = search_index(index, top_5_keys, 4)
+    distances, indices = search_index(index, top_5_keys.astype(np.float32), 4)
     logger.info(f"Indices:\n {indices}")
     logger.info(f"Distances:\n {distances}")
 
