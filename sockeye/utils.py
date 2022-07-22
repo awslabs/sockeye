@@ -686,3 +686,20 @@ def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: st
         isometric_score = pred_sub_score + synchrony_sub_score
 
         return isometric_score
+
+
+def inference_trace(module: pt.nn.Module, *args, **kwargs) -> pt.jit.ScriptModule:
+    """
+    Trace a module and apply inference-only optimizations with fusion turned
+    off.
+
+    WARNING: This function is not thread safe due to temporarily changing the
+    global fusion strategy.
+    """
+    check_condition(not module.training,
+                    f'Switch the following module to eval mode to enable inference-optimized tracing: {module}')
+    previous_strategy = pt.jit._set_fusion_strategy([])
+    with pt.jit.fuser('fuser1'):
+        traced_module = pt.jit.optimize_for_inference(pt.jit.trace(module, *args, **kwargs))
+    pt.jit._set_fusion_strategy(previous_strategy)
+    return traced_module

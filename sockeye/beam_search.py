@@ -814,8 +814,10 @@ class BeamSearch(pt.nn.Module):
         self.nvs_thresh = nvs_thresh
 
         self._repeat_states = RepeatStates(beam_size=beam_size, state_structure=self._inference.state_structure())
+        self._repeat_states.eval()
         self._traced_repeat_states = None  # type: Optional[pt.jit.ScriptModule]
         self._sort_states = SortStates(state_structure=self._inference.state_structure())
+        self._sort_states.eval()
         self._traced_sort_states = None  # type: Optional[pt.jit.ScriptModule]
         self._update_scores = UpdateScores(prevent_unk)  # tracing this module seems to incur a small slowdown on GPUs
         self._sort_norm_and_update_finished = SortNormalizeAndUpdateFinished(
@@ -823,14 +825,16 @@ class BeamSearch(pt.nn.Module):
             eos_id=eos_id,
             scorer=scorer,
             expect_factors=self.num_target_factors > 1)
+        self._sort_norm_and_update_finished.eval()
         self._traced_sort_norm_and_update_finished = None  # type: Optional[pt.jit.ScriptModule]
-
         self._sample = None  # type: Optional[pt.nn.Module]
         self._top = None  # type: Optional[pt.nn.Module]
         if sample is not None:
             self._sample = SampleK(sample)
         else:
             self._top = TopK(self.beam_size)
+        assert self._top is not None
+        self._top.eval()
         self._traced_top = None  # type: Optional[pt.jit.ScriptModule]
 
     def forward(self,
@@ -901,7 +905,7 @@ class BeamSearch(pt.nn.Module):
         # repeat states to beam_size
         if self._traced_repeat_states is None:
             logger.debug("Tracing repeat_states")
-            self._traced_repeat_states = pt.jit.trace(self._repeat_states, model_states, strict=False)
+            self._traced_repeat_states = utils.inference_trace(self._repeat_states, model_states, strict=False)
         model_states = self._traced_repeat_states(*model_states)
         # repeat estimated_reference_lengths to shape (batch_size * beam_size)
         estimated_reference_lengths = estimated_reference_lengths.repeat_interleave(self.beam_size, dim=0)
@@ -991,7 +995,8 @@ class BeamSearch(pt.nn.Module):
 
                 if self._traced_top is None:
                     logger.debug("Tracing _top")
-                    self._traced_top = pt.jit.trace(self._top, (scores,))
+                    assert self._top is not None
+                    self._traced_top = utils.inference_trace(self._top, (scores,))
                 best_hyp_indices, best_word_indices, scores_accumulated = self._traced_top(scores)
                 if batch_size > 1:
                     # Offsetting the indices to match the shape of the scores matrix
@@ -1008,8 +1013,8 @@ class BeamSearch(pt.nn.Module):
             if self.num_target_factors > 1:
                 _sort_inputs += [target_factors, *factor_scores_accumulated]
             if self._traced_sort_norm_and_update_finished is None:
-                self._traced_sort_norm_and_update_finished = pt.jit.trace(self._sort_norm_and_update_finished,
-                                                                          _sort_inputs)
+                self._traced_sort_norm_and_update_finished = utils.inference_trace(self._sort_norm_and_update_finished,
+                                                                                   _sort_inputs)
             best_word_indices, finished, \
             (scores_accumulated, *factor_scores_accumulated), \
             lengths, estimated_reference_lengths = self._traced_sort_norm_and_update_finished(*_sort_inputs)
@@ -1024,7 +1029,7 @@ class BeamSearch(pt.nn.Module):
             # (5) update models' state with winning hypotheses (ascending)
             if self._traced_sort_states is None:
                 logger.debug("Tracing sort_states")
-                self._traced_sort_states = pt.jit.trace(self._sort_states, (best_hyp_indices, *model_states))
+                self._traced_sort_states = utils.inference_trace(self._sort_states, (best_hyp_indices, *model_states))
             model_states = self._traced_sort_states(best_hyp_indices, *model_states)
 
         logger.debug("Finished after %d out of %d steps.", t, max_iterations)
