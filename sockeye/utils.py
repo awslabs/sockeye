@@ -688,18 +688,16 @@ def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: st
         return isometric_score
 
 
-def inference_trace(module: pt.nn.Module, *args, **kwargs) -> pt.jit.ScriptModule:
+def trace(module: pt.nn.Module, *args, inference_only: bool = False, **kwargs) -> pt.jit.ScriptModule:
     """
-    Trace a module and apply inference-only optimizations with fusion turned
-    off.
-
-    WARNING: This function is not thread safe due to temporarily changing the
-    global fusion strategy.
+    Trace a module and optionally apply inference-only optimizations. The module
+    must be in eval mode to optimize for inference.
     """
-    check_condition(not module.training,
-                    f'Switch the following module to eval mode to enable inference-optimized tracing: {module}')
-    previous_strategy = pt.jit._set_fusion_strategy([])
-    with pt.jit.fuser('fuser1'):
-        traced_module = pt.jit.optimize_for_inference(pt.jit.trace(module, *args, **kwargs))
-    pt.jit._set_fusion_strategy(previous_strategy)
+    traced_module = pt.jit.trace(module, *args, **kwargs)
+    if inference_only:
+        check_condition(not module.training,
+                        f'Switch the following module to eval mode to enable inference-optimized tracing: {module}')
+        if pt.__version__ >= (1, 12):  # type: ignore
+            return pt.jit.optimize_for_inference(traced_module)
+        logger.warn('Consider installing PyTorch 1.12+ to enable inference optimizations when tracing modules.')
     return traced_module

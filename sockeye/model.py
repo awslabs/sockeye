@@ -209,11 +209,15 @@ class SockeyeModel(pt.nn.Module):
         """
         if self.traced_embedding_source is None:
             logger.debug("Tracing embedding_source")
-            self.traced_embedding_source = utils.inference_trace(self.embedding_source, inputs)
+            self.traced_embedding_source = utils.trace(self.embedding_source,
+                                                       inputs,
+                                                       inference_only=self.inference_only)
         source_embed = self.traced_embedding_source(inputs)
         if self.traced_encoder is None:
             logger.debug("Tracing encoder")
-            self.traced_encoder = utils.inference_trace(self.encoder, (source_embed, valid_length))
+            self.traced_encoder = utils.trace(self.encoder,
+                                              (source_embed, valid_length),
+                                              inference_only=self.inference_only)
         source_encoded, source_encoded_length, att_mask = self.traced_encoder(source_embed, valid_length)
         return source_encoded, source_encoded_length, att_mask
 
@@ -296,7 +300,9 @@ class SockeyeModel(pt.nn.Module):
                                                 self.output_layer,
                                                 self.factor_output_layers)
             decode_step_module.eval()
-            self.traced_decode_step = utils.inference_trace(decode_step_module, decode_step_inputs)
+            self.traced_decode_step = utils.trace(decode_step_module,
+                                                  decode_step_inputs,
+                                                  inference_only=self.inference_only)
         # the traced module returns a flat list of tensors
         decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
         step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
