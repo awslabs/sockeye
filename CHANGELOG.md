@@ -11,6 +11,18 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.9999]
+
+### Changed
+
+- Allow PyTorch 1.12 in requirements.
+
+### Added
+
+- Enable the following optimizations when using PyTorch 1.12+:
+  - Use PyTorch's native multi-head attention implementation ([`torch._native_multi_head_attention`](https://pytorch.org/blog/a-better-transformer-for-fast-transformer-encoder-inference/)) on the encoder side during inference.
+  - Run [`torch.jit.optimize_for_inference`](https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html#torch.jit.optimize_for_inference) on traced modules that are only used for inference.
+
 ## [3.1.17]
 
 ### Added
