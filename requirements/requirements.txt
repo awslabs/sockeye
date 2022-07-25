@@ -1,5 +1,10 @@
 torch>=1.10.0,<1.14.0
 pyyaml>=5.1
 numpy>1.16.0,<2.0.0
+<<<<<<< HEAD
 sacrebleu>=2.3.0
 faiss-cpu>=1.7.2
+=======
+sacrebleu==1.4.14
+faiss-gpu>=1.7.2
+>>>>>>> 81dbdb5 (running version of knn-mt)

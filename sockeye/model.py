@@ -485,13 +485,15 @@ class SockeyeModel(pt.nn.Module):
         import faiss.contrib.torch_utils
         import numpy as np
         import json
-        with open(os.path.join(knn_index_folder, "config.json")) as in_config:
-            knn_config = json.load(in_config)
+        # with open(os.path.join(knn_index_folder, "config.json")) as in_config:
+        #     knn_config = json.load(in_config)
         keys_index = faiss.read_index(os.path.join(knn_index_folder, "key_index"))
+        # keys_index = faiss.index_cpu_to_all_gpus(keys_index)
         # vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"), dtype=np.int32,
         #                  mode='r', shape=(knn_config["size"], ))
-        vals = np.load(os.path.join(knn_index_folder, "vals.npy"),
-                       mmap_mode='r')
+        # vals = np.load(os.path.join(knn_index_folder, "vals.npy"),
+        #                mmap_mode='r')
+        vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"), dtype=np.int16, mode='r', shape=(133816080, 1))
         self.knn = layers.KNN(keys_index, vals, vocab_size=self.config.vocab_target_size)
 
     @staticmethod

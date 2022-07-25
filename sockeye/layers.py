@@ -16,6 +16,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+import numpy as np
 import torch as pt
 import torch.nn.functional as F
 
@@ -129,7 +130,7 @@ class KNN(pt.nn.Module):
     @pt.jit.ignore
     def forward(self, data: pt.Tensor):
         # TODO: figure out why despite the `import faiss.contrib.torch_utils` we can't call FAISS directly
-        distances, indices = self.keys_index.search(data.numpy(), self.k)
+        distances, indices = self.keys_index.search(data.cpu().numpy().astype(np.float32), self.k)
         # Map indices to tokens
         y = self.vals[indices]
         distances = pt.from_numpy(distances).to(device=data.device)
@@ -139,8 +140,8 @@ class KNN(pt.nn.Module):
         probs = pt.softmax(-distances / self.temperature, dim=-1)
         # For now we just use the distances, but we should
         full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device)
-        full_probs.scatter_(src=probs, index=y, dim=-1)
-        return full_probs
+        full_probs.scatter_(src=probs, index=y.squeeze(2), dim=-1)
+        return full_probs.half()
 
 
 @dataclass
