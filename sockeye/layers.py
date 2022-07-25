@@ -474,8 +474,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
                                                          v_proj_weight=None)
             return contexts, contexts  # dummy return
         elif not self.kv_interleaved:
-            # Encoder inference with new enough version of PyTorch (indicated by
-            # non-interleaved params): Use native multi-head attention
+            # Inference, parameters not interleaved: Use native multi-head
+            # attention
             contexts, _ = pt._native_multi_head_attention(query=inputs, key=inputs, value=inputs,
                                                           embed_dim=self.depth,
                                                           num_head=self.heads,
@@ -487,8 +487,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
                                                           need_weights=False)
             return contexts, contexts  # dummy return
         else:
-            # Decoder inference: Use Sockeye multi-head attention with
-            # interleaved key-value parameters
+            # Inference, parameters interleaved: Use Sockeye multi-head
+            # attention
             proj = self.ff_in(inputs)
             queries, states = proj.split((self.depth_att, 2 * self.depth_att), dim=2)
 

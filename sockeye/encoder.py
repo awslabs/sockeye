@@ -13,7 +13,6 @@
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-import logging
 from typing import List, Tuple, Optional, Union
 
 import torch as pt
@@ -23,13 +22,15 @@ from . import config
 from . import layers
 from . import transformer
 
-logger = logging.getLogger(__name__)
-
 
 def get_transformer_encoder(config: transformer.TransformerConfig,
                             inference_only: bool = False,
+                            using_native_mha: bool = False,
                             dtype: Optional[pt.dtype] = None):
-    return TransformerEncoder(config=config, inference_only=inference_only, dtype=dtype)
+    return TransformerEncoder(config=config,
+                              inference_only=inference_only,
+                              using_native_mha=using_native_mha,
+                              dtype=dtype)
 
 
 get_encoder = get_transformer_encoder
@@ -174,22 +175,17 @@ class TransformerEncoder(Encoder):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  inference_only: bool = False,
+                 using_native_mha: bool = False,
                  dtype: Optional[pt.dtype] = None) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
         self.inference_only = inference_only
-        self.using_native_mha = False
-        if self.inference_only:
-            if hasattr(pt, '_native_multi_head_attention'):
-                self.using_native_mha = True
-                # Native multi-head attention requires biases. We create a
-                # single set of zero (no-op) biases to use across layers.
-                self.register_buffer('mha_qkv_bias', pt.zeros(self.config.model_size * 3), persistent=False)
-                self.register_buffer('mha_proj_bias', pt.zeros(self.config.model_size), persistent=False)
-            else:
-                logger.warning('This version of PyTorch does not include a native multi-head attention function '
-                               '(torch._native_multi_head_attention). Falling back to default implementation. Consider '
-                               'installing PyTorch 1.12+ for faster encoder attention during inference.')
+        self.using_native_mha = using_native_mha
+        if self.using_native_mha:
+            # Native multi-head attention requires biases. We create a single
+            # set of zero (no-op) biases to use across layers.
+            self.register_buffer('mha_qkv_bias', pt.zeros(self.config.model_size * 3), persistent=False)
+            self.register_buffer('mha_proj_bias', pt.zeros(self.config.model_size), persistent=False)
 
         self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
 

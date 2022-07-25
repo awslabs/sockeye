@@ -95,6 +95,7 @@ class SockeyeModel(pt.nn.Module):
     def __init__(self,
                  config: ModelConfig,
                  inference_only: bool = False,
+                 using_native_mha: bool = False,
                  train_decoder_only: bool = False,
                  forward_pass_cache_size: int = 0) -> None:
         super().__init__()
@@ -118,7 +119,7 @@ class SockeyeModel(pt.nn.Module):
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
-                                                       dtype=self.dtype)
+                                                       using_native_mha=using_native_mha, dtype=self.dtype)
         self.decoder = decoder.get_decoder(self.config.config_decoder, inference_only=inference_only, dtype=self.dtype)
         self.nvs = None
         if self.config.neural_vocab_selection:
@@ -664,6 +665,8 @@ def load_model(model_folder: str,
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :return: List of models, source vocabularies, target vocabularies.
     """
+    if dtype is not None:
+        dtype = utils.get_torch_dtype(dtype)
     source_vocabs = vocab.load_source_vocabs(model_folder)
     target_vocabs = vocab.load_target_vocabs(model_folder)
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
@@ -680,8 +683,20 @@ def load_model(model_folder: str,
     else:
         params_fname = os.path.join(model_folder, C.PARAMS_NAME % checkpoint)
 
-    model = SockeyeModel(model_config, inference_only=inference_only, train_decoder_only=train_decoder_only,
-                         forward_pass_cache_size=forward_pass_cache_size)
+    # Use native multi-head attention when available and supported:
+    # - Self-attention (encoder) only
+    # - Inference mode only
+    # - Not compatible with dynamic quantization
+    using_native_mha = False
+    if inference_only and dtype != pt.int8:
+        if hasattr(pt, '_native_multi_head_attention'):
+            using_native_mha = True
+        else:
+            logger.warning('This version of PyTorch does not include a native multi-head attention function '
+                           '(torch._native_multi_head_attention). Falling back to default implementation. Consider '
+                           'installing PyTorch 1.12+ for faster encoder attention during inference.')
+    model = SockeyeModel(model_config, inference_only=inference_only, using_native_mha=using_native_mha,
+                         train_decoder_only=train_decoder_only, forward_pass_cache_size=forward_pass_cache_size)
 
     model.load_parameters(filename=params_fname,
                           device=device,
@@ -691,13 +706,11 @@ def load_model(model_folder: str,
     model.to(device)
 
     if set_grad_req_null:
+        # Calling eval() interleaves all attention parameters
         model.eval()
 
-    # Turn on native multi-head attention when available and supported:
-    # - Encoder only
-    # - Inference only
-    # - Not compatible with dynamic quantization
-    if inference_only and dtype != pt.int8 and hasattr(pt, '_native_multi_head_attention'):
+    if using_native_mha:
+        # Separate encoder attention parameters for native multi-head attention
         model.encoder.apply(layers.separate_kv)
 
     if dtype is None:
