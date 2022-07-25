@@ -7,8 +7,8 @@ overwrite: False
 src_vocab: onmt/vocab.shared
 tgt_vocab: onmt/vocab.shared
 vocab_size_multiple: 8
-src_words_min_frequency: 2
-tgt_words_min_frequency: 2
+src_words_min_frequency: 3
+tgt_words_min_frequency: 3
 share_vocab: True
 n_sample: 0
 
@@ -40,19 +40,19 @@ bucket_size: 32768
 world_size: 8
 gpu_ranks: [0, 1, 2, 3, 4, 5, 6, 7]
 batch_type: "tokens"
-batch_size: 3584
-valid_batch_size: 8
+batch_size: 5000
+valid_batch_size: 2048
 batch_size_multiple: 1
 max_generator_batches: 0
-accum_count: [14]
+accum_count: [10]
 accum_steps: [0]
 
 model_dtype: "fp16"
 apex_opt_level: "O2"
 optim: "fusedadam"
-learning_rate: 0.06325
+learning_rate: 2
 warmup_steps: 4000
-decay_method: "rsqrt"
+decay_method: "noam"
 adam_beta2: 0.98
 max_grad_norm: 0
 label_smoothing: 0.1
