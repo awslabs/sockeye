@@ -698,6 +698,10 @@ def trace(module: pt.nn.Module, *args, inference_only: bool = False, **kwargs) -
         check_condition(not module.training,
                         f'Switch the following module to eval mode to enable inference-optimized tracing: {module}')
         if pt.__version__ >= (1, 12):  # type: ignore
-            return pt.jit.optimize_for_inference(traced_module)
-        logger.warn('Consider installing PyTorch 1.12+ to enable inference optimizations when tracing modules.')
+            # Support PYTORCH_JIT=0: Don't optimize the module if it wasn't
+            # actually traced.
+            if isinstance(traced_module, pt.jit.ScriptModule):
+                traced_module = pt.jit.optimize_for_inference(traced_module)
+        else:
+            logger.warn('Consider installing PyTorch 1.12+ to enable inference optimizations when tracing modules.')
     return traced_module
