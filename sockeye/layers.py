@@ -119,13 +119,14 @@ class OutputLayer(pt.nn.Module):
 
 
 class KNN(pt.nn.Module):
-    def __init__(self, keys_index, vals, vocab_size, k=3, temperature=10) -> None:
+    def __init__(self, keys_index, vals, vocab_size, k=3, temperature=10, state_dump=None) -> None:
         super().__init__()
         self.keys_index = keys_index
         self.vals = vals
         self.vocab_size = vocab_size
         self.k = k
         self.temperature = temperature
+        self.state_dump = state_dump
 
     @pt.jit.ignore
     def forward(self, data: pt.Tensor):
@@ -133,7 +134,14 @@ class KNN(pt.nn.Module):
         distances, indices = self.keys_index.search(data.cpu().numpy().astype(np.float32), self.k)
         # Map indices to tokens
         y = self.vals[indices]
-        distances = pt.from_numpy(distances).to(device=data.device)
+
+        # optional -- use exact distance
+        if self.state_dump is not None:
+            raw_keys = pt.from_numpy(self.state_dump[indices])
+            distances = pt.norm(data - raw_keys, dim=-1)
+        else:
+            distances = pt.from_numpy(distances).to(device=data.device)
+
         y = pt.from_numpy(y).to(device=data.device).long()
         # TODO: alternatively compute the l2 distance
 

@@ -40,6 +40,7 @@ from . import nvs
 logger = logging.getLogger(__name__)
 
 
+ifccuglvjetghrtlflhrnrdbceniikjgerlnitbtdb
 @dataclass
 class ModelConfig(Config):
     """
@@ -491,10 +492,14 @@ class SockeyeModel(pt.nn.Module):
         # keys_index = faiss.index_cpu_to_all_gpus(keys_index)
         # vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"), dtype=np.int32,
         #                  mode='r', shape=(knn_config["size"], ))
-        # vals = np.load(os.path.join(knn_index_folder, "vals.npy"),
-        #                mmap_mode='r')
-        vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"), dtype=np.int16, mode='r', shape=(133816080, 1))
-        self.knn = layers.KNN(keys_index, vals, vocab_size=self.config.vocab_target_size)
+        vals = np.load(os.path.join(knn_index_folder, "vals.npy"),
+                       mmap_mode='r')
+        if os.path.isfile(os.path.join(knn_index_folder, "keys.npy")):
+            state_dump = np.load(os.path.join(knn_index_folder, "keys.npy"),
+                                 mmap_mode='r')
+        else:
+            state_dump = None
+        self.knn = layers.KNN(keys_index, vals, vocab_size=self.config.vocab_target_size, state_dump=state_dump)
 
     @staticmethod
     def save_version(folder: str):
@@ -750,7 +755,7 @@ def load_model(model_folder: str,
             model.knn_cache = None
             logger.info('kNN cache disabled')
 
-        model.load_knn_index(knn_index)
+    model.load_knn_index(knn_index)
 
     model.to(device)
 
