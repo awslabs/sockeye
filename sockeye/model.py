@@ -40,7 +40,6 @@ from . import nvs
 logger = logging.getLogger(__name__)
 
 
-ifccuglvjetghrtlflhrnrdbceniikjgerlnitbtdb
 @dataclass
 class ModelConfig(Config):
     """
