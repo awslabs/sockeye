@@ -119,7 +119,7 @@ class OutputLayer(pt.nn.Module):
 
 
 class KNN(pt.nn.Module):
-    def __init__(self, keys_index, vals, vocab_size, k=3, temperature=10, state_dump=None) -> None:
+    def __init__(self, keys_index, vals, vocab_size, k=64, temperature=10, state_dump=None) -> None:
         super().__init__()
         self.keys_index = keys_index
         self.vals = vals
@@ -135,21 +135,21 @@ class KNN(pt.nn.Module):
         # Map indices to tokens
         y = self.vals[indices]
 
-        # optional -- use exact distance
+        # use exact distance when state_dump is available
         if self.state_dump is not None:
-            raw_keys = pt.from_numpy(self.state_dump[indices])
-            distances = pt.norm(data - raw_keys, dim=-1)
+            raw_keys = pt.from_numpy(self.state_dump[indices]).cuda()  # (data.shape[0], k, dim)
+            distances = pt.norm(data.unsqueeze(1) - raw_keys, p=2, dim=-1)  # data lacks the k axis, so need to expand to create one
         else:
-            distances = pt.from_numpy(distances).to(device=data.device)
+            distances = pt.from_numpy(distances).to(device=data.device).half()
 
         y = pt.from_numpy(y).to(device=data.device).long()
-        # TODO: alternatively compute the l2 distance
 
         probs = pt.softmax(-distances / self.temperature, dim=-1)
-        # For now we just use the distances, but we should
-        full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device)
-        full_probs.scatter_(src=probs, index=y.squeeze(2), dim=-1)
-        return full_probs.half()
+        full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device).half()
+        full_probs.scatter_add_(src=probs, index=y.squeeze(2), dim=-1)
+        z = pt.sum(full_probs, dim=-1).unsqueeze(-1)
+        full_probs.div_(z)
+        return full_probs
 
 
 @dataclass
