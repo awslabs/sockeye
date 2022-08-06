@@ -122,6 +122,16 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
      False, 0, 0),
+    # Basic transformer with clamp-to-dtype during training and inference
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg_softmax"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --clamp-to-dtype",
+     "--beam-size 2 --clamp-to-dtype",
+     False, 0, 0),
     # Basic transformer, training only the decoder
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"

@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.18]
+
+### Added
+
+- Added `sockeye-train` and `sockeye-translate` option `--clamp-to-dtype` that clamps outputs of transformer attention, feed-forward networks, and process blocks to the min/max finite values for the current dtype. This can prevent inf/nan values from overflow when running large models in float16 mode. See: https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139
+
 ## [3.1.17]
 
 ### Added

@@ -25,8 +25,9 @@ from . import transformer
 
 def get_transformer_encoder(config: transformer.TransformerConfig,
                             inference_only: bool = False,
-                            dtype: Optional[pt.dtype] = None):
-    return TransformerEncoder(config=config, inference_only=inference_only, dtype=dtype)
+                            dtype: Optional[pt.dtype] = None,
+                            clamp_to_dtype: bool = False):
+    return TransformerEncoder(config=config, inference_only=inference_only, dtype=dtype, clamp_to_dtype=clamp_to_dtype)
 
 
 get_encoder = get_transformer_encoder
@@ -171,7 +172,8 @@ class TransformerEncoder(Encoder):
     def __init__(self,
                  config: transformer.TransformerConfig,
                  inference_only: bool = False,
-                 dtype: Optional[pt.dtype] = None) -> None:
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
         pt.nn.Module.__init__(self)
         self.config = config
 
@@ -185,13 +187,17 @@ class TransformerEncoder(Encoder):
                                                          dtype=dtype)
 
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer.TransformerEncoderBlock(config, inference_only=inference_only, dtype=dtype)
+            transformer.TransformerEncoderBlock(config,
+                                                inference_only=inference_only,
+                                                dtype=dtype,
+                                                clamp_to_dtype=clamp_to_dtype)
             for _ in range(config.num_layers))
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
                                                                  num_hidden=self.config.model_size,
-                                                                 dtype=dtype)
+                                                                 dtype=dtype,
+                                                                 clamp_to_dtype=clamp_to_dtype)
 
     def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         # positional embedding
