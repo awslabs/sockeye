@@ -1001,7 +1001,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
-    optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
+    optimizer_class, optimizer_kwargs, zero_grad_kwargs = optimizers.get_optimizer(optimizer_config)
+    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs)
 
     lr_scheduler_class, lr_scheduler_kwargs = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                                                             args.initial_learning_rate,
@@ -1052,8 +1053,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         sockeye_model=sockeye_model,
         training_model=training_model,
         optimizer=optimizer,
-        zero_grad_kwargs=zero_grad_kwargs,
         lr_scheduler=_lr_scheduler,
+        zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
         device=device,
         using_amp=args.amp,
