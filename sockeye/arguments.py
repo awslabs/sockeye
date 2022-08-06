@@ -194,7 +194,9 @@ def simple_dict() -> Callable:
     """
     A simple dictionary format that does not require spaces or quoting.
 
-    Supported types: bool, int, float
+    Format: key1:value1,key2:value2,...
+
+    Supported types: bool, int, float, str (that doesn't parse as other types).
 
     :return: A method that can be used as a type in argparse.
     """
@@ -206,9 +208,12 @@ def simple_dict() -> Callable:
                 return True
             if value.lower() == "false":
                 return False
-            if "." in value or "e" in value:
+            if value.isdigit():
+                return int(value)
+            try:
                 return float(value)
-            return int(value)
+            except:
+                return value
 
         _dict = dict()
         try:
@@ -216,8 +221,7 @@ def simple_dict() -> Callable:
                 key, value = entry.split(":")
                 _dict[key] = _parse(value)
         except ValueError:
-            raise argparse.ArgumentTypeError("Specify argument dictionary as key1:value1,key2:value2,..."
-                                             " Supported types: bool, int, float.")
+            raise argparse.ArgumentTypeError("Specify argument dictionary as key1:value1,key2:value2,...")
         return _dict
 
     return parse
@@ -1005,11 +1009,6 @@ def add_training_args(params):
                               default=C.LR_SCHEDULER_PLATEAU_REDUCE,
                               choices=C.LR_SCHEDULERS,
                               help='Learning rate scheduler type. Default: %(default)s.')
-    train_params.add_argument('--learning-rate-t-scale',
-                              type=float,
-                              default=1.0,
-                              help="Step number is multiplied by this value when determining learning rate for the "
-                                   "current step. Default: %(default)s.")
     train_params.add_argument('--learning-rate-reduce-factor',
                               type=float,
                               default=0.9,

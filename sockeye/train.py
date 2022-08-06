@@ -20,6 +20,7 @@ from . import initial_setup
 initial_setup.handle_env_cli_arg()
 
 import argparse
+import gc
 import logging
 import os
 import shutil
@@ -1066,6 +1067,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     checkpoint_decoder = None
     if utils.is_primary_worker():
         checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
+
+    # Clean up GPU and CPU memory used during initialization
+    torch.cuda.empty_cache()
+    gc.collect()
 
     training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
                                  checkpoint_decoder=checkpoint_decoder)

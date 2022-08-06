@@ -32,8 +32,6 @@ import torch.distributed
 try:
     import apex.amp
 except ImportError:
-    # Not an issue because Apex AMP is only used when the trainer setting is
-    # activated. We check that Apex can be imported before creating the trainer.
     pass
 
 from . import average
