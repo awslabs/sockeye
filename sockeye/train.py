@@ -755,14 +755,6 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
-    lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                             args.initial_learning_rate,
-                                             args.learning_rate_t_scale,
-                                             args.learning_rate_reduce_factor,
-                                             args.learning_rate_reduce_num_not_improved,
-                                             args.learning_rate_warmup,
-                                             args.max_updates)
-
     config = optimizers.OptimizerConfig(name=args.optimizer,
                                         running_on_gpu=not args.use_cpu,
                                         lr=args.initial_learning_rate,
@@ -771,8 +763,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
                                         weight_decay=args.weight_decay,
                                         momentum=args.momentum,
                                         gradient_clipping_type=gradient_clipping_type,
-                                        gradient_clipping_threshold=gradient_clipping_threshold,
-                                        lr_scheduler=lr_sched)
+                                        gradient_clipping_threshold=gradient_clipping_threshold)
 
     num_workers = 1 if not utils.is_distributed() else torch.distributed.get_world_size()
     effective_batch_size = args.batch_size * args.update_interval * num_workers
@@ -1008,7 +999,17 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     utils.log_parameters(sockeye_model)
 
+    losses = create_losses(args, all_num_classes=target_vocab_sizes)
+
     optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
+
+    lr_scheduler_class, lr_scheduler_kwargs = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                                                            args.initial_learning_rate,
+                                                                            args.learning_rate_reduce_factor,
+                                                                            args.learning_rate_reduce_num_not_improved,
+                                                                            args.learning_rate_warmup,
+                                                                            args.max_updates)
+    _lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs) if lr_scheduler_class is not None else None
 
     # This starts as a reference to the original Sockeye model. It is
     # sequentially transformed/wrapped to produce the model instance used for
@@ -1045,8 +1046,6 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                    device_ids=None if args.use_cpu else [device],
                                                                    output_device=None if args.use_cpu else device)
 
-    losses = create_losses(args, all_num_classes=target_vocab_sizes)
-
     trainer = training.EarlyStoppingTrainer(
         config=trainer_config,
         optimizer_config=optimizer_config,
@@ -1054,6 +1053,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         training_model=training_model,
         optimizer=optimizer,
         zero_grad_kwargs=zero_grad_kwargs,
+        lr_scheduler=_lr_scheduler,
         loss_functions=losses,
         device=device,
         using_amp=args.amp,
