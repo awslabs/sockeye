@@ -412,21 +412,21 @@ class EarlyStoppingTrainer:
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
                 loss_metric.update(loss_value.item(), num_samples.item())
 
-        # Primary worker optionally runs the checkpoint decoder
-        decoder_metrics = {}  # type: Dict[str, float]
-        if utils.is_primary_worker() and checkpoint_decoder is not None:
-            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
-            decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
-        # Broadcast decoder metrics (if any) from primary worker to secondary
-        # workers
+        if utils.is_primary_worker():
+            # Primary worker runs checkpoint decoder
+            decoder_metrics = {}  # type: Dict[str, float]
+            if checkpoint_decoder is not None:
+                output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
+                decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
+            # Add decoder metrics (if any) to validation metrics
+            for metric_name, metric_value in decoder_metrics.items():
+                assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
+                metric = loss.LossMetric(name=metric_name)
+                metric.update(metric_value, num_samples=1)
+                val_metrics.append(metric)
         if utils.is_distributed():
-            decoder_metrics = utils.broadcast_object(decoder_metrics)
-        # Add decoder metrics (if any) to validation metrics
-        for metric_name, metric_value in decoder_metrics.items():
-            assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
-            metric = loss.LossMetric(name=metric_name)
-            metric.update(metric_value, num_samples=1)
-            val_metrics.append(metric)
+            # Primary worker's evaluation is authoritative
+            val_metrics = utils.broadcast_object(val_metrics)
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
@@ -447,21 +447,9 @@ class EarlyStoppingTrainer:
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
-                # In distributed mode, the primary worker makes an authoritative
-                # check of whether the metric value has improved and broadcasts
-                # the result to secondary workers. Non-determinism in the order
-                # of GPU operations can lead to slight numeric variations across
-                # workers, causing potential desync if each worker makes its own
-                # check for key training decisions (reducing learning rate,
-                # early stopping, etc.).
-                if utils.is_primary_worker():
-                    # Authoritative check
-                    value_is_better = utils.metric_value_is_better(value,
-                                                                   self.state.best_metric,
-                                                                   self.config.early_stopping_metric)
-                if utils.is_distributed():
-                    # Broadcast result
-                    value_is_better = utils.broadcast_object(value_is_better)
+                value_is_better = utils.metric_value_is_better(value,
+                                                               self.state.best_metric,
+                                                               self.config.early_stopping_metric)
                 if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
