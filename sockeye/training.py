@@ -347,6 +347,7 @@ class EarlyStoppingTrainer:
         # the optimizer to update model weights. Every Nth batch is an update
         # batch.
         is_update_batch = self.state.batches % self.config.update_interval == 0
+        self.state.updates += 1 if is_update_batch else 0
 
         # Forward/loss/backward (compute gradients). In distributed mode,
         # workers accumulate gradients locally for N-1 batches (no_sync), then
@@ -359,9 +360,7 @@ class EarlyStoppingTrainer:
         for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
-        did_grad_step = False
         if is_update_batch:
-            self.state.updates += 1
             if self.using_amp:
                 self._scaler.unscale_(self.optimizer)
             # Clip gradients
@@ -381,11 +380,10 @@ class EarlyStoppingTrainer:
             else:
                 self.optimizer.step()
             self.optimizer.zero_grad(**self.zero_grad_kwargs)
-            did_grad_step = True
 
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
-        return did_grad_step
+        return is_update_batch
 
     def _evaluate(self, checkpoint: int, data_iter,
                   checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss.LossMetric]:
