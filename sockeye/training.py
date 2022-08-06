@@ -195,7 +195,7 @@ class EarlyStoppingTrainer:
             if utils.is_primary_worker():
                 self.sockeye_model.save_config(self.config.output_dir)
                 self.sockeye_model.save_version(self.config.output_dir)
-                self.sockeye_model.save_parameters(self.current_params_fname)
+            self._save_params()
             logger.info("Training started.")
 
         tic = time.time()
@@ -277,9 +277,6 @@ class EarlyStoppingTrainer:
         metrics and update the best known parameters accordingly.
         """
         self.state.checkpoint += 1
-        # save parameters and evaluate on validation data
-        if utils.is_primary_worker():
-            self._save_params()
         train_metrics = [lf.metric for lf in self.loss_functions]
         logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                     self.state.checkpoint, self.state.updates, self.state.epoch,
@@ -294,12 +291,14 @@ class EarlyStoppingTrainer:
         self.state.diverged = self._determine_divergence(val_metrics)
         self._adjust_learning_rate(has_improved)
         if utils.is_primary_worker():
+            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+        self._save_training_state(train_iter)
+        self._save_params()
+        if utils.is_primary_worker():
             if has_improved:
                 self._update_best_params()
                 self._save_optimizer_state(self.best_optimizer_state_fname)
                 self._save_lr_scheduler(self.best_lr_scheduler_fname)
-            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
-            self._save_training_state(train_iter)
         for metric in train_metrics:
             metric.reset()
         if self.checkpoint_callback:
@@ -328,12 +327,16 @@ class EarlyStoppingTrainer:
             sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
         # Backward. PyTorch AMP and Apex AMP use different loss scaling APIs.
         if self.using_amp:
+            # PyTorch AMP loss scaling
             sum_losses = self._scaler.scale(sum_losses)
         if self.using_apex_amp:
+            # Apex AMP loss scaling
             with apex.amp.scale_loss(sum_losses, self.optimizer,
                                      delay_unscale=not is_update_batch) as scaled_sum_losses:
+                # Apex AMP backward
                 scaled_sum_losses.backward()
         else:
+            # PyTorch (with/without AMP) backward
             sum_losses.backward()  # type: ignore
         return loss_outputs
 
@@ -599,13 +602,15 @@ class EarlyStoppingTrainer:
 
     def _save_params(self):
         """
-        Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
+        Saves model parameters at current checkpoint and optionally cleans up
+        older parameter files to save disk space.
         """
-        self.sockeye_model.save_parameters(self.current_params_fname)
-        cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
-                             self.state.best_checkpoint, self.config.keep_initializations,
-                             self.config.max_params_files_to_cache, self.config.cache_metric,
-                             self.config.cache_strategy)
+        if utils.is_primary_worker():
+            self.sockeye_model.save_parameters(self.current_params_fname)
+            cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
+                                 self.state.best_checkpoint, self.config.keep_initializations,
+                                 self.config.max_params_files_to_cache, self.config.cache_metric,
+                                 self.config.cache_strategy)
 
     def _save_optimizer_state(self, fname):
         torch.save(self.optimizer.state_dict(), fname)
@@ -619,7 +624,7 @@ class EarlyStoppingTrainer:
         if self.lr_scheduler is not None:
             torch.save(self.lr_scheduler.state_dict(), fname)
             logger.info("Saved '%s' to '%s'", self.lr_scheduler, fname)
-        
+
     def _load_lr_scheduler(self, fname):
         if self.lr_scheduler is not None:
             self.lr_scheduler.load_state_dict(torch.load(fname))
@@ -631,38 +636,47 @@ class EarlyStoppingTrainer:
         """
         # Create temporary directory for storing the state of the optimization process
         training_state_dirname = os.path.join(self.config.output_dir, C.TRAINING_STATE_TEMP_DIRNAME)
-        if not os.path.exists(training_state_dirname):
+        if utils.is_primary_worker() and not os.path.exists(training_state_dirname):
             os.mkdir(training_state_dirname)
+        if utils.is_distributed():
+            torch.distributed.barrier()
 
-        # (1) Parameters: link current file
-        params_base_fname = C.PARAMS_NAME % self.state.checkpoint
-        params_file = os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
-        if os.path.exists(params_file):
-            os.unlink(params_file)
-        os.symlink(os.path.join("..", params_base_fname), params_file)
+        if utils.is_primary_worker():
+            # Otherwise, only the primary worker saves the following.
+            # (1) Parameters: link current file
+            params_base_fname = C.PARAMS_NAME % self.state.checkpoint
+            params_file = os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
+            if os.path.exists(params_file):
+                os.unlink(params_file)
+            os.symlink(os.path.join("..", params_base_fname), params_file)
 
-        # (2) Optimizer state
-        opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATE_LAST)
-        self._save_optimizer_state(opt_state_fname)
+            # (2) Optimizer state
+            opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATE_LAST)
+            self._save_optimizer_state(opt_state_fname)
 
-        # (3) Data iterator
+            # (3) lr_scheduler
+            lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
+            self._save_lr_scheduler(lr_scheduler_fname)
+
+        # Secondary workers are done. Only the primary worker runs everything
+        # beyond this point.
+        if not utils.is_primary_worker():
+            return
+
+        # (4) Data iterator
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
-        # (4) Random generators
+        # (5) Random generators
         # RNG states: python, numpy, torch
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
             pickle.dump(np.random.get_state(), fp)
             pickle.dump(torch.random.get_rng_state(), fp)
 
-        # (5) Training state
+        # (6) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
 
-        # (5.5) lr_scheduler
-        lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
-        self._save_lr_scheduler(lr_scheduler_fname)
-
-        # (6) AMP grad scaler state
+        # (7) AMP grad scaler state
         if self.using_amp:
             torch.save(self._scaler.state_dict(), os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME))
         if self.using_apex_amp:
@@ -698,24 +712,24 @@ class EarlyStoppingTrainer:
         opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATE_LAST)
         self._load_optimizer_state(opt_state_fname)
 
-        # (3) Data Iterator
+        # (3) lr_scheduler
+        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
+        self._load_lr_scheduler(lr_scheduler_fname)
+
+        # (4) Data Iterator
         train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
-        # (4) Random generators
+        # (5) Random generators
         # RNG states: python, numpy, torch
         with open(os.path.join(self.training_state_dirname, C.RNG_STATE_NAME), "rb") as fp:
             random.setstate(pickle.load(fp))
             np.random.set_state(pickle.load(fp))
             torch.random.set_rng_state(pickle.load(fp))
 
-        # (5) Training state
+        # (6) Training state
         self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
-        # (5.5) lr_scheduler
-        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
-        self._load_lr_scheduler(lr_scheduler_fname)
-
-        # (6) AMP grad scaler state
+        # (7) AMP grad scaler state
         if self.using_amp:
             self._scaler.load_state_dict(
                 torch.load(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME)))
