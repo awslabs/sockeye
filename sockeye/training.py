@@ -51,16 +51,16 @@ logger = logging.getLogger(__name__)
 
 class ModelWithLoss(torch.nn.Module):
     """
-    Wraps a SockeyeModel or traced SockeyeModel (ScriptModule) and its Losses in
-    a single module.
+    Wraps a SockeyeModel and its Losses in a single module. The SockeyeModel
+    can be JIT traced (ScriptModule).
 
-    :param sockeye_model: SockeyeModel or traced SockeyeModel (ScriptModule).
+    :param model: SockeyeModel (untraced or traced).
     :param losses: List of Loss objects.
 
     :return: Tuple of summed loss, list of loss values, and list of number of
              samples.
     """
-    def __init__(self, model: torch.nn.Module, losses: List[loss.Loss], using_amp: bool = False) -> None:
+    def __init__(self, model: torch.nn.Module, losses: List[loss.Loss]) -> None:
         super().__init__()
         self.model = model
         self.losses = losses
