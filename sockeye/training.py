@@ -73,14 +73,6 @@ class ModelWithLoss(torch.nn.Module):
                                                           List[torch.Tensor],
                                                           List[torch.Tensor]]:
         model_outputs = self.model(source, source_length, target, target_length)
-        # Guarantee model outputs are in a supported dtype for computing losses:
-        # - For float32 training, conversion is a no-op.
-        # - PyTorch AMP automatically casts as needed so model outputs can
-        #   remain non-float32 (skip conversion).
-        # - For others (float16/bfloat16 training with Apex/DeepSpeed), convert
-        #   from model dtype to float32.
-        if not torch.is_autocast_enabled():
-            model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
         loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
         sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
@@ -438,8 +430,6 @@ class EarlyStoppingTrainer:
                 # Forward: use sockeye_model because (traced) training_model
                 # doesn't support eval mode (still runs dropout, etc.)
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
-                # Require model outputs to be float32 for validation loss
-                outputs = {output_name: output.to(torch.float32) for (output_name, output) in outputs.items()}
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
                 # Update validation metrics for batch
