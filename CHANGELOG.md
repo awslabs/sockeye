@@ -13,6 +13,10 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ## [3.1.19]
 
+### Added
+
+- Clean up GPU and CPU memory used during training initialization before starting the main training loop.
+
 ### Changed
 
 - Refactored training code in advance of adding DeepSpeed support:
