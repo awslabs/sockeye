@@ -1049,11 +1049,14 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                    device_ids=None if args.use_cpu else [device],
                                                                    output_device=None if args.use_cpu else device)
 
+    # Final step: wrap training model and losses in a single module
+    model_object = training.ModelWithLoss(model=training_model, losses=losses)  # type: torch.nn.Module
+
     trainer = training.EarlyStoppingTrainer(
         config=trainer_config,
         optimizer_config=optimizer_config,
         sockeye_model=sockeye_model,
-        training_model=training_model,
+        model_object=model_object,
         optimizer=optimizer,
         lr_scheduler=_lr_scheduler,
         zero_grad_kwargs=zero_grad_kwargs,

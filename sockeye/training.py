@@ -49,6 +49,39 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 
+class ModelWithLoss(torch.nn.Module):
+    """
+    Wraps a SockeyeModel or traced SockeyeModel (ScriptModule) and its Losses in
+    a single module.
+
+    :param sockeye_model: SockeyeModel or traced SockeyeModel (ScriptModule).
+    :param losses: List of Loss objects.
+
+    :return: Tuple of summed loss, list of loss values, and list of number of
+             samples.
+    """
+    def __init__(self, model: torch.nn.Module, losses: List[loss.Loss]) -> None:
+        super().__init__()
+        self.model = model
+        self.losses = losses
+
+    def forward(self, source: torch.Tensor,
+                source_length: torch.Tensor,
+                target: torch.Tensor,
+                target_length: torch.Tensor,
+                labels: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor,
+                                                          List[torch.Tensor],
+                                                          List[torch.Tensor]]:
+        model_outputs = self.model(source, source_length, target, target_length)
+        # Guarantee model outputs are float32 before computing losses.
+        # Computing losses in float16 can lead to overflow.
+        model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
+        loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
+        loss_values, num_samples = zip(*loss_outputs)
+        sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
+        return sum_losses, loss_values, num_samples  # type: ignore
+
+
 @dataclass
 class TrainerConfig(Config):
     output_dir: str
@@ -147,7 +180,7 @@ class EarlyStoppingTrainer:
                  config: TrainerConfig,
                  optimizer_config: optimizers.OptimizerConfig,
                  sockeye_model: model.SockeyeModel,
-                 training_model: torch.nn.Module,
+                 model_object: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
                  lr_scheduler: Optional[lr_scheduler.LearningRateScheduler],
                  zero_grad_kwargs: Dict[str, Any],
@@ -160,7 +193,7 @@ class EarlyStoppingTrainer:
         self.config = config
         self.optimizer_config = optimizer_config
         self.sockeye_model = sockeye_model
-        self.training_model = training_model
+        self.model_object = model_object
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
         self.zero_grad_kwargs = zero_grad_kwargs
@@ -315,17 +348,13 @@ class EarlyStoppingTrainer:
         """
         batch = batch.load(device=self.device)
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
-            # Forward
-            outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
-            # Loss (scaled by update interval)
-            loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
-            # TODO(mdenkows): We currently give 1/N weight to every batch in the
-            # update, but batches have subtly different sizes (different numbers
-            # of padding tokens). Consider normalizing by relative batch size.
-            loss_values = [v / self.config.update_interval if self.config.update_interval > 1
-                           else v for v, _ in loss_outputs]
-            sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
-        # Backward. PyTorch AMP and Apex AMP use different loss scaling APIs.
+            # Forward + loss
+            sum_losses, loss_values, num_samples = self.model_object(batch.source, batch.source_length,
+                                                                     batch.target, batch.target_length, batch.labels)
+        # Backward
+        if self.config.update_interval > 1:
+            # Scale loss by number of batches per update
+            sum_losses = sum_losses / self.config.update_interval
         if self.using_amp:
             # PyTorch AMP loss scaling
             sum_losses = self._scaler.scale(sum_losses)
@@ -338,7 +367,7 @@ class EarlyStoppingTrainer:
         else:
             # PyTorch (with/without AMP) backward
             sum_losses.backward()  # type: ignore
-        return loss_outputs
+        return loss_values, num_samples
 
     def _step(self, batch: data_io.Batch) -> bool:
         self.state.batches += 1
@@ -353,11 +382,11 @@ class EarlyStoppingTrainer:
         # workers accumulate gradients locally for N-1 batches (no_sync), then
         # average the accumulated gradients across workers during the update
         # batch.
-        with (self.training_model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
+        with (self.model_object.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
         else utils.no_context()):
-            loss_outputs = self._forward_backward(batch, is_update_batch)
+            loss_values, num_samples = self._forward_backward(batch, is_update_batch)
 
-        for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
+        for loss_func, loss_value, num_samples in zip(self.loss_functions, loss_values, num_samples):
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
         if is_update_batch:
@@ -365,10 +394,10 @@ class EarlyStoppingTrainer:
                 self._scaler.unscale_(self.optimizer)
             # Clip gradients
             if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
-                torch.nn.utils.clip_grad.clip_grad_value_(self.training_model.parameters(),
+                torch.nn.utils.clip_grad.clip_grad_value_(self.sockeye_model.parameters(),
                                                           self.optimizer_config.gradient_clipping_threshold)
             elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-                torch.nn.utils.clip_grad.clip_grad_norm_(self.training_model.parameters(),
+                torch.nn.utils.clip_grad.clip_grad_norm_(self.sockeye_model.parameters(),
                                                          self.optimizer_config.gradient_clipping_threshold)
             # Set learning rate for current step
             if self.lr_scheduler is not None:
@@ -404,6 +433,8 @@ class EarlyStoppingTrainer:
                 # Forward: use sockeye_model because (traced) training_model
                 # doesn't support eval mode (still runs dropout, etc.)
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
+                # Require model outputs to be float32 for validation loss
+                outputs = {output_name: output.to(torch.float32) for (output_name, output) in outputs.items()}
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
                 # Update validation metrics for batch
