@@ -11,6 +11,23 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.19]
+
+### Changed
+
+- Refactored training code to improve PyTorch/DeepSpeed compatibility:
+  - Moved logic for flagging interleaved key-value parameters from layers.py to model.py.
+  - Refactored LearningRateScheduler API to be compatible with PyTorch/DeepSpeed.
+  - Refactored optimizer and learning rate scheduler creation to be modular.
+  - Migrated to ModelWithLoss API, which wraps a Sockeye model and its losses in a single module.
+  - Refactored primary and secondary worker logic to reduce redundant calculations.
+  - Refactored code for saving/loading training states.
+  - Added utility functions for managing configuration dictionaries.
+
+### Removed
+
+- Removed unused training option `--learning-rate-t-scale`.
+
 ## [3.1.18]
 
 ### Added
