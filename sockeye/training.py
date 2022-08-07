@@ -60,7 +60,7 @@ class ModelWithLoss(torch.nn.Module):
     :return: Tuple of summed loss, list of loss values, and list of number of
              samples.
     """
-    def __init__(self, model: torch.nn.Module, losses: List[loss.Loss]) -> None:
+    def __init__(self, model: torch.nn.Module, losses: List[loss.Loss], using_amp: bool = False) -> None:
         super().__init__()
         self.model = model
         self.losses = losses
@@ -73,9 +73,14 @@ class ModelWithLoss(torch.nn.Module):
                                                           List[torch.Tensor],
                                                           List[torch.Tensor]]:
         model_outputs = self.model(source, source_length, target, target_length)
-        # Guarantee model outputs are float32 before computing losses.
-        # Computing losses in float16 can lead to overflow.
-        model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
+        # Guarantee model outputs are in a supported dtype for computing losses:
+        # - For float32 training, conversion is a no-op.
+        # - PyTorch AMP automatically casts as needed so model outputs can
+        #   remain non-float32 (skip conversion).
+        # - For others (float16/bfloat16 training with Apex/DeepSpeed), convert
+        #   from model dtype to float32.
+        if not torch.is_autocast_enabled():
+            model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
         loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
         sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
@@ -382,7 +387,7 @@ class EarlyStoppingTrainer:
         # workers accumulate gradients locally for N-1 batches (no_sync), then
         # average the accumulated gradients across workers during the update
         # batch.
-        with (self.model_object.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
+        with (self.model_object.model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
         else utils.no_context()):
             loss_values, num_samples = self._forward_backward(batch, is_update_batch)
 
