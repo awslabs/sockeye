@@ -133,7 +133,10 @@ class KNN(pt.nn.Module):
         # TODO: figure out why despite the `import faiss.contrib.torch_utils` we can't call FAISS directly
         distances, indices = self.keys_index.search(data.cpu().numpy().astype(np.float32), self.k)
         # Map indices to tokens
-        y = self.vals[indices]
+        y = self.vals[(indices+1) % len(self.vals)]
+        y[y == 2] = C.EOS_ID
+        # TODO: this is a patch
+        y[y < 0] = C.UNK_ID
 
         # use exact distance when state_dump is available
         if self.state_dump is not None:
