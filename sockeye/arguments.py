@@ -208,7 +208,7 @@ def simple_dict() -> Callable:
                 return True
             if value.lower() == "false":
                 return False
-            if value.isdigit():
+            if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
                 return int(value)
             try:
                 return float(value)
