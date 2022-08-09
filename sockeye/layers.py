@@ -283,13 +283,16 @@ class MultiHeadAttentionBase(pt.nn.Module):
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores.
     :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
     def __init__(self,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: Optional[pt.dtype] = None) -> None:
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
         super().__init__()
         utils.check_condition(depth_att % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
@@ -297,6 +300,7 @@ class MultiHeadAttentionBase(pt.nn.Module):
         self.heads = heads
         self.depth_out = depth_out
         self.depth_per_head = self.depth // self.heads
+        self.clamp_to_dtype = clamp_to_dtype
 
         self.dot_att = DotAttentionCell(dropout=dropout, heads=heads)
         self.ff_out = pt.nn.Linear(in_features=depth_att, out_features=depth_out, bias=False, dtype=dtype)
@@ -319,6 +323,9 @@ class MultiHeadAttentionBase(pt.nn.Module):
 
         # (query_max_length, batch, output_depth)
         contexts = self.ff_out(contexts)
+
+        if self.clamp_to_dtype:
+            contexts = clamp_to_dtype_min_max(contexts)
 
         return contexts
 
@@ -365,6 +372,8 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     :param depth_out: Output depth / number of output units.
     :param dropout: Dropout probability on attention scores.
     :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
 
     def __init__(self,
@@ -372,8 +381,9 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: Optional[pt.dtype] = None) -> None:
-        super().__init__(depth_att, heads, depth_out, dropout, dtype)
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
+        super().__init__(depth_att, heads, depth_out, dropout, dtype, clamp_to_dtype)
 
         self.depth_att = depth_att
         self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False, dtype=dtype)
@@ -492,6 +502,8 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     :param depth_key_value: Dimension of input key and value vectors.
     :param dropout: Dropout probability on attention scores.
     :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
 
     def __init__(self,
@@ -500,8 +512,9 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  depth_out: int = 512,
                  dropout: float = 0.0,
                  depth_key_value: int = 512,
-                 dtype: Optional[pt.dtype] = None) -> None:
-        super().__init__(depth_att, heads, depth_out, dropout, dtype)
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
+        super().__init__(depth_att, heads, depth_out, dropout, dtype, clamp_to_dtype)
         self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False, dtype=dtype)
         self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False, dtype=dtype)
         self._drop_p = dropout
@@ -715,11 +728,18 @@ class SSRU(AutoregressiveLayer):
     :param model_size: number of hidden units
     :param inference_only: flag used to indicate execution at inference time.
     :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
-    def __init__(self, model_size: int, inference_only: bool, dtype: Optional[pt.dtype] = None) -> None:
+    def __init__(self,
+                 model_size: int,
+                 inference_only: bool,
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False,) -> None:
         super().__init__()
         self.model_size = model_size
         self.inference_only = inference_only
+        self.clamp_to_dtype = clamp_to_dtype
 
         self.cell_state_transform = self._inference_cell_state_transform \
                                     if inference_only else self._training_cell_state_transform
@@ -780,5 +800,19 @@ class SSRU(AutoregressiveLayer):
         weighted_inputs = (1 - forget_rates) * self.linear(inputs)
 
         cell_state, last_step_state = self.cell_state_transform(previous_states, weighted_inputs, forget_rates)
+        cell_state = self.relu(cell_state)
 
-        return self.relu(cell_state), last_step_state
+        if self.clamp_to_dtype:
+            cell_state = clamp_to_dtype_min_max(cell_state)
+
+        return cell_state, last_step_state
+
+
+def clamp_to_dtype_min_max(data: pt.Tensor) -> pt.Tensor:
+    """
+    Clamp a tensor's values to the min and max for its dtype. This effectively
+    pushes overflowed (infinite) values back into the finite range.
+
+    See: https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139
+    """
+    return pt.clamp(data, min=pt.finfo(data.dtype).min, max=pt.finfo(data.dtype).max)
