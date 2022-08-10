@@ -162,6 +162,7 @@ TENSORBOARD_NAME = "tensorboard"
 TRAINING_STATE_DIRNAME = "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
+TRAINING_STATE_DEEPSPEED = "deepspeed"
 
 OPT_STATE_LAST = "optimizer_last.pkl"
 OPT_STATE_BEST = "optimizer_best.pkl"
@@ -180,7 +181,7 @@ ARGS_STATE_NAME = "args.yaml"
 # Arguments that may differ and still resume training
 ARGS_MAY_DIFFER = ["device_id", "device_ids", "overwrite_output", "use_tensorboard", "quiet", "align_plot_prefix",
                    "sure_align_threshold", "keep_last_params", "seed", "max_updates", "min_updates", "max_num_epochs",
-                   "min_num_epochs", "max_samples", "min_samples", "max_checkpoints", "max_seconds"]
+                   "min_num_epochs", "max_samples", "min_samples", "max_checkpoints", "max_seconds", "local_rank"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
