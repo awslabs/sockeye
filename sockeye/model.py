@@ -630,7 +630,7 @@ class _DecodeStep(pt.nn.Module):
 
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
-        knn_output = None
+        knn_output = pt.zeros(1)  # could only be lists of tensors, so put a dummy tensor in case kNN was not used
         if self.knn is not None:
             assert vocab_slice_ids is None, "vocab_slice_ids are currently not supported."
 
@@ -639,8 +639,8 @@ class _DecodeStep(pt.nn.Module):
             # # TODO: step_output is logits! -> So we need to merge outside
             # step_output = lmbda * step_output + (1-lmbda) * knn_output
 
-        # return values are collected in a flat list due to constraints in mixed return types in traced modules
-        # (can only by tensors, or lists of tensors or dicts of tensors, but no mix of them).
+            # return values are collected in a flat list due to constraints in mixed return types in traced modules
+            # (can only by tensors, or lists of tensors or dicts of tensors, but no mix of them).
         outputs = [step_output, knn_output]
         if self.has_target_factors:
             outputs += [fol(decoder_out) for fol in self.factor_output_layers]
@@ -753,7 +753,7 @@ def load_model(model_folder: str,
             model.knn_cache = None
             logger.info('kNN cache disabled')
 
-    model.load_knn_index(knn_index)
+        model.load_knn_index(knn_index)
 
     model.to(device)
 

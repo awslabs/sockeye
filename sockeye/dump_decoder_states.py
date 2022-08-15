@@ -179,7 +179,7 @@ class StateDumper:
             self.words_dump_file.add(flat_target)
 
     def save_config(self):
-        config = KNNConfig(self.dump_size, self.dimension, self.data_type.__name__, "")
+        config = KNNConfig(self.dump_size, self.dimension, self.data_type.__name__, "", -1)
         config.save(self.dump_prefix + ".conf.yaml")
 
 

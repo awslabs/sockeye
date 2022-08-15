@@ -1472,7 +1472,7 @@ def add_knn_args(params):
     knn_params.add_argument('--knn-index',
                             type=str,
                             help='Optionally use a KNN index during inference to retrieve similar hidden states and corresponding target tokens.',
-                            default="")
+                            default=None)
 
 
 def add_build_knn_index_args(params):

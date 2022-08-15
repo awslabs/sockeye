@@ -147,7 +147,7 @@ class KNN(pt.nn.Module):
 
         y = pt.from_numpy(y).to(device=data.device).long()
 
-        probs = pt.softmax(-distances / self.temperature, dim=-1)
+        probs = pt.exp(-distances / self.temperature)
         full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device).half()
         full_probs.scatter_add_(src=probs, index=y.squeeze(2), dim=-1)
         z = pt.sum(full_probs, dim=-1).unsqueeze(-1)

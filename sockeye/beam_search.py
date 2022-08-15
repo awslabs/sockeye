@@ -85,11 +85,11 @@ class _SingleModelInference(_Inference):
                     factor_vocab_size: Optional[int] = None):
         logits, knn_probs, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
-            if knn_probs is not None:
+            if knn_probs.numel() == 1:  # no knn used
+                probs = pt.log_softmax(logits, dim=-1)
+            else:
                 lmbda = 0.8
                 probs = pt.log(lmbda * pt.softmax(logits, dim=-1) + (1-lmbda) * knn_probs)
-            else:
-                probs = pt.log_softmax(logits, dim=-1)
         else:
             assert knn_probs is None, "Can't skip softmax with KNN."
             probs = logits
