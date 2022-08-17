@@ -16,6 +16,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+import pdb
 import numpy as np
 import torch as pt
 import torch.nn.functional as F
@@ -128,15 +129,13 @@ class KNN(pt.nn.Module):
         self.temperature = temperature
         self.state_dump = state_dump
 
-    @pt.jit.ignore
     def forward(self, data: pt.Tensor):
         # TODO: figure out why despite the `import faiss.contrib.torch_utils` we can't call FAISS directly
         distances, indices = self.keys_index.search(data.cpu().numpy().astype(np.float32), self.k)
         # Map indices to tokens
-        y = self.vals[(indices+1) % len(self.vals)]
+        y = self.vals[(indices+1) % len(self.vals)].astype(np.int32)
         y[y == 2] = C.EOS_ID
-        # TODO: this is a patch
-        y[y < 0] = C.UNK_ID
+        y[y < 0] = 65535 + y[y < 0]
 
         # use exact distance when state_dump is available
         if self.state_dump is not None:
@@ -151,6 +150,7 @@ class KNN(pt.nn.Module):
         full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device).half()
         full_probs.scatter_add_(src=probs, index=y.squeeze(2), dim=-1)
         z = pt.sum(full_probs, dim=-1).unsqueeze(-1)
+        z[z < 1e-6] = 1e-6  # avoid div by 0 (which may happen when distances are large)
         full_probs.div_(z)
         return full_probs
 

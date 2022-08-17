@@ -307,8 +307,13 @@ class SockeyeModel(pt.nn.Module):
             self.traced_decode_step = pt.jit.trace(decode_step_module, decode_step_inputs)
         # the traced module returns a flat list of tensors
         decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
-        # +1 for the KNN output
-        step_output, knn_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors+1]
+        # +1 for the decoder output, which will be used to generate kNN output
+        step_output, decoder_out, *target_factor_outputs = decode_step_outputs[:self.num_target_factors+1]
+
+        # do the query here because it cannot be traced (jit.ignore does not play well with tracing)
+        if self.knn is not None:
+            knn_output = self.knn(decoder_out)
+
         new_states = decode_step_outputs[self.num_target_factors+1:]
         return step_output, knn_output, new_states, target_factor_outputs
 
@@ -630,18 +635,10 @@ class _DecodeStep(pt.nn.Module):
 
         # step_output: (batch_size, target_vocab_size or vocab_slice_ids)
         step_output = self.output_layer(decoder_out, vocab_slice_ids)
-        knn_output = pt.zeros(1)  # could only be lists of tensors, so put a dummy tensor in case kNN was not used
-        if self.knn is not None:
-            assert vocab_slice_ids is None, "vocab_slice_ids are currently not supported."
 
-            knn_output = self.knn(decoder_out)
-            # lmbda = 0.8
-            # # TODO: step_output is logits! -> So we need to merge outside
-            # step_output = lmbda * step_output + (1-lmbda) * knn_output
-
-            # return values are collected in a flat list due to constraints in mixed return types in traced modules
-            # (can only by tensors, or lists of tensors or dicts of tensors, but no mix of them).
-        outputs = [step_output, knn_output]
+        # return values are collected in a flat list due to constraints in mixed return types in traced modules
+        # (can only by tensors, or lists of tensors or dicts of tensors, but no mix of them).
+        outputs = [step_output, decoder_out]
         if self.has_target_factors:
             outputs += [fol(decoder_out) for fol in self.factor_output_layers]
         outputs += new_states
