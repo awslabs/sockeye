@@ -351,6 +351,10 @@ class EarlyStoppingTrainer:
         # Backward
         if self.config.update_interval > 1:
             # Scale loss by number of batches per update
+            # TODO(mdenkows): We currently give equal weight to every batch in
+            # every update but batches have subtly different sizes (different
+            # numbers of padding tokens). Consider normalizing by relative batch
+            # size.
             sum_losses = sum_losses / self.config.update_interval
         if self.using_amp:
             # PyTorch AMP loss scaling
