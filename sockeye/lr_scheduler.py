@@ -27,7 +27,9 @@ class LearningRateScheduler:
     """
     Learning rate scheduler base class. A scheduler operates on a specified
     optimizer instance using an API that is compatible with PyTorch and
-    DeepSpeed.
+    DeepSpeed. See https://pytorch.org/docs/stable/optim.html for more
+    information on PyTorch optimizers, learning rate schedulers, and parameter
+    groups.
 
     :param optimizer: Optimizer. If None, `LearningRateScheduler(optimizer)`
                       must be called before running `step()`.
