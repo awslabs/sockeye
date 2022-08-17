@@ -431,7 +431,9 @@ class EarlyStoppingTrainer:
         for batch in data_iter:
             batch = batch.load(device=self.device)
             with torch.inference_mode():
-                # Forward: run SockeyeModel directly
+                # Forward: run SockeyeModel directly. The traced model may not
+                # fully support switching between train and eval modes depending
+                # how much Python logic is used in the various submodules.
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
