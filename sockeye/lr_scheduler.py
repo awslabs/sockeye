@@ -27,7 +27,9 @@ class LearningRateScheduler:
     """
     Learning rate scheduler base class. A scheduler operates on a specified
     optimizer instance using an API that is compatible with PyTorch and
-    DeepSpeed.
+    DeepSpeed. See https://pytorch.org/docs/stable/optim.html for more
+    information on PyTorch optimizers, learning rate schedulers, and parameter
+    groups.
 
     :param optimizer: Optimizer. If None, `LearningRateScheduler(optimizer)`
                       must be called before running `step()`.
@@ -261,8 +263,9 @@ def get_lr_scheduler(scheduler_type: str,
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
         return LearningRateSchedulerInvSqrtDecay, {'base_lr': base_learning_rate, 'warmup': learning_rate_warmup}
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
-        assert max_updates is not None, "The total number of training updates (--max-updates) must be specified when " \
-                                        "using the linear decay learning rate scheduler."
+        check_condition(max_updates is not None,
+                        "The total number of training updates (--max-updates) must be specified when using the linear "
+                        "decay learning rate scheduler.")
         return LearningRateSchedulerLinearDecay, {'base_lr': base_learning_rate, 'total_steps': max_updates,
                                                   'warmup': learning_rate_warmup}
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
