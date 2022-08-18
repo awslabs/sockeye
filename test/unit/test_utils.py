@@ -417,3 +417,14 @@ def test_count_seq_len(sample, count_type, replace_tokens, expected_seq_len):
     ])
 def test_rerank_hypotheses_isometric(hypothesis, hypothesis_score, source, metric, alpha, expected_score):
     assert utils.compute_isometric_score(hypothesis,hypothesis_score,source,metric,alpha) == expected_score
+
+
+@pytest.mark.parametrize('dest,prefix_kv,expected', [
+    ({}, {'a': 1, 'b.c': 2, 'b.d': 3, 'e.f.g': 4},
+     {'a': 1, 'b': {'c': 2, 'd': 3}, 'e': {'f': {'g': 4}}}),
+    ({'a': {}, 'b': {'x': 5}, 'e': {'f': {'y': 6}}}, {'a': 1, 'b.c': 2, 'b.d': 3, 'e.f.g': 4, 'e.z': 5},
+     {'a': 1, 'b': {'x': 5, 'c': 2, 'd': 3}, 'e': {'f': {'y': 6, 'g': 4}, 'z': 5}}),
+])
+def test_update_dict_with_prefix_kv(dest, prefix_kv, expected):
+    utils.update_dict_with_prefix_kv(dest, prefix_kv)
+    assert dest == expected

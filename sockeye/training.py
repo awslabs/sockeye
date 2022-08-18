@@ -32,8 +32,6 @@ import torch.distributed
 try:
     import apex.amp
 except ImportError:
-    # Not an issue because Apex AMP is only used when the trainer setting is
-    # activated. We check that Apex can be imported before creating the trainer.
     pass
 
 from . import average
@@ -49,6 +47,36 @@ from . import vocab
 from .config import Config
 
 logger = logging.getLogger(__name__)
+
+
+class ModelWithLoss(torch.nn.Module):
+    """
+    Wraps a SockeyeModel and its Losses in a single module. The SockeyeModel
+    can be JIT traced (ScriptModule).
+
+    :param model: SockeyeModel (untraced or traced).
+    :param losses: List of Loss objects.
+
+    :return: Tuple of summed loss, list of loss values, and list of number of
+             samples.
+    """
+    def __init__(self, model: torch.nn.Module, losses: List[loss.Loss]) -> None:
+        super().__init__()
+        self.model = model
+        self.losses = losses
+
+    def forward(self, source: torch.Tensor,
+                source_length: torch.Tensor,
+                target: torch.Tensor,
+                target_length: torch.Tensor,
+                labels: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor,
+                                                          List[torch.Tensor],
+                                                          List[torch.Tensor]]:
+        model_outputs = self.model(source, source_length, target, target_length)
+        loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
+        loss_values, num_samples = zip(*loss_outputs)
+        sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
+        return sum_losses, loss_values, num_samples  # type: ignore
 
 
 @dataclass
@@ -149,8 +177,9 @@ class EarlyStoppingTrainer:
                  config: TrainerConfig,
                  optimizer_config: optimizers.OptimizerConfig,
                  sockeye_model: model.SockeyeModel,
-                 training_model: torch.nn.Module,
+                 model_object: torch.nn.Module,
                  optimizer: torch.optim.Optimizer,
+                 lr_scheduler: Optional[lr_scheduler.LearningRateScheduler],
                  zero_grad_kwargs: Dict[str, Any],
                  loss_functions: List[loss.Loss],
                  device: torch.device,
@@ -161,8 +190,9 @@ class EarlyStoppingTrainer:
         self.config = config
         self.optimizer_config = optimizer_config
         self.sockeye_model = sockeye_model
-        self.training_model = training_model
+        self.model_object = model_object
         self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
         self.zero_grad_kwargs = zero_grad_kwargs
         self.loss_functions = loss_functions
         self.device = device
@@ -195,7 +225,7 @@ class EarlyStoppingTrainer:
             if utils.is_primary_worker():
                 self.sockeye_model.save_config(self.config.output_dir)
                 self.sockeye_model.save_version(self.config.output_dir)
-                self.sockeye_model.save_parameters(self.current_params_fname)
+            self._save_params()
             logger.info("Training started.")
 
         tic = time.time()
@@ -277,9 +307,6 @@ class EarlyStoppingTrainer:
         metrics and update the best known parameters accordingly.
         """
         self.state.checkpoint += 1
-        # save parameters and evaluate on validation data
-        if utils.is_primary_worker():
-            self._save_params()
         train_metrics = [lf.metric for lf in self.loss_functions]
         logger.info("Checkpoint [%d]\tUpdates=%d Epoch=%d Samples=%d Time-cost=%.3f Updates/sec=%.3f",
                     self.state.checkpoint, self.state.updates, self.state.epoch,
@@ -294,12 +321,14 @@ class EarlyStoppingTrainer:
         self.state.diverged = self._determine_divergence(val_metrics)
         self._adjust_learning_rate(has_improved)
         if utils.is_primary_worker():
+            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+        self._save_training_state(train_iter)
+        self._save_params()
+        if utils.is_primary_worker():
             if has_improved:
                 self._update_best_params()
                 self._save_optimizer_state(self.best_optimizer_state_fname)
                 self._save_lr_scheduler(self.best_lr_scheduler_fname)
-            self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
-            self._save_training_state(train_iter)
         for metric in train_metrics:
             metric.reset()
         if self.checkpoint_callback:
@@ -316,26 +345,30 @@ class EarlyStoppingTrainer:
         """
         batch = batch.load(device=self.device)
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
-            # Forward
-            outputs = self.training_model(batch.source, batch.source_length, batch.target, batch.target_length)
-            # Loss (scaled by update interval)
-            loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
-            # TODO(mdenkows): We currently give 1/N weight to every batch in the
-            # update, but batches have subtly different sizes (different numbers
-            # of padding tokens). Consider normalizing by relative batch size.
-            loss_values = [v / self.config.update_interval if self.config.update_interval > 1
-                           else v for v, _ in loss_outputs]
-            sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
-        # Backward. PyTorch AMP and Apex AMP use different loss scaling APIs.
+            # Forward + loss
+            sum_losses, loss_values, num_samples = self.model_object(batch.source, batch.source_length,
+                                                                     batch.target, batch.target_length, batch.labels)
+        # Backward
+        if self.config.update_interval > 1:
+            # Scale loss by number of batches per update
+            # TODO(mdenkows): We currently give equal weight to every batch in
+            # every update but batches have subtly different sizes (different
+            # numbers of padding tokens). Consider normalizing by relative batch
+            # size.
+            sum_losses = sum_losses / self.config.update_interval
         if self.using_amp:
+            # PyTorch AMP loss scaling
             sum_losses = self._scaler.scale(sum_losses)
         if self.using_apex_amp:
+            # Apex AMP loss scaling
             with apex.amp.scale_loss(sum_losses, self.optimizer,
                                      delay_unscale=not is_update_batch) as scaled_sum_losses:
+                # Apex AMP backward
                 scaled_sum_losses.backward()
         else:
+            # PyTorch (with/without AMP) backward
             sum_losses.backward()  # type: ignore
-        return loss_outputs
+        return loss_values, num_samples
 
     def _step(self, batch: data_io.Batch) -> bool:
         self.state.batches += 1
@@ -344,34 +377,32 @@ class EarlyStoppingTrainer:
         # the optimizer to update model weights. Every Nth batch is an update
         # batch.
         is_update_batch = self.state.batches % self.config.update_interval == 0
+        self.state.updates += 1 if is_update_batch else 0
 
         # Forward/loss/backward (compute gradients). In distributed mode,
         # workers accumulate gradients locally for N-1 batches (no_sync), then
         # average the accumulated gradients across workers during the update
         # batch.
-        with (self.training_model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
+        with (self.model_object.model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
         else utils.no_context()):
-            loss_outputs = self._forward_backward(batch, is_update_batch)
+            loss_values, num_samples = self._forward_backward(batch, is_update_batch)
 
-        for loss_func, (loss_value, num_samples) in zip(self.loss_functions, loss_outputs):
+        for loss_func, loss_value, num_samples in zip(self.loss_functions, loss_values, num_samples):
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
-        did_grad_step = False
         if is_update_batch:
-            self.state.updates += 1
             if self.using_amp:
                 self._scaler.unscale_(self.optimizer)
             # Clip gradients
             if self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_ABS:
-                torch.nn.utils.clip_grad.clip_grad_value_(self.training_model.parameters(),
+                torch.nn.utils.clip_grad.clip_grad_value_(self.sockeye_model.parameters(),
                                                           self.optimizer_config.gradient_clipping_threshold)
             elif self.optimizer_config.gradient_clipping_type == C.GRADIENT_CLIPPING_TYPE_NORM:
-                torch.nn.utils.clip_grad.clip_grad_norm_(self.training_model.parameters(),
+                torch.nn.utils.clip_grad.clip_grad_norm_(self.sockeye_model.parameters(),
                                                          self.optimizer_config.gradient_clipping_threshold)
             # Set learning rate for current step
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = self.optimizer_config.lr_scheduler(self.state.updates) \
-                    if self.optimizer_config.lr_scheduler is not None else self.optimizer_config.lr
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
             # Update weights and reset gradients
             if self.using_amp:
                 self._scaler.step(self.optimizer)
@@ -379,11 +410,10 @@ class EarlyStoppingTrainer:
             else:
                 self.optimizer.step()
             self.optimizer.zero_grad(**self.zero_grad_kwargs)
-            did_grad_step = True
 
         self._speedometer(self.state.epoch, self.state.batches,
                           self.state.updates, batch.samples, batch.tokens, (lf.metric for lf in self.loss_functions))
-        return did_grad_step
+        return is_update_batch
 
     def _evaluate(self, checkpoint: int, data_iter,
                   checkpoint_decoder: Optional[checkpoint_decoder.CheckpointDecoder]) -> List[loss.LossMetric]:
@@ -401,8 +431,9 @@ class EarlyStoppingTrainer:
         for batch in data_iter:
             batch = batch.load(device=self.device)
             with torch.inference_mode():
-                # Forward: use sockeye_model because (traced) training_model
-                # doesn't support eval mode (still runs dropout, etc.)
+                # Forward: run SockeyeModel directly. The traced model may not
+                # fully support switching between train and eval modes depending
+                # how much Python logic is used in the various submodules.
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
@@ -410,21 +441,21 @@ class EarlyStoppingTrainer:
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
                 loss_metric.update(loss_value.item(), num_samples.item())
 
-        # Primary worker optionally runs the checkpoint decoder
-        decoder_metrics = {}  # type: Dict[str, float]
-        if utils.is_primary_worker() and checkpoint_decoder is not None:
-            output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
-            decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
-        # Broadcast decoder metrics (if any) from primary worker to secondary
-        # workers
+        if utils.is_primary_worker():
+            # Primary worker runs checkpoint decoder
+            decoder_metrics = {}  # type: Dict[str, float]
+            if checkpoint_decoder is not None:
+                output_name = os.path.join(self.config.output_dir, C.DECODE_OUT_NAME.format(checkpoint=checkpoint))
+                decoder_metrics = checkpoint_decoder.decode_and_evaluate(output_name=output_name)
+            # Add decoder metrics (if any) to validation metrics
+            for metric_name, metric_value in decoder_metrics.items():
+                assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
+                metric = loss.LossMetric(name=metric_name)
+                metric.update(metric_value, num_samples=1)
+                val_metrics.append(metric)
         if utils.is_distributed():
-            decoder_metrics = utils.broadcast_object(decoder_metrics)
-        # Add decoder metrics (if any) to validation metrics
-        for metric_name, metric_value in decoder_metrics.items():
-            assert metric_name not in val_metrics, "Duplicate validation metric %s" % metric_name
-            metric = loss.LossMetric(name=metric_name)
-            metric.update(metric_value, num_samples=1)
-            val_metrics.append(metric)
+            # Primary worker's evaluation is authoritative
+            val_metrics = utils.broadcast_object(val_metrics)
 
         logger.info('Checkpoint [%d]\t%s',
                     self.state.checkpoint, "\t".join("Validation-%s" % str(lm) for lm in val_metrics))
@@ -445,21 +476,9 @@ class EarlyStoppingTrainer:
         for val_metric in val_metrics:
             if val_metric.name == self.config.early_stopping_metric:
                 value = val_metric.get()
-                # In distributed mode, the primary worker makes an authoritative
-                # check of whether the metric value has improved and broadcasts
-                # the result to secondary workers. Non-determinism in the order
-                # of GPU operations can lead to slight numeric variations across
-                # workers, causing potential desync if each worker makes its own
-                # check for key training decisions (reducing learning rate,
-                # early stopping, etc.).
-                if utils.is_primary_worker():
-                    # Authoritative check
-                    value_is_better = utils.metric_value_is_better(value,
-                                                                   self.state.best_metric,
-                                                                   self.config.early_stopping_metric)
-                if utils.is_distributed():
-                    # Broadcast result
-                    value_is_better = utils.broadcast_object(value_is_better)
+                value_is_better = utils.metric_value_is_better(value,
+                                                               self.state.best_metric,
+                                                               self.config.early_stopping_metric)
                 if value_is_better:
                     logger.info("Validation-%s improved to %f (delta=%f).", self.config.early_stopping_metric,
                                 value, abs(value - self.state.best_metric))
@@ -543,11 +562,10 @@ class EarlyStoppingTrainer:
         """
         Adjusts the optimizer learning rate if required and logs it.
         """
-        scheduler = self.optimizer_config.lr_scheduler
         lr = self.optimizer_config.lr
-        if scheduler is not None:
-            if issubclass(type(scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
-                lr_adjusted = scheduler.new_evaluation_result(has_improved)  # type: ignore
+        if self.lr_scheduler is not None:
+            if issubclass(type(self.lr_scheduler), lr_scheduler.AdaptiveLearningRateScheduler):
+                lr_adjusted = self.lr_scheduler.new_evaluation_result(has_improved)  # type: ignore
             else:
                 lr_adjusted = False
             if lr_adjusted and not has_improved and not self.config.no_reload_on_learning_rate_reduce:
@@ -557,7 +575,8 @@ class EarlyStoppingTrainer:
                     self.sockeye_model.load_parameters(filename=self.best_params_fname, device=self.device)
                 if os.path.exists(self.best_optimizer_state_fname):
                     self._load_optimizer_state(self.best_optimizer_state_fname)
-            lr = scheduler.lr
+            # Assume same learning rate for all param groups
+            lr = self.lr_scheduler.get_last_lr()[0]
         logger.info("Checkpoint [%d]\tLearning-rate=%.6f", self.state.checkpoint, lr)
 
     def _write_and_log_metrics(self,
@@ -568,8 +587,8 @@ class EarlyStoppingTrainer:
         Writes all metrics to the metrics file, optionally logs to tensorboard, and sends metrics to custom logger.
         """
         data = {"epoch": self.state.epoch,
-                "learning-rate": (self.optimizer_config.lr if self.optimizer_config.lr_scheduler is None
-                                  else self.optimizer_config.lr_scheduler.lr),
+                "learning-rate": (self.optimizer_config.lr if self.lr_scheduler is None
+                                  else self.lr_scheduler.get_last_lr()[0]),
                 "time-elapsed": self.state.time_elapsed,
                 "max-gpu-memory": torch.cuda.max_memory_allocated(self.device),
                 "converged": self.state.converged,
@@ -600,13 +619,15 @@ class EarlyStoppingTrainer:
 
     def _save_params(self):
         """
-        Saves model parameters at current checkpoint and optionally cleans up older parameter files to save disk space.
+        Saves model parameters at current checkpoint and optionally cleans up
+        older parameter files to save disk space.
         """
-        self.sockeye_model.save_parameters(self.current_params_fname)
-        cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
-                             self.state.best_checkpoint, self.config.keep_initializations,
-                             self.config.max_params_files_to_cache, self.config.cache_metric,
-                             self.config.cache_strategy)
+        if utils.is_primary_worker():
+            self.sockeye_model.save_parameters(self.current_params_fname)
+            cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
+                                 self.state.best_checkpoint, self.config.keep_initializations,
+                                 self.config.max_params_files_to_cache, self.config.cache_metric,
+                                 self.config.cache_strategy)
 
     def _save_optimizer_state(self, fname):
         torch.save(self.optimizer.state_dict(), fname)
@@ -617,16 +638,14 @@ class EarlyStoppingTrainer:
         logger.info('Loaded optimizer state from "%s"', fname)
 
     def _save_lr_scheduler(self, fname):
-        if self.optimizer_config.lr_scheduler is not None:
-            with open(fname, "wb") as fp:
-                pickle.dump(self.optimizer_config.lr_scheduler, fp)
-            logger.info("Saved '%s' to '%s'", self.optimizer_config.lr_scheduler, fname)
+        if self.lr_scheduler is not None:
+            torch.save(self.lr_scheduler.state_dict(), fname)
+            logger.info("Saved '%s' to '%s'", self.lr_scheduler, fname)
 
     def _load_lr_scheduler(self, fname):
-        if os.path.exists(fname):
-            with open(fname, "rb") as fp:
-                self.optimizer_config.lr_scheduler = pickle.load(fp)
-            logger.info("Loaded '%s' from '%s'", self.optimizer_config.lr_scheduler, fname)
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.load_state_dict(torch.load(fname))
+            logger.info("Loaded '%s' from '%s'", self.lr_scheduler, fname)
 
     def _save_training_state(self, train_iter: data_io.BaseParallelSampleIter):
         """
@@ -634,38 +653,47 @@ class EarlyStoppingTrainer:
         """
         # Create temporary directory for storing the state of the optimization process
         training_state_dirname = os.path.join(self.config.output_dir, C.TRAINING_STATE_TEMP_DIRNAME)
-        if not os.path.exists(training_state_dirname):
+        if utils.is_primary_worker() and not os.path.exists(training_state_dirname):
             os.mkdir(training_state_dirname)
+        if utils.is_distributed():
+            torch.distributed.barrier()
 
-        # (1) Parameters: link current file
-        params_base_fname = C.PARAMS_NAME % self.state.checkpoint
-        params_file = os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
-        if os.path.exists(params_file):
-            os.unlink(params_file)
-        os.symlink(os.path.join("..", params_base_fname), params_file)
+        if utils.is_primary_worker():
+            # Otherwise, only the primary worker saves the following.
+            # (1) Parameters: link current file
+            params_base_fname = C.PARAMS_NAME % self.state.checkpoint
+            params_file = os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
+            if os.path.exists(params_file):
+                os.unlink(params_file)
+            os.symlink(os.path.join("..", params_base_fname), params_file)
 
-        # (2) Optimizer state
-        opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATE_LAST)
-        self._save_optimizer_state(opt_state_fname)
+            # (2) Optimizer state
+            opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATE_LAST)
+            self._save_optimizer_state(opt_state_fname)
 
-        # (3) Data iterator
+            # (3) lr_scheduler
+            lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
+            self._save_lr_scheduler(lr_scheduler_fname)
+
+        # Secondary workers are done. Only the primary worker runs everything
+        # beyond this point.
+        if not utils.is_primary_worker():
+            return
+
+        # (4) Data iterator
         train_iter.save_state(os.path.join(training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
-        # (4) Random generators
+        # (5) Random generators
         # RNG states: python, numpy, torch
         with open(os.path.join(training_state_dirname, C.RNG_STATE_NAME), "wb") as fp:
             pickle.dump(random.getstate(), fp)
             pickle.dump(np.random.get_state(), fp)
             pickle.dump(torch.random.get_rng_state(), fp)
 
-        # (5) Training state
+        # (6) Training state
         self.state.save(os.path.join(training_state_dirname, C.TRAINING_STATE_NAME))
 
-        # (5.5) lr_scheduler
-        lr_scheduler_fname = os.path.join(training_state_dirname, C.LR_SCHEDULER_LAST)
-        self._save_lr_scheduler(lr_scheduler_fname)
-
-        # (6) AMP grad scaler state
+        # (7) AMP grad scaler state
         if self.using_amp:
             torch.save(self._scaler.state_dict(), os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME))
         if self.using_apex_amp:
@@ -701,24 +729,24 @@ class EarlyStoppingTrainer:
         opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATE_LAST)
         self._load_optimizer_state(opt_state_fname)
 
-        # (3) Data Iterator
+        # (3) lr_scheduler
+        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
+        self._load_lr_scheduler(lr_scheduler_fname)
+
+        # (4) Data Iterator
         train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
 
-        # (4) Random generators
+        # (5) Random generators
         # RNG states: python, numpy, torch
         with open(os.path.join(self.training_state_dirname, C.RNG_STATE_NAME), "rb") as fp:
             random.setstate(pickle.load(fp))
             np.random.set_state(pickle.load(fp))
             torch.random.set_rng_state(pickle.load(fp))
 
-        # (5) Training state
+        # (6) Training state
         self.state = TrainState.load(os.path.join(self.training_state_dirname, C.TRAINING_STATE_NAME))
 
-        # (5.5) lr_scheduler
-        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
-        self._load_lr_scheduler(lr_scheduler_fname)
-
-        # (6) AMP grad scaler state
+        # (7) AMP grad scaler state
         if self.using_amp:
             self._scaler.load_state_dict(
                 torch.load(os.path.join(self.training_state_dirname, C.GRAD_SCALER_STATE_NAME)))

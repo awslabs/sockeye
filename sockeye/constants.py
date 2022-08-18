@@ -302,7 +302,11 @@ LARGE_VALUES = {
     # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP32: LARGE_POSITIVE_VALUE,
     np.float32: LARGE_POSITIVE_VALUE,
-    pt.float32: LARGE_POSITIVE_VALUE
+    pt.float32: LARGE_POSITIVE_VALUE,
+
+    # Rounds to 1.0014e+08
+    DTYPE_BF16: LARGE_POSITIVE_VALUE,
+    pt.bfloat16: LARGE_POSITIVE_VALUE,
 }
 
 # lhuc application points

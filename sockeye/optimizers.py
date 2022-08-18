@@ -13,13 +13,13 @@
 
 from dataclasses import dataclass
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Type
 
 import torch
 
 from . import config
 from . import constants as C
-from .lr_scheduler import LearningRateScheduler
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -44,18 +44,16 @@ class OptimizerConfig(config.Config):
     gradient_clipping_threshold: Optional[float] = None
     update_interval: int = 1
 
-    lr_scheduler: Optional[LearningRateScheduler] = None
 
-
-def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torch.optim.Optimizer, Dict[str, Any]]:
+def get_optimizer(config: OptimizerConfig) -> Tuple[Type[torch.optim.Optimizer], Dict[str, Any], Dict[str, Any]]:
     """
-    Create an optimizer for a Sockeye model using the specified config settings.
+    Get optimizer class, kwargs, and `zero_grad()` kwargs using the specified
+    config settings.
 
-    :param model: Sockeye model.
     :param config: Optimizer config.
 
-    :return: Tuple of an Optimizer and the kwargs dict for calling that
-             optimizer's `zero_grad()` method.
+    :return: Tuple of Optimizer class, its kwargs dictionary, and the kwargs
+             dictionary for calling that optimizer's `zero_grad()` method.
     """
     adam_impl = torch.optim.Adam
     sgd_impl = torch.optim.SGD
@@ -63,6 +61,7 @@ def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torc
     # https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html
     zero_grad_kwargs = {'set_to_none': True}
 
+    # Use Apex's fused optimizers if Apex is available
     if config.running_on_gpu:
         try:
             from apex.optimizers import FusedAdam, FusedSGD
@@ -78,9 +77,9 @@ def get_optimizer(model: torch.nn.Module, config: OptimizerConfig) -> Tuple[torc
                            'faster GPU training: https://github.com/NVIDIA/apex')
 
     if config.name == C.OPTIMIZER_ADAM:
-        return adam_impl(model.parameters(), lr=config.lr, betas=config.betas, eps=config.eps,
-                         weight_decay=config.weight_decay), zero_grad_kwargs
+        return adam_impl, {'lr': config.lr, 'betas':config.betas, 'eps': config.eps,
+                           'weight_decay': config.weight_decay}, zero_grad_kwargs
     elif config.name == C.OPTIMIZER_SGD:
-        return sgd_impl(model.parameters(), lr=config.lr, momentum=config.momentum,
-                        weight_decay=config.weight_decay), zero_grad_kwargs
+        return sgd_impl, {'lr': config.lr, 'momentum': config.momentum,
+                          'weight_decay': config.weight_decay}, zero_grad_kwargs
     raise ValueError(f'Unknown optimizer: {config.name}')

@@ -20,6 +20,7 @@ from . import initial_setup
 initial_setup.handle_env_cli_arg()
 
 import argparse
+import gc
 import logging
 import os
 import shutil
@@ -755,14 +756,6 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
     else:
         gradient_clipping_type = args.gradient_clipping_type
 
-    lr_sched = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
-                                             args.initial_learning_rate,
-                                             args.learning_rate_t_scale,
-                                             args.learning_rate_reduce_factor,
-                                             args.learning_rate_reduce_num_not_improved,
-                                             args.learning_rate_warmup,
-                                             args.max_updates)
-
     config = optimizers.OptimizerConfig(name=args.optimizer,
                                         running_on_gpu=not args.use_cpu,
                                         lr=args.initial_learning_rate,
@@ -771,8 +764,7 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
                                         weight_decay=args.weight_decay,
                                         momentum=args.momentum,
                                         gradient_clipping_type=gradient_clipping_type,
-                                        gradient_clipping_threshold=gradient_clipping_threshold,
-                                        lr_scheduler=lr_sched)
+                                        gradient_clipping_threshold=gradient_clipping_threshold)
 
     num_workers = 1 if not utils.is_distributed() else torch.distributed.get_world_size()
     effective_batch_size = args.batch_size * args.update_interval * num_workers
@@ -1009,7 +1001,18 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     utils.log_parameters(sockeye_model)
 
-    optimizer, zero_grad_kwargs = optimizers.get_optimizer(sockeye_model, optimizer_config)
+    losses = create_losses(args, all_num_classes=target_vocab_sizes)
+
+    optimizer_class, optimizer_kwargs, zero_grad_kwargs = optimizers.get_optimizer(optimizer_config)
+    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs)
+
+    lr_scheduler_class, lr_scheduler_kwargs = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
+                                                                            args.initial_learning_rate,
+                                                                            args.learning_rate_reduce_factor,
+                                                                            args.learning_rate_reduce_num_not_improved,
+                                                                            args.learning_rate_warmup,
+                                                                            args.max_updates)
+    _lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs) if lr_scheduler_class is not None else None
 
     # This starts as a reference to the original Sockeye model. It is
     # sequentially transformed/wrapped to produce the model instance used for
@@ -1046,14 +1049,16 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                    device_ids=None if args.use_cpu else [device],
                                                                    output_device=None if args.use_cpu else device)
 
-    losses = create_losses(args, all_num_classes=target_vocab_sizes)
+    # Final step: wrap training model and losses in a single module
+    model_object = training.ModelWithLoss(model=training_model, losses=losses)  # type: torch.nn.Module
 
     trainer = training.EarlyStoppingTrainer(
         config=trainer_config,
         optimizer_config=optimizer_config,
         sockeye_model=sockeye_model,
-        training_model=training_model,
+        model_object=model_object,
         optimizer=optimizer,
+        lr_scheduler=_lr_scheduler,
         zero_grad_kwargs=zero_grad_kwargs,
         loss_functions=losses,
         device=device,
@@ -1066,6 +1071,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     checkpoint_decoder = None
     if utils.is_primary_worker():
         checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
+
+    # Clean up GPU and CPU memory used during initialization
+    torch.cuda.empty_cache()
+    gc.collect()
 
     training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
                                  checkpoint_decoder=checkpoint_decoder)
