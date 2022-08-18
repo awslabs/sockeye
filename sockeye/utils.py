@@ -610,6 +610,7 @@ def update_dict(dest: Dict[Any, Any], source: Dict[Any, Any]):
         else:
             dest[key] = source[key]
 
+
 def update_dict_with_prefix_kv(dest: Dict[Any, Any], prefix_kv: Dict[Any, Any]):
     """
     Update a dictionary in place with prefix key-value dictionary.
