@@ -10,6 +10,7 @@
 # an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
+
 import argparse
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -19,152 +20,120 @@ import math
 import numpy as np
 import os
 import random
-from sockeye import config, utils, constants as C
-from sockeye.log import setup_main_logger
 from typing import Dict, Iterable, List, Optional, Tuple, Callable
 
-#from torch import long
-#from itertools import chain, islice
+from . import arguments
+from sockeye import config, utils, constants as C
+from sockeye.log import setup_main_logger
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class KNNConfig(config.Config):
     index_size: int
     dimension: int
-    data_type: str  # must be primitive type
-    index_type: str  # must be primitive type
+    state_data_type: np.dtype
+    word_data_type: np.dtype
+    index_type: str
     train_data_size: int
 
-def get_numpy_dtype(config):
-    if config.data_type == "float16":
-        return np.float16
-    if config.data_type == "float32":
-        return np.float32
-    if config.data_type == "int16":
-        return np.int16
-    raise NotImplementedError
 
-def train_data_sampling(keys, train_data_size: int):
-    # Sampling the memmap file is very slow.
-    # Hard code to take from the top for now.
-    # Might implement sampling in the future
-    return keys[:train_data_size]
+class FaissIndexBuilder:
 
-def get_faiss_index(config: KNNConfig, keys: np.array):
-    # Initialize faiss index
-    index_size = config.index_size
-    index = faiss.index_factory(config.dimension, config.index_type)
+    def __init__(self, config: KNNConfig, use_gpu: bool = False, device_id: int = 0):
+        self.config = config
+        self.use_gpu = use_gpu
+        self.device_id = device_id
 
-    # Train if needed
-    if not index.is_trained:
-        logger.info(f"index.is_trained: {index.is_trained}")
-        logger.info(f"Train index: sampling input keys ...")
-        train_data = train_data_sampling(keys, config.train_data_size)
-        logger.info(f"Training size: {train_data.shape[0]}")
-        sample = train_data.astype(np.float32)
-        logger.info(f"Train index: sampling input keys ... completed.")
-        logger.info(f"Train index: training ...")
-        index.train(sample)
-        logger.info(f"Train index: training ... completed.")
+    # def built_index_from_dump(self, keys: np.array, dim: int, signature: str, train_sample: np.memmap = None, block_size: int = 1000000):
+    def init_faiss_index(self, train_sample: Optional[np.memmap] = None):
+        index = faiss.index_factory(self.config.dimension, self.config.index_type)
+        if self.use_gpu is True:
+            res = faiss.StandardGpuResources()
+            co = faiss.GpuClonerOptions()
+            index = faiss.index_cpu_to_gpu(res, self.device_id, index, co)
 
-    # Add keys to faiss index
-    logger.info(f"index.is_trained: {index.is_trained}")
-    utils.check_condition(index.is_trained, f"Index must be trained before adding keys!")
-    logger.info(f"Add keys to the trained index ... ")
-    chunk_size = 1024 * 1024
-    chunk_count = math.ceil(index_size / chunk_size)
-    for chunk_num in range(chunk_count):
-        chunk_start = chunk_num * chunk_size
-        index.add(keys[chunk_start : chunk_start + chunk_size].astype(np.float32)) # add vectors to the index
-        logger.info(f"Added chunk [{chunk_num + 1} / {chunk_count}].")
-    logger.info(f"Add keys to the trained index ... completed.")
-    logger.info(f"index.ntotal: {index.ntotal}")
-    return index
+        if not index.is_trained and train_sample is not None:
+            index.train(train_sample.astype(np.float32))  # unfortunately, faiss index only supports float32
+        elif not index.is_trained:
+            logger.error("Index needs training but no training sample is passed.")
 
-def build_from_path(input_file: str, output_file: str, config: KNNConfig):
-    """
-    :param input_file: Path to memmap file that stores the keys to be indexed.
-    :param output_file: Path to the output index file.
-    :param config: The KNNConfig object.
-    :param index_type: The index type.
-    :return: The faiss index object and the keys' top 5 vectors
-    """
-    index_size = config.index_size
-    dimention = config.dimension
-    data_type = get_numpy_dtype(config)
-    keys = np.memmap(input_file, dtype=data_type, mode='r', shape=(index_size, dimention)) # load key vectors from the memmap file. Faiss index supports np.float32 only.
-    index = get_faiss_index(config, keys)
-    faiss.write_index(index, output_file) # Dump index to output file
-    return index, keys[:5]
+        return index
 
+    def add_items(self, index: faiss.Index, keys: np.array):
+        item_count, key_dim = keys.shape
+        assert key_dim == self.config.dimension
 
-def get_index_file_path(input_file: str) -> str:
-    return f"{input_file}.knn.idx"
+        index.add(keys.astype(np.float32))  # unfortunately, faiss index only supports float32
 
+    def block_add_items(self, index: faiss.Index, keys: np.array, block_size: int = 1024*1024):
+        item_count, key_dim = keys.shape
+        assert key_dim == self.config.dimension
 
-def build_index(args: argparse.Namespace):
-    input_file = args.input_file
-    utils.check_condition(os.path.exists(input_file), f"Input file {input_file} not found!")
-    config_file = args.config_file
-    utils.check_condition(os.path.exists(input_file), f"Config file {config_file} not found!")
+        n_blocks = item_count // block_size
+        for i in range(n_blocks):
+            logger.info("adding block no.{0}".format(i))
+            start = block_size * i
+            end = block_size * (i + 1)
+            index.add(keys[start:end].astype(np.float32))  # unfortunately, faiss index only supports float32
 
-    index_file = get_index_file_path(input_file)
-    setup_main_logger(file_logging=not args.no_logfile, console=not args.quiet,
-                      path="%s.%s" % (index_file, C.LOG_NAME))
-    logger.info(f"Build index for: {input_file}")
-    knn_config = KNNConfig.load(config_file)
-    logger.info(f"Config: {knn_config}")
+        if block_size * n_blocks < item_count:
+            start = block_size * n_blocks
+            index.add(keys[start:item_count].astype(np.float32))  # unfortunately, faiss index only supports float32
 
-    index, top_5_keys = build_from_path(input_file, index_file, knn_config)
-    logger.info(f"Index file is saved to: {index_file}.")
-    return index, top_5_keys, index_file
+    @staticmethod
+    def build_train_sample(keys: np.array, sample_size: int):
+        item_count, _ = keys.shape
+        assert 0 < sample_size <= item_count
 
+        if sample_size < item_count:
+            train_sample_idx = np.random.choice(np.arange(item_count), size=[sample_size], replace=False)
+            train_sample = keys[train_sample_idx]
+        else:
+            train_sample = keys
 
-def load_from_path(index_file: str):
-    """
-    :param index_file: Path to index file.
-    :return: The faiss index object.
-    """
-    index = faiss.read_index(index_file)
-    return index
+        return train_sample
 
+    def build_faiss_index(self, keys: np.array, train_sample: Optional[np.memmap] = None):
+        if train_sample is None and self.config.train_data_size > 0:
+            train_sample = FaissIndexBuilder.build_train_sample(keys, self.config.train_data_size)
+        
+        index = self.init_faiss_index(train_sample)
+        self.block_add_items(index, keys)
 
-def search_index(index, query_keys: np.ndarray, k: int) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    :param index: The faiss index object.
-    :param query_keys: The array of keys to be queried.
-    :param k: The number of nearest neighbors to be returned.
-    :return: Both Tuple[0] and Tuple[1] has the same shape(len(query_keys), k). 
-    Tuple[0] contains distance of each returned neighbor. Tuple[1] contains the index of each returned neighbor.
-    """
-    return index.search(query_keys, k)
-
-
-def index_sanity_check(index_file: str, query_keys, validate_col, expected_indices, expected_distances):
-    index = load_from_path(index_file)
-    distances, indices = search_index(index, query_keys.astype(np.float32), 4)
-    logger.info(f"Indices:\n {indices}")
-    logger.info(f"Distances:\n {distances}")
-    actual_indices = indices[:,validate_col]
-    if( not (actual_indices==np.array(expected_indices)).all()):
-        raise Exception(f"Expected indices {expected_indices} but got {actual_indices}.")
-    # Distances depends on index type and might not be exactly matches the expected value
-    # Disable the validation for now
-    #actual_distances = distances[:,validate_col]
-    #if( not (actual_distances==np.array(expected_distances)).all()):
-    #    raise Exception(f"Expected indices {expected_distances} but got {actual_distances}.")
-    logger.info(f"Sanity check succeeded for index: {index_file}.")
+        return index
 
 
 def main():
-    from . import arguments
-    params = argparse.ArgumentParser(description='CLI to build knn index.')
+    params = arguments.ConfigArgumentParser(description='CLI to build knn index.')
     arguments.add_build_knn_index_args(params)
     arguments.add_logging_args(params)
+    arguments.add_device_args(params)
     args = params.parse_args()
-    index, top_5_keys, index_file = build_index(args)
-    index_sanity_check(index_file, top_5_keys, 0, [0,1,2,3,4], [0,0,0,0,0])
+
+    utils.check_condition(os.path.exists(args.input_file), f"Input file {args.input_file} not found!")
+    utils.check_condition(os.path.exists(args.config_file), f"Config file {args.config_file} not found!")
+
+    setup_main_logger(file_logging=False,
+                      console=not args.quiet,
+                      level=args.loglevel)  # pylint: disable=no-member
+    utils.log_basic_info(args)
+
+    config = KNNConfig.load(args.config_file)
+    keys = np.memmap(args.input_file, dtype=config.state_data_type, mode='r', shape=(config.index, config.dimension))
+    builder = FaissIndexBuilder(config, args.use_gpu, args.device_id)
+    train_sample = None
+    if args.train_sample_input_file is not None:
+        train_sample = np.memmap(args.train_sample_input_file, dtype=config.state_data_type, mode='r', shape=(config.index, config.dimension))
+    index = builder.build_faiss_index(keys, train_sample)
+
+    if args.use_gpu:
+        index_cpu = faiss.index_gpu_to_cpu(index)
+    else:
+        index_cpu = index
+
+    faiss.write_index(index_cpu, args.output_file)
 
 
 if __name__ == "__main__":

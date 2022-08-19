@@ -1133,7 +1133,7 @@ def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
-    add_knn_args(params)  # for kNN MT
+    add_knn_mt_args(params)  # for kNN MT
 
 
 def add_score_cli_args(params):
@@ -1458,7 +1458,7 @@ def add_build_vocab_args(params):
     add_process_pool_args(params)
 
 
-def add_knn_args(params):
+def add_knn_mt_args(params):
     knn_params = params.add_argument_group("kNN MT parameters")
 
     knn_params.add_argument('--knn-cache-size',
@@ -1471,19 +1471,28 @@ def add_knn_args(params):
 
     knn_params.add_argument('--knn-index',
                             type=str,
-                            help='Optionally use a KNN index during inference to retrieve similar hidden states and corresponding target tokens.',
+                            help='Optionally use a KNN index during inference to '
+                                 'retrieve similar hidden states and corresponding target tokens.',
                             default=None)
 
 
 def add_build_knn_index_args(params):
     params.add_argument('-i', '--input-file',
                         required=True,
-                        default=None,
                         type=str,
-                        help='The input file path.')
+                        help='The path to the dumped decoder states.')
     params.add_argument('-c', '--config-file',
                         required=True,
-                        default=512,
-                        type=str,
                         help='The config yaml file path.')
 
+                        help='The path to the config yaml file. '
+                             '(If the state dump CLI was used, the yaml fields should have been auto-generated.)')
+    params.add_argument('-o', '--output-file',
+                        required=True,
+                        type=str,
+                        help='The path to the dumped index.')
+    params.add_argument('-i', '--train-sample-input-file',
+                        default=None,
+                        type=str,
+                        help='An optional field to reuse an already-built training data sample for the index. '
+                             'Otherwise, a (slow) sampling step might needs to be run.')

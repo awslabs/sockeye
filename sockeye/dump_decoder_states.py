@@ -183,28 +183,7 @@ class StateDumper:
         config.save(self.dump_prefix + ".conf.yaml")
 
 
-def main():
-    params = arguments.ConfigArgumentParser(description='Score data with an existing model.')
-    arguments.add_state_dumping_args(params)
-    args = params.parse_args()
-    check_condition(args.batch_type == C.BATCH_TYPE_SENTENCE, "Batching by number of words is not supported")
-
-    setup_main_logger(file_logging=False,
-                      console=not args.quiet,
-                      level=args.loglevel)  # pylint: disable=no-member
-
-    utils.log_basic_info(args)
-
-    dump(args)
-
-
 def dump(args: argparse.Namespace):
-    setup_main_logger(file_logging=False,
-                      console=not args.quiet,
-                      level=args.loglevel)  # pylint: disable=no-member
-
-    utils.log_basic_info(args)
-
     use_cpu = args.use_cpu
     if not pt.cuda.is_available():
         logger.info("CUDA not available, using cpu")
@@ -235,6 +214,21 @@ def dump(args: argparse.Namespace):
     dumper.init_dump_file(dumper.dump_size)  # TODO: assuming targets[0] is the text file, the rest are factors
     dumper.build_states_and_dump(sources, targets, args.batch_size)
     dumper.save_config()
+
+
+def main():
+    params = arguments.ConfigArgumentParser(description='CLI to build a state dump.')
+    arguments.add_state_dumping_args(params)
+    args = params.parse_args()
+    check_condition(args.batch_type == C.BATCH_TYPE_SENTENCE, "Batching by number of words is not supported")
+
+    setup_main_logger(file_logging=False,
+                      console=not args.quiet,
+                      level=args.loglevel)  # pylint: disable=no-member
+
+    utils.log_basic_info(args)
+
+    dump(args)
 
 
 if __name__ == "__main__":
