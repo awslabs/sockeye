@@ -76,9 +76,10 @@ class ModelWithLoss(torch.nn.Module):
                                                           List[torch.Tensor],
                                                           List[torch.Tensor]]:
         model_outputs = self.model(source, source_length, target, target_length)
-        # TODO: Guarantee model outputs are float32 before computing losses.
-        # Computing losses in float16 can lead to overflow.
-        # model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
+        if utils.using_deepspeed():
+            # Guarantee model outputs are float32 before computing losses.
+            # Computing losses in DeepSpeed float16 mode can lead to overflow.
+            model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
         loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
         sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
@@ -452,6 +453,8 @@ class EarlyStoppingTrainer:
                 # fully support switching between train and eval modes depending
                 # how much Python logic is used in the various submodules.
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
+                # Guarantee model outputs are float32 before computing losses
+                outputs = {name: output.to(torch.float32) for (name, output) in outputs.items()}
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
                 # Update validation metrics for batch
