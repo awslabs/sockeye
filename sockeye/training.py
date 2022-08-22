@@ -399,7 +399,7 @@ class EarlyStoppingTrainer:
         # workers accumulate gradients locally for N-1 batches (no_sync), then
         # average the accumulated gradients across workers during the update
         # batch.
-        with (self.model_object.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
+        with (self.model_object.model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
         and not utils.using_deepspeed() else utils.no_context()):
             loss_values, num_samples = self._forward_backward(batch, is_update_batch)
 
