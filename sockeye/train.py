@@ -941,7 +941,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # prerequisite for all inter-process communication.
 
     # The DeepSpeed launcher automatically adds `--local_rank=N` to the CLI args
-    # when launching processes. When this arg specified, run in DeepSpeed mode.
+    # when launching processes. When this arg is specified, run in DeepSpeed
+    # mode.
     if args.local_rank is not None:
         utils.init_deepspeed()
         check_condition(args.local_rank == utils.get_local_rank(),

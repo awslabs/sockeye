@@ -681,7 +681,7 @@ _using_deepspeed = False
 def init_deepspeed():
     """
     Make sure all of the DeepSpeed modules we use can be imported, initialize
-    DeepSpeed, and set the global variables that track initialization.
+    DeepSpeed, and set the global variable that tracks initialization.
 
     """
     global _using_deepspeed
