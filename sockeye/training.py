@@ -700,8 +700,8 @@ class EarlyStoppingTrainer:
             # DeepSpeed saves parameters, optimizer state, and learning rate
             # scheduler in a single checkpoint file. All workers need to call
             # `save_checkpoint()`.
-            self.model_object.save_checkpoint(os.path.join(training_state_dirname,
-                                                           C.TRAINING_STATE_DEEPSPEED))  # type: ignore
+            self.model_object.save_checkpoint(os.path.join(training_state_dirname,  # type: ignore
+                                                           C.TRAINING_STATE_DEEPSPEED))
         elif utils.is_primary_worker():
             # Otherwise, only the primary worker saves the following.
             # (1) Parameters: link current file
@@ -768,8 +768,8 @@ class EarlyStoppingTrainer:
         if utils.using_deepspeed():
             # DeepSpeed loads parameters, optimizer state, and learning rate
             # scheduler from a single checkpoint file.
-            _, _ = self.model_object.load_checkpoint(os.path.join(self.training_state_dirname,
-                                                                  C.TRAINING_STATE_DEEPSPEED))  # type: ignore
+            _, _ = self.model_object.load_checkpoint(os.path.join(self.training_state_dirname,  # type: ignore
+                                                                  C.TRAINING_STATE_DEEPSPEED))
         else:
             # (1) Parameters
             params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
