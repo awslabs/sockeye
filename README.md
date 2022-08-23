@@ -92,9 +92,14 @@ Sockeye has been used for both academic and industrial research. A list of known
 If you know more, please let us know or submit a pull request (last updated: May 2022).
 
 ### 2022
+* Domhan, Tobias, Eva Hasler, Ke Tran, Sony Trenous, Bill Byrne and Felix Hieber. "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation". Proceedings of NAACL-HLT (2022)
+* Fischer, Lukas, Patricia Scheurer, Raphael Schwitter, Martin Volk. "Machine Translation of 16th Century Letters from Latin to German". Workshop on Language Technologies for Historical and Ancient Languages (2022).
+* Knowles, Rebecca, Patrick Littell. "Translation Memories as Baselines for Low-Resource Machine Translation". Proceedings of LREC (2022)
+* McNamee, Paul, Kevin Duh. "The Multilingual Microblog Translation Corpus: Improving and Evaluating Translation of User-Generated Text". Proceedings of LREC (2022)
+* Nadejde Maria, Anna Currey, Benjamin Hsu, Xing Niu, Marcello Federico, Georgiana Dinu. "CoCoA-MT: A Dataset and Benchmark for Contrastive Controlled MT with Application to Formality". Proceedings of NAACL (2022).
 * Weller-Di Marco, Marion, Matthias Huck, Alexander Fraser. "Modeling Target-Side Morphology in Neural Machine Translation: A Comparison of Strategies
 ". arXiv preprint arXiv:2203.13550 (2022)
-* Tobias Domhan, Eva Hasler, Ke Tran, Sony Trenous, Bill Byrne and Felix Hieber. "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation". Proceedings of NAACL-HLT (2022)
+
 
 ### 2021
 
