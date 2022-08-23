@@ -686,8 +686,8 @@ def init_deepspeed():
     """
     global _using_deepspeed
     try:
-        import deepspeed
-        import deepspeed.utils.zero_to_fp32
+        import deepspeed  # pylint: disable=E0401
+        import deepspeed.utils.zero_to_fp32  # pylint: disable=E0401
         deepspeed.init_distributed()
         _using_deepspeed = True
     except:
