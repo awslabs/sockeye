@@ -38,7 +38,9 @@ def test_convert_model_checkpoints():
         # Convert
         convert_model_checkpoints(model_dirname=model_dir, keep_deepspeed=False)
         # Check
-        converted_params = torch.load(os.path.join(model_dir, C.PARAMS_BEST_NAME))
-        reference_params = torch.load(os.path.join('test', 'data', 'deepspeed', 'converted', C.PARAMS_BEST_NAME))
-        for key in converted_params.keys() | reference_params.keys():
-            assert torch.allclose(converted_params[key], reference_params[key])
+        for fname in os.listdir(model_dir):
+            if fname.startswith(C.PARAMS_PREFIX) and fname[len(C.PARAMS_PREFIX):].isdigit():
+                converted_params = torch.load(os.path.join(model_dir, fname))
+                reference_params = torch.load(os.path.join('test', 'data', 'deepspeed', 'converted', fname))
+                for key in converted_params.keys() | reference_params.keys():
+                    assert torch.allclose(converted_params[key], reference_params[key])
