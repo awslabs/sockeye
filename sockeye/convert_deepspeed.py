@@ -56,6 +56,7 @@ def convert_model_checkpoints(model_dirname: str, keep_deepspeed: bool = False):
         if fname.startswith(C.PARAMS_PREFIX) and fname[len(C.PARAMS_PREFIX):].isdigit():
             params_fname = os.path.join(model_dirname, fname)
             if os.path.isdir(params_fname):
+                logger.info(f'Converting checkpoint {params_fname}')
                 # Move directory checkpoint to e.g., params.00000.ds
                 checkpoint_dirname = params_fname + '.ds'
                 shutil.move(params_fname, checkpoint_dirname)
@@ -66,6 +67,7 @@ def convert_model_checkpoints(model_dirname: str, keep_deepspeed: bool = False):
     # Update params.best
     params_best_fname = os.path.join(model_dirname, C.PARAMS_BEST_NAME)
     if os.path.exists(params_best_fname) and os.path.islink(params_best_fname):
+        logger.info(f'Updating {params_best_fname}')
         params_best_target = os.readlink(params_best_fname)
         os.remove(params_best_fname)
         os.symlink(params_best_target, params_best_fname)
