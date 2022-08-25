@@ -30,6 +30,8 @@ jobs:
       run: python -m pip install --upgrade pip
     - name: Sockeye requirements
       run: pip install -r requirements/requirements.txt
+    - name: DeepSpeed requirements
+      run: pip install -r requirements/requirements.deepspeed.txt
     - name: Development requirements
       run: pip install -r requirements/requirements.dev.txt
     - name: Unit tests

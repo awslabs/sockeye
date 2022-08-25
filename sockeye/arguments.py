@@ -1055,6 +1055,24 @@ def add_training_args(params):
                               nargs='*',
                               help="Manually specify names of parameters to fix during training. Default: %(default)s.")
 
+    # DeepSpeed arguments
+    train_params.add_argument('--local_rank',
+                               type=int_greater_or_equal(0),
+                               default=None,
+                               help='The DeepSpeed launcher (`deepspeed`) automatically adds this argument. When it is '
+                                    'present, training runs in DeepSpeed mode. This argument does not need to be '
+                                    'specified manually.')
+    train_params.add_argument('--deepspeed-fp16',
+                              action='store_true',
+                              default=False,
+                              help='Run the model in float16 mode with float32 master weights and dynamic loss '
+                                   'scaling. This is similar to --apex-amp. Default: %(default)s.')
+    train_params.add_argument('--deepspeed-bf16',
+                              action='store_true',
+                              default=False,
+                              help='Run the model in bfloat16 mode, which does not require loss scaling. '
+                                   'Default: %(default)s.')
+
     train_params.add_argument(C.TRAIN_ARGS_MONITOR_BLEU,
                               default=500,
                               type=int,

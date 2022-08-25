@@ -26,15 +26,24 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import cast, Callable, Optional, Dict, List, Tuple
+from typing import Any, cast, Callable, Optional, Dict, List, Tuple, Type
 
 import torch
 import torch.distributed
 import torch.distributed.elastic.multiprocessing.errors
 
+# Optional imports. Import errors are not an issue because these modules are
+# only used when certain settings are activated. We check that these modules
+# can be imported before activating the settings.
+try:
+    import deepspeed
+except ImportError:
+    pass
+
 from . import arguments
 from . import checkpoint_decoder
 from . import constants as C
+from . import convert_deepspeed
 from . import data_io
 from . import encoder
 from . import layers
@@ -132,6 +141,14 @@ def check_arg_compatibility(args: argparse.Namespace):
         logger.warning('Specifying a non-float32 dtype to sockeye.train has no effect. Use --amp or --apex-amp for '
                        'mixed precision training.')
 
+    if args.local_rank is not None:
+        check_condition(not args.amp and not args.apex_amp, 'DeepSpeed mode does not support --amp or --apex-amp. '
+                                                            'Use --deepspeed-fp16 or --deepspeed-bf16.')
+        check_condition(not (args.learning_rate_scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE
+                             and not args.no_reload_on_learning_rate_reduce),
+                        'DeepSpeed mode does not support learning rate schedulers that reload checkpoints. Use a '
+                        'different --learning-rate-scheduler-type or specify --no-reload-on-learning-rate-reduce.')
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -205,6 +222,10 @@ def create_checkpoint_decoder(
         sample_size = -1
 
     if sample_size == 0:
+        return None
+
+    if utils.using_deepspeed():
+        logger.info('Turning off checkpoint decoder when using DeepSpeed')
         return None
 
     cpd = checkpoint_decoder.CheckpointDecoder(
@@ -796,6 +817,61 @@ def create_optimizer_config(args: argparse.Namespace) -> optimizers.OptimizerCon
     return config
 
 
+def create_deepspeed_config(args: argparse.Namespace,
+                            optimizer_config: optimizers.OptimizerConfig,
+                            optimizer_class: Type[torch.optim.Optimizer],
+                            optimizer_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generates a DeepSpeed config dictionary from training arguments. See:
+    https://www.deepspeed.ai/docs/config-json/
+
+    :param args: Arguments as returned by argparse.
+    :param optimizer_config: Optimizer config.
+    :param optimizer_class: Optimizer class.
+    :param optimizer_kwargs: Optimizer kwargs.
+
+    :return: Dictionary of config options that can be used to initialize the
+             DeepSpeed engine.
+    """
+
+    utils.check_condition(utils.using_deepspeed(), 'Initialize DeepSpeed before generating the config')
+
+    ds_config = {
+        'train_micro_batch_size_per_gpu': args.batch_size,
+        'gradient_accumulation_steps': args.update_interval,
+        'optimizer': {
+            'type': optimizer_class.__name__,
+            'params': optimizer_kwargs,
+        },
+        'zero_optimization': {
+            'stage': 1,
+        },
+        'steps_per_print': args.update_interval * args.checkpoint_interval,
+    }
+
+    if args.deepspeed_fp16:
+        utils.update_dict(ds_config, {
+            'fp16': {
+                'enabled': True,
+                'initial_scale_power': 18,
+            },
+        })
+
+    if args.deepspeed_bf16:
+        utils.update_dict(ds_config, {
+            'bf16': {
+                'enabled': True,
+            },
+        })
+
+    if optimizer_config.gradient_clipping_type != C.GRADIENT_CLIPPING_TYPE_NONE:
+        utils.update_dict(ds_config, {
+            'gradient_clipping': optimizer_config.gradient_clipping_threshold,
+        })
+
+    return ds_config
+
+
 def unset_requires_grad_for_fixed_params(config: model.ModelConfig,
                                          params: Dict[str, torch.nn.parameter.Parameter],
                                          fixed_param_names: List[str],
@@ -882,7 +958,19 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                 each time a checkpoint has been reached
     """
 
-    if args.dist:
+    # When running distributed training, initializing the process group is a
+    # prerequisite for all inter-process communication.
+
+    # The DeepSpeed launcher automatically adds `--local_rank=N` to the CLI args
+    # when launching processes. When this arg is specified, run in DeepSpeed
+    # mode.
+    if args.local_rank is not None:
+        utils.init_deepspeed()
+        check_condition(args.local_rank == utils.get_local_rank(),
+                        f'Mismatch between local rank argument and environment variable: {args.local_rank} != '
+                        f'{utils.get_local_rank()}')
+    elif args.dist:
+        # Otherwise use PyTorch's standard distributed mode
         torch.distributed.init_process_group(torch.distributed.Backend.GLOO if args.use_cpu
                                              else torch.distributed.Backend.NCCL)
 
@@ -1005,7 +1093,12 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         model_config,
         clamp_to_dtype=args.clamp_to_dtype,
         train_decoder_only=args.fixed_param_strategy == C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER)
-    sockeye_model.to(device)
+
+    # Move the model to the training device unless using DeepSpeed, which moves
+    # the model automatically.
+    if not utils.using_deepspeed():
+        sockeye_model.to(device)
+
     sockeye_model.apply(model.initialize_parameters)
 
     # Load starting parameters if specified
@@ -1025,7 +1118,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     losses = create_losses(args, all_num_classes=target_vocab_sizes)
 
     optimizer_class, optimizer_kwargs, zero_grad_kwargs = optimizers.get_optimizer(optimizer_config)
-    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs)
+    # Create the optimizer unless using DeepSpeed, which handles its own
+    # optimizer creation.
+    optimizer = optimizer_class(sockeye_model.parameters(), **optimizer_kwargs) if not utils.using_deepspeed() else None
 
     lr_scheduler_class, lr_scheduler_kwargs = lr_scheduler.get_lr_scheduler(args.learning_rate_scheduler_type,
                                                                             args.initial_learning_rate,
@@ -1034,6 +1129,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                                                             args.learning_rate_warmup,
                                                                             args.max_updates)
     _lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs) if lr_scheduler_class is not None else None
+
+    ds_config = create_deepspeed_config(args, optimizer_config,
+                                        optimizer_class, optimizer_kwargs) if utils.using_deepspeed() else None
 
     # This starts as a reference to the original Sockeye model. It is
     # sequentially transformed/wrapped to produce the model instance used for
@@ -1051,27 +1149,45 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # https://nvidia.github.io/apex/amp.html#o2-almost-fp16-mixed-precision
         training_model, optimizer = apex.amp.initialize(training_model, optimizer, opt_level='O2')
 
-    logger.info('Tracing model on a validation batch')
-    batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
-    # When using AMP, turn on autocasting when tracing the model so that
-    # dtypes will match during AMP training. Disable the weight cache for
-    # compatibility with tracing. See:
-    # https://github.com/pytorch/pytorch/pull/63552
-    with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
-        training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
-                                                          batch.target, batch.target_length), strict=False)
-    eval_iter.reset()
+    if utils.using_deepspeed():
+        logger.info('Skipping SockeyeModel trace when using DeepSpeed')
+    else:
+        logger.info('Tracing SockeyeModel on a validation batch')
+        batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
+        # When using AMP, turn on autocasting when tracing the model so that
+        # dtypes will match during AMP training. Disable the weight cache for
+        # compatibility with tracing. See:
+        # https://github.com/pytorch/pytorch/pull/63552
+        with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
+            training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
+                                                            batch.target, batch.target_length), strict=False)
+        eval_iter.reset()
 
-    if utils.is_distributed():
-        # In distributed mode, wrap the traced model with a distributed
-        # data-parallel model that shares (averages) gradients with models
-        # in other worker processes.
+    if utils.is_distributed() and not utils.using_deepspeed():
+        # In distributed mode, wrap the model object with a distributed data-
+        # parallel container that shares (averages) gradients with models in
+        # other worker processes. This is not required when using DeepSpeed,
+        # which automatically handles model synchronization between processes.
         training_model = torch.nn.parallel.DistributedDataParallel(training_model,
                                                                    device_ids=None if args.use_cpu else [device],
                                                                    output_device=None if args.use_cpu else device)
 
-    # Final step: wrap training model and losses in a single module
+    # Wrap training model and losses in a single module
     model_object = training.ModelWithLoss(model=training_model, losses=losses)  # type: torch.nn.Module
+
+    if utils.using_deepspeed():
+        # Wrap the model object with a DeepSpeed engine that automatically
+        # handles many aspects of distributed training.
+        model_object, optimizer, _, _lr_scheduler = deepspeed.initialize(model=model_object,
+                                                                         model_parameters=sockeye_model.parameters(),
+                                                                         lr_scheduler=_lr_scheduler,
+                                                                         config=ds_config)
+        # At each time step, DeepSpeed calls `optimizer.step()` before
+        # `lr_scheduler.step()`. Adjust for this by stepping the learning rate
+        # scheduler once (from t=0 to t=1) before training starts. This way
+        # optimizer step 1 uses the learning rate for t=1, optimizer step 2 uses
+        # the learning rate for t=2, etc.
+        _lr_scheduler.step()
 
     trainer = training.EarlyStoppingTrainer(
         config=trainer_config,
@@ -1099,6 +1215,17 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     training_state = trainer.fit(train_iter=train_iter, validation_iter=eval_iter,
                                  checkpoint_decoder=checkpoint_decoder)
+
+    if utils.using_deepspeed() and utils.is_primary_worker():
+        # Free the memory used during training
+        del model_object
+        del sockeye_model
+        torch.cuda.empty_cache()
+        gc.collect()
+        # Convert parameter directories (DeepSpeed checkpoints) to parameter
+        # files (regular float32). This does not affect the DeepSpeed checkpoint
+        # stored as part of the training state that enables continuing training.
+        convert_deepspeed.convert_model_checkpoints(trainer_config.output_dir, keep_deepspeed=False)
 
     return training_state
 

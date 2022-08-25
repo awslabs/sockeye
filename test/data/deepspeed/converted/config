@@ -1,0 +1,99 @@
+!ModelConfig
+config_data: !DataConfig
+  data_statistics: !DataStatistics
+    average_len_target_per_bucket:
+    - 5.996365000000221
+    buckets:
+    - !!python/tuple
+      - 10
+      - 10
+    length_ratio_mean: 1.0
+    length_ratio_stats_per_bucket:
+    - !!python/tuple
+      - 1.0
+      - 0.0
+    length_ratio_std: 0.0
+    max_observed_len_source: 10
+    max_observed_len_target: 10
+    num_discarded: 0
+    num_sents: 1000000
+    num_sents_per_bucket:
+    - 1000000
+    num_tokens_source: 5996365
+    num_tokens_target: 5996365
+    num_unks_source: 0
+    num_unks_target: 0
+    size_vocab_source: 16
+    size_vocab_target: 16
+  max_seq_len_source: 10
+  max_seq_len_target: 10
+  num_source_factors: 2
+  num_target_factors: 2
+config_decoder: !TransformerConfig
+  act_type: relu
+  attention_heads: 4
+  decoder_type: ssru_transformer
+  depth_key_value: 16
+  dropout_act: 0.1
+  dropout_attention: 0.1
+  dropout_prepost: 0.1
+  feed_forward_num_hidden: 16
+  max_seq_len_source: 10
+  max_seq_len_target: 10
+  model_size: 16
+  num_layers: 1
+  positional_embedding_type: fixed
+  postprocess_sequence: dr
+  preprocess_sequence: n
+  use_glu: false
+  use_lhuc: false
+config_embed_source: !EmbeddingConfig
+  allow_sparse_grad: false
+  dropout: 0.0
+  factor_configs:
+  - !FactorConfig
+    combine: sum
+    num_embed: 16
+    share_embedding: false
+    vocab_size: 8
+  num_embed: 16
+  num_factors: 2
+  vocab_size: 16
+config_embed_target: !EmbeddingConfig
+  allow_sparse_grad: false
+  dropout: 0.0
+  factor_configs:
+  - !FactorConfig
+    combine: sum
+    num_embed: 16
+    share_embedding: false
+    vocab_size: 8
+  num_embed: 16
+  num_factors: 2
+  vocab_size: 16
+config_encoder: !TransformerConfig
+  act_type: relu
+  attention_heads: 4
+  decoder_type: ssru_transformer
+  depth_key_value: 16
+  dropout_act: 0.1
+  dropout_attention: 0.1
+  dropout_prepost: 0.1
+  feed_forward_num_hidden: 16
+  max_seq_len_source: 10
+  max_seq_len_target: 10
+  model_size: 16
+  num_layers: 1
+  positional_embedding_type: fixed
+  postprocess_sequence: dr
+  preprocess_sequence: n
+  use_glu: false
+  use_lhuc: false
+config_length_task: null
+dtype: float32
+lhuc: false
+neural_vocab_selection: null
+neural_vocab_selection_block_loss: false
+vocab_source_size: 16
+vocab_target_size: 16
+weight_tying_type: src_trg_softmax
