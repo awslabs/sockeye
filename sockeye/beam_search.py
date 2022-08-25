@@ -65,10 +65,14 @@ class _SingleModelInference(_Inference):
     def __init__(self,
                  model: SockeyeModel,
                  skip_softmax: bool = False,
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 use_sigmoid: bool = False) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
+        self._use_sigmoid = use_sigmoid
+        if self._use_sigmoid:
+            assert self._skip_softmax
 
     def state_structure(self) -> List:
         return [self._model.state_structure()]
@@ -86,6 +90,8 @@ class _SingleModelInference(_Inference):
         logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             logits = pt.log_softmax(logits, dim=-1)
+        if self._use_sigmoid:
+            logits = pt.nn.functional.logsigmoid(logits)
         scores = -logits  # shape: (batch*beam, output_vocab_size/len(vocab_slice_ids))
 
         target_factors = None  # type: Optional[pt.Tensor]
@@ -1071,7 +1077,8 @@ def get_search_algorithm(models: List[SockeyeModel],
                          prevent_unk: bool = False,
                          greedy: bool = False,
                          skip_nvs: bool = False,
-                         nvs_thresh: Optional[float] = None) -> Union[BeamSearch, GreedySearch]:
+                         nvs_thresh: Optional[float] = None,
+                         use_sigmoid: bool = False) -> Union[BeamSearch, GreedySearch]:
     """
     Returns an instance of BeamSearch or GreedySearch depending.
 
@@ -1104,9 +1111,20 @@ def get_search_algorithm(models: List[SockeyeModel],
             skip_softmax = beam_size == 1 and not output_scores and sample is None
             if skip_softmax:
                 logger.info("Enabled skipping softmax for a single model and greedy decoding.")
+            if use_sigmoid:
+                logger.info("Enabling sigmoid transformation for logits, disabling softmax")
+                if not models[0].config.multi_label_model:
+                    logging.warning("Applying the sigmoid activation to a model trained with softmax")
+                use_sigmoid = True
+                skip_softmax = True
+            else:
+                use_sigmoid = False
+                if models[0].config.multi_label_model:
+                    logging.warning("Using a multi-label model with softmax")
             inference = _SingleModelInference(model=models[0],
                                               skip_softmax=skip_softmax,
-                                              constant_length_ratio=constant_length_ratio)
+                                              constant_length_ratio=constant_length_ratio,
+                                              use_sigmoid=use_sigmoid)
         else:
             inference = _EnsembleInference(models=models,
                                            ensemble_mode=ensemble_mode,

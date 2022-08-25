@@ -97,7 +97,8 @@ def score(args: argparse.Namespace):
                                                       brevity_penalty_weight=args.brevity_penalty_weight),
                                score_type=args.score_type,
                                constant_length_ratio=constant_length_ratio,
-                               softmax_temperature=args.softmax_temperature)
+                               softmax_temperature=args.softmax_temperature,
+                               use_sigmoid=model.config.multi_label_model)
     batch_scorer.to(device)
 
     scorer = Scorer(model=model,

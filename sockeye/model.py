@@ -73,6 +73,7 @@ class ModelConfig(Config):
     dtype: str = C.DTYPE_FP32
     neural_vocab_selection: Optional[str] = None
     neural_vocab_selection_block_loss: bool = False
+    multi_label_model: bool = False
 
 
 class SockeyeModel(pt.nn.Module):

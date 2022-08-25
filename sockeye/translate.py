@@ -141,7 +141,8 @@ def run_translate(args: argparse.Namespace):
                                       max_input_length=args.max_input_length,
                                       max_output_length=args.max_output_length,
                                       prevent_unk=args.prevent_unk,
-                                      greedy=args.greedy)
+                                      greedy=args.greedy,
+                                      use_sigmoid=models[0].config.multi_label_model)
 
     read_and_translate(translator=translator,
                        output_handler=output_handler,

@@ -72,6 +72,7 @@ class CheckpointDecoder:
                  bucket_width_source: int = 10,
                  length_penalty_alpha: float = 1.0,
                  length_penalty_beta: float = 0.0,
+                 use_sigmoid: bool = False,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  ensemble_mode: str = 'linear',
                  sample_size: int = -1,
@@ -85,6 +86,7 @@ class CheckpointDecoder:
         self.bucket_width_source = bucket_width_source
         self.length_penalty_alpha = length_penalty_alpha
         self.length_penalty_beta = length_penalty_beta
+        self.use_sigmoid = use_sigmoid
         self.model = model
 
         with ExitStack() as exit_stack:
@@ -134,7 +136,8 @@ class CheckpointDecoder:
             models=[self.model],
             source_vocabs=source_vocabs,
             target_vocabs=target_vocabs,
-            restrict_lexicon=None)
+            restrict_lexicon=None,
+            use_sigmoid=use_sigmoid)
 
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, num_sentences=%d)",
                     max_input_len if max_input_len is not None else -1, beam_size, len(self.targets_sentences[0]))

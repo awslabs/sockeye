@@ -39,12 +39,14 @@ class BatchScorer(pt.nn.Module):
                  scorer: CandidateScorer,
                  score_type: str = C.SCORING_TYPE_DEFAULT,
                  constant_length_ratio: Optional[float] = None,
-                 softmax_temperature: Optional[float] = None) -> None:
+                 softmax_temperature: Optional[float] = None,
+                 use_sigmoid: bool = False) -> None:
         super().__init__()
         self.score_type = score_type
         self.scorer = scorer
         self.constant_length_ratio = constant_length_ratio
         assert softmax_temperature is None, 'not implemented'
+        self.use_sigmoid = use_sigmoid
 
     def forward(self,
                 logits, labels,
@@ -60,7 +62,10 @@ class BatchScorer(pt.nn.Module):
                Shape: (batch, length, factor_vocab_size).
         :return: Sequence scores. Shape: (batch,).
         """
-        logprobs = logits.log_softmax(dim=-1)
+        if self.use_sigmoid:
+            logprobs = pt.nn.functional.logsigmoid(logits)
+        else:
+            logprobs = logits.log_softmax(dim=-1)
 
         # Select the label log probability
         # logprobs and scores: (batch_size, target_seq_len)

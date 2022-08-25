@@ -648,6 +648,18 @@ def add_model_parameters(params):
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
 
+    model_params.add_argument('--scones',
+                              action='store_true',
+                              help='Use multi-label classification model, Default: %(default)s.')
+    model_params.add_argument('--scones-alpha',
+                              default=1.0,
+                              type=float,
+                              help='SCONES loss alpha hyperparameter. Default: %(default)s.')
+    model_params.add_argument('--scones-epsilon',
+                              default=1.0e-30,
+                              type=float,
+                              help='SCONES loss epsilon for numerical stability. Default: %(default)s.')
+
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
                               type=multiple_values(num_values=2, greater_or_equal=1),

@@ -745,6 +745,7 @@ class Translator:
            If model(s) do not support given input length it will fall back to what the model(s) support.
     :param skip_nvs: Manually turn off Neural Vocabulary Selection (NVS) to do a softmax over the full target vocabulary.
     :param nvs_thresh: The probability threshold for a word to be added to the set of target words. Default: 0.5.
+    :param use_sigmoid: If True, replace the default softmax activation with sigmoid (used for SCONES models).
     """
 
     def __init__(self,
@@ -769,7 +770,8 @@ class Translator:
                  prevent_unk: bool = False,
                  greedy: bool = False,
                  skip_nvs: bool = False,
-                 nvs_thresh: float = 0.5) -> None:
+                 nvs_thresh: float = 0.5,
+                 use_sigmoid: bool = False) -> None:
         self.device = device
         self.dtype = models[0].dtype
         self._scorer = scorer
@@ -815,7 +817,8 @@ class Translator:
             prevent_unk=prevent_unk,
             greedy=greedy,
             skip_nvs=skip_nvs,
-            nvs_thresh=nvs_thresh)
+            nvs_thresh=nvs_thresh,
+            use_sigmoid=use_sigmoid)
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,

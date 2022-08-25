@@ -167,6 +167,17 @@ SORT_CASES = [
      True, 0, 0,
      1.03,
      0.97),
+    ("Sort:transformer:transformer:batch_word_scones",
+     "--encoder transformer --decoder transformer"
+     " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
+     " --max-updates 6000 --scones --scones-alpha 0.5"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
+     " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
+     " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1 --prevent-unk",
+     True, 0, 0,
+     1.03,
+     0.97),
     ("Sort:transformer:transformer:source_factors:target_factors:batch_max_word",
      "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 70 --update-interval 2 --batch-type max-word --batch-sentences-multiple-of 1"

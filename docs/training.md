@@ -185,3 +185,16 @@ This is similar to using `--restrict-lexicon` for `sockeye-translate` with the a
 To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`.
 This will train a model with NVS that is automatically used by `sockeye-translate`.
 If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
+
+
+## Scones
+
+Sockeye implements the SCONES training objective, which has been proposed in:
+
+> Felix Stahlberg and Shankar Kumar. 2022.
+> [Jam or Cream First? Modeling Ambiguity in Neural Machine Translation with SCONES](https://aclanthology.org/2022.naacl-main.365/)
+> Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies.
+
+At training time, provide the argument `--scones` to enable the objective, and optionally set `--scones-alpha` to balance the positive and negative loss terms.
+The resulting model is automatically configured to be `multi_label_model=True`
+At inference time, a multi-label model will automatically use the sigmoid activation instead of the default softmax.

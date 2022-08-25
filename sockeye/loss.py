@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Tuple
 
 import torch as pt
+import torch.nn.functional as F
 import numpy as np
 
 from . import constants as C
@@ -394,4 +395,100 @@ class MSELoss(Loss):
 
     def create_metric(self) -> 'LossMetric':
         return LossMetric(name=C.LENRATIO_MSE)
+
+
+class PositiveSconesLoss(Loss):
+    """
+    Computes the positive term of the SCONES loss, normalized by the number of valid (non-pad) tokens.
+    """
+
+    def __init__(self,
+                 name: str = C.POSITIVE_SCONES,
+                 weight: float = 1.0,
+                 label_smoothing: float = 0.0,
+                 epsilon: float = 1.0e-30,
+                 dtype: str = C.DTYPE_FP32,
+                 output_name: str = C.LOGITS_NAME,
+                 label_name: str = C.TARGET_LABEL_NAME,
+                 ignore_label: int = C.PAD_ID,
+                 metric_prefix: str = ''):
+        super().__init__(name=name, output_name=output_name, label_name=label_name,
+                         weight=weight, metric_prefix=metric_prefix)
+        self.ignore_label = ignore_label
+        self._l = label_smoothing
+        self._epsilon = epsilon
+        self._dtype = dtype
+
+    def forward(self, logits, labels):
+        true_logprob = F.logsigmoid(logits)
+        tgt_true_logprob = true_logprob.gather(dim=-1, index=labels.unsqueeze(-1).long()).squeeze(-1)
+
+        if self._l <= 0:  # No label smoothing; remove label smoothing terms for efficiency
+            tgt_true_xent = -tgt_true_logprob
+        else:
+            false_logprob = pt.log(pt.clamp(1.0 - pt.exp(true_logprob), min=self._epsilon))
+            tgt_false_logprob = false_logprob.gather(dim=-1, index=labels.unsqueeze(-1).long()).squeeze(-1)
+            tgt_true_xent = -(1.0 - self._l) * tgt_true_logprob - self._l * tgt_false_logprob
+        loss = tgt_true_xent  # batch, length
+
+        valid_mask = labels.not_equal(self.ignore_label)
+        num_valid = valid_mask.sum()
+
+        loss_value = (loss * valid_mask).sum() * self.weight / num_valid
+        return loss_value, pt.ones(1, device=loss.device)
+
+    def create_metric(self) -> 'LossMetric':
+        """
+        Create an instance of the EvalMetric that corresponds to this Loss function.
+        """
+        return LossMetric(name=C.POSITIVE_SCONES)
+
+
+class NegativeSconesLoss(Loss):
+    """
+    Computes the negative term of the SCONES loss, normalized by the number of valid (non-pad) tokens.
+    """
+
+    def __init__(self,
+                 name: str = C.NEGATIVE_SCONES,
+                 weight: float = 1.0,
+                 label_smoothing: float = 0.0,
+                 epsilon: float = 1.0e-30,
+                 dtype: str = C.DTYPE_FP32,
+                 output_name: str = C.LOGITS_NAME,
+                 label_name: str = C.TARGET_LABEL_NAME,
+                 ignore_label: int = C.PAD_ID,
+                 metric_prefix: str = ''):
+        super().__init__(name=name, output_name=output_name, label_name=label_name,
+                         weight=weight, metric_prefix=metric_prefix)
+        self.ignore_label = ignore_label
+        self._l = label_smoothing
+        self._epsilon = epsilon
+        self._dtype = dtype
+
+    def forward(self, logits, labels):
+        true_logprob = F.logsigmoid(logits)
+        false_logprob = pt.log(pt.clamp(1.0 - pt.exp(true_logprob), min=self._epsilon))
+        tgt_false_logprob = false_logprob.gather(dim=-1, index=labels.unsqueeze(-1).long()).squeeze(-1)
+
+        if self._l <= 0:  # No label smoothing; remove label smoothing terms for efficiency
+            tgt_false_xent = -tgt_false_logprob
+            all_false_xent = -false_logprob
+        else:
+            tgt_true_logprob = true_logprob.gather(dim=-1, index=labels.unsqueeze(-1).long()).squeeze(-1)
+            tgt_false_xent = -(1.0 - self._l) * tgt_false_logprob - self._l * tgt_true_logprob
+            all_false_xent = -(1.0 - self._l) * false_logprob - self._l * true_logprob
+        loss = all_false_xent.sum(dim=-1) - tgt_false_xent  # batch, length
+
+        valid_mask = labels.not_equal(self.ignore_label)
+        num_valid = valid_mask.sum()
+
+        loss_value = (loss * valid_mask).sum() * self.weight / num_valid
+        return loss_value, pt.ones(1, device=loss.device)
+
+    def create_metric(self) -> 'LossMetric':
+        """
+        Create an instance of the EvalMetric that corresponds to this Loss function.
+        """
+        return LossMetric(name=C.NEGATIVE_SCONES)
 

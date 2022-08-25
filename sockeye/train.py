@@ -215,7 +215,8 @@ def create_checkpoint_decoder(
         model=sockeye_model,
         source_vocabs=source_vocabs,
         target_vocabs=target_vocabs,
-        device=device)
+        device=device,
+        use_sigmoid=sockeye_model.config.multi_label_model)
     cpd.warmup()
     return cpd
 
@@ -682,7 +683,8 @@ def create_model_config(args: argparse.Namespace,
                                      neural_vocab_selection=args.neural_vocab_selection,
                                      neural_vocab_selection_block_loss=args.neural_vocab_selection_block_loss,
                                      lhuc=args.lhuc is not None,
-                                     dtype=C.DTYPE_FP32)
+                                     dtype=C.DTYPE_FP32,
+                                     multi_label_model=args.scones)
     return model_config
 
 
@@ -706,14 +708,33 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         label_name = C.TARGET_LABEL_NAME if i == 0 else C.TARGET_FACTOR_LABEL_NAME % i
         label_smoothing = args.label_smoothing if i == 0 else .0  # Note: No label smoothing for target factor losses.
 
-        losses.append(loss.CrossEntropyLoss(name=name,
-                                            weight=weight,
-                                            label_smoothing=label_smoothing,
-                                            dtype=C.DTYPE_FP32,
-                                            output_name=output_name,
-                                            label_name=label_name,
-                                            metric_prefix=metric_prefix,
-                                            label_smoothing_impl=args.label_smoothing_impl))
+        if i == 0 and args.scones:
+            logger.info(f"Using SCONES loss (alpha={args.scones_alpha})")
+            losses.append(loss.PositiveSconesLoss(name=C.POSITIVE_SCONES,
+                                          weight=weight,
+                                          label_smoothing=label_smoothing,
+                                          epsilon=args.scones_epsilon,
+                                          dtype=C.DTYPE_FP32,
+                                          output_name=output_name,
+                                          label_name=label_name,
+                                          metric_prefix=metric_prefix))
+            losses.append(loss.NegativeSconesLoss(name=C.NEGATIVE_SCONES,
+                                          weight=weight * args.scones_alpha,
+                                          label_smoothing=label_smoothing,
+                                          epsilon=args.scones_epsilon,
+                                          dtype=C.DTYPE_FP32,
+                                          output_name=output_name,
+                                          label_name=label_name,
+                                          metric_prefix=metric_prefix))
+        else:
+            losses.append(loss.CrossEntropyLoss(name=name,
+                                                weight=weight,
+                                                label_smoothing=label_smoothing,
+                                                dtype=C.DTYPE_FP32,
+                                                output_name=output_name,
+                                                label_name=label_name,
+                                                metric_prefix=metric_prefix,
+                                                label_smoothing_impl=args.label_smoothing_impl))
 
     if args.length_task is not None:
         weight = args.length_task_weight

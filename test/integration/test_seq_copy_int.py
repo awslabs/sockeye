@@ -143,6 +143,17 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --fixed-param-strategy " + C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
      "--beam-size 2",
      False, 0, 0),
+    # Basic transformer with SCONES loss
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg_softmax"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
+     " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none"
+     " --scones --scones-alpha 0.5",
+     "--beam-size 2 --nbest-size 2",
+     False, 0, 0),
 ]
 
 # expand test cases across transformer & ssru, as well as use_pytorch true/false
