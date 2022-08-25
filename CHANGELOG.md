@@ -11,6 +11,16 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.20]
+
+### Added
+
+- Added training support for [DeepSpeed](https://www.deepspeed.ai/).
+  - Installation: `pip install deepspeed`
+  - Usage: `deepspeed --no_python ... sockeye-train ...`
+  - DeepSpeed mode uses Zero Redundancy Optimizer (ZeRO) stage 1 ([Rajbhandari et al., 2019](https://arxiv.org/abs/1910.02054v3)).
+  - Run in FP16 mode with `--deepspeed-fp16` or BF16 mode with `--deepspeed-bf16`.
+
 ## [3.1.19]
 
 ### Added

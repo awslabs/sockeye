@@ -29,6 +29,9 @@ import numpy as np
 import torch
 import torch.distributed
 
+# Optional imports. Import errors are not an issue because these modules are
+# only used when certain settings are activated. We check that these modules
+# can be imported before activating the settings.
 try:
     import apex.amp
 except ImportError:
@@ -73,6 +76,10 @@ class ModelWithLoss(torch.nn.Module):
                                                           List[torch.Tensor],
                                                           List[torch.Tensor]]:
         model_outputs = self.model(source, source_length, target, target_length)
+        if utils.using_deepspeed():
+            # Guarantee model outputs are float32 before computing losses.
+            # Computing losses in DeepSpeed float16 mode can lead to overflow.
+            model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
         loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
         sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
@@ -225,7 +232,7 @@ class EarlyStoppingTrainer:
             if utils.is_primary_worker():
                 self.sockeye_model.save_config(self.config.output_dir)
                 self.sockeye_model.save_version(self.config.output_dir)
-            self._save_params()
+            self._save_params(use_checkpoint=False)
             logger.info("Training started.")
 
         tic = time.time()
@@ -322,13 +329,18 @@ class EarlyStoppingTrainer:
         self._adjust_learning_rate(has_improved)
         if utils.is_primary_worker():
             self._write_and_log_metrics(train_metrics=train_metrics, val_metrics=val_metrics)
+        # When using DeepSpeed, all workers participate in saving the training
+        # state and model parameters. Otherwise these methods are a no-op for
+        # secondary workers.
         self._save_training_state(train_iter)
-        self._save_params()
+        self._save_params(use_checkpoint=True)
         if utils.is_primary_worker():
             if has_improved:
                 self._update_best_params()
-                self._save_optimizer_state(self.best_optimizer_state_fname)
-                self._save_lr_scheduler(self.best_lr_scheduler_fname)
+                if not utils.using_deepspeed():
+                    # DeepSpeed mode does not support checkpoint reloading
+                    self._save_optimizer_state(self.best_optimizer_state_fname)
+                    self._save_lr_scheduler(self.best_lr_scheduler_fname)
         for metric in train_metrics:
             metric.reset()
         if self.checkpoint_callback:
@@ -349,25 +361,29 @@ class EarlyStoppingTrainer:
             sum_losses, loss_values, num_samples = self.model_object(batch.source, batch.source_length,
                                                                      batch.target, batch.target_length, batch.labels)
         # Backward
-        if self.config.update_interval > 1:
-            # Scale loss by number of batches per update
-            # TODO(mdenkows): We currently give equal weight to every batch in
-            # every update but batches have subtly different sizes (different
-            # numbers of padding tokens). Consider normalizing by relative batch
-            # size.
-            sum_losses = sum_losses / self.config.update_interval
-        if self.using_amp:
-            # PyTorch AMP loss scaling
-            sum_losses = self._scaler.scale(sum_losses)
-        if self.using_apex_amp:
-            # Apex AMP loss scaling
-            with apex.amp.scale_loss(sum_losses, self.optimizer,
-                                     delay_unscale=not is_update_batch) as scaled_sum_losses:
-                # Apex AMP backward
-                scaled_sum_losses.backward()
+        if utils.using_deepspeed():
+            # DeepSpeed backward. DeepSpeed handles all loss scaling.
+            self.model_object.backward(sum_losses)  # type: ignore
         else:
-            # PyTorch (with/without AMP) backward
-            sum_losses.backward()  # type: ignore
+            if self.config.update_interval > 1:
+                # Scale loss by number of batches per update
+                # TODO(mdenkows): We currently give equal weight to every batch
+                # in every update but batches have subtly different sizes
+                # (different numbers of padding tokens). Consider normalizing by
+                # relative batch size.
+                sum_losses = sum_losses / self.config.update_interval
+            if self.using_amp:
+                # PyTorch AMP loss scaling
+                sum_losses = self._scaler.scale(sum_losses)
+            if self.using_apex_amp:
+                # Apex AMP loss scaling
+                with apex.amp.scale_loss(sum_losses, self.optimizer,
+                                         delay_unscale=not is_update_batch) as scaled_sum_losses:
+                    # Apex AMP backward
+                    scaled_sum_losses.backward()
+            else:
+                # PyTorch (with/without AMP) backward
+                sum_losses.backward()  # type: ignore
         return loss_values, num_samples
 
     def _step(self, batch: data_io.Batch) -> bool:
@@ -384,13 +400,15 @@ class EarlyStoppingTrainer:
         # average the accumulated gradients across workers during the update
         # batch.
         with (self.model_object.model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
-        else utils.no_context()):
+        and not utils.using_deepspeed() else utils.no_context()):
             loss_values, num_samples = self._forward_backward(batch, is_update_batch)
 
         for loss_func, loss_value, num_samples in zip(self.loss_functions, loss_values, num_samples):
             loss_func.metric.update(loss_value.item(), num_samples.item())
 
-        if is_update_batch:
+        if utils.using_deepspeed():
+            self.model_object.step()  # type: ignore
+        elif is_update_batch:
             if self.using_amp:
                 self._scaler.unscale_(self.optimizer)
             # Clip gradients
@@ -435,6 +453,8 @@ class EarlyStoppingTrainer:
                 # fully support switching between train and eval modes depending
                 # how much Python logic is used in the various submodules.
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
+                # Guarantee model outputs are float32 before computing losses
+                outputs = {name: output.to(torch.float32) for (name, output) in outputs.items()}
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
                 # Update validation metrics for batch
@@ -617,13 +637,31 @@ class EarlyStoppingTrainer:
         os.symlink(actual_best_params_fname, self.best_params_fname)
         logger.info("'%s' now points to '%s'", self.best_params_fname, actual_best_params_fname)
 
-    def _save_params(self):
+    def _save_params(self, use_checkpoint: bool = False):
         """
         Saves model parameters at current checkpoint and optionally cleans up
         older parameter files to save disk space.
+
+        :param use_checkpoint: When using DeepSpeed, copy files from the latest
+                               checkpoint instead of creating a new checkpoint.
         """
-        if utils.is_primary_worker():
+        if utils.using_deepspeed():
+            # Copy or create a DeepSpeed checkpoint that can be used to generate
+            # a regular Sockeye parameter file at the end of training.
+            if use_checkpoint:
+                if utils.is_primary_worker():
+                    shutil.copytree(src=os.path.join(self.training_state_dirname, C.TRAINING_STATE_DEEPSPEED),
+                                    dst=self.current_params_fname)
+            else:
+                if utils.is_primary_worker() and not os.path.exists(self.current_params_fname):
+                    os.mkdir(self.current_params_fname)
+                torch.distributed.barrier()
+                # All workers save their local shards of the float32 parameters.
+                self.model_object.save_checkpoint(self.current_params_fname)  # type: ignore
+        elif utils.is_primary_worker():
             self.sockeye_model.save_parameters(self.current_params_fname)
+        if utils.is_primary_worker():
+            # With or without DeepSpeed
             cleanup_params_files(self.config.output_dir, self.config.max_params_files_to_keep, self.state.checkpoint,
                                  self.state.best_checkpoint, self.config.keep_initializations,
                                  self.config.max_params_files_to_cache, self.config.cache_metric,
@@ -658,7 +696,13 @@ class EarlyStoppingTrainer:
         if utils.is_distributed():
             torch.distributed.barrier()
 
-        if utils.is_primary_worker():
+        if utils.using_deepspeed():
+            # DeepSpeed saves parameters, optimizer state, and learning rate
+            # scheduler in a single checkpoint file. All workers need to call
+            # `save_checkpoint()`.
+            self.model_object.save_checkpoint(os.path.join(training_state_dirname,  # type: ignore
+                                                           C.TRAINING_STATE_DEEPSPEED))
+        elif utils.is_primary_worker():
             # Otherwise, only the primary worker saves the following.
             # (1) Parameters: link current file
             params_base_fname = C.PARAMS_NAME % self.state.checkpoint
@@ -721,17 +765,24 @@ class EarlyStoppingTrainer:
         Loads the full training state from disk.
         :param train_iter: training data iterator.
         """
-        # (1) Parameters
-        params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
-        self.sockeye_model.load_parameters(params_fname, device=self.device, allow_missing=False, ignore_extra=False)
+        if utils.using_deepspeed():
+            # DeepSpeed loads parameters, optimizer state, and learning rate
+            # scheduler from a single checkpoint file.
+            _, _ = self.model_object.load_checkpoint(os.path.join(self.training_state_dirname,  # type: ignore
+                                                                  C.TRAINING_STATE_DEEPSPEED))
+        else:
+            # (1) Parameters
+            params_fname = os.path.join(self.training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
+            self.sockeye_model.load_parameters(params_fname, device=self.device,
+                                               allow_missing=False, ignore_extra=False)
 
-        # (2) Optimizer states
-        opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATE_LAST)
-        self._load_optimizer_state(opt_state_fname)
+            # (2) Optimizer states
+            opt_state_fname = os.path.join(self.training_state_dirname, C.OPT_STATE_LAST)
+            self._load_optimizer_state(opt_state_fname)
 
-        # (3) lr_scheduler
-        lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
-        self._load_lr_scheduler(lr_scheduler_fname)
+            # (3) lr_scheduler
+            lr_scheduler_fname = os.path.join(self.training_state_dirname, C.LR_SCHEDULER_LAST)
+            self._load_lr_scheduler(lr_scheduler_fname)
 
         # (4) Data Iterator
         train_iter.load_state(os.path.join(self.training_state_dirname, C.BUCKET_ITER_STATE_NAME))
@@ -963,7 +1014,11 @@ def cleanup_params_files(output_folder: str, max_to_keep: int, checkpoint: int, 
             param_fname_n = params_name_with_dir % n
             if param_fname_n in existing_files and n not in top_n:
                 try:
-                    os.remove(param_fname_n)
+                    if os.path.isdir(param_fname_n):
+                        # DeepSpeed mode initially saves checkpoint directories
+                        shutil.rmtree(param_fname_n)
+                    else:
+                        os.remove(param_fname_n)
                 except FileNotFoundError:
                     # This can be occur on file systems with higher latency,
                     # such as distributed file systems.  While repeated

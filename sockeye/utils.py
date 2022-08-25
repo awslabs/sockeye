@@ -33,6 +33,14 @@ import numpy as np
 import torch as pt
 import torch.distributed
 
+# Optional imports. Import errors are not an issue because these modules are
+# only used when certain settings are activated. We check that these modules
+# can be imported before activating the settings.
+try:
+    import deepspeed
+except ImportError:
+    pass
+
 from . import __version__, constants as C
 from .log import log_sockeye_version, log_torch_version
 
@@ -665,6 +673,31 @@ def all_gather_object(obj: T) -> List[T]:
     obj_list = [None] * torch.distributed.get_world_size()  # type: List[T]
     torch.distributed.all_gather_object(obj_list, obj)
     return obj_list
+
+
+# Track whether DeepSpeed has been initialized
+_using_deepspeed = False
+
+def init_deepspeed():
+    """
+    Make sure all of the DeepSpeed modules we use can be imported, initialize
+    DeepSpeed, and set the global variable that tracks initialization.
+
+    """
+    global _using_deepspeed
+    try:
+        import deepspeed  # pylint: disable=E0401
+        import deepspeed.utils.zero_to_fp32  # pylint: disable=E0401
+        deepspeed.init_distributed()
+        _using_deepspeed = True
+    except:
+        raise RuntimeError('To train models with DeepSpeed (https://www.deepspeed.ai/), '
+                           'install the module with `pip install deepspeed`.')
+
+
+def using_deepspeed() -> bool:
+    """Check whether DeepSpeed has been initialized via this module"""
+    return _using_deepspeed
 
 
 def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optional[List] = None) -> int:
