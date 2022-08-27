@@ -129,8 +129,6 @@ class StateDumper:
                 token_count += min(len(line.strip().split(' ')) + 1, max_seq_len)  # +1 for EOS
         return token_count
 
-
-
     def init_dump_file(self, initial_size: int) -> None:
         self.dimension = self.model.config.config_decoder.model_size
 
@@ -170,13 +168,11 @@ class StateDumper:
                 trace_inputs = {'get_decoder_states': model_inputs}
                 self.traced_model = pt.jit.trace_module(self.model, trace_inputs, strict=False)
             decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
-            # decoder_states = self.model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
 
             # flatten batch and sent_len dimensions, remove pads on the target
             pad_mask = (batch.target != C.PAD_ID).squeeze(2)  # shape: (batch, seq_length)
             flat_target = batch.target[pad_mask].cpu().detach().numpy()
             flat_states = decoder_states[pad_mask].cpu().detach().numpy()
-            # self.dump_size += flat_target.shape[0]
 
             # dump
             self.state_dump_file.add(flat_states)
@@ -219,8 +215,8 @@ def dump(args: argparse.Namespace):
 
     dumper = StateDumper(model, source_vocabs, target_vocabs, args.dump_prefix, max_seq_len_source, max_seq_len_target,
                          args.state_dtype, args.word_dtype, device)
-    dumper.dump_size = StateDumper.probe_token_count(targets[0], max_seq_len_target)  # TODO: Yikes -- shouldn't be setting attributes this way
-    dumper.init_dump_file(dumper.dump_size)  # TODO: assuming targets[0] is the text file, the rest are factors
+    dumper.dump_size = StateDumper.probe_token_count(targets[0], max_seq_len_target)
+    dumper.init_dump_file(dumper.dump_size)
     dumper.build_states_and_dump(sources, targets, args.batch_size)
     dumper.save_config()
 
