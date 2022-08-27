@@ -20,6 +20,7 @@ import math
 import numpy as np
 import os
 import random
+import shutil
 from typing import Dict, Iterable, List, Optional, Tuple, Callable
 
 from . import arguments
@@ -31,10 +32,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class KNNConfig(config.Config):
+    """
+    KNNConfig defines knn-specific configurations, including the information about the data dump
+    as well as the index itself.
+
+    :param index_size: Size of the index and the data dump.
+    :param dimension: Number of dimensions of the decoder states.
+    :param state_data_type: Data type of the decoder states (keys).
+    :param word_data_type: Data type of the stored word indexes (values).
+    :param index_type: faiss index signature, see https://github.com/facebookresearch/faiss/wiki/The-index-factory
+    :param train_data_size: Size of the training data used to train the index (if it needs to be trained).
+    """
     index_size: int
     dimension: int
-    state_data_type: np.dtype
-    word_data_type: np.dtype
+    state_data_type: str
+    word_data_type: str
     index_type: str
     train_data_size: int
 
@@ -105,6 +117,12 @@ class FaissIndexBuilder:
         return index
 
 
+def get_state_dump_filename(prefix: str) -> str:
+    return prefix + ".states.npy"
+
+def get_word_dump_filename(prefix: str) -> str:
+    return prefix + ".words.npy"
+
 def main():
     params = arguments.ConfigArgumentParser(description='CLI to build knn index.')
     arguments.add_build_knn_index_args(params)
@@ -112,7 +130,10 @@ def main():
     arguments.add_device_args(params)
     args = params.parse_args()
 
-    utils.check_condition(os.path.exists(args.input_file), f"Input file {args.input_file} not found!")
+    state_dump_filename = get_state_dump_filename(args.input_dump_prefix)
+    word_dump_filename = get_word_dump_filename(args.input_dump_prefix)
+    utils.check_condition(os.path.exists(state_dump_filename), f"Input file {state_dump_filename} not found!")
+    utils.check_condition(os.path.exists(word_dump_filename), f"Input file {word_dump_filename} not found!")
     utils.check_condition(os.path.exists(args.config_file), f"Config file {args.config_file} not found!")
 
     setup_main_logger(file_logging=False,
@@ -121,19 +142,28 @@ def main():
     utils.log_basic_info(args)
 
     config = KNNConfig.load(args.config_file)
-    keys = np.memmap(args.input_file, dtype=config.state_data_type, mode='r', shape=(config.index, config.dimension))
-    builder = FaissIndexBuilder(config, args.use_gpu, args.device_id)
+    if args.index_type is not None:
+        config.index_type = args.index_type
+    if args.train_data_size is not None:
+        config.train_data_size = args.train_data_size
+
+    keys = np.memmap(state_dump_filename, dtype=config.state_data_type, mode='r', shape=(config.index_size, config.dimension))
+    builder = FaissIndexBuilder(config, not args.use_cpu, args.device_id)
     train_sample = None
-    if args.train_sample_input_file is not None:
-        train_sample = np.memmap(args.train_sample_input_file, dtype=config.state_data_type, mode='r', shape=(config.index, config.dimension))
+    if args.train_data_input_file is not None:
+        train_sample = np.memmap(args.train_data_input_file, dtype=config.state_data_type, mode='r', shape=(config.index_size, config.dimension))
     index = builder.build_faiss_index(keys, train_sample)
 
-    if args.use_gpu:
+    if not args.use_cpu:
         index_cpu = faiss.index_gpu_to_cpu(index)
     else:
         index_cpu = index
 
-    faiss.write_index(index_cpu, args.output_file)
+    if not os.path.exists(args.output_dir):
+        os.mkdir(args.output_dir)
+        faiss.write_index(index_cpu, os.path.join(args.output_dir, "key_index"))
+        config.save(os.path.join(args.output_dir, "config.yaml"))
+        shutil.copy(word_dump_filename, os.path.join(args.output_dir, "vals.npy"))
 
 
 if __name__ == "__main__":

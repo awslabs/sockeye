@@ -30,14 +30,13 @@ from .log import setup_main_logger
 from .model import SockeyeModel, load_model
 from .vocab import Vocab
 from .utils import check_condition
-from .knn import KNNConfig
+from .knn import KNNConfig, get_state_dump_filename, get_word_dump_filename
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = logging.getLogger(__name__)
 
 # a general blocked mmap stroage interface
 # TODO: could be implemented with numpy memmap, h5py, zarr, etc.
-# TODO: add (1) load from existing file dump (2) read from existing dump
 class BlockMMapStorage:
 
     def __init__(self,
@@ -101,6 +100,8 @@ class StateDumper:
                  dump_prefix: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
+                 state_data_type: str,
+                 word_data_type: str,
                  device: pt.device) -> None:
         self.model = model
         self.source_vocabs = source_vocabs
@@ -117,7 +118,8 @@ class StateDumper:
         # info for KNNConfig
         self.dump_size = 0
         self.dimension = None
-        self.data_type = None
+        self.state_data_type = utils.get_numpy_dtype(state_data_type)
+        self.word_data_type = utils.get_numpy_dtype(word_data_type)
 
     @staticmethod
     def probe_token_count(target: str, max_seq_len: int) -> int:
@@ -127,12 +129,15 @@ class StateDumper:
                 token_count += min(len(line.strip().split(' ')) + 1, max_seq_len)  # +1 for EOS
         return token_count
 
+
+
     def init_dump_file(self, initial_size: int) -> None:
         self.dimension = self.model.config.config_decoder.model_size
-        self.data_type = np.float16  # TODO: shouldn't hard-code dtype
 
-        self.state_dump_file = NumpyMemmapStorage(self.dump_prefix + ".states.npy", self.dimension, self.data_type)  # TODO: shouldn't hard-code dtype
-        self.words_dump_file = NumpyMemmapStorage(self.dump_prefix + ".words.npy", 1, np.int16)  # TODO: shouldn't hard-code dtype
+        self.state_dump_file = NumpyMemmapStorage(get_state_dump_filename(self.dump_prefix),
+                                                  self.dimension, self.state_data_type)
+        self.words_dump_file = NumpyMemmapStorage(get_word_dump_filename(self.dump_prefix),
+                                                  1, self.word_data_type)
         self.state_dump_file.open(initial_size, 1)
         self.words_dump_file.open(initial_size, 1)
 
@@ -140,7 +145,6 @@ class StateDumper:
                               sources: List[str],
                               targets: List[str],
                               batch_size: int) -> None:
-
         assert self.state_dump_file != None, \
                "You should call probe_token_count first to initialize the dump files."
 
@@ -179,7 +183,7 @@ class StateDumper:
             self.words_dump_file.add(flat_target)
 
     def save_config(self):
-        config = KNNConfig(self.dump_size, self.dimension, self.data_type.__name__, "", -1)
+        config = KNNConfig(self.dump_size, self.dimension, utils.dtype_to_str(self.state_data_type), utils.dtype_to_str(self.word_data_type), "", -1)
         config.save(self.dump_prefix + ".conf.yaml")
 
 
@@ -209,7 +213,12 @@ def dump(args: argparse.Namespace):
                     "Number of target inputs/factors provided (%d) does not match number of target factors "
                     "required by the model (%d)" % (len(targets), model.num_target_factors))
 
-    dumper = StateDumper(model, source_vocabs, target_vocabs, args.dump_prefix, max_seq_len_source, max_seq_len_target, device)
+    # if state data type is None, use inferred data type
+    if args.state_dtype is None:
+        args.state_dtype = utils.dtype_to_str(model.dtype)
+
+    dumper = StateDumper(model, source_vocabs, target_vocabs, args.dump_prefix, max_seq_len_source, max_seq_len_target,
+                         args.state_dtype, args.word_dtype, device)
     dumper.dump_size = StateDumper.probe_token_count(targets[0], max_seq_len_target)  # TODO: Yikes -- shouldn't be setting attributes this way
     dumper.init_dump_file(dumper.dump_size)  # TODO: assuming targets[0] is the text file, the rest are factors
     dumper.build_states_and_dump(sources, targets, args.batch_size)

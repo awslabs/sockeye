@@ -532,6 +532,23 @@ _STRING_TO_TORCH_DTYPE = {
 }
 
 
+_STRING_TO_NUMPY_DTYPE = {
+    C.DTYPE_FP16: np.float16,
+    C.DTYPE_FP32: np.float32,
+    C.DTYPE_INT8: np.int8,
+    C.DTYPE_INT16: np.int16,
+    C.DTYPE_INT32: np.int32,
+}
+
+
+def get_numpy_dtype(dtype: Union[np.dtype, str]) -> np.dtype:
+    if isinstance(dtype, np.dtype):
+        return dtype
+    if dtype in _STRING_TO_NUMPY_DTYPE:
+        return _STRING_TO_NUMPY_DTYPE[dtype]
+    raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
+
+
 def get_torch_dtype(dtype: Union[pt.dtype, str]) -> pt.dtype:
     if isinstance(dtype, pt.dtype):
         return dtype

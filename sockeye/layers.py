@@ -130,27 +130,34 @@ class KNN(pt.nn.Module):
         self.state_dump = state_dump
 
     def forward(self, data: pt.Tensor):
-        # TODO: figure out why despite the `import faiss.contrib.torch_utils` we can't call FAISS directly
+        # faiss only supports float32
         distances, indices = self.keys_index.search(data.cpu().numpy().astype(np.float32), self.k)
         # Map indices to tokens
-        y = self.vals[(indices+1) % len(self.vals)].astype(np.int32)
+        y = self.vals[(indices+1) % len(self.vals)]
         y[y == 2] = C.EOS_ID
-        y[y < 0] = 65535 + y[y < 0]
+        # guard vocab index overflow caused by int16
+        # in general, it is recommended to use int32
+        if not np.all(y >= 0):
+            y = y.astype(np.int32)
+            y[y < 0] = 65535 + y[y < 0]
 
         # use exact distance when state_dump is available
         if self.state_dump is not None:
             raw_keys = pt.from_numpy(self.state_dump[indices]).cuda()  # (data.shape[0], k, dim)
             distances = pt.norm(data.unsqueeze(1) - raw_keys, p=2, dim=-1)  # data lacks the k axis, so need to expand to create one
         else:
-            distances = pt.from_numpy(distances).to(device=data.device).half()
+            # distances = pt.from_numpy(distances).to(device=data.device).half()
+            distances = pt.from_numpy(distances).to(device=data.device)
 
+        # pytorch expects long for indexes
         y = pt.from_numpy(y).to(device=data.device).long()
 
         probs = pt.exp(-distances / self.temperature)
-        full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device).half()
+        # full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device).half()
+        full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device)
         full_probs.scatter_add_(src=probs, index=y.squeeze(2), dim=-1)
         z = pt.sum(full_probs, dim=-1).unsqueeze(-1)
-        z[z < 1e-6] = 1e-6  # avoid div by 0 (which may happen when distances are large)
+        z[z < 1e-6] = 1e-6  # avoid div by 0 (which may happen when distances of all items are large)
         full_probs.div_(z)
         return full_probs
 

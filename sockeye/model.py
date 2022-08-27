@@ -36,6 +36,7 @@ from .config import Config
 from .encoder import FactorConfig
 from .layers import LengthRatioConfig
 from . import nvs
+from sockeye.knn import KNNConfig
 
 logger = logging.getLogger(__name__)
 
@@ -490,17 +491,17 @@ class SockeyeModel(pt.nn.Module):
         # The following import will allow us to pass pytorch arrays directly to faiss
         import faiss.contrib.torch_utils
         import numpy as np
-        import json
-        # with open(os.path.join(knn_index_folder, "config.json")) as in_config:
-        #     knn_config = json.load(in_config)
+        knn_config = KNNConfig.load(os.path.join(knn_index_folder, "config.yaml"))
         keys_index = faiss.read_index(os.path.join(knn_index_folder, "key_index"))
-        keys_index.nprobe = 32
-        # keys_index = faiss.index_cpu_to_all_gpus(keys_index)
-        # vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"), dtype=np.int32,
-        #                  mode='r', shape=(knn_config["size"], ))
-        vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"), dtype=np.int16, mode='r', shape=(133816080, 1))
+        vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"),
+                         dtype=utils.get_numpy_dtype(knn_config.word_data_type),
+                         mode='r',
+                         shape=(knn_config.index_size, 1))
         if os.path.isfile(os.path.join(knn_index_folder, "keys.npy")):
-            state_dump = np.memmap(os.path.join(knn_index_folder, "keys.npy"), dtype=np.float16, mode='r', shape=(133816080, 1024))
+            state_dump = np.memmap(os.path.join(knn_index_folder, "keys.npy"),
+                                   dtype=utils.get_numpy_dtype(knn_config.state_data_type),
+                                   mode='r',
+                                   shape=(knn_config.index_size, knn_config.dimension))
         else:
             state_dump = None
         self.knn = layers.KNN(keys_index, vals, vocab_size=self.config.vocab_target_size, state_dump=state_dump)

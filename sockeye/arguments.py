@@ -1189,6 +1189,12 @@ def add_state_dumping_args(params):
 
     decode_params = params.add_argument_group("Decoder state dumping parameters")
 
+    params.add_argument('--state-dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16],
+                        help="Data type of the decoder state dump. Default: %(default)s infers from saved model.")
+
+    params.add_argument('--word-dtype', default=C.DTYPE_INT32, choices=[None, C.DTYPE_INT16, C.DTYPE_INT32],
+                        help="Data type of the word index dump. Default: int32.")
+
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
 
@@ -1477,22 +1483,30 @@ def add_knn_mt_args(params):
 
 
 def add_build_knn_index_args(params):
-    params.add_argument('-i', '--input-file',
+    params.add_argument('-i', '--input-dump-prefix',
                         required=True,
                         type=str,
-                        help='The path to the dumped decoder states.')
+                        help='The path prefix to the dumped decoder states and values (without .[states|words].npy).')
     params.add_argument('-c', '--config-file',
                         required=True,
                         help='The config yaml file path.')
 
                         help='The path to the config yaml file. '
                              '(If the state dump CLI was used, the yaml fields should have been auto-generated.)')
-    params.add_argument('-o', '--output-file',
+    params.add_argument('-o', '--output-dir',
                         required=True,
                         type=str,
-                        help='The path to the dumped index.')
-    params.add_argument('-i', '--train-sample-input-file',
+                        help='The path to the output directory.')
+    params.add_argument('-t', '--index-type',
+                        default=None,
+                        type=str,
+                        help='An optional field to specify the type of the index. Will override settings in the config.')
+    params.add_argument('--train-data-input-file',
                         default=None,
                         type=str,
                         help='An optional field to reuse an already-built training data sample for the index. '
                              'Otherwise, a (slow) sampling step might needs to be run.')
+    params.add_argument('--train-data-size',
+                        default=None,
+                        type=int,
+                        help='An optional field to specify the size of the training sample. Will override settings in the config.')
