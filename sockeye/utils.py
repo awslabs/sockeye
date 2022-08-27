@@ -541,7 +541,7 @@ _STRING_TO_NUMPY_DTYPE = {
 }
 
 
-def get_numpy_dtype(dtype: Union[np.dtype, str]) -> np.dtype:
+def get_numpy_dtype(dtype: Union[np.dtype, str]):
     if isinstance(dtype, np.dtype):
         return dtype
     if dtype in _STRING_TO_NUMPY_DTYPE:

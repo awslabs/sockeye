@@ -180,7 +180,7 @@ class SockeyeModel(pt.nn.Module):
             for name, dtype in mismatched_dtype_params:
                 logger.warn(f'{name}: {dtype} -> {self.dtype}')
 
-        self.knn = None
+        self.knn : Optional[layers.KNN] = None
 
 
     def cast(self, dtype: Union[pt.dtype, str]):
@@ -484,12 +484,13 @@ class SockeyeModel(pt.nn.Module):
                     (name, model_params[name].size(), new_params[name].size())
                 model_params[name].data[:] = new_params[name].data
 
-    def load_knn_index(self, knn_index_folder: str):
+    def load_knn_index(self, knn_index_folder: str) -> None:
         import faiss
         # The following import will allow us to pass pytorch arrays directly to faiss
         import faiss.contrib.torch_utils
         import numpy as np
         knn_config = KNNConfig.load(os.path.join(knn_index_folder, "config.yaml"))
+        knn_config = cast(KNNConfig, knn_config)  # load returns a Config class, need to cast to subclass KNNConfig
         keys_index = faiss.read_index(os.path.join(knn_index_folder, "key_index"))
         vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"),
                          dtype=utils.get_numpy_dtype(knn_config.word_data_type),
@@ -616,7 +617,7 @@ class _DecodeStep(pt.nn.Module):
                  decoder: decoder.Decoder,
                  output_layer: layers.OutputLayer,
                  factor_output_layers: pt.nn.ModuleList,
-                 knn = None):
+                 knn : Optional[layers.KNN] = None):
         super().__init__()
         self.embedding_target = embedding_target
         self.decoder = decoder
@@ -739,16 +740,9 @@ def load_model(model_folder: str,
                           ignore_extra=False)
 
     if knn_index is not None:
-
-        # only build cache if knn_cache_size is not zero
-        if knn_cache_size > 0:
-            model.knn_cache = cachetools.LRUCache(knn_cache_size)
-            model.knn_cache_alpha = knn_cache_alpha
-            logger.info(f'kNN cache with size {model.knn_cache.maxsize}, alpha {model.knn_cache_alpha}')
-        else:
-            # do this so we can run without caching
-            model.knn_cache = None
-            logger.info('kNN cache disabled')
+        # knn cache not supported for now
+        model.knn_cache = None
+        logger.info('kNN cache disabled')
 
         model.load_knn_index(knn_index)
 

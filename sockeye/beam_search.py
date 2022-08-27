@@ -173,7 +173,7 @@ class _EnsembleInference(_Inference):
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
-            logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
+            logits, knn_outputs, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
             probs = logits.softmax(dim=-1)
             outputs.append(probs)
             if target_factor_outputs:
