@@ -1480,6 +1480,10 @@ def add_knn_mt_args(params):
                             help='Optionally use a KNN index during inference to '
                                  'retrieve similar hidden states and corresponding target tokens.',
                             default=None)
+    knn_params.add_argument('--knn-lambda',
+                            type=float,
+                            help="Interpolation parameter when using KNN index.",
+                            default=0.8)
 
 
 def add_build_knn_index_args(params):
@@ -1489,8 +1493,6 @@ def add_build_knn_index_args(params):
                         help='The path prefix to the dumped decoder states and values (without .[states|words].npy).')
     params.add_argument('-c', '--config-file',
                         required=True,
-                        help='The config yaml file path.')
-
                         help='The path to the config yaml file. '
                              '(If the state dump CLI was used, the yaml fields should have been auto-generated.)')
     params.add_argument('-o', '--output-dir',

@@ -118,6 +118,8 @@ def run_translate(args: argparse.Namespace):
     else:
         raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
+    knn_lambda = args.knn_lambda
+
     for model in models:
         model.eval()
 
@@ -142,6 +144,7 @@ def run_translate(args: argparse.Namespace):
                                       sample=args.sample,
                                       output_scores=output_handler.reports_score(),
                                       constant_length_ratio=constant_length_ratio,
+                                      knn_lambda=knn_lambda,
                                       max_output_length_num_stds=args.max_output_length_num_stds,
                                       max_input_length=args.max_input_length,
                                       max_output_length=args.max_output_length,

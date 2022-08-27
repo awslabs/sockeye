@@ -65,10 +65,12 @@ class _SingleModelInference(_Inference):
     def __init__(self,
                  model: SockeyeModel,
                  skip_softmax: bool = False,
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 knn_lambda: float = 0.8) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
+        self.knn_lambda = knn_lambda
 
     def state_structure(self) -> List:
         return [self._model.state_structure()]
@@ -88,7 +90,7 @@ class _SingleModelInference(_Inference):
             if knn_probs is None:  # no knn used
                 probs = pt.log_softmax(logits, dim=-1)
             else:
-                lmbda = 0.8
+                lmbda = self.knn_lambda
                 probs = pt.log(lmbda * pt.softmax(logits, dim=-1) + (1-lmbda) * knn_probs)
         else:
             assert knn_probs is None, "Can't skip softmax with KNN."
@@ -1094,6 +1096,7 @@ def get_search_algorithm(models: List[SockeyeModel],
                          ensemble_mode: str = 'linear',
                          beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                          constant_length_ratio: float = 0.0,
+                         knn_lambda: float = 0.8,
                          sample: Optional[int] = None,
                          prevent_unk: bool = False,
                          greedy: bool = False,
@@ -1122,7 +1125,8 @@ def get_search_algorithm(models: List[SockeyeModel],
             num_target_factors=models[0].num_target_factors,
             inference=_SingleModelInference(model=models[0],
                                             skip_softmax=True,
-                                            constant_length_ratio=0.0),
+                                            constant_length_ratio=0.0,
+                                            knn_lambda=knn_lambda),
             skip_nvs=skip_nvs,
             nvs_thresh=nvs_thresh)
     else:
@@ -1133,7 +1137,8 @@ def get_search_algorithm(models: List[SockeyeModel],
                 logger.info("Enabled skipping softmax for a single model and greedy decoding.")
             inference = _SingleModelInference(model=models[0],
                                               skip_softmax=skip_softmax,
-                                              constant_length_ratio=constant_length_ratio)
+                                              constant_length_ratio=constant_length_ratio,
+                                              knn_lambda=knn_lambda)
         else:
             inference = _EnsembleInference(models=models,
                                            ensemble_mode=ensemble_mode,
