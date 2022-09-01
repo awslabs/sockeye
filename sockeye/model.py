@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import cast, Dict, List, Optional, Tuple, Union
 
-import cachetools
 import torch as pt
 
 from sockeye import __version__
@@ -485,6 +484,7 @@ class SockeyeModel(pt.nn.Module):
                 model_params[name].data[:] = new_params[name].data
 
     def load_knn_index(self, knn_index_folder: str) -> None:
+        utils.init_faiss()
         import faiss
         # The following import will allow us to pass pytorch arrays directly to faiss
         import faiss.contrib.torch_utils

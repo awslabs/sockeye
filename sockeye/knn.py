@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,7 +14,6 @@
 import argparse
 from abc import abstractmethod
 from dataclasses import dataclass
-import faiss
 import logging
 import math
 import numpy as np
@@ -26,6 +25,11 @@ from typing import Dict, Iterable, List, Optional, Tuple, Callable
 from . import arguments
 from sockeye import config, utils, constants as C
 from sockeye.log import setup_main_logger
+
+try:
+    import faiss
+except:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +58,11 @@ class KNNConfig(config.Config):
 class FaissIndexBuilder:
 
     def __init__(self, config: KNNConfig, use_gpu: bool = False, device_id: int = 0):
+        utils.init_faiss()  # faiss will definitely be used for this class, so check here
         self.config = config
         self.use_gpu = use_gpu
         self.device_id = device_id
 
-    # def built_index_from_dump(self, keys: np.array, dim: int, signature: str, train_sample: np.memmap = None, block_size: int = 1000000):
     def init_faiss_index(self, train_sample: Optional[np.memmap] = None):
         index = faiss.index_factory(self.config.dimension, self.config.index_type)
         if self.use_gpu is True:
@@ -73,13 +77,13 @@ class FaissIndexBuilder:
 
         return index
 
-    def add_items(self, index: faiss.Index, keys: np.array):
+    def add_items(self, index, keys: np.array):
         item_count, key_dim = keys.shape
         assert key_dim == self.config.dimension
 
         index.add(keys.astype(np.float32))  # unfortunately, faiss index only supports float32
 
-    def block_add_items(self, index: faiss.Index, keys: np.array, block_size: int = 1024*1024):
+    def block_add_items(self, index, keys: np.array, block_size: int = 1024*1024):
         item_count, key_dim = keys.shape
         assert key_dim == self.config.dimension
 
@@ -135,6 +139,7 @@ def main():
     utils.check_condition(os.path.exists(state_dump_filename), f"Input file {state_dump_filename} not found!")
     utils.check_condition(os.path.exists(word_dump_filename), f"Input file {word_dump_filename} not found!")
     utils.check_condition(os.path.exists(args.config_file), f"Config file {args.config_file} not found!")
+    utils.init_faiss()
 
     setup_main_logger(file_logging=False,
                       console=not args.quiet,

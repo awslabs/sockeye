@@ -717,6 +717,30 @@ def using_deepspeed() -> bool:
     return _using_deepspeed
 
 
+# Track whether faiss has been initialized
+_using_faiss = False
+
+def init_faiss():
+    """
+    Make sure the faiss module can be imported, initialize faiss,
+    and set the global variable that tracks initialization.
+
+    """
+    global _using_faiss
+    if not _using_faiss:
+        try:
+            import faiss
+            _using_faiss = True
+        except:
+            raise RuntimeError('To run kNN-MT models, you need to install faiss by following '
+                               'https://github.com/facebookresearch/faiss/blob/main/INSTALL.md')
+
+
+def using_faiss() -> bool:
+    """Check whether faiss has been initialized via this module"""
+    return _using_faiss
+
+
 def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optional[List] = None) -> int:
     """
     Count sequence length, after replacing (optional) token/s.
