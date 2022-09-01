@@ -441,6 +441,9 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Target side of parallel training data.')
+    params.add_argument(C.TRAINING_ARG_METADATA, '-md',
+                        type=regular_file(),
+                        help='Metadata for parallel training data (JSON).')
 
 
 def add_validation_data_params(params):
@@ -466,6 +469,9 @@ def add_validation_data_params(params):
                         default=[],
                         help='File(s) containing additional token-parallel validation target side factors. '
                              'Default: %(default)s.')
+    params.add_argument('--validation-metadata', '-vmd',
+                        type=regular_file(),
+                        help='Metadata for validation data (JSON).')
 
 
 def add_prepared_data_args(params):

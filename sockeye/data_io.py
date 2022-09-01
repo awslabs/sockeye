@@ -214,7 +214,7 @@ def calculate_length_statistics(source_iterables: Sequence[Iterable[Any]],
     """
     mean_and_variance = OnlineMeanAndVariance()
 
-    for sources, targets in parallel_iter(source_iterables, target_iterables):
+    for sources, targets, _ in parallel_iter(source_iterables, target_iterables):
         source_len = len(sources[0])
         target_len = len(targets[0])
         if source_len > max_seq_len_source or target_len > max_seq_len_target:
@@ -355,7 +355,10 @@ class DataStatisticsAccumulator:
 def create_shards(source_fnames: List[str],
                   target_fnames: List[str],
                   num_shards: int,
-                  output_prefix: str) -> Tuple[List[Tuple[Tuple[str, ...], Tuple[str, ...]]], bool]:
+                  output_prefix: str,
+                  metadata_fname: Optional[str]) -> Tuple[List[Tuple[Tuple[str, ...], Tuple[str, ...]]],
+                                                          Optional[Tuple[str]],
+                                                          bool]:
     """
     Assign source/target sentence pairs to shards at random.
 
@@ -363,28 +366,41 @@ def create_shards(source_fnames: List[str],
     :param target_fnames: The path to the target text (and optional token-parallel factor files).
     :param num_shards: The total number of shards.
     :param output_prefix: The prefix under which the shard files will be created.
-    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each shard
-             and a flag of whether the returned file names are temporary and can be deleted.
+    :param metadata_fname: Optional path to the metadata JSON (line-parallel to source and target).
+    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each
+             shard, tuple of metadata file names (or None), and a flag of whether the returned file names are temporary
+             and can be deleted.
     """
     if num_shards == 1:
-        return [(tuple(source_fnames), tuple(target_fnames))], True
+        return ([(tuple(source_fnames), tuple(target_fnames))],
+                (metadata_fname,) if metadata_fname is not None else None,
+                True)
     os.makedirs(output_prefix, exist_ok=True)
     sources_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % i) + ".%d" % f for i in range(num_shards)]
                             for f in range(len(source_fnames))]
     targets_shard_fnames = [[os.path.join(output_prefix, C.SHARD_TARGET % i) + ".%d" % f for i in range(num_shards)]
                             for f in range(len(target_fnames))]
+    metadata_shard_fnames = [os.path.join(output_prefix, C.SHARD_METADATA % i) for i in range(num_shards)] \
+        if metadata_fname is not None else None
 
     with ExitStack() as exit_stack:
         sources_shards = [[exit_stack.enter_context(smart_open(f, mode="wb")) for f in sources_shard_fnames[i]] for i in
                           range(len(source_fnames))]
         targets_shards = [[exit_stack.enter_context(smart_open(f, mode="wb")) for f in targets_shard_fnames[i]] for i in
                           range(len(target_fnames))]
+        metadata_shards = [exit_stack.enter_context(smart_open(f, mode="wb")) for f in metadata_shard_fnames] \
+            if metadata_fname is not None else None
 
         source_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in source_fnames]
         target_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in target_fnames]
+        metadata_reader = exit_stack.enter_context(smart_open(metadata_fname, mode="rb")) \
+            if metadata_fname is not None else None
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
-        for (sources, targets), random_shard_index in zip(parallel_iter(source_readers, target_readers, True, False), random_shard_iter):
+        for (sources, targets, metadata), random_shard_index in zip(parallel_iter(source_readers, target_readers,
+                                                                                  metadata_reader, skip_blanks=True,
+                                                                                  check_token_parallel=False),
+                                                                    random_shard_iter):
             random_shard_index = cast(int, random_shard_index)
             for i, line in enumerate(sources):
                 file = sources_shards[i][random_shard_index]
@@ -392,10 +408,16 @@ def create_shards(source_fnames: List[str],
             for i, line in enumerate(targets):
                 file = targets_shards[i][random_shard_index]
                 file.write(line)
+            if metadata is not None:
+                file = metadata_shards[random_shard_index]
+                file.write(metadata)
     sources_shard_fnames_by_shards = zip(*sources_shard_fnames)
     targets_shard_fnames_by_shards = zip(*targets_shard_fnames)
+    metadata_shard_fnames_by_shards = zip(metadata_shard_fnames) if metadata_fname is not None else None
 
-    return list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards)), False
+    return (list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards)),
+            list(metadata_shard_fnames_by_shards) if metadata_fname is not None else None,
+            False)
 
 
 class RawParallelDatasetLoader:
@@ -461,7 +483,7 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays
-        for sources, targets in parallel_iter(source_iterables, target_iterables, skip_blanks=self.skip_blanks):
+        for sources, targets, _ in parallel_iter(source_iterables, target_iterables, skip_blanks=self.skip_blanks):
             sources = [[] if stream is None else stream for stream in sources]
             targets = [[] if stream is None else stream for stream in targets]
             source_len = len(sources[0])
@@ -554,7 +576,7 @@ def save_shard(shard_idx: int,
     # Shards contain the raw sentences. Need to map to integers using the vocabs and add BOS/EOS
     sources_sentences, targets_sentences = create_sequence_readers(shard_sources, shard_targets, source_vocabs, target_vocabs)
 
-    for sources, targets in parallel_iter(sources_sentences, targets_sentences):
+    for sources, targets, _ in parallel_iter(sources_sentences, targets_sentences):
         source_len = len(sources[0])
         target_len = len(targets[0])
 
@@ -714,7 +736,7 @@ def get_data_statistics(source_readers: Optional[Sequence[Iterable]],
                                                        length_ratio_std)
 
     if source_readers is not None:
-        for sources, targets in parallel_iter(source_readers, target_readers):
+        for sources, targets, _ in parallel_iter(source_readers, target_readers):
             buck_idx, _ = get_parallel_bucket(buckets, len(sources[0]), len(targets[0]))
             data_stats_accumulator.sequence_pair(sources[0], targets[0], buck_idx)
     else:  # Allow stats for target only data
@@ -1246,6 +1268,7 @@ def create_sequence_readers(sources: List[str], targets: List[str],
 
 def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
                   target_iterables: Sequence[Iterable[Optional[Any]]],
+                  metadata_iterable: Optional[Iterable[Optional[Any]]] = None,
                   skip_blanks: bool = True,
                   check_token_parallel: bool = True):
     """
@@ -1254,18 +1277,21 @@ def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
     the caller to save iterator state between calls, if desired.
 
     :param source_iterables: A list of source iterables.
-    :param target_iterables: A target iterable.
+    :param target_iterables: A list of target iterable.
+    :param metadata_iterable: An optional metadata iterable.
     :param skip_blanks: Whether to skip empty target lines.
     :param check_token_parallel: Whether to check if the tokens are parallel or not.
-    :return: Iterators over sources and target.
+    :return: Iterators over sources, targets, and metadata.
     """
     source_iterators = [iter(s) for s in source_iterables]
     target_iterators = [iter(t) for t in target_iterables]
-    return parallel_iterate(source_iterators, target_iterators, skip_blanks, check_token_parallel)
+    metadata_iterator = iter(metadata_iterable) if metadata_iterable is not None else None
+    return parallel_iterate(source_iterators, target_iterators, metadata_iterator, skip_blanks, check_token_parallel)
 
 
 def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
                      target_iterators: Sequence[Iterator[Optional[Any]]],
+                     metadata_iterator: Optional[Iterator[Optional[Any]]] = None,
                      skip_blanks: bool = True,
                      check_token_parallel: bool = True):
     """
@@ -1277,17 +1303,20 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
 
     :param source_iterators: A list of source iterators.
     :param target_iterators: A list of source iterators.
+    :param metadata_iterator: An optional metadata iterator.
     :param skip_blanks: Whether to skip empty target lines.
     :param check_token_parallel: Whether to check if the tokens are parallel or not.
-    :return: Iterators over sources and target.
+    :return: Iterators over sources, targets, and metadata.
     """
     num_skipped = 0
     while True:
         try:
             sources = [next(source_iter) for source_iter in source_iterators]
             targets = [next(target_iter) for target_iter in target_iterators]
+            metadata = next(metadata_iterator) if metadata_iterator is not None else None
         except StopIteration:
             break
+        # Check source and target; metadata lines are allowed to be blank.
         if skip_blanks and (any((s is None for s in sources)) or any((t is None for t in targets))):
             num_skipped += 1
             continue
@@ -1296,15 +1325,16 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
                             "Source sequences are not token-parallel: %s" % (str(sources)))
             check_condition(are_none(targets) or are_token_parallel(targets),
                             "Target sequences are not token-parallel: %s" % (str(targets)))
-        yield sources, targets
+        yield sources, targets, metadata
 
     if num_skipped > 0:
         logger.warning("Parallel reading of sequences skipped %d elements", num_skipped)
 
     check_condition(
         all(next(cast(Iterator, s), None) is None for s in source_iterators) and \
-        all(next(cast(Iterator, t), None) is None for t in target_iterators),
-        "Different number of lines in source(s) and target(s) iterables.")
+        all(next(cast(Iterator, t), None) is None for t in target_iterators) and \
+        (metadata_iterator is None or next(cast(Iterator, metadata_iterator), None) is None),
+        "Different number of lines in source(s), target(s), and (if specified) metadata iterables.")
 
 
 def get_parallel_bucket(buckets: List[Tuple[int, int]],
