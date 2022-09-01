@@ -357,7 +357,7 @@ def create_shards(source_fnames: List[str],
                   num_shards: int,
                   output_prefix: str,
                   metadata_fname: Optional[str]) -> Tuple[List[Tuple[Tuple[str, ...], Tuple[str, ...]]],
-                                                          Optional[Tuple[str]],
+                                                          Optional[List[str]],
                                                           bool]:
     """
     Assign source/target sentence pairs to shards at random.
@@ -368,12 +368,12 @@ def create_shards(source_fnames: List[str],
     :param output_prefix: The prefix under which the shard files will be created.
     :param metadata_fname: Optional path to the metadata JSON (line-parallel to source and target).
     :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each
-             shard, tuple of metadata file names (or None), and a flag of whether the returned file names are temporary
+             shard, list of metadata file names (or None), and a flag of whether the returned file names are temporary
              and can be deleted.
     """
     if num_shards == 1:
         return ([(tuple(source_fnames), tuple(target_fnames))],
-                (metadata_fname,) if metadata_fname is not None else None,
+                [metadata_fname] if metadata_fname is not None else None,
                 True)
     os.makedirs(output_prefix, exist_ok=True)
     sources_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % i) + ".%d" % f for i in range(num_shards)]
@@ -413,10 +413,9 @@ def create_shards(source_fnames: List[str],
                 file.write(metadata)
     sources_shard_fnames_by_shards = zip(*sources_shard_fnames)
     targets_shard_fnames_by_shards = zip(*targets_shard_fnames)
-    metadata_shard_fnames_by_shards = zip(metadata_shard_fnames) if metadata_fname is not None else None
 
     return (list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards)),
-            list(metadata_shard_fnames_by_shards) if metadata_fname is not None else None,
+            metadata_shard_fnames if metadata_fname is not None else None,
             False)
 
 
@@ -612,6 +611,9 @@ def prepare_data(source_fnames: List[str],
                  bucket_width: int,
                  num_shards: int,
                  output_prefix: str,
+                 metadata_fname: Optional[str] = None,
+                 metadata_vocab: Optional[vocab.Vocab] = None,
+                 metadata_vocab_path: Optional[str] = None,
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
                  pool: multiprocessing.pool.Pool = None,
@@ -623,6 +625,8 @@ def prepare_data(source_fnames: List[str],
     # write vocabularies to data folder
     vocab.save_source_vocabs(source_vocabs, output_prefix)
     vocab.save_target_vocabs(target_vocabs, output_prefix)
+    if metadata_vocab is not None:
+        vocab.save_metadata_vocab(metadata_vocab, output_prefix)
 
     # Get target/source length ratios.
     stats_args = ((source_path, target_path, source_vocabs, target_vocabs, max_seq_len_source, max_seq_len_target)
@@ -1662,7 +1666,7 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         sources_sentences = [[] for _ in self.sources_sentences]  # type: List[List[str]]
         targets_sentences = [[] for _ in self.targets_sentences]  # type: List[List[str]]
         num_read = 0
-        for num_read, (sources, targets) in enumerate(
+        for num_read, (sources, targets, _) in enumerate(
                 parallel_iterate(self.sources_iters, self.targets_iters, skip_blanks=False), 1):
             source_len = 0 if sources[0] is None else len(sources[0])
             target_len = 0 if targets[0] is None else len(targets[0])

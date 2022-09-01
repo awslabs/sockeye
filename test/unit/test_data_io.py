@@ -160,7 +160,7 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
 def test_nonparallel_iter(source_iterables, target_iterables):
     with pytest.raises(SockeyeError) as e:
         list(data_io.parallel_iter(source_iterables, target_iterables))
-    assert str(e.value) == "Different number of lines in source(s) and target(s) iterables."
+    assert str(e.value) == "Different number of lines in source(s), target(s), and (if specified) metadata iterables."
 
 
 @pytest.mark.parametrize("source_iterables, target_iterables",
@@ -189,41 +189,60 @@ def test_not_target_token_parallel_iter(source_iterables, target_iterables):
     assert str(e.value).startswith("Target sequences are not token-parallel")
 
 
-@pytest.mark.parametrize("source_iterables, target_iterables, expected",
+@pytest.mark.parametrize("source_iterables, target_iterables, metadata_iterable, expected",
                          [
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[[0], [1]]],
-                                     [([[0], [0]], [[0]]), ([[1, 1], [1, 1]], [[1]])]
+                                     None,
+                                     [([[0], [0]], [[0]], None), ([[1, 1], [1, 1]], [[1]], None)]
                              ),
                              (
                                      [[[0], None], [[0], None]],
                                      [[[0], [1]]],
-                                     [([[0], [0]], [[0]])]
+                                     None,
+                                     [([[0], [0]], [[0]], None)]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[[0], None]],
-                                     [([[0], [0]], [[0]])]
+                                     None,
+                                     [([[0], [0]], [[0]], None)]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
                                      [[None, [1]]],
-                                     [([[1, 1], [1, 1]], [[1]])]
+                                     None,
+                                     [([[1, 1], [1, 1]], [[1]], None)]
                              ),
                              (
                                      [[None, [1]]],
                                      [[None, [1, 1]], [None, [1, 1]]],
-                                     [([[1]], [[1, 1], [1, 1]])]
+                                     None,
+                                     [([[1]], [[1, 1], [1, 1]], None)]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
                                      [[None, None]],
+                                     None,
                                      []
-                             )
+                             ),
+                             # With metadata
+                             (
+                                     [[[0], [1, 1]], [[0], [1, 1]]],
+                                     [[[0], [1]]],
+                                     [2, 3],
+                                     [([[0], [0]], [[0]], 2), ([[1, 1], [1, 1]], [[1]], 3)]
+                             ),
+                             (
+                                     [[[0], None], [[0], None]],
+                                     [[[0], [1]]],
+                                     [2],
+                                     [([[0], [0]], [[0]], 2)]
+                             ),
                          ])
-def test_parallel_iter(source_iterables, target_iterables, expected):
-    assert list(data_io.parallel_iter(source_iterables, target_iterables)) == expected
+def test_parallel_iter(source_iterables, target_iterables, metadata_iterable, expected):
+    assert list(data_io.parallel_iter(source_iterables, target_iterables, metadata_iterable)) == expected
 
 
 def test_sample_based_define_bucket_batch_sizes():

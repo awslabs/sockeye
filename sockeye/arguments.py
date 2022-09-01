@@ -597,6 +597,10 @@ def add_vocab_args(params):
                         type=regular_file(),
                         default=[],
                         help='Existing target factor vocabulary (-ies) (JSON).')
+    params.add_argument('--metadata-vocab',
+                        required=False,
+                        default=None,
+                        help='Existing metadata vocabulary (JSON).')
     params.add_argument(C.VOCAB_ARG_SHARED_VOCAB,
                         action='store_true',
                         default=False,

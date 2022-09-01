@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import argparse
+import functools
 import json
 import logging
 import os
@@ -30,23 +31,28 @@ Vocab = Dict[str, int]
 InverseVocab = Dict[int, str]
 
 
-def count_tokens_for_path(path: str) -> Counter:
+def count_tokens_for_path(path: str, is_metadata: bool = False) -> Counter:
     """
     :param path: Path to file with one sentence per line.
+    :param is_metadata: File is metadata that contains one JSON dictionary per
+                        line instead of one sentence.
     :return: Token counter.
     """
     with utils.smart_open(path, mode='rt') as lines:
+        if is_metadata:
+            return Counter(key for line in lines for key in json.loads(line))
         return count_tokens(lines)
 
 
-def build_from_paths(paths: Iterable[str], num_words: Optional[int] = None, min_count: int = 1,
-                     pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:
+def build_from_paths(paths: Iterable[str], is_metadata: bool = False, num_words: Optional[int] = None,
+                     min_count: int = 1, pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:
     """
     Creates a vocabulary mapping from words to ids from shard paths to files in sentence-per-line format.
     A sentence is just a whitespace delimited list of tokens. Note that special symbols like the beginning of sentence (BOS)
     symbol will be added to the vocabulary.
 
     :param paths: List of tuples containing shard paths to files with one sentence per line.
+    :param is_metadata: Files are metadata and contain one JSON dictionary per line instead of one sentence.
     :param num_words: Optional maximum number of words in the vocabulary.
     :param min_count: Minimum occurrences of words to be included in the vocabulary.
     :param pad_to_multiple_of: If not None, pads the vocabulary to a size that is the next multiple of this int.
@@ -54,7 +60,7 @@ def build_from_paths(paths: Iterable[str], num_words: Optional[int] = None, min_
     :return: Word-to-id mapping.
     """
     logger.info("Building vocabulary from dataset(s): %s", " ".join(paths)) # type: ignore
-    vocab_counters = mapper(count_tokens_for_path, paths)
+    vocab_counters = mapper(functools.partial(count_tokens_for_path, is_metadata=is_metadata), paths)
     # Combine shard Counters and create a single Vocab
     raw_vocab = sum(vocab_counters, Counter()) # type: Counter
     return build_pruned_vocab(raw_vocab=raw_vocab,
@@ -224,6 +230,16 @@ def save_target_vocabs(target_vocabs: List[Vocab], folder: str):
         vocab_to_json(vocab, os.path.join(folder, C.VOCAB_TRG_NAME % i))
 
 
+def save_metadata_vocab(metadata_vocab: Vocab, folder: str):
+    """
+    Saves metadata vocabulary to folder.
+
+    :param metadata_vocab: Metadata vocabulary.
+    :param folder: Destination folder.
+    """
+    vocab_to_json(metadata_vocab, os.path.join(folder, C.VOCAB_META_NAME))
+
+
 def _get_sorted_source_vocab_fnames(folder) -> List[str]:
     _key = lambda x: int(x.split('.', 3)[-2])
     return sorted([f for f in os.listdir(folder) if f.startswith(C.VOCAB_SRC_PREFIX)], key=_key)
@@ -256,7 +272,8 @@ def load_target_vocabs(folder: str) -> List[Vocab]:
     return [vocab_from_json(os.path.join(folder, fname)) for fname in _get_sorted_target_vocab_fnames(folder)]
 
 
-def load_or_create_vocab(data: Iterable[str], vocab_path: Optional[str], num_words: int, word_min_count: int,
+def load_or_create_vocab(data: Iterable[str], vocab_path: Optional[str], is_metadata: bool = False,
+                         num_words: Optional[int] = None, word_min_count: int = 1,
                          pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:
     """
     If the vocabulary path is defined, the vocabulary is loaded from the path.
@@ -265,7 +282,7 @@ def load_or_create_vocab(data: Iterable[str], vocab_path: Optional[str], num_wor
     :param data: Tuple of file paths for each shard.
     """
     if vocab_path is None:
-        return build_from_paths(paths=data, num_words=num_words, min_count=word_min_count,
+        return build_from_paths(paths=data, is_metadata=is_metadata, num_words=num_words, min_count=word_min_count,
                                 pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)
     else:
         return vocab_from_json(vocab_path)
@@ -279,8 +296,10 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
                           shared_vocab: bool,
                           num_words_source: Optional[int], word_min_count_source: int,
                           num_words_target: Optional[int], word_min_count_target: int,
+                          shard_metadata_paths: Optional[Iterable[str]] = None,
+                          metadata_vocab_path: Optional[str] = None,
                           pad_to_multiple_of: Optional[int] = None,
-                          mapper: Callable = map) -> Tuple[List[Vocab], List[Vocab]]:
+                          mapper: Callable = map) -> Tuple[List[Vocab], List[Vocab], Optional[Vocab]]:
     """
     Returns vocabularies for source files (including factors) and target files (including factors.
     If the respective vocabulary paths are not None, the vocabulary is read from the path and returned.
@@ -297,6 +316,7 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     :param word_min_count_source: Minimum frequency of words in the source vocabulary.
     :param num_words_target: Number of words in the target vocabulary.
     :param word_min_count_target: Minimum frequency of words in the target vocabulary.
+    :param metadata_vocab_path: The optional metadata vocabulary path.
     :param pad_to_multiple_of: If not None, pads the vocabularies to a size that is the next multiple of this int.
     :param mapper: Built-in map function or multiprocessing.pool.map with max_processes processes.
     :return: List of source vocabularies (for source and factors), and target vocabulary.
@@ -342,10 +362,12 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
             vocab_source = vocab_target = vocab_from_json(vocab_path)
 
     else:
-        vocab_source = load_or_create_vocab(shard_source_sentence_paths, source_vocab_path, num_words_source, word_min_count_source,
-                                            pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)
-        vocab_target = load_or_create_vocab(shard_target_sentence_paths, target_vocab_path, num_words_target, word_min_count_target,
-                                            pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)
+        vocab_source = load_or_create_vocab(shard_source_sentence_paths, source_vocab_path, num_words=num_words_source,
+                                            word_min_count=word_min_count_source, pad_to_multiple_of=pad_to_multiple_of,
+                                            mapper=mapper)
+        vocab_target = load_or_create_vocab(shard_target_sentence_paths, target_vocab_path, num_words=num_words_target,
+                                            word_min_count=word_min_count_target, pad_to_multiple_of=pad_to_multiple_of,
+                                            mapper=mapper)
 
     vocab_source_factors = []  # type: List[Vocab]
     if shard_source_factor_paths:
@@ -365,7 +387,8 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
                                                                          source_factor_vocab_same_as_source):
         if not share_source_vocab:
             vocab_source_factors.append(load_or_create_vocab(shard_factor_paths, factor_vocab_path,
-                                                             num_words_source, word_min_count_source,
+                                                             num_words=num_words_source,
+                                                             word_min_count=word_min_count_source,
                                                              pad_to_multiple_of=pad_to_multiple_of,
                                                              mapper=mapper))
         else:
@@ -389,13 +412,20 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
                                                                          target_factor_vocab_same_as_target):
         if not share_target_vocab:
             vocab_target_factors.append(load_or_create_vocab(shard_factor_paths, factor_vocab_path,
-                                                             num_words_target, word_min_count_target,
+                                                             num_words=num_words_target,
+                                                             word_min_count=word_min_count_target,
                                                              pad_to_multiple_of=pad_to_multiple_of,
                                                              mapper=mapper))
         else:
             vocab_target_factors.append(vocab_target)
 
-    return [vocab_source] + vocab_source_factors, [vocab_target] + vocab_target_factors
+    vocab_metadata = None  # type: Vocab
+    if shard_metadata_paths is not None:
+        logger.info("(4) Additional metadata vocabulary")
+        vocab_metadata = load_or_create_vocab(shard_metadata_paths, metadata_vocab_path, is_metadata=True,
+                                              pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)
+
+    return [vocab_source] + vocab_source_factors, [vocab_target] + vocab_target_factors, vocab_metadata
 
 
 def reverse_vocab(vocab: Vocab) -> InverseVocab:
