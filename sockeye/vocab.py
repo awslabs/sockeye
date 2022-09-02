@@ -296,7 +296,7 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
                           shared_vocab: bool,
                           num_words_source: Optional[int], word_min_count_source: int,
                           num_words_target: Optional[int], word_min_count_target: int,
-                          shard_metadata_paths: Optional[Iterable[str]] = None,
+                          shard_metadata_paths: Optional[Iterable[Optional[str]]] = None,
                           metadata_vocab_path: Optional[str] = None,
                           pad_to_multiple_of: Optional[int] = None,
                           mapper: Callable = map) -> Tuple[List[Vocab], List[Vocab], Optional[Vocab]]:
