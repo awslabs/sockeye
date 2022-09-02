@@ -420,7 +420,8 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
             vocab_target_factors.append(vocab_target)
 
     vocab_metadata = None  # type: Vocab
-    if shard_metadata_paths is not None:
+    # Paths may be None or (None, ...) depending on whether we're using sharding
+    if shard_metadata_paths is not None and None not in shard_metadata_paths:
         logger.info("(4) Additional metadata vocabulary")
         vocab_metadata = load_or_create_vocab(shard_metadata_paths, metadata_vocab_path, is_metadata=True,
                                               pad_to_multiple_of=pad_to_multiple_of, mapper=mapper)

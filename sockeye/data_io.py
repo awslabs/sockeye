@@ -15,6 +15,7 @@
 Implements data iterators and I/O related functions for sequence-to-sequence models.
 """
 import bisect
+import itertools
 import logging
 import math
 import multiprocessing.pool
@@ -356,9 +357,8 @@ def create_shards(source_fnames: List[str],
                   target_fnames: List[str],
                   num_shards: int,
                   output_prefix: str,
-                  metadata_fname: Optional[str]) -> Tuple[List[Tuple[Tuple[str, ...], Tuple[str, ...]]],
-                                                          Optional[List[str]],
-                                                          bool]:
+                  metadata_fname: Optional[str] = None) -> Tuple[List[Tuple[Tuple[str, ...], Tuple[str, ...], str]],
+                                                                 bool]:
     """
     Assign source/target sentence pairs to shards at random.
 
@@ -367,29 +367,26 @@ def create_shards(source_fnames: List[str],
     :param num_shards: The total number of shards.
     :param output_prefix: The prefix under which the shard files will be created.
     :param metadata_fname: Optional path to the metadata JSON (line-parallel to source and target).
-    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each
-             shard, list of metadata file names (or None), and a flag of whether the returned file names are temporary
+    :return: List of tuples of source (and source factor) file names, target (and target factor) file names, and
+             metadata file names (or None's) for each shard and a flag of whether the returned file names are temporary
              and can be deleted.
     """
     if num_shards == 1:
-        return ([(tuple(source_fnames), tuple(target_fnames))],
-                [metadata_fname] if metadata_fname is not None else None,
-                True)
+        return ([(tuple(source_fnames), tuple(target_fnames), metadata_fname)], True)
     os.makedirs(output_prefix, exist_ok=True)
     sources_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % i) + ".%d" % f for i in range(num_shards)]
                             for f in range(len(source_fnames))]
     targets_shard_fnames = [[os.path.join(output_prefix, C.SHARD_TARGET % i) + ".%d" % f for i in range(num_shards)]
                             for f in range(len(target_fnames))]
     metadata_shard_fnames = [os.path.join(output_prefix, C.SHARD_METADATA % i) for i in range(num_shards)] \
-        if metadata_fname is not None else None
+        if metadata_fname is not None else []
 
     with ExitStack() as exit_stack:
         sources_shards = [[exit_stack.enter_context(smart_open(f, mode="wb")) for f in sources_shard_fnames[i]] for i in
                           range(len(source_fnames))]
         targets_shards = [[exit_stack.enter_context(smart_open(f, mode="wb")) for f in targets_shard_fnames[i]] for i in
                           range(len(target_fnames))]
-        metadata_shards = [exit_stack.enter_context(smart_open(f, mode="wb")) for f in metadata_shard_fnames] \
-            if metadata_fname is not None else None
+        metadata_shards = [exit_stack.enter_context(smart_open(f, mode="wb")) for f in metadata_shard_fnames]
 
         source_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in source_fnames]
         target_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in target_fnames]
@@ -414,8 +411,9 @@ def create_shards(source_fnames: List[str],
     sources_shard_fnames_by_shards = zip(*sources_shard_fnames)
     targets_shard_fnames_by_shards = zip(*targets_shard_fnames)
 
-    return (list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards)),
-            metadata_shard_fnames if metadata_fname is not None else None,
+    return (list(itertools.zip_longest(sources_shard_fnames_by_shards,
+                                       targets_shard_fnames_by_shards,
+                                       metadata_shard_fnames)),
             False)
 
 
@@ -548,9 +546,11 @@ def save_shard(shard_idx: int,
                length_ratio_std: float,
                buckets: List[Tuple[int, int]],
                output_prefix: str,
-               keep_tmp_shard_files: bool):
+               keep_tmp_shard_files: bool,
+               shard_metadata: Optional[str] = None,
+               metadata_vocab: Optional[vocab.Vocab] = None):
     """
-    Load raw shard source and target data files, map to integers using the corresponding vocabularies,
+    Load raw shard source, target and optional metadata files, map to integers using the corresponding vocabularies,
     convert data into tensors and save to disk.
     Optionally it can delete the source/target files.
 
@@ -565,6 +565,8 @@ def save_shard(shard_idx: int,
     :param buckets: Bucket list.
     :param output_prefix: The prefix of the output file name.
     :param keep_tmp_shard_files: Keep the sources/target files when it is True otherwise delete them.
+    :param shard_metadata: Optional metadata file name.
+    :param metadata_vocab: Optional metadata vocabulary.
     :return: Shard statistics.
     """
 
@@ -617,7 +619,7 @@ def prepare_data(source_fnames: List[str],
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
                  pool: multiprocessing.pool.Pool = None,
-                 shards: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None):
+                 shards: List[Tuple[Tuple[str, ...], Tuple[str, ...], str]] = None):
     """
     :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.
     """
@@ -630,7 +632,7 @@ def prepare_data(source_fnames: List[str],
 
     # Get target/source length ratios.
     stats_args = ((source_path, target_path, source_vocabs, target_vocabs, max_seq_len_source, max_seq_len_target)
-                  for source_path, target_path in shards)
+                  for source_path, target_path, _ in shards)
     length_stats = pool.starmap(analyze_sequence_lengths, stats_args)
     shards_num_sents = [stat.num_sents for stat in length_stats]
     shards_mean = [stat.length_ratio_mean for stat in length_stats]
@@ -658,7 +660,8 @@ def prepare_data(source_fnames: List[str],
     # Process shards in parallel
     args = ((shard_idx, data_loader, shard_sources, shard_targets, source_vocabs, target_vocabs,
              length_statistics.length_ratio_mean, length_statistics.length_ratio_std, buckets, output_prefix,
-             keep_tmp_shard_files) for shard_idx, (shard_sources, shard_targets) in enumerate(shards))
+             keep_tmp_shard_files, shard_metadata, metadata_vocab)
+            for shard_idx, (shard_sources, shard_targets, shard_metadata) in enumerate(shards))
     per_shard_statistics = pool.starmap(save_shard, args)
 
     # Combine per shard statistics to obtain global statistics
