@@ -22,9 +22,7 @@ import torch
 
 from sockeye import constants as C
 from sockeye import data_io
-from sockeye import utils
 from sockeye import vocab
-from sockeye.test_utils import tmp_digits_dataset
 from sockeye.utils import SockeyeError, get_tokens, seed_rngs
 
 seed_rngs(12)
@@ -140,6 +138,29 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
             if add_eos:
                 expected_sequences = [s + [vocabulary[C.EOS_SYMBOL]] if s else None for s in expected_sequences]
             assert read_sequences == expected_sequences
+
+
+def test_metadata_reader():
+
+    inputs = [r'{"a": 1, "b": 0, "c": 0.5}', r'{}']
+    expected_data_no_vocab = [[['a', 'b', 'c'], [1., 0., 0.5]], None]
+
+    with TemporaryDirectory() as work_dir:
+        path = os.path.join(work_dir, 'input')
+        with open(path, 'w') as f:
+            for inp in inputs:
+                print(inp, file=f)
+
+        vocabulary = vocab.build_from_paths([path], is_metadata=True)
+        reader = data_io.MetadataReader(path, vocabulary=vocabulary)
+
+        read_data = [d for d in reader]
+        assert len(read_data) == len(inputs)
+
+        for data, expected_output in zip(read_data, expected_data_no_vocab):
+            if expected_output is not None:
+                expected_output = [data_io.tokens2ids(expected_output[0], vocabulary), expected_output[1]]
+            assert data == expected_output
 
 
 @pytest.mark.parametrize("source_iterables, target_iterables",

@@ -16,6 +16,7 @@ Implements data iterators and I/O related functions for sequence-to-sequence mod
 """
 import bisect
 import itertools
+import json
 import logging
 import math
 import multiprocessing.pool
@@ -1252,6 +1253,38 @@ class SequenceReader:
             if self.add_eos:
                 sequence.append(self.eos_id)
             yield sequence
+
+
+class MetadataReader:
+    """
+    Reads metadata lines from path and creates parallel sequences of integer key
+    ids and float values. Streams from disk, instead of loading all samples into
+    memory. Empty sequences are yielded as None.
+
+    :param path: Path to read JSON metadata from.
+    :param vocabulary: Mapping from strings to integer ids.
+    :param limit: Read limit.
+    """
+
+    def __init__(self,
+                 path: str,
+                 vocabulary: vocab.Vocab,
+                 limit: Optional[int] = None) -> None:
+        self.path = path
+        self.vocab = vocabulary
+        self.limit = limit
+
+    def __iter__(self):
+        with smart_open(self.path) as indata:
+            for i, line in enumerate(indata):
+                if self.limit is not None and i == self.limit:
+                    break
+                data = json.loads(line)
+                if len(data) == 0:
+                    yield None
+                    continue
+                keys, values = zip(*data.items())
+                yield [tokens2ids(keys, self.vocab), list(float(value) for value in values)]
 
 
 def create_sequence_readers(sources: List[str], targets: List[str],
