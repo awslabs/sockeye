@@ -11,6 +11,17 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.22]
+
+### Added
+
+- log beam search avg output vocab size
+
+### Changed
+
+- common base Search for GreedySearch and BeamSearch
+- .pylintrc: suppress warnings about deprecated pylint warning suppressions
+
 ## [3.1.21]
 
 ### Fixed

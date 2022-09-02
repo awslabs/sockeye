@@ -979,6 +979,7 @@ class Translator:
 
         logger.debug("Translated %d inputs (%d chunks) in %d batches to %d outputs. %d empty/bad inputs.",
                      num_inputs, num_chunks, num_batches, num_outputs, num_bad_empty)
+        self._search.log_search_stats()
 
         return results
 
