@@ -39,9 +39,7 @@ def count_tokens_for_path(path: str, is_metadata: bool = False) -> Counter:
     :return: Token counter.
     """
     with utils.smart_open(path, mode='rt') as lines:
-        if is_metadata:
-            return Counter(key for line in lines for key in json.loads(line))
-        return count_tokens(lines)
+        return count_tokens(lines, is_metadata=is_metadata)
 
 
 def build_from_paths(paths: Iterable[str], is_metadata: bool = False, num_words: Optional[int] = None,
@@ -137,14 +135,16 @@ def build_pruned_vocab(raw_vocab: Counter, num_words: Optional[int] = None, min_
     return word_to_id
 
 
-def count_tokens(data: Iterable[str]) -> Counter:
+def count_tokens(data: Iterable[str], is_metadata: bool = False) -> Counter:
     """
     Count whitespace delimited tokens.
 
     :param data: Sequence of sentences containing whitespace-delimited tokens.
+    :param is_metadata: Data is metadata that contains one JSON dictionary per
+                        line. Count keys as tokens.
     :return: Token counter.
     """
-    return Counter(token for line in data for token in utils.get_tokens(line))
+    return Counter(token for line in data for token in (json.loads(line) if is_metadata else utils.get_tokens(line)))
 
 
 def vocab_to_json(vocab: Vocab, path: str):
@@ -237,7 +237,7 @@ def save_metadata_vocab(metadata_vocab: Vocab, folder: str):
     :param metadata_vocab: Metadata vocabulary.
     :param folder: Destination folder.
     """
-    vocab_to_json(metadata_vocab, os.path.join(folder, C.VOCAB_META_NAME))
+    vocab_to_json(metadata_vocab, os.path.join(folder, C.VOCAB_METADATA_NAME))
 
 
 def _get_sorted_source_vocab_fnames(folder) -> List[str]:

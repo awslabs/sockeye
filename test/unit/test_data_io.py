@@ -191,6 +191,7 @@ def test_not_target_token_parallel_iter(source_iterables, target_iterables):
 
 @pytest.mark.parametrize("source_iterables, target_iterables, metadata_iterable, expected",
                          [
+                             # Without metadata
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[[0], [1]]],
@@ -237,8 +238,14 @@ def test_not_target_token_parallel_iter(source_iterables, target_iterables):
                              (
                                      [[[0], None], [[0], None]],
                                      [[[0], [1]]],
-                                     [2],
+                                     [2, 3],
                                      [([[0], [0]], [[0]], 2)]
+                             ),
+                             (
+                                     [[None, [1, 1]], [None, [1, 1]]],
+                                     [[None, None]],
+                                     [2, 3],
+                                     []
                              ),
                          ])
 def test_parallel_iter(source_iterables, target_iterables, metadata_iterable, expected):
