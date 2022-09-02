@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.21]
+
+### Fixed
+
+- Send skip_nvs and nvs_thresh args now to Translator constructor in sockeye-translate instead of ignoring them.
+
 ## [3.1.20]
 
 ### Added
