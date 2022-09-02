@@ -577,6 +577,10 @@ def save_shard(shard_idx: int,
 
     # Shards contain the raw sentences. Need to map to integers using the vocabs and add BOS/EOS
     sources_sentences, targets_sentences = create_sequence_readers(shard_sources, shard_targets, source_vocabs, target_vocabs)
+    metadata_sequences = None  # type: Optional[MetadataReader]
+    if shard_metadata is not None:
+        check_condition(metadata_vocab is not None, 'shard_metadata also requires metadata_vocab.')
+        metadata_sequences = MetadataReader(shard_metadata, metadata_vocab)
 
     for sources, targets, _ in parallel_iter(sources_sentences, targets_sentences):
         source_len = len(sources[0])
@@ -597,6 +601,8 @@ def save_shard(shard_idx: int,
     if not keep_tmp_shard_files:
         for f in chain(shard_sources, shard_targets):
             os.remove(f)
+        if shard_metadata is not None:
+            os.remove(shard_metadata)
 
     return shard_stat_accumulator.statistics
 
