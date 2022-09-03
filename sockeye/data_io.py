@@ -16,7 +16,6 @@ Implements data iterators and I/O related functions for sequence-to-sequence mod
 """
 import bisect
 import itertools
-import json
 import logging
 import math
 import multiprocessing.pool
@@ -461,7 +460,8 @@ class RawParallelDatasetLoader:
     def load(self,
              source_iterables: Sequence[Iterable],
              target_iterables: Sequence[Iterable],
-             num_samples_per_bucket: List[int]) -> 'ParallelDataSet':
+             num_samples_per_bucket: List[int],
+             metadata_iterable: Optional[Iterable] = None) -> 'ParallelDataSet':
 
         assert len(num_samples_per_bucket) == len(self.buckets)
         num_source_factors = len(source_iterables)
@@ -481,7 +481,8 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays
-        for sources, targets, _ in parallel_iter(source_iterables, target_iterables, skip_blanks=self.skip_blanks):
+        for sources, targets, metadata in parallel_iter(source_iterables, target_iterables, metadata_iterable,
+                                                        skip_blanks=self.skip_blanks):
             sources = [[] if stream is None else stream for stream in sources]
             targets = [[] if stream is None else stream for stream in targets]
             source_len = len(sources[0])
@@ -582,7 +583,7 @@ def save_shard(shard_idx: int,
         check_condition(metadata_vocab is not None, 'shard_metadata also requires metadata_vocab.')
         metadata_sequences = MetadataReader(shard_metadata, metadata_vocab)
 
-    for sources, targets, _ in parallel_iter(sources_sentences, targets_sentences):
+    for sources, targets, _ in parallel_iter(sources_sentences, targets_sentences, metadata_sequences):
         source_len = len(sources[0])
         target_len = len(targets[0])
 
@@ -592,7 +593,8 @@ def save_shard(shard_idx: int,
     shard_stats = shard_stat_accumulator.statistics
 
     # Convert to tensors
-    dataset = data_loader.load(sources_sentences, targets_sentences, shard_stats.num_sents_per_bucket)
+    dataset = data_loader.load(sources_sentences, targets_sentences, shard_stats.num_sents_per_bucket,
+                               metadata_iterable=metadata_sequences)
     shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
     shard_stats.log()
     logger.info("Writing '%s'", shard_fname)
@@ -1285,7 +1287,7 @@ class MetadataReader:
             for i, line in enumerate(indata):
                 if self.limit is not None and i == self.limit:
                     break
-                data = json.loads(line)
+                data = utils.json_loads_handle_blank(line)
                 if len(data) == 0:
                     yield None
                     continue
@@ -1362,7 +1364,8 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
             metadata = next(metadata_iterator) if metadata_iterator is not None else None
         except StopIteration:
             break
-        # Check source and target; metadata lines are allowed to be blank.
+        # Check sources and targets. Metadata lines are allowed to be "blank"
+        # (empty dictionaries for lines with no applicable metadata).
         if skip_blanks and (any((s is None for s in sources)) or any((t is None for t in targets))):
             num_skipped += 1
             continue

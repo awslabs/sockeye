@@ -120,6 +120,24 @@ def test_get_tokens(line, expected_tokens):
     assert tokens == expected_tokens
 
 
+@pytest.mark.parametrize("line, expected", [('', {}),
+                                            ('\n', {}),
+                                            (' \n', {}),
+                                            (r'{"a": 1, "b": 2, "c": 3}', {'a': 1, 'b': 2, 'c': 3})])
+def test_json_loads_handle_blank(line, expected):
+    assert utils.json_loads_handle_blank(line) == expected
+
+
+def test_json_loads_handle_blank_exception():
+    undecodable_line = r'{"'
+    try:
+        utils.json_loads_handle_blank(undecodable_line)
+        assert False, 'RuntimeError not raised'
+    except RuntimeError as e:
+        # JSONDecodeError caught and converted to RuntimeError that reports line
+        assert str(e).endswith(f'for line: {undecodable_line}')
+
+
 @pytest.mark.parametrize("samples, sample_means, expected_mean",
                          [
                              ([[1.23, 0.474, 9.516], [10.219, 5.31, 9, 21.90, 98]], [3.74, 28.8858], 19.456125),
