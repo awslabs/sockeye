@@ -471,6 +471,8 @@ class RawParallelDatasetLoader:
                        for (source_len, _), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
                        for (_, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
+        metadata_tensors = [[] for _ in self.buckets] if metadata_iterable is not None \
+                           else None  # type: Optional[List[List[Tuple[torch.Tensor, torch.Tensor]]]]
 
         bucket_sample_index = [0 for _ in self.buckets]
 
@@ -480,7 +482,8 @@ class RawParallelDatasetLoader:
         num_pad_source = 0
         num_pad_target = 0
 
-        # Bucket sentences as padded np arrays
+        # Bucket sentences as padded np arrays, metadata as tuples of tensors
+        # (name_ids, weights)
         for sources, targets, metadata in parallel_iter(source_iterables, target_iterables, metadata_iterable,
                                                         skip_blanks=self.skip_blanks):
             sources = [[] if stream is None else stream for stream in sources]
@@ -512,18 +515,29 @@ class RawParallelDatasetLoader:
                     # sequence: <BOS> <BOS> ...
                     t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
+            if metadata_iterable is not None:
+                # Tuple of metadata (name_ids, weights) as tensors
+                metadata_tensors[buck_index].append((
+                    torch.from_numpy(np.array(metadata[0] if metadata is not None else [], dtype=self.dtype)),
+                    torch.from_numpy(np.array(metadata[1] if metadata is not None else [], dtype='float32')),
+                ))
 
             bucket_sample_index[buck_index] += 1
 
         data_source_tensors = [torch.from_numpy(data) for data in data_source]
         data_target_tensors = [torch.from_numpy(data) for data in data_target]
 
+        if metadata_iterable is not None:
+            for metadata_list, num_samples in zip(metadata_tensors, num_samples_per_bucket):
+                check_condition(len(metadata_list) == num_samples, 'Different lengths for data and metadata: '
+                                                                   f'{num_samples} != {len(metadata_list)}')
+
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-        return ParallelDataSet(data_source_tensors, data_target_tensors)
+        return ParallelDataSet(data_source_tensors, data_target_tensors, metadata_tensors)
 
 
 def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
@@ -1431,11 +1445,13 @@ class ParallelDataSet:
 
     def __init__(self,
                  source: List[torch.Tensor],
-                 target: List[torch.Tensor]) -> None:
+                 target: List[torch.Tensor],
+                 metadata: Optional[List[List[Tuple[torch.Tensor, torch.Tensor]]]] = None) -> None:
         check_condition(len(source) == len(target),
                         "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
         self.source = source
         self.target = target
+        self.metadata = metadata
 
     def __len__(self) -> int:
         return len(self.source)
