@@ -828,9 +828,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
     version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
     with open(version_file) as version_in:
         version = int(version_in.read())
-        check_condition(version == C.PREPARED_DATA_VERSION,
-                        "The dataset %s was written in an old and incompatible format. Please rerun data "
-                        "preparation with a current version of Sockeye." % prepared_data_dir)
+        check_condition(C.PREPARED_DATA_VERSION >= version >= C.PREPARED_DATA_MIN_SUPPORTED_VERSION,
+                        "The dataset %s was written in an incompatible format. "
+                        "Please rerun data preparation with this version of Sockeye." % prepared_data_dir)
     info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
     check_condition(os.path.exists(info_file),
                     "Could not find data info %s. Are you sure %s is a directory created with "
