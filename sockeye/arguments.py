@@ -443,7 +443,8 @@ def add_training_data_args(params, required=False):
                         help='Target side of parallel training data.')
     params.add_argument(C.TRAINING_ARG_METADATA, '-md',
                         type=regular_file(),
-                        help='Metadata for parallel training data (JSON).')
+                        help='Metadata for training examples (line-parallel with source and target files). One JSON '
+                             'dictionary per line containing name-weight (str-float) pairs.')
 
 
 def add_validation_data_params(params):
@@ -471,7 +472,8 @@ def add_validation_data_params(params):
                              'Default: %(default)s.')
     params.add_argument('--validation-metadata', '-vmd',
                         type=regular_file(),
-                        help='Metadata for validation data (JSON).')
+                        help='Metadata for validation data (line-parallel with source and target files). One JSON '
+                             'dictionary per line containing name-weight (str-float) pairs.')
 
 
 def add_prepared_data_args(params):

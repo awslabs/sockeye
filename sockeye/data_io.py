@@ -366,7 +366,7 @@ def create_shards(source_fnames: List[str],
     :param target_fnames: The path to the target text (and optional token-parallel factor files).
     :param num_shards: The total number of shards.
     :param output_prefix: The prefix under which the shard files will be created.
-    :param metadata_fname: Optional path to the metadata JSON (line-parallel to source and target).
+    :param metadata_fname: Optional path to the JSON metadata (line-parallel with source and target).
     :return: List of tuples of source (and source factor) file names, target (and target factor) file names, and
              metadata file names (or None's) for each shard and a flag of whether the returned file names are temporary
              and can be deleted.
@@ -552,9 +552,8 @@ def save_shard(shard_idx: int,
                shard_metadata: Optional[str] = None,
                metadata_vocab: Optional[vocab.Vocab] = None):
     """
-    Load raw shard source, target and optional metadata files, map to integers using the corresponding vocabularies,
-    convert data into tensors and save to disk.
-    Optionally it can delete the source/target files.
+    Load raw shard source, target and optional JSON metadata files, map to integers using the corresponding
+    vocabularies, convert data into tensors and save to disk. Optionally it can delete the source/target files.
 
     :param shard_idx: The index of the shard.
     :param data_loader: A loader for loading parallel data from sources and target.
@@ -567,7 +566,7 @@ def save_shard(shard_idx: int,
     :param buckets: Bucket list.
     :param output_prefix: The prefix of the output file name.
     :param keep_tmp_shard_files: Keep the sources/target files when it is True otherwise delete them.
-    :param shard_metadata: Optional metadata file name.
+    :param shard_metadata: Optional JSON metadata file name.
     :param metadata_vocab: Optional metadata vocabulary.
     :return: Shard statistics.
     """
@@ -630,7 +629,8 @@ def prepare_data(source_fnames: List[str],
                  pool: multiprocessing.pool.Pool = None,
                  shards: List[Tuple[Tuple[str, ...], Tuple[str, ...], str]] = None):
     """
-    :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.
+    :param shards: List of num_shards shards of parallel source, target, and metadata tuples which in turn contain
+                   tuples to shard data factor file paths.
     """
     logger.info("Preparing data.")
     # write vocabularies to data folder
@@ -1265,9 +1265,9 @@ class SequenceReader:
 
 class MetadataReader:
     """
-    Reads metadata lines from path and creates parallel sequences of integer key
-    ids and float values. Streams from disk, instead of loading all samples into
-    memory. Empty sequences are yielded as None.
+    Reads JSON metadata lines from path and creates parallel sequences of
+    integer name ids and float weights. Streams from disk, instead of loading
+    all samples into memory. Empty sequences are yielded as None.
 
     :param path: Path to read JSON metadata from.
     :param vocabulary: Mapping from strings to integer ids.
@@ -1291,8 +1291,8 @@ class MetadataReader:
                 if len(data) == 0:
                     yield None
                     continue
-                keys, values = zip(*data.items())
-                yield [tokens2ids(keys, self.vocab), list(float(value) for value in values)]
+                names, weights = zip(*data.items())
+                yield [tokens2ids(names, self.vocab), list(float(value) for value in weights)]
 
 
 def create_sequence_readers(sources: List[str], targets: List[str],

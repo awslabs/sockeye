@@ -34,8 +34,8 @@ InverseVocab = Dict[int, str]
 def count_tokens_for_path(path: str, is_metadata: bool = False) -> Counter:
     """
     :param path: Path to file with one sentence per line.
-    :param is_metadata: File is metadata that contains one JSON dictionary per
-                        line instead of one sentence.
+    :param is_metadata: File is JSON metadata that contains one dictionary per
+                        line.
     :return: Token counter.
     """
     with utils.smart_open(path, mode='rt') as lines:
@@ -50,7 +50,7 @@ def build_from_paths(paths: Iterable[str], is_metadata: bool = False, num_words:
     symbol will be added to the vocabulary.
 
     :param paths: List of tuples containing shard paths to files with one sentence per line.
-    :param is_metadata: Files are metadata and contain one JSON dictionary per line instead of one sentence.
+    :param is_metadata: Files are JSON metadata that contain one dictionary per line.
     :param num_words: Optional maximum number of words in the vocabulary.
     :param min_count: Minimum occurrences of words to be included in the vocabulary.
     :param pad_to_multiple_of: If not None, pads the vocabulary to a size that is the next multiple of this int.
@@ -140,8 +140,8 @@ def count_tokens(data: Iterable[str], is_metadata: bool = False) -> Counter:
     Count whitespace delimited tokens.
 
     :param data: Sequence of sentences containing whitespace-delimited tokens.
-    :param is_metadata: Data is metadata that contains one JSON dictionary per
-                        line. Count keys as tokens.
+    :param is_metadata: Data is JSON metadata that contains one dictionary per
+                        line. Count names (keys).
     :return: Token counter.
     """
     return Counter(token for line in data for token in (utils.json_loads_handle_blank(line)
@@ -317,6 +317,7 @@ def load_or_create_vocabs(shard_source_paths: Iterable[Iterable[str]],
     :param word_min_count_source: Minimum frequency of words in the source vocabulary.
     :param num_words_target: Number of words in the target vocabulary.
     :param word_min_count_target: Minimum frequency of words in the target vocabulary.
+    :param shard_metadata_paths: Optional list of optional JSON metadata shard paths.
     :param metadata_vocab_path: The optional metadata vocabulary path.
     :param pad_to_multiple_of: If not None, pads the vocabularies to a size that is the next multiple of this int.
     :param mapper: Built-in map function or multiprocessing.pool.map with max_processes processes.
