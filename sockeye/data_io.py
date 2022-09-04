@@ -417,6 +417,29 @@ def create_shards(source_fnames: List[str],
             False)
 
 
+def pack_and_convert_metadata(metadata_list: List[Tuple[np.ndarray, np.ndarray]]) \
+    -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Pack per-sequence metadata arrays of different lengths into metadata
+    tensors. Record indices for slicing individual metadata sequences as needed.
+
+    Packed format: tuple of metadata name IDs tensor (sum_seq_lens,), metadata
+    weights tensor (sum_seq_lens,), and slice indices tensor (num_seqs, 2)
+    """
+    if len(metadata_list) == 0:
+        return (torch.zeros(0, dtype=torch.int32),
+                torch.zeros(0, dtype=torch.float32),
+                torch.zeros(0, 2, dtype=torch.int64))
+    name_ids_list, weights_list = zip(*((name_ids, weights) for name_ids, weights in metadata_list))
+    seq_lens = torch.tensor([name_ids.shape[0] for name_ids in name_ids_list], dtype=torch.int64)
+    slice_ends = torch.cumsum(seq_lens, dim=0, dtype=torch.int64)
+    slice_starts = slice_ends - seq_lens
+    slice_indices = torch.stack((slice_starts, slice_ends), dim=1)
+    return (torch.from_numpy(np.concatenate(name_ids_list)),
+            torch.from_numpy(np.concatenate(weights_list)),
+            slice_indices)
+
+
 class RawParallelDatasetLoader:
     """
     Loads a data set of variable-length parallel source/target sequences into buckets of tensors.
@@ -471,8 +494,8 @@ class RawParallelDatasetLoader:
                        for (source_len, _), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
                        for (_, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-        metadata_tensors = [[] for _ in self.buckets] if metadata_iterable is not None \
-                           else None  # type: Optional[List[List[Tuple[torch.Tensor, torch.Tensor]]]]
+        metadata_lists = [[] for _ in self.buckets] if metadata_iterable is not None \
+                          else None  # type: Optional[List[List[Tuple[np.ndarray, np.ndarray]]]]
 
         bucket_sample_index = [0 for _ in self.buckets]
 
@@ -516,21 +539,24 @@ class RawParallelDatasetLoader:
                     t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
             if metadata_iterable is not None:
-                # Tuple of metadata (name_ids, weights) as tensors
-                metadata_tensors[buck_index].append((
-                    torch.from_numpy(np.array(metadata[0] if metadata is not None else [], dtype=self.dtype)),
-                    torch.from_numpy(np.array(metadata[1] if metadata is not None else [], dtype='float32')),
+                # Tuple of metadata (name_ids, weights)
+                metadata_lists[buck_index].append((
+                    np.array(metadata[0] if metadata is not None else [], dtype=self.dtype),
+                    np.array(metadata[1] if metadata is not None else [], dtype='float32'),
                 ))
 
             bucket_sample_index[buck_index] += 1
 
+        if metadata_iterable is not None:
+            for metadata_list, num_samples in zip(metadata_lists, num_samples_per_bucket):
+                check_condition(len(metadata_list) == num_samples,
+                                f'Different lengths for data and metadata: {num_samples} != {len(metadata_list)}')
+
+        # Convert from NumPy arrays to Pytorch tensors
         data_source_tensors = [torch.from_numpy(data) for data in data_source]
         data_target_tensors = [torch.from_numpy(data) for data in data_target]
-
-        if metadata_iterable is not None:
-            for metadata_list, num_samples in zip(metadata_tensors, num_samples_per_bucket):
-                check_condition(len(metadata_list) == num_samples, 'Different lengths for data and metadata: '
-                                                                   f'{num_samples} != {len(metadata_list)}')
+        metadata_tensors = [pack_and_convert_metadata(metadata_list) for metadata_list in metadata_lists] \
+                           if metadata_iterable is not None else None
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
@@ -844,7 +870,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
     version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
     with open(version_file) as version_in:
         version = int(version_in.read())
-        check_condition(C.PREPARED_DATA_VERSION >= version >= C.PREPARED_DATA_MIN_SUPPORTED_VERSION,
+        check_condition(version in (C.PREPARED_DATA_VERSION, C.PREPARED_DATA_LEGACY_VERSION),
                         "The dataset %s was written in an incompatible format. "
                         "Please rerun data preparation with this version of Sockeye." % prepared_data_dir)
     info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
@@ -1446,7 +1472,7 @@ class ParallelDataSet:
     def __init__(self,
                  source: List[torch.Tensor],
                  target: List[torch.Tensor],
-                 metadata: Optional[List[List[Tuple[torch.Tensor, torch.Tensor]]]] = None) -> None:
+                 metadata: Optional[List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = None) -> None:
         check_condition(len(source) == len(target),
                         "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
         self.source = source
@@ -1459,23 +1485,43 @@ class ParallelDataSet:
     def get_bucket_counts(self):
         return [len(self.source[buck_idx]) for buck_idx in range(len(self))]
 
-    def save(self, fname: str):
+    def save(self, fname: str, use_legacy_format: bool = False):
         """
-        Saves the dataset to a binary .npy file.
+        Saves the dataset to disk using PyTorch's pickle/zip format. The option
+        to use the legacy data format is included for testing backward
+        compatibility and is not recommended for general use.
         """
-        torch.save(self.source + self.target, fname)
+        if use_legacy_format:
+            check_condition(self.metadata is None, 'Cannot save data in legacy format when using metadata')
+            torch.save(self.source + self.target, fname)
+        else:
+            torch.save({C.DATA_KEY_SOURCE: self.source,
+                        C.DATA_KEY_TARGET: self.target,
+                        C.DATA_KEY_METADATA: self.metadata}, fname)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
         """
-        Loads a dataset from a binary .npy file. When running in distributed
-        mode, the data is sliced and each worker loads a different slice based
-        on its rank. Specifically, each of N workers loads 1/N of each bucket.
+        Loads a dataset that was saved to disk in PyTorch's pickle/zip format.
+        When running in distributed mode, the data is sliced and each worker
+        loads a different slice based on its rank. Specifically, each of N
+        workers loads 1/N of each bucket.
         """
         data = torch.load(fname)
-        n = len(data) // 2
-        source = data[:n]
-        target = data[n:2 * n]
+        if isinstance(data, list):
+            # Legacy format (data version 6)
+            n = len(data) // 2
+            source = data[:n]
+            target = data[n:2 * n]
+            metadata = None
+        else:
+            # Current format (data version 7)
+            check_condition(isinstance(data, dict) and data.keys() == set(C.DATA_KEYS),
+                            f'Unknown data format for file {fname}. '
+                            'Please rerun data preparation with this version of Sockeye.')
+            source = data[C.DATA_KEY_SOURCE]
+            target = data[C.DATA_KEY_TARGET]
+            metadata = data[C.DATA_KEY_METADATA]
         if utils.is_distributed():
             split_index = torch.distributed.get_rank()
             total_splits = torch.distributed.get_world_size()
@@ -1495,6 +1541,7 @@ class ParallelDataSet:
                                     num_sentences, num_copies, total_splits)
                         source[k] = torch.repeat_interleave(source[k], repeats=num_copies, dim=0)
                         target[k] = torch.repeat_interleave(target[k], repeats=num_copies, dim=0)
+                        # TODO(mdenkows): Repeat metadata here
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
@@ -1504,8 +1551,11 @@ class ParallelDataSet:
             target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])]
                       if t.shape[0] > 0
                       else t for t in target]
+            # TODO(mdenkows): slice metadata here
         assert len(source) == len(target)
-        return ParallelDataSet(source, target)
+        if metadata is not None:
+            assert len(source) == len(metadata)
+        return ParallelDataSet(source, target, metadata)
 
     def fill_up(self,
                 bucket_batch_sizes: List[BucketBatchSize],

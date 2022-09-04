@@ -329,11 +329,51 @@ def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_
         assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
 
 
-def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
-                              min_count: int,
-                              max_count: int,
-                              bucket_counts: Optional[List[Optional[int]]] = None) -> Tuple[List[torch.Tensor],
-                                                                                            List[torch.Tensor]]:
+@pytest.mark.parametrize("metadata_list,expected_metadata_tensors", [
+    ([(np.array([0], dtype='int32'), np.array([1.], dtype='float32'))],
+     (torch.tensor([0], dtype=torch.int32),
+      torch.tensor([1.], dtype=torch.float32),
+      torch.tensor([[0, 1]], dtype=torch.int64))),
+
+    ([(np.array([1, 2], dtype='int32'), np.array([0.5, 0.5], dtype='float32')),
+      (np.array([0], dtype='int32'), np.array([1.], dtype='float32')),
+      (np.array([3, 4, 5], dtype='int32'), np.array([0.33, 0.33, 0.33], dtype='float32'))],
+     (torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
+      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
+      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64))),
+
+    ([],
+     (torch.zeros(0, dtype=torch.int32),
+      torch.zeros(0, dtype=torch.float32),
+      torch.zeros(0, 2, dtype=torch.int64)))
+])
+def test_pack_and_convert_metadata(metadata_list, expected_metadata_tensors):
+    # Test packing and converting data
+    metadata_tensors = data_io.pack_and_convert_metadata(metadata_list)
+    for tensor, expected_tensor in zip(metadata_tensors, expected_metadata_tensors):
+            assert tensor.dtype == expected_tensor.dtype
+            assert torch.allclose(tensor, expected_tensor)
+
+    # Test slicing packed/converted data
+    name_ids, weights, slice_indices = metadata_tensors
+    if len(metadata_list) == 0:
+        assert name_ids.shape[0] == 0
+        assert weights.shape[0] == 0
+        assert slice_indices.shape[0] == 0
+        return
+    for (start, end), (original_name_ids, original_weights) in zip(slice_indices, metadata_list):
+        assert torch.equal(name_ids[start:end], torch.tensor(original_name_ids))
+        assert torch.allclose(weights[start:end], torch.tensor(original_weights))
+
+
+def _get_random_bucketed_data(
+    buckets: List[Tuple[int, int]],
+    min_count: int,
+    max_count: int,
+    bucket_counts: Optional[List[Optional[int]]] = None,
+    include_metadata: bool = False) -> Tuple[List[torch.Tensor],
+                                             List[torch.Tensor],
+                                             Optional[List[List[Tuple[torch.Tensor, torch.Tensor]]]]]:
     """
     Get random bucket data.
 
@@ -341,8 +381,9 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
     :param min_count: The minimum number of samples that will be sampled if no exact count is given.
     :param max_count: The maximum number of samples that will be sampled if no exact count is given.
     :param bucket_counts: For each bucket an optional exact example count can be given. If it is not given it will be
-                         sampled.
-    :return: The random source and target tensors.
+                          sampled.
+    :param include_metadata: Also generate random metadata (otherwise return None for metadata).
+    :return: The random source and target tensors and optional metadata.
     """
     if bucket_counts is None:
         bucket_counts = [None for _ in buckets]
@@ -352,25 +393,52 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
               for count, bucket in zip(bucket_counts, buckets)]
     target = [torch.randint(0, 10, (count, random.randint(2, bucket[1]), 1))
               for count, bucket in zip(bucket_counts, buckets)]
-    return source, target
+    metadata = None
+    if include_metadata:
+        metadata = [[] for _ in buckets]
+        for b, (count, bucket) in enumerate(zip(bucket_counts, buckets)):
+            for _ in range(count):
+                name_ids = torch.randint(0, 10, (random.randint(0, bucket[0]),))
+                weights = torch.rand_like(name_ids, dtype=torch.float32)
+                metadata[b].append((name_ids, weights))
+    return source, target, metadata
 
 
-def test_parallel_data_set():
+@pytest.mark.parametrize("include_metadata", [False, True])
+def test_parallel_data_set(include_metadata):
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
-    source, target = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
+    source, target, metadata = _get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                         include_metadata=include_metadata)
 
     def check_equal(tensors1, tensors2):
         assert len(tensors1) == len(tensors2)
         for a1, a2 in zip(tensors1, tensors2):
             assert torch.equal(a1, a2)
 
+    def check_equal_metadata(metadata1, metadata2):
+        assert len(metadata1) == len(metadata2)
+        for md1, md2 in zip(metadata1, metadata2):
+            assert len(md1) == len(md2)
+            for (name_ids1, weights1), (name_ids2, weights2) in zip(md1, md2):
+                assert torch.equal(name_ids1, name_ids2)
+                assert torch.equal(weights1, weights2)
+
     with TemporaryDirectory() as work_dir:
-        dataset = data_io.ParallelDataSet(source, target)
+        dataset = data_io.ParallelDataSet(source, target, metadata)
         fname = os.path.join(work_dir, 'dataset')
         dataset.save(fname)
         dataset_loaded = data_io.ParallelDataSet.load(fname)
         check_equal(dataset.source, dataset_loaded.source)
         check_equal(dataset.target, dataset_loaded.target)
+        if include_metadata:
+            check_equal_metadata(dataset.metadata, dataset_loaded.metadata)
+        else:
+            # Test backward compatibility: with the legacy format (source/target
+            # only; no metadata)
+            dataset.save(fname, use_legacy_format=True)
+            dataset_loaded = data_io.ParallelDataSet.load(fname)
+            check_equal(dataset.source, dataset_loaded.source)
+            check_equal(dataset.target, dataset_loaded.target)
 
 
 def test_parallel_data_set_fill_up():
