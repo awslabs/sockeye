@@ -906,11 +906,13 @@ def get_prepared_data_iters(prepared_data_dir: str,
                     "Wrong number of target vocabularies. Found %d, need %d." % (len(target_vocabs),
                                                                                  len(data_info.targets)))
     if metadata_vocab is not None:
-        check_condition(validation_metadata is not None,
-                        'Training data was prepared with metadata. Please specify validation metadata.')
+        if validation_metadata is None:
+            logger.warning('Metadata exists for prepared training data but not validation data. '
+                           'All validation data will use empty metadata.')
     else:
         check_condition(validation_metadata is None,
-                        'Training data was not prepared with metadata. Cannot use validation metadata.')
+                        'Validation metadata is specified but the prepared training data does not include metadata. '
+                        'Training metadata must be available to train a model that supports metadata.')
 
     buckets = config_data.data_statistics.buckets
     max_seq_len_source = config_data.max_seq_len_source

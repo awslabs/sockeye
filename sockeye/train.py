@@ -135,6 +135,11 @@ def check_arg_compatibility(args: argparse.Namespace):
         # Length 1: expand the list to the appropriate length
         args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
 
+    if args.validation_metadata is not None:
+        check_condition((args.metadata is not None) or (args.prepared_data is not None),
+                        'Using --validation-metadata requires training a model that supports metadata. '
+                        'Specify --metadata or --prepared-data (that includes metadata).')
+
     check_condition(not (args.amp and args.apex_amp), 'Use either --amp (safer) or --apex-amp (faster).')
 
     if args.dtype != C.DTYPE_FP32:
@@ -420,8 +425,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         check_condition(len(targets) == len(validation_targets),
                         'Training and validation data must have the same number of target factors, '
                         'but found %d and %d.' % (len(targets), len(validation_targets)))
-        check_condition((metadata is None) == (validation_metadata is None),
-                        'Metadata must be specified for both training and validation or for neither.')
+        if metadata is not None and validation_metadata is None:
+            logger.warning('Metadata is specified for training but not validation data. '
+                           'All validation data will use empty metadata.')
 
         train_iter, validation_iter, config_data, data_info = data_io.get_training_data_iters(
             sources=sources,
