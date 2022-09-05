@@ -273,6 +273,20 @@ def load_target_vocabs(folder: str) -> List[Vocab]:
     return [vocab_from_json(os.path.join(folder, fname)) for fname in _get_sorted_target_vocab_fnames(folder)]
 
 
+def load_metadata_vocab(folder: str) -> Optional[Vocab]:
+    """
+    Loads optional metadata vocabulary from folder. Returns None when metadata
+    vocabulary file is not present.
+
+    :param folder: Source folder.
+    :return: Metadata vocabulary or None
+    """
+    fname = os.path.join(folder, C.VOCAB_METADATA_NAME)
+    if os.path.exists(fname):
+        return vocab_from_json(fname)
+    return None
+
+
 def load_or_create_vocab(data: Iterable[str], vocab_path: Optional[str], is_metadata: bool = False,
                          num_words: Optional[int] = None, word_min_count: int = 1,
                          pad_to_multiple_of: Optional[int] = None, mapper: Callable = map) -> Vocab:

@@ -858,9 +858,13 @@ def get_prepared_data_iters(prepared_data_dir: str,
                             batch_size: int,
                             batch_type: str,
                             batch_sentences_multiple_of: int = 1,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter',
-                                                           'BaseParallelSampleIter',
-                                                           'DataConfig', List[vocab.Vocab], List[vocab.Vocab]]:
+                            permute: bool = True,
+                            validation_metadata: Optional[str] = None) -> Tuple['BaseParallelSampleIter',
+                                                                                'BaseParallelSampleIter',
+                                                                                'DataConfig',
+                                                                                List[vocab.Vocab],
+                                                                                List[vocab.Vocab],
+                                                                                Optional[vocab.Vocab]]:
     logger.info("===============================")
     logger.info("Creating training data iterator")
     logger.info("===============================")
@@ -893,6 +897,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
     source_vocabs = vocab.load_source_vocabs(prepared_data_dir)
     target_vocabs = vocab.load_target_vocabs(prepared_data_dir)
+    metadata_vocab = vocab.load_metadata_vocab(prepared_data_dir)
 
     check_condition(len(source_vocabs) == len(data_info.sources),
                     "Wrong number of source vocabularies. Found %d, need %d." % (len(source_vocabs),
@@ -900,6 +905,12 @@ def get_prepared_data_iters(prepared_data_dir: str,
     check_condition(len(target_vocabs) == len(data_info.targets),
                     "Wrong number of target vocabularies. Found %d, need %d." % (len(target_vocabs),
                                                                                  len(data_info.targets)))
+    if metadata_vocab is not None:
+        check_condition(validation_metadata is not None,
+                        'Training data was prepared with metadata. Please specify validation metadata.')
+    else:
+        check_condition(validation_metadata is None,
+                        'Training data was not prepared with metadata. Cannot use validation metadata.')
 
     buckets = config_data.data_statistics.buckets
     max_seq_len_source = config_data.max_seq_len_source
@@ -939,7 +950,7 @@ def get_prepared_data_iters(prepared_data_dir: str,
                                                batch_size=batch_size,
                                                permute=False)
 
-    return train_iter, validation_iter, config_data, source_vocabs, target_vocabs
+    return train_iter, validation_iter, config_data, source_vocabs, target_vocabs, metadata_vocab
 
 
 def get_training_data_iters(sources: List[str],
