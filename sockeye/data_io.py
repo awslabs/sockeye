@@ -442,7 +442,8 @@ def pack_and_convert_metadata(metadata_list: List[Tuple[np.ndarray, np.ndarray]]
 
 class RawParallelDatasetLoader:
     """
-    Loads a data set of variable-length parallel source/target sequences into buckets of tensors.
+    Loads a data set of variable-length parallel source/target sequences with
+    optional metadata into buckets of tensors.
 
     :param buckets: Bucket list.
     :param eos_id: End-of-sentence id.
@@ -1324,7 +1325,7 @@ class MetadataReader:
             for i, line in enumerate(indata):
                 if self.limit is not None and i == self.limit:
                     break
-                data = utils.json_loads_handle_blank(line)
+                data = utils.json_loads_dict(line)
                 if len(data) == 0:
                     yield None
                     continue

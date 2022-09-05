@@ -144,7 +144,7 @@ def count_tokens(data: Iterable[str], is_metadata: bool = False) -> Counter:
                         line. Count names (keys).
     :return: Token counter.
     """
-    return Counter(token for line in data for token in (utils.json_loads_handle_blank(line)
+    return Counter(token for line in data for token in (utils.json_loads_dict(line)
                                                         if is_metadata else utils.get_tokens(line)))
 
 

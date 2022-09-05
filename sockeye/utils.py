@@ -190,19 +190,23 @@ def get_tokens(line: str) -> Iterator[str]:
             yield token
 
 
-def json_loads_handle_blank(line: str) -> Dict[Any, Any]:
+def json_loads_dict(line: str) -> Dict[Any, Any]:
     """
     Load a JSON dictionary from a line. If the line contains only whitespace
     (including blank lines), an empty dictionary is returned.
 
-    :param line: Line containing a valid JSON string or whitespace only.
+    :param line: Line containing a valid JSON dictionary string or whitespace
+                 only.
     :return: Loaded dictionary.
     """
     line = line.strip()
     if not line:
         return {}
     try:
-        return json.loads(line)
+        _dict = json.loads(line)
+        check_condition(isinstance(_dict, dict),
+                        f'Expected {dict}, got {type(_dict)} when loading JSON line: {line}')
+        return _dict
     except json.decoder.JSONDecodeError as e:
         # Raise an error that also includes the undecodable line
         raise RuntimeError(f'JSONDecodeError: {e.msg} at column {e.colno} (char {e.pos}) for line: {line}')
