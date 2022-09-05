@@ -661,9 +661,7 @@ def prepare_data(source_fnames: List[str],
                  bucket_width: int,
                  num_shards: int,
                  output_prefix: str,
-                 metadata_fname: Optional[str] = None,
                  metadata_vocab: Optional[vocab.Vocab] = None,
-                 metadata_vocab_path: Optional[str] = None,
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
                  pool: multiprocessing.pool.Pool = None,
@@ -704,7 +702,6 @@ def prepare_data(source_fnames: List[str],
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID)
-
 
     # Process shards in parallel
     args = ((shard_idx, data_loader, shard_sources, shard_targets, source_vocabs, target_vocabs,

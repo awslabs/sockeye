@@ -103,13 +103,11 @@ def prepare_data(args: argparse.Namespace):
 
         data_io.prepare_data(source_fnames=source_paths,
                              target_fnames=target_paths,
-                             metadata_fname=args.metadata,
                              source_vocabs=source_vocabs,
                              target_vocabs=target_vocabs,
                              metadata_vocab=metadata_vocab,
                              source_vocab_paths=source_vocab_paths,
                              target_vocab_paths=[args.target_vocab],
-                             metadata_vocab_path=args.metadata_vocab,
                              shared_vocab=args.shared_vocab,
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
