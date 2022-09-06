@@ -329,7 +329,7 @@ def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_
         assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
 
 
-@pytest.mark.parametrize("metadata_list,expected_metadata_tensors", [
+@pytest.mark.parametrize("metadata_tuple_list,metadata_tensors", [
     ([(np.array([0], dtype='int32'), np.array([1.], dtype='float32'))],
      (torch.tensor([0], dtype=torch.int32),
       torch.tensor([1.], dtype=torch.float32),
@@ -347,23 +347,33 @@ def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_
       torch.zeros(0, dtype=torch.float32),
       torch.zeros(0, 2, dtype=torch.int64)))
 ])
-def test_pack_and_convert_metadata(metadata_list, expected_metadata_tensors):
-    # Test packing and converting data
-    metadata_tensors = data_io.pack_and_convert_metadata(metadata_list)
-    for tensor, expected_tensor in zip(metadata_tensors, expected_metadata_tensors):
-            assert tensor.dtype == expected_tensor.dtype
-            assert torch.allclose(tensor, expected_tensor)
+def test_metadata_bucket(metadata_tuple_list, metadata_tensors):
 
-    # Test slicing packed/converted data
-    name_ids, weights, slice_indices = metadata_tensors
-    if len(metadata_list) == 0:
-        assert name_ids.shape[0] == 0
-        assert weights.shape[0] == 0
-        assert slice_indices.shape[0] == 0
-        return
-    for (start, end), (original_name_ids, original_weights) in zip(slice_indices, metadata_list):
-        assert torch.equal(name_ids[start:end], torch.tensor(original_name_ids))
-        assert torch.allclose(weights[start:end], torch.tensor(original_weights))
+    def _compare_metadata_tensors(name_ids1, weights1, slice_indices1, name_ids2, weights2, slice_indices2):
+        # Equal
+        assert name_ids1.dtype == name_ids2.dtype
+        assert torch.equal(name_ids1, name_ids2)
+        # All close
+        assert weights1.dtype == weights2.dtype
+        assert torch.allclose(weights1, weights2)
+        # Equal
+        assert slice_indices1.dtype == slice_indices2.dtype
+        assert torch.equal(slice_indices1, slice_indices2)
+
+    # Test packing and conversion
+    metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
+    _compare_metadata_tensors(*metadata_bucket.as_tuple(), *metadata_tensors)
+    assert len(metadata_bucket) == len(metadata_tuple_list)
+
+    # Test slicing
+    for i, (name_ids_np, weights_np) in enumerate(metadata_tuple_list):
+        name_ids, weights = metadata_bucket.get(i)
+        assert torch.equal(name_ids, torch.tensor(name_ids_np))
+        assert torch.allclose(weights, torch.tensor(weights_np))
+
+    # Test tuple round trip
+    metadata_bucket_rt = data_io.MetadataBucket(*metadata_bucket.as_tuple())
+    _compare_metadata_tensors(*metadata_bucket_rt.as_tuple(), *metadata_tensors)
 
 
 def _get_random_bucketed_data(
@@ -373,7 +383,7 @@ def _get_random_bucketed_data(
     bucket_counts: Optional[List[Optional[int]]] = None,
     include_metadata: bool = False) -> Tuple[List[torch.Tensor],
                                              List[torch.Tensor],
-                                             Optional[List[List[Tuple[torch.Tensor, torch.Tensor]]]]]:
+                                             Optional[List[data_io.MetadataBucket]]]:
     """
     Get random bucket data.
 
@@ -395,12 +405,14 @@ def _get_random_bucketed_data(
               for count, bucket in zip(bucket_counts, buckets)]
     metadata = None
     if include_metadata:
-        metadata = [[] for _ in buckets]
-        for b, (count, bucket) in enumerate(zip(bucket_counts, buckets)):
+        metadata = []
+        for count, bucket in enumerate(zip(bucket_counts, buckets)):
+            metadata_tuple_list = []
             for _ in range(count):
-                name_ids = torch.randint(0, 10, (random.randint(0, bucket[0]),))
-                weights = torch.rand_like(name_ids, dtype=torch.float32)
-                metadata[b].append((name_ids, weights))
+                name_ids = np.random.randint(0, 10, (random.randint(0, bucket[0]),))
+                weights = np.random.rand(*name_ids.shape)
+                metadata_tuple_list.append((name_ids, weights))
+            metadata.append(data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list))
     return source, target, metadata
 
 
@@ -419,9 +431,11 @@ def test_parallel_data_set(include_metadata):
         assert len(metadata1) == len(metadata2)
         for md1, md2 in zip(metadata1, metadata2):
             assert len(md1) == len(md2)
-            for (name_ids1, weights1), (name_ids2, weights2) in zip(md1, md2):
+            for i in range(len(md1)):
+                name_ids1, weights1 = md1.get(i)
+                name_ids2, weights2 = md2.get(i)
                 assert torch.equal(name_ids1, name_ids2)
-                assert torch.equal(weights1, weights2)
+                assert torch.allclose(weights1, weights2)
 
     with TemporaryDirectory() as work_dir:
         dataset = data_io.ParallelDataSet(source, target, metadata)

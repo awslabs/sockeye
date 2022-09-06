@@ -417,29 +417,6 @@ def create_shards(source_fnames: List[str],
             False)
 
 
-def pack_and_convert_metadata(metadata_list: List[Tuple[np.ndarray, np.ndarray]]) \
-    -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Pack per-sequence metadata arrays of different lengths into metadata
-    tensors. Record indices for slicing individual metadata sequences as needed.
-
-    Packed format: tuple of metadata name IDs tensor (sum_seq_lens,), metadata
-    weights tensor (sum_seq_lens,), and slice indices tensor (num_seqs, 2)
-    """
-    if len(metadata_list) == 0:
-        return (torch.zeros(0, dtype=torch.int32),
-                torch.zeros(0, dtype=torch.float32),
-                torch.zeros(0, 2, dtype=torch.int64))
-    name_ids_list, weights_list = zip(*((name_ids, weights) for name_ids, weights in metadata_list))
-    seq_lens = torch.tensor([name_ids.shape[0] for name_ids in name_ids_list], dtype=torch.int64)
-    slice_ends = torch.cumsum(seq_lens, dim=0, dtype=torch.int64)
-    slice_starts = slice_ends - seq_lens
-    slice_indices = torch.stack((slice_starts, slice_ends), dim=1)
-    return (torch.from_numpy(np.concatenate(name_ids_list)),
-            torch.from_numpy(np.concatenate(weights_list)),
-            slice_indices)
-
-
 class RawParallelDatasetLoader:
     """
     Loads a data set of variable-length parallel source/target sequences with
@@ -556,7 +533,7 @@ class RawParallelDatasetLoader:
         # Convert from NumPy arrays to Pytorch tensors
         data_source_tensors = [torch.from_numpy(data) for data in data_source]
         data_target_tensors = [torch.from_numpy(data) for data in data_target]
-        metadata_tensors = [pack_and_convert_metadata(metadata_list) for metadata_list in metadata_lists] \
+        metadata_buckets = [MetadataBucket.from_numpy_tuple_list(metadata_list) for metadata_list in metadata_lists] \
                            if metadata_iterable is not None else None
 
         if num_tokens_source > 0 and num_tokens_target > 0:
@@ -564,7 +541,7 @@ class RawParallelDatasetLoader:
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-        return ParallelDataSet(data_source_tensors, data_target_tensors, metadata_tensors)
+        return ParallelDataSet(data_source_tensors, data_target_tensors, metadata_buckets)
 
 
 def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
@@ -1475,6 +1452,69 @@ def get_target_bucket(buckets: List[Tuple[int, int]],
     return bucket_idx, bucket
 
 
+class MetadataBucket:
+    """
+    Metadata for a single bucket: parallel sequences of name IDs and weights
+    stored in a packed format. Metadata sequences represent name/weight pairs
+    and are not token-parallel with the corresponding source or target
+    sequences. Unlike bucketed source and target data, bucketed metadata
+    sequences can be of any length. A MetadataBucket object stores `num_seq`
+    metadata sequences with concatenated length `sum_seq_len`.
+
+    :param name_ids: Tensor of concatenated name ID sequences. Shape
+                     (sum_seq_len,).
+    :param weights: Tensor of concatenated weight sequences. Shape
+                    (sum_seq_len,).
+    :param slice_indices: Tensor of shape (num_seq, 2) that contains pairs of
+                          start/end indices for slicing individual metadata
+                          sequences from the packed tensors.
+    """
+    def __init__(self, name_ids: torch.Tensor, weights: torch.Tensor, slice_indices: torch.Tensor):
+        assert name_ids.ndim == 1
+        assert weights.ndim == 1
+        assert slice_indices.ndim == 2
+        assert name_ids.shape == weights.shape
+        self.name_ids = name_ids
+        self.weights = weights
+        self.slice_indices = slice_indices
+
+    @staticmethod
+    def from_numpy_tuple_list(metadata_tuple_list: List[Tuple[np.ndarray, np.ndarray]]) -> 'MetadataBucket':
+        """
+        Create a bucket-level metadata object from lists of sequence-level
+        metadata arrays of varying lengths. Pack the sequence-level arrays into
+        bucket-level tensors and record indices for slicing individual metadata
+        sequences as needed.
+
+        :param metadata_tuple_list: List of tuples containing sequence-level
+                                    metadata name IDs and weights as NumPy
+                                    arrays.
+
+        :return: MetadataBucket containing packed tensors and slice indices.
+        """
+        if len(metadata_tuple_list) == 0:
+            return MetadataBucket(name_ids=torch.zeros(0, dtype=torch.int32),
+                                  weights=torch.zeros(0, dtype=torch.float32),
+                                  slice_indices=torch.zeros(0, 2, dtype=torch.int64))
+        name_ids_list, weights_list = zip(*((name_ids, weights) for name_ids, weights in metadata_tuple_list))
+        seq_lens = torch.tensor([name_ids.shape[0] for name_ids in name_ids_list], dtype=torch.int64)
+        slice_ends = torch.cumsum(seq_lens, dim=0, dtype=torch.int64)
+        slice_starts = slice_ends - seq_lens
+        return MetadataBucket(name_ids=torch.from_numpy(np.concatenate(name_ids_list)),
+                              weights=torch.from_numpy(np.concatenate(weights_list)),
+                              slice_indices=torch.stack((slice_starts, slice_ends), dim=1))
+
+    def __len__(self) -> int:
+        return self.slice_indices.shape[0]
+
+    def as_tuple(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return (self.name_ids, self.weights, self.slice_indices)
+
+    def get(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        start, end = self.slice_indices[i]
+        return (self.name_ids[start:end], self.weights[start:end])
+
+
 class ParallelDataSet:
     """
     Bucketed parallel data set
@@ -1483,7 +1523,7 @@ class ParallelDataSet:
     def __init__(self,
                  source: List[torch.Tensor],
                  target: List[torch.Tensor],
-                 metadata: Optional[List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]] = None) -> None:
+                 metadata: Optional[List[MetadataBucket]] = None) -> None:
         check_condition(len(source) == len(target),
                         "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
         self.source = source
@@ -1508,7 +1548,9 @@ class ParallelDataSet:
         else:
             torch.save({C.DATA_KEY_SOURCE: self.source,
                         C.DATA_KEY_TARGET: self.target,
-                        C.DATA_KEY_METADATA: self.metadata}, fname)
+                        C.DATA_KEY_METADATA: [metadata_bucket.as_tuple() for metadata_bucket in self.metadata]
+                                             if self.metadata is not None else None},
+                       fname)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1532,7 +1574,8 @@ class ParallelDataSet:
                             'Please rerun data preparation with this version of Sockeye.')
             source = data[C.DATA_KEY_SOURCE]
             target = data[C.DATA_KEY_TARGET]
-            metadata = data[C.DATA_KEY_METADATA]
+            metadata = [MetadataBucket(*metadata_bucket_tuple) for metadata_bucket_tuple in data[C.DATA_KEY_METADATA]] \
+                       if data[C.DATA_KEY_METADATA] is not None else None
         if utils.is_distributed():
             split_index = torch.distributed.get_rank()
             total_splits = torch.distributed.get_world_size()
