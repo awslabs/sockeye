@@ -1489,7 +1489,6 @@ class MetadataBucket:
         :param metadata_tuple_list: List of tuples containing sequence-level
                                     metadata name IDs and weights as NumPy
                                     arrays.
-
         :return: MetadataBucket containing packed tensors and slice indices.
         """
         if len(metadata_tuple_list) == 0:
@@ -1507,12 +1506,62 @@ class MetadataBucket:
     def __len__(self) -> int:
         return self.slice_indices.shape[0]
 
+    def __repr__(self) -> str:
+        return str(self.as_tuple())
+
     def as_tuple(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Return a tuple view of the stored metadata.
+        """
         return (self.name_ids, self.weights, self.slice_indices)
 
     def get(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get parallel name IDs and weights for a single sequence from the packed
+        metadata.
+
+        :param i: Sequence index.
+        :returns: Tuple of name ID and weight sequence tensors.
+        """
         start, end = self.slice_indices[i]
         return (self.name_ids[start:end], self.weights[start:end])
+
+    def get_slice(self, start: int, end: int) -> 'MetadataBucket':
+        """
+        Get a new MetadataBucket containing a slice of the metadata. If the
+        sliced data is modified, the underlying data is also modified.
+
+        :param start: Positive start index.
+        :param end: Positice end index greater than or equal to start index.
+        :returns: Sliced metadata.
+        """
+        check_condition(0 <= start <= end,
+                        f'Metadata slicing only supports positive indices for which start <= end. Got: {start} {end}')
+        if start == end:
+            return MetadataBucket(name_ids=torch.zeros(0, dtype=torch.int32),
+                                  weights=torch.zeros(0, dtype=torch.float32),
+                                  slice_indices=torch.zeros(0, 2, dtype=torch.int64))
+        # Indices are a copy because we need to modify them
+        slice_indices = self.slice_indices[start:end].clone()
+        name_ids = self.name_ids[slice_indices[0, 0]:slice_indices[-1, 1]]  # type: ignore
+        weights = self.weights[slice_indices[0, 0]:slice_indices[-1, 1]]  # type: ignore
+        # Offset by starting point in packed metadata
+        slice_indices -= self.slice_indices[start, 0]
+        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
+
+    def repeat(self, repeats: int) -> 'MetadataBucket':
+        """
+        Repeat metadata `repeats` times.
+
+        :param repeats: Number of times to repeat metadata.
+        :returns: Repeated metadata.
+        """
+        name_ids = self.name_ids.repeat(repeats)
+        weights = self.weights.repeat(repeats)
+        # Each copy of the indices is offset by its copy number times the
+        # size of the packed metadata
+        slice_indices = torch.cat([self.slice_indices + i * self.name_ids.shape[0] for i in range(repeats)], dim=0)
+        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
 
 
 class ParallelDataSet:
@@ -1593,22 +1642,31 @@ class ParallelDataSet:
                     if num_copies > 1:
                         logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
                                     num_sentences, num_copies, total_splits)
-                        source[k] = torch.repeat_interleave(source[k], repeats=num_copies, dim=0)
-                        target[k] = torch.repeat_interleave(target[k], repeats=num_copies, dim=0)
-                        # TODO(mdenkows): Repeat metadata here
+                        source[k] = source[k].repeat(num_copies, 1, 1)
+                        target[k] = target[k].repeat(num_copies, 1, 1)
+                        if metadata is not None:
+                            metadata[k] = metadata[k].repeat(num_copies)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
             source = [s[math.floor(i * s.shape[0]):math.floor(j * s.shape[0])]
-                      if s.shape[0] > 0
-                      else s for s in source]
+                      if s.shape[0] > 0 else s
+                      for s in source]
             target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])]
-                      if t.shape[0] > 0
-                      else t for t in target]
-            # TODO(mdenkows): slice metadata here
+                      if t.shape[0] > 0 else t
+                      for t in target]
+            if metadata is not None:
+                metadata = [m.get_slice(math.floor(i * len(m)), math.floor(j * len(m)))
+                            if len(m) > 0 else m
+                            for m in metadata]
+        # Sanity checks
         assert len(source) == len(target)
+        for s, t in zip(source, target):
+            assert s.shape[0] == t.shape[0]
         if metadata is not None:
             assert len(source) == len(metadata)
+            for s, m in zip(source, metadata):
+                assert s.shape[0] == len(m)
         return ParallelDataSet(source, target, metadata)
 
     def fill_up(self,
