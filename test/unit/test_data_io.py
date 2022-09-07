@@ -406,7 +406,7 @@ metadata_tuple_lists = [
 
 
 @pytest.mark.parametrize("metadata_tuple_list", metadata_tuple_lists)
-def test_metadata_bucket_get_slice(metadata_tuple_list):
+def test_metadata_bucket_slice_copy(metadata_tuple_list):
     metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
     # For various slice sizes taken from various positions in the metadata...
     for slice_size in {0, 1, 2, len(metadata_tuple_list) // 2, len(metadata_tuple_list)}:
@@ -415,7 +415,7 @@ def test_metadata_bucket_get_slice(metadata_tuple_list):
             # Check that the sliced MetadataBucket is identical to the
             # MetadataBucket created from the slice of the original tuple list
             # using the same indices.
-            sliced_metadata_bucket = metadata_bucket.get_slice(start, end)
+            sliced_metadata_bucket = metadata_bucket.slice_copy(start, end)
             metadata_bucket_from_slice = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list[start:end])
             _compare_metadata_tensors(*sliced_metadata_bucket.as_tuple(), *metadata_bucket_from_slice.as_tuple())
 

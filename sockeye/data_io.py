@@ -1540,14 +1540,13 @@ class MetadataBucket:
         start, end = self.slice_indices[i]
         return (self.name_ids[start:end], self.weights[start:end])
 
-    def get_slice(self, start: int, end: int) -> 'MetadataBucket':
+    def slice_copy(self, start: int, end: int) -> 'MetadataBucket':
         """
-        Get a new MetadataBucket containing a slice of the metadata. If the
-        sliced data is modified, the underlying data is also modified.
+        Get a new MetadataBucket containing a copied slice of the metadata.
 
         :param start: Positive start index.
         :param end: Positive end index greater than or equal to start index.
-        :returns: Sliced MetadataBucket.
+        :returns: Sliced and copied MetadataBucket.
         """
         check_condition(0 <= start <= end,
                         f'Metadata slicing only supports positive indices for which start <= end. Got: {start} {end}')
@@ -1555,10 +1554,9 @@ class MetadataBucket:
             return MetadataBucket(name_ids=torch.zeros(0, dtype=torch.int32),
                                   weights=torch.zeros(0, dtype=torch.float32),
                                   slice_indices=torch.zeros(0, 2, dtype=torch.int64))
-        # Indices are a copy because we need to modify them
         slice_indices = self.slice_indices[start:end].clone()
-        name_ids = self.name_ids[slice_indices[0, 0]:slice_indices[-1, 1]]  # type: ignore
-        weights = self.weights[slice_indices[0, 0]:slice_indices[-1, 1]]  # type: ignore
+        name_ids = self.name_ids[slice_indices[0, 0]:slice_indices[-1, 1]].clone()  # type: ignore
+        weights = self.weights[slice_indices[0, 0]:slice_indices[-1, 1]].clone()  # type: ignore
         # Offset by starting point in packed metadata
         slice_indices -= self.slice_indices[start, 0]
         return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
@@ -1709,7 +1707,7 @@ class ParallelDataSet:
                       if t.shape[0] > 0 else t
                       for t in target]
             if metadata is not None:
-                metadata = [m.get_slice(math.floor(i * len(m)), math.floor(j * len(m)))
+                metadata = [m.slice_copy(math.floor(i * len(m)), math.floor(j * len(m)))
                             if len(m) > 0 else m
                             for m in metadata]
         # Sanity checks
