@@ -377,7 +377,7 @@ def test_metadata_bucket_creation(metadata_tuple_list, metadata_tensors):
     _compare_metadata_tensors(*metadata_bucket_rt.as_tuple(), *metadata_tensors)
 
 
-@pytest.mark.parametrize("metadata_tuple_list", [
+metadata_tuple_lists = [
     [],
     [(np.array([0], dtype='int32'), np.array([1.], dtype='float32')),
      (np.array([0, 1], dtype='int32'), np.array([0.5, 0.5], dtype='float32')),
@@ -396,7 +396,10 @@ def test_metadata_bucket_creation(metadata_tuple_list, metadata_tensors):
      (np.array([0], dtype='int32'), np.array([1.], dtype='float32')),
      (np.array([], dtype='int32'), np.array([], dtype='float32')),
     ],
-])
+]
+
+
+@pytest.mark.parametrize("metadata_tuple_list", metadata_tuple_lists)
 def test_metadata_bucket_get_slice(metadata_tuple_list):
     metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
     # For various slice sizes taken from various positions in the metadata...
@@ -411,40 +414,16 @@ def test_metadata_bucket_get_slice(metadata_tuple_list):
             _compare_metadata_tensors(*sliced_metadata_bucket.as_tuple(), *metadata_bucket_from_slice.as_tuple())
 
 
-@pytest.mark.parametrize("metadata_tensors,repeats,repeated_metadata_tensors", [
-    ((torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64)),
-     1,
-     (torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64))),
-
-    ((torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64)),
-     3,
-     (torch.tensor([1, 2, 0, 3, 4, 5,
-                    1, 2, 0, 3, 4, 5,
-                    1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33,
-                    0.5, 0.5, 1., 0.33, 0.33, 0.33,
-                    0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6],
-                    [6, 8], [8, 9], [9, 12],
-                    [12, 14], [14, 15], [15, 18]], dtype=torch.int64))),
-
-    ((torch.zeros(0, dtype=torch.int32),
-      torch.zeros(0, dtype=torch.float32),
-      torch.zeros(0, 2, dtype=torch.int64)),
-     3,
-     (torch.zeros(0, dtype=torch.int32),
-      torch.zeros(0, dtype=torch.float32),
-      torch.zeros(0, 2, dtype=torch.int64)))
-])
-def test_metadata_bucket_repeat(metadata_tensors, repeats, repeated_metadata_tensors):
-    _compare_metadata_tensors(*data_io.MetadataBucket(*metadata_tensors).repeat(repeats).as_tuple(),
-                              *repeated_metadata_tensors)
+@pytest.mark.parametrize("metadata_tuple_list", metadata_tuple_lists)
+def test_metadata_bucket_repeat(metadata_tuple_list):
+    metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
+    # For various numbers of repeats...
+    for repeats in (0, 1, 2, 5):
+        # Check that the repeated MetadataBucket is identical to the
+        # MetadataBucket created from repeating the original tuple list.
+        repeated_metadata_bucket = metadata_bucket.repeat(repeats)
+        metadata_bucket_from_repeated = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list * repeats)
+        _compare_metadata_tensors(*repeated_metadata_bucket.as_tuple(), *metadata_bucket_from_repeated.as_tuple())
 
 
 def _get_random_bucketed_data(

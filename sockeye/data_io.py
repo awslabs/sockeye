@@ -1556,6 +1556,12 @@ class MetadataBucket:
         :param repeats: Number of times to repeat metadata.
         :returns: Repeated metadata.
         """
+        check_condition(repeats >= 0,
+                        f'Metadata cannot be repeated a negative number of times. Got: {repeats}')
+        if repeats == 0:
+            return MetadataBucket(name_ids=torch.zeros(0, dtype=torch.int32),
+                                  weights=torch.zeros(0, dtype=torch.float32),
+                                  slice_indices=torch.zeros(0, 2, dtype=torch.int64))
         name_ids = self.name_ids.repeat(repeats)
         weights = self.weights.repeat(repeats)
         # Each copy of the indices is offset by its copy number times the
