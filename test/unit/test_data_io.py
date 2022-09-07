@@ -426,6 +426,21 @@ def test_metadata_bucket_repeat(metadata_tuple_list):
         _compare_metadata_tensors(*repeated_metadata_bucket.as_tuple(), *metadata_bucket_from_repeated.as_tuple())
 
 
+@pytest.mark.parametrize("metadata_tuple_list", metadata_tuple_lists)
+def test_metadata_bucket_fill_up(metadata_tuple_list):
+    if len(metadata_tuple_list) <= 0:
+        # Cannot fill up buckets of size 0
+        return
+    # Test: create MetadataBucket from tuple list and then call fill_up
+    metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
+    desired_indices = random.choices(range(len(metadata_tuple_list)), k=10)
+    filled_up_metadata_bucket = metadata_bucket.fill_up(torch.tensor(desired_indices))
+    # Reference: fill up tuple list and then create MetadataBucket
+    filled_up_metadata_tuple_list = metadata_tuple_list + [metadata_tuple_list[i] for i in desired_indices]
+    metadata_bucket_from_filled_up = data_io.MetadataBucket.from_numpy_tuple_list(filled_up_metadata_tuple_list)
+    _compare_metadata_tensors(*filled_up_metadata_bucket.as_tuple(), *metadata_bucket_from_filled_up.as_tuple())
+
+
 def _get_random_bucketed_data(
     buckets: List[Tuple[int, int]],
     min_count: int,
@@ -505,14 +520,16 @@ def test_parallel_data_set(include_metadata):
             check_equal(dataset.target, dataset_loaded.target)
 
 
-def test_parallel_data_set_fill_up():
+@pytest.mark.parametrize("include_metadata", [False, True])
+def test_parallel_data_set_fill_up(include_metadata):
     batch_size = 32
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
                                                            data_target_average_len=[None] * len(buckets))
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5,
+                                      include_metadata=include_metadata))
 
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)

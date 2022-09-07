@@ -1507,7 +1507,7 @@ class MetadataBucket:
         return self.slice_indices.shape[0]
 
     def __repr__(self) -> str:
-        return str(self.as_tuple())
+        return f'MetadataBucket{self.as_tuple()}'
 
     def as_tuple(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -1533,7 +1533,7 @@ class MetadataBucket:
 
         :param start: Positive start index.
         :param end: Positice end index greater than or equal to start index.
-        :returns: Sliced metadata.
+        :returns: Sliced MetadataBucket.
         """
         check_condition(0 <= start <= end,
                         f'Metadata slicing only supports positive indices for which start <= end. Got: {start} {end}')
@@ -1554,7 +1554,7 @@ class MetadataBucket:
         Repeat metadata `repeats` times.
 
         :param repeats: Number of times to repeat metadata.
-        :returns: Repeated metadata.
+        :returns: Repeated MetadataBucket.
         """
         check_condition(repeats >= 0,
                         f'Metadata cannot be repeated a negative number of times. Got: {repeats}')
@@ -1568,6 +1568,29 @@ class MetadataBucket:
         # size of the packed metadata
         slice_indices = torch.cat([self.slice_indices + i * self.name_ids.shape[0] for i in range(repeats)], dim=0)
         return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
+
+    def fill_up(self, desired_indices: torch.Tensor) -> 'MetadataBucket':
+        """
+        Create a filled-up metadata bucket by copying the sequences with the
+        specified indices and concatenating them to the existing metadata.
+
+        :param desired_indices: Tensor of sequence indices to copy.
+        :returns: Filled-up MetadataBucket.
+        """
+        check_condition(len(self) > 0, 'Cannot fill up an empty MetadataBucket (no examples to copy)')
+        slice_indices = torch.index_select(self.slice_indices, 0, desired_indices)
+        name_ids = torch.cat([self.name_ids[start:end] for start, end in slice_indices], dim=0)
+        weights = torch.cat([self.weights[start:end] for start, end in slice_indices], dim=0)
+        # Recompute slice indices for packed fill-up metadata based on sequence
+        # lengths
+        seq_lens = slice_indices[:, 1] - slice_indices[:, 0]
+        slice_ends = torch.cumsum(seq_lens, dim=0, dtype=torch.int64)
+        slice_starts = slice_ends - seq_lens
+        # Offset by size of existing packed metadata
+        slice_indices = torch.stack((slice_starts, slice_ends), dim=1) + self.name_ids.shape[0]
+        return MetadataBucket(name_ids=torch.cat((self.name_ids, name_ids), dim=0),
+                              weights=torch.cat((self.weights, weights), dim=0),
+                              slice_indices=torch.cat((self.slice_indices, slice_indices), dim=0))
 
 
 class ParallelDataSet:
@@ -1687,6 +1710,7 @@ class ParallelDataSet:
         """
         source = list(self.source)
         target = list(self.target)
+        metadata = list(self.metadata) if self.metadata is not None else None
 
         rs = np.random.RandomState(seed)
 
@@ -1694,6 +1718,9 @@ class ParallelDataSet:
             bucket_batch_size = bucket_batch_sizes[bucket_idx].batch_size
             bucket_source = self.source[bucket_idx]
             bucket_target = self.target[bucket_idx]
+            if self.metadata is not None:
+                bucket_metadata = self.metadata[bucket_idx]
+
             num_samples = bucket_source.shape[0]
 
             # Determine the target number of samples (current value or minimally
@@ -1718,8 +1745,11 @@ class ParallelDataSet:
                                                 torch.index_select(bucket_source, 0, desired_indices)), dim=0)
                 target[bucket_idx] = torch.cat((bucket_target,
                                                 torch.index_select(bucket_target, 0, desired_indices)), dim=0)
+                if self.metadata is not None:
+                    metadata[bucket_idx] = bucket_metadata.fill_up(desired_indices)
+                    assert source[bucket_idx].shape[0] == len(metadata[bucket_idx])
 
-        return ParallelDataSet(source, target)
+        return ParallelDataSet(source, target, metadata)
 
     def permute(self, permutations: List[torch.Tensor]) -> 'ParallelDataSet':
         """
