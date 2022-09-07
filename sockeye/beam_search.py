@@ -553,20 +553,20 @@ def _get_vocab_slice_ids(restrict_lexicon: lexicon.RestrictLexicon,
     vocab_slice_ids = pt.nn.functional.pad(vocab_slice_ids,
                                            pad=(0, 7 - ((vocab_slice_ids.size(-1) - 1) % 8)),
                                            mode='constant', value=eos_id)
-    vocab_slice_ids_shape = vocab_slice_ids.size()[0]
-    if vocab_slice_ids_shape < beam_size + 1:
+    vocab_slice_ids_size = vocab_slice_ids.size()[0]
+    if vocab_slice_ids_size < beam_size + 1:
         # This fixes an edge case for toy models, where the number of vocab ids from the lexicon is
         # smaller than the beam size.
         logger.warning("Padding vocab_slice_ids (%d) with EOS to have at least %d+1 elements to expand",
-                       vocab_slice_ids_shape, beam_size)
-        n = beam_size - vocab_slice_ids_shape + 1
+                       vocab_slice_ids_size, beam_size)
+        n = beam_size - vocab_slice_ids_size + 1
         vocab_slice_ids = pt.cat((vocab_slice_ids, pt.full((n,),
                                                            fill_value=eos_id,
                                                            device=device,
                                                            dtype=pt.int32)), dim=0)
 
-    logger.debug(f'decoder softmax size: {vocab_slice_ids_shape}')
-    return vocab_slice_ids, vocab_slice_ids_shape
+    logger.debug(f'decoder softmax size: {vocab_slice_ids_size}')
+    return vocab_slice_ids, vocab_slice_ids_size
 
 
 def _get_nvs_vocab_slice_ids(
@@ -614,7 +614,36 @@ def _get_nvs_vocab_slice_ids(
     return bow, output_vocab_size
 
 
-class GreedySearch(pt.nn.Module):
+class Search(pt.nn.Module):
+    def __init__(self,
+                 dtype: pt.dtype,
+                 bos_id: int,
+                 eos_id: int,
+                 device: pt.device,
+                 num_source_factors: int,
+                 num_target_factors: int,
+                 skip_nvs: bool = False,
+                 nvs_thresh: float = 0.5):
+        super().__init__()
+        self.dtype = dtype
+        self.bos_id = bos_id
+        self.eos_id = eos_id
+        self.device = device
+        self.num_source_factors = num_source_factors
+        self.num_target_factors = num_target_factors
+        self.skip_nvs = skip_nvs
+        self.nvs_thresh = nvs_thresh
+
+        self.output_vocab_sizes = utils.OnlineMeanAndVariance()
+
+    def update_output_vocab_size(self, size : Union[float, int]):
+        self.output_vocab_sizes.update(size)
+
+    def log_search_stats(self):
+        logger.info(f'decoder softmax size: {self.output_vocab_sizes.mean:.1f} (avg)')
+
+
+class GreedySearch(Search):
     """
     Implements greedy search, not supporting various features from the BeamSearch class
     (scoring, sampling, ensembling, batch decoding).
@@ -630,21 +659,13 @@ class GreedySearch(pt.nn.Module):
                  inference: _SingleModelInference,
                  skip_nvs: bool = False,
                  nvs_thresh: float = 0.5):
-        super().__init__()
-        self.dtype = dtype
-        self.bos_id = bos_id
-        self.eos_id = eos_id
-        self.device = device
+        super().__init__(dtype, bos_id, eos_id, device, num_source_factors,
+                         num_target_factors, skip_nvs, nvs_thresh)
         self.output_vocab_size = inference.model_output_vocab_size
         self.output_factor_vocab_size = inference.model_output_factor_vocab_size
         self._inference = inference
-        self.num_source_factors = num_source_factors
-        self.num_target_factors = num_target_factors
         self.global_avoid_trie = None
         assert inference._skip_softmax, "skipping softmax must be enabled for GreedySearch"
-        self.skip_nvs = skip_nvs
-        self.nvs_thresh = nvs_thresh
-
         self.work_block = GreedyTop1()
 
     def forward(self,
@@ -686,16 +707,19 @@ class GreedySearch(pt.nn.Module):
         vocab_slice_ids = None  # type: Optional[pt.Tensor]
         # If using a top-k lexicon or NVS select param rows for logit computation that correspond to the
         # target vocab for this sentence.
+
+        output_vocab_size = self.output_vocab_size
         if nvs_prediction is not None and not self.skip_nvs:
-            vocab_slice_ids, _ = _get_nvs_vocab_slice_ids(self.nvs_thresh, nvs_prediction,
-                                                          restrict_lexicon=restrict_lexicon,
-                                                          target_prefix=target_prefix)
+            vocab_slice_ids, output_vocab_size = _get_nvs_vocab_slice_ids(self.nvs_thresh, nvs_prediction,
+                                                                          restrict_lexicon=restrict_lexicon,
+                                                                          target_prefix=target_prefix)
         elif restrict_lexicon:
             source_words = source[:, :, 0]
-            vocab_slice_ids, _ = _get_vocab_slice_ids(restrict_lexicon, source_words, self.eos_id, beam_size=1,
-                                                      target_prefix=target_prefix,
-                                                      output_vocab_size=self.output_vocab_size)
-
+            vocab_slice_ids, output_vocab_size = _get_vocab_slice_ids(restrict_lexicon, source_words,
+                                                                      self.eos_id, beam_size=1,
+                                                                      target_prefix=target_prefix,
+                                                                      output_vocab_size=self.output_vocab_size)
+        self.update_output_vocab_size(output_vocab_size)
 
         # Prefix masks, where scores are infinity for all other vocabulary items except target_prefix ids
         prefix_masks, prefix_masks_length = None, 0
@@ -768,7 +792,7 @@ class GreedyTop1(pt.nn.Module):
         return best_word_index
 
 
-class BeamSearch(pt.nn.Module):
+class BeamSearch(Search):
     """
     Features:
     - beam search stop
@@ -797,21 +821,15 @@ class BeamSearch(pt.nn.Module):
                  prevent_unk: bool = False,
                  skip_nvs: bool = False,
                  nvs_thresh: float = 0.5) -> None:
-        super().__init__()
+        super().__init__(dtype, bos_id, eos_id, device, num_source_factors,
+                         num_target_factors, skip_nvs, nvs_thresh)
         self.beam_size = beam_size
-        self.dtype = dtype
-        self.bos_id = bos_id
-        self.eos_id = eos_id
         self.output_vocab_size = output_vocab_size
         self.output_factor_vocab_size = inference.model_output_factor_vocab_size
-        self.device = device
         self._inference = inference
         self.beam_search_stop = beam_search_stop
-        self.num_source_factors = num_source_factors
-        self.num_target_factors = num_target_factors
         self.prevent_unk = prevent_unk
-        self.skip_nvs = skip_nvs
-        self.nvs_thresh = nvs_thresh
+        self.output_vocab_sizes = utils.OnlineMeanAndVariance()
 
         self._repeat_states = RepeatStates(beam_size=beam_size, state_structure=self._inference.state_structure())
         self._traced_repeat_states = None  # type: Optional[pt.jit.ScriptModule]
@@ -924,6 +942,7 @@ class BeamSearch(pt.nn.Module):
                                                                       beam_size=self.beam_size,
                                                                       target_prefix=target_prefix,
                                                                       output_vocab_size=self.output_vocab_size)
+        self.update_output_vocab_size(output_vocab_size)
 
         if self._sample is not None:
             utils.check_condition(
