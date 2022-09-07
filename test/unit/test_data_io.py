@@ -421,21 +421,19 @@ def test_metadata_bucket_get_slice(metadata_tuple_list):
 
 
 @pytest.mark.parametrize("metadata_tuple_list", metadata_tuple_lists)
-def test_metadata_bucket_index_select_copy_and_permute(metadata_tuple_list):
+def test_metadata_bucket_index_select(metadata_tuple_list):
     if len(metadata_tuple_list) <= 0:
         # Cannot select from buckets of size 0
         return
     indices = random.choices(range(len(metadata_tuple_list) - 1), k=10)
-    # Test 1: create MetadataBucket from tuple list and then call select/copy
+    # Test: create MetadataBucket from tuple list and then call index_select
     metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
-    selected_metadata_bucket_tuple = metadata_bucket._index_select_copy(torch.tensor(indices))
-    # Reference: create selected tuple list and then create MetadataBucket
+    selected_metadata_bucket = metadata_bucket.index_select(torch.tensor(indices))
+    # Reference: create tuple list from selected indices and then create
+    # MetadataBucket
     selected_tuple_list = [metadata_tuple_list[i] for i in indices]
     metadata_bucket_from_selected = metadata_bucket.from_numpy_tuple_list(selected_tuple_list)
-    _compare_metadata_tensors(*selected_metadata_bucket_tuple, *metadata_bucket_from_selected.as_tuple())
-    # Test 2: equivalent result from permute
-    permuted_metadata_bucket = metadata_bucket.permute(torch.tensor(indices))
-    _compare_metadata_tensors(*permuted_metadata_bucket.as_tuple(), *metadata_bucket_from_selected.as_tuple())
+    _compare_metadata_tensors(*selected_metadata_bucket.as_tuple(), *metadata_bucket_from_selected.as_tuple())
 
 
 @pytest.mark.parametrize("metadata_tuple_list", metadata_tuple_lists)

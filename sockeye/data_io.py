@@ -1563,14 +1563,13 @@ class MetadataBucket:
         slice_indices -= self.slice_indices[start, 0]
         return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
 
-    def _index_select_copy(self, indices: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def index_select(self, indices: torch.Tensor) -> 'MetadataBucket':
         """
-        Copy and repack metadata sequences at the specified indices. The new
-        tensors are returned directly without creating a new MetadataBucket
-        object.
+        Create a new metadata bucket containing the sequences with the specified
+        indices in order.
 
         :param indices: 1-D tensor of sequence indices.
-        :returns: Tuple of (name_ids, weights, slice_indices).
+        :returns: MetadataBucket with selected sequences.
         """
         check_condition(indices.ndim == 1, 'Indices should be specified as a 1-D tensor')
         slice_indices = torch.index_select(self.slice_indices, 0, indices)
@@ -1579,7 +1578,7 @@ class MetadataBucket:
         seq_lens = slice_indices[:, 1] - slice_indices[:, 0]
         # Recompute slice indices for selected/packed metadata
         slice_indices = compute_slice_indices_from_sequence_lengths(seq_lens)
-        return name_ids, weights, slice_indices
+        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
 
     def repeat(self, repeats: int) -> 'MetadataBucket':
         """
@@ -1610,24 +1609,12 @@ class MetadataBucket:
         :returns: Filled-up MetadataBucket.
         """
         check_condition(len(self) > 0, 'Cannot fill up an empty MetadataBucket (no examples to copy)')
-        name_ids, weights, slice_indices = self._index_select_copy(desired_indices)
+        name_ids, weights, slice_indices = self.index_select(desired_indices).as_tuple()
         # Offset by size of existing packed metadata
         slice_indices += self.name_ids.shape[0]
         return MetadataBucket(name_ids=torch.cat((self.name_ids, name_ids), dim=0),
                               weights=torch.cat((self.weights, weights), dim=0),
                               slice_indices=torch.cat((self.slice_indices, slice_indices), dim=0))
-
-    def permute(self, permutation: torch.Tensor) -> 'MetadataBucket':
-        """
-        Create a permuted metadata bucket using the specified order of sequence
-        indices (permutation).
-
-        :param permutation: 1-D tensor of sequence indices specifying the
-                            permuted order.
-        :returns: Permuted MetadataBucket.
-        """
-        name_ids, weights, slice_indices = self._index_select_copy(permutation)
-        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
 
 
 class ParallelDataSet:
@@ -1807,7 +1794,7 @@ class ParallelDataSet:
                 source.append(torch.index_select(self.source[buck_idx], 0, permutation))
                 target.append(torch.index_select(self.target[buck_idx], 0, permutation))
                 if self.metadata is not None:
-                    metadata.append(self.metadata[buck_idx].permute(permutation))
+                    metadata.append(self.metadata[buck_idx].index_select(permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
