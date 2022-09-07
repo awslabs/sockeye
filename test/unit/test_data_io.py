@@ -329,6 +329,12 @@ def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_
         assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
 
 
+def test_compute_slice_indices_from_sequence_lengths():
+    seq_lens = torch.tensor([0, 1, 2, 0, 0, 3, 4, 5, 0])
+    slice_indices = torch.tensor([[0, 0], [0, 1], [1, 3], [3, 3], [3, 3], [3, 6], [6, 10], [10, 15], [15, 15]])
+    assert torch.equal(data_io.compute_slice_indices_from_sequence_lengths(seq_lens), slice_indices)
+
+
 def _compare_metadata_tensors(name_ids1, weights1, slice_indices1, name_ids2, weights2, slice_indices2):
         # Equal
         assert name_ids1.dtype == name_ids2.dtype
@@ -415,6 +421,24 @@ def test_metadata_bucket_get_slice(metadata_tuple_list):
 
 
 @pytest.mark.parametrize("metadata_tuple_list", metadata_tuple_lists)
+def test_metadata_bucket_index_select_copy_and_permute(metadata_tuple_list):
+    if len(metadata_tuple_list) <= 0:
+        # Cannot select from buckets of size 0
+        return
+    indices = random.choices(range(len(metadata_tuple_list) - 1), k=10)
+    # Test 1: create MetadataBucket from tuple list and then call select/copy
+    metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
+    selected_metadata_bucket_tuple = metadata_bucket._index_select_copy(torch.tensor(indices))
+    # Reference: create selected tuple list and then create MetadataBucket
+    selected_tuple_list = [metadata_tuple_list[i] for i in indices]
+    metadata_bucket_from_selected = metadata_bucket.from_numpy_tuple_list(selected_tuple_list)
+    _compare_metadata_tensors(*selected_metadata_bucket_tuple, *metadata_bucket_from_selected.as_tuple())
+    # Test 2: equivalent result from permute
+    permuted_metadata_bucket = metadata_bucket.permute(torch.tensor(indices))
+    _compare_metadata_tensors(*permuted_metadata_bucket.as_tuple(), *metadata_bucket_from_selected.as_tuple())
+
+
+@pytest.mark.parametrize("metadata_tuple_list", metadata_tuple_lists)
 def test_metadata_bucket_repeat(metadata_tuple_list):
     metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
     # For various numbers of repeats...
@@ -431,9 +455,9 @@ def test_metadata_bucket_fill_up(metadata_tuple_list):
     if len(metadata_tuple_list) <= 0:
         # Cannot fill up buckets of size 0
         return
+    desired_indices = random.choices(range(len(metadata_tuple_list)), k=10)
     # Test: create MetadataBucket from tuple list and then call fill_up
     metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
-    desired_indices = random.choices(range(len(metadata_tuple_list)), k=10)
     filled_up_metadata_bucket = metadata_bucket.fill_up(torch.tensor(desired_indices))
     # Reference: fill up tuple list and then create MetadataBucket
     filled_up_metadata_tuple_list = metadata_tuple_list + [metadata_tuple_list[i] for i in desired_indices]
@@ -529,7 +553,7 @@ def test_parallel_data_set_fill_up(include_metadata):
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5,
-                                      include_metadata=include_metadata))
+                                                                 include_metadata=include_metadata))
 
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
@@ -560,14 +584,16 @@ def test_get_permutations():
             assert len(p_set) == 1
 
 
-def test_parallel_data_set_permute():
+@pytest.mark.parametrize("include_metadata", [False, True])
+def test_parallel_data_set_permute(include_metadata):
     batch_size = 5
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
                                                            data_target_average_len=[None] * len(buckets))
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                 include_metadata=include_metadata)).fill_up(
         bucket_batch_sizes)
 
     permutations, inverse_permutations = data_io.get_permutations(dataset.get_bucket_counts())
@@ -580,9 +606,14 @@ def test_parallel_data_set_permute():
         if num_samples:
             assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).all()
             assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).all()
+            if include_metadata:
+                _compare_metadata_tensors(*dataset.metadata[buck_idx].as_tuple(),
+                                          *dataset_restored.metadata[buck_idx].as_tuple())
         else:
             assert not dataset_restored.source[buck_idx].shape[0]
             assert not dataset_restored.target[buck_idx].shape[0]
+            if include_metadata:
+                assert not len(dataset_restored.metadata[buck_idx])
 
 
 def test_get_batch_indices():

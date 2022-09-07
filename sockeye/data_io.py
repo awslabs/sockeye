@@ -1452,6 +1452,21 @@ def get_target_bucket(buckets: List[Tuple[int, int]],
     return bucket_idx, bucket
 
 
+def compute_slice_indices_from_sequence_lengths(seq_lens: torch.Tensor) -> torch.Tensor:
+    """
+    Compute indices for slicing sequences of specified lengths if they were to
+    be concatenated into a single (packed) sequence.
+
+    :param seq_lens: 1-D tensor of sequence lengths
+    :returns: Tensor of shape (seq_lens, 2) specifying the start and end indices
+              to slice each sequence from a single concatenated sequence.
+    """
+    check_condition(seq_lens.ndim == 1, 'Sequence lengths should be specified as a 1-D tensor')
+    slice_ends = torch.cumsum(seq_lens, dim=0, dtype=torch.int64)
+    slice_starts = slice_ends - seq_lens
+    return torch.stack((slice_starts, slice_ends), dim=1)
+
+
 class MetadataBucket:
     """
     Metadata for a single bucket: parallel sequences of name IDs and weights
@@ -1497,11 +1512,10 @@ class MetadataBucket:
                                   slice_indices=torch.zeros(0, 2, dtype=torch.int64))
         name_ids_list, weights_list = zip(*((name_ids, weights) for name_ids, weights in metadata_tuple_list))
         seq_lens = torch.tensor([name_ids.shape[0] for name_ids in name_ids_list], dtype=torch.int64)
-        slice_ends = torch.cumsum(seq_lens, dim=0, dtype=torch.int64)
-        slice_starts = slice_ends - seq_lens
-        return MetadataBucket(name_ids=torch.from_numpy(np.concatenate(name_ids_list)),
-                              weights=torch.from_numpy(np.concatenate(weights_list)),
-                              slice_indices=torch.stack((slice_starts, slice_ends), dim=1))
+        name_ids = torch.from_numpy(np.concatenate(name_ids_list))
+        weights = torch.from_numpy(np.concatenate(weights_list))
+        slice_indices = compute_slice_indices_from_sequence_lengths(seq_lens)
+        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
 
     def __len__(self) -> int:
         return self.slice_indices.shape[0]
@@ -1532,7 +1546,7 @@ class MetadataBucket:
         sliced data is modified, the underlying data is also modified.
 
         :param start: Positive start index.
-        :param end: Positice end index greater than or equal to start index.
+        :param end: Positive end index greater than or equal to start index.
         :returns: Sliced MetadataBucket.
         """
         check_condition(0 <= start <= end,
@@ -1548,6 +1562,24 @@ class MetadataBucket:
         # Offset by starting point in packed metadata
         slice_indices -= self.slice_indices[start, 0]
         return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
+
+    def _index_select_copy(self, indices: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Copy and repack metadata sequences at the specified indices. The new
+        tensors are returned directly without creating a new MetadataBucket
+        object.
+
+        :param indices: 1-D tensor of sequence indices.
+        :returns: Tuple of (name_ids, weights, slice_indices).
+        """
+        check_condition(indices.ndim == 1, 'Indices should be specified as a 1-D tensor')
+        slice_indices = torch.index_select(self.slice_indices, 0, indices)
+        name_ids = torch.cat([self.name_ids[start:end] for start, end in slice_indices], dim=0)
+        weights = torch.cat([self.weights[start:end] for start, end in slice_indices], dim=0)
+        seq_lens = slice_indices[:, 1] - slice_indices[:, 0]
+        # Recompute slice indices for selected/packed metadata
+        slice_indices = compute_slice_indices_from_sequence_lengths(seq_lens)
+        return name_ids, weights, slice_indices
 
     def repeat(self, repeats: int) -> 'MetadataBucket':
         """
@@ -1578,19 +1610,24 @@ class MetadataBucket:
         :returns: Filled-up MetadataBucket.
         """
         check_condition(len(self) > 0, 'Cannot fill up an empty MetadataBucket (no examples to copy)')
-        slice_indices = torch.index_select(self.slice_indices, 0, desired_indices)
-        name_ids = torch.cat([self.name_ids[start:end] for start, end in slice_indices], dim=0)
-        weights = torch.cat([self.weights[start:end] for start, end in slice_indices], dim=0)
-        # Recompute slice indices for packed fill-up metadata based on sequence
-        # lengths
-        seq_lens = slice_indices[:, 1] - slice_indices[:, 0]
-        slice_ends = torch.cumsum(seq_lens, dim=0, dtype=torch.int64)
-        slice_starts = slice_ends - seq_lens
+        name_ids, weights, slice_indices = self._index_select_copy(desired_indices)
         # Offset by size of existing packed metadata
-        slice_indices = torch.stack((slice_starts, slice_ends), dim=1) + self.name_ids.shape[0]
+        slice_indices += self.name_ids.shape[0]
         return MetadataBucket(name_ids=torch.cat((self.name_ids, name_ids), dim=0),
                               weights=torch.cat((self.weights, weights), dim=0),
                               slice_indices=torch.cat((self.slice_indices, slice_indices), dim=0))
+
+    def permute(self, permutation: torch.Tensor) -> 'MetadataBucket':
+        """
+        Create a permuted metadata bucket using the specified order of sequence
+        indices (permutation).
+
+        :param permutation: 1-D tensor of sequence indices specifying the
+                            permuted order.
+        :returns: Permuted MetadataBucket.
+        """
+        name_ids, weights, slice_indices = self._index_select_copy(permutation)
+        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
 
 
 class ParallelDataSet:
@@ -1762,17 +1799,22 @@ class ParallelDataSet:
         assert len(self) == len(permutations)
         source = []  # type: List[torch.Tensor]
         target = []  # type: List[torch.Tensor]
+        metadata = [] if self.metadata is not None else None  # type: Optional[List[MetadataBucket]]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not an empty bucket
                 permutation = permutations[buck_idx]
                 source.append(torch.index_select(self.source[buck_idx], 0, permutation))
                 target.append(torch.index_select(self.target[buck_idx], 0, permutation))
+                if self.metadata is not None:
+                    metadata.append(self.metadata[buck_idx].permute(permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
+                if self.metadata is not None:
+                    metadata.append(self.metadata[buck_idx])
 
-        return ParallelDataSet(source, target)
+        return ParallelDataSet(source, target, metadata)
 
 
 def get_permutations(bucket_counts: List[int]) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
