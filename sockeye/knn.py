@@ -28,7 +28,7 @@ from sockeye.log import setup_main_logger
 
 try:
     import faiss
-except:
+except ImportError:
     pass
 
 logger = logging.getLogger(__name__)

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import cast, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch as pt
 
 from sockeye import __version__
@@ -485,10 +486,10 @@ class SockeyeModel(pt.nn.Module):
 
     def load_knn_index(self, knn_index_folder: str) -> None:
         utils.init_faiss()
-        import faiss
+        import faiss  # pylint: disable=E0401
         # The following import will allow us to pass pytorch arrays directly to faiss
-        import faiss.contrib.torch_utils
-        import numpy as np
+        import faiss.contrib.torch_utils  # pylint: disable=E0401
+
         knn_config = KNNConfig.load(os.path.join(knn_index_folder, "config.yaml"))
         knn_config = cast(KNNConfig, knn_config)  # load returns a Config class, need to cast to subclass KNNConfig
         keys_index = faiss.read_index(os.path.join(knn_index_folder, "key_index"))

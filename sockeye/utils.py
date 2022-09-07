@@ -729,7 +729,7 @@ def init_faiss():
     global _using_faiss
     if not _using_faiss:
         try:
-            import faiss
+            import faiss  # pylint: disable=E0401
             _using_faiss = True
         except:
             raise RuntimeError('To run kNN-MT models, you need to install faiss by following '
