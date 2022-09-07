@@ -359,14 +359,14 @@ def _compare_metadata_tensors(name_ids1, weights1, slice_indices1, name_ids2, we
       torch.zeros(0, dtype=torch.float32),
       torch.zeros(0, 2, dtype=torch.int64)))
 ])
-def test_metadata_bucket(metadata_tuple_list, metadata_tensors):
+def test_metadata_bucket_creation(metadata_tuple_list, metadata_tensors):
 
     # Test packing and conversion
     metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
     _compare_metadata_tensors(*metadata_bucket.as_tuple(), *metadata_tensors)
     assert len(metadata_bucket) == len(metadata_tuple_list)
 
-    # Test slicing
+    # Test slicing individual sequences
     for i, (name_ids_np, weights_np) in enumerate(metadata_tuple_list):
         name_ids, weights = metadata_bucket.get(i)
         assert torch.equal(name_ids, torch.tensor(name_ids_np))
@@ -377,55 +377,38 @@ def test_metadata_bucket(metadata_tuple_list, metadata_tensors):
     _compare_metadata_tensors(*metadata_bucket_rt.as_tuple(), *metadata_tensors)
 
 
-@pytest.mark.parametrize("metadata_tensors,start,end,sliced_metadata_tensors", [
-    ((torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64)),
-     0,
-     3,
-     (torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64))),
-
-    ((torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64)),
-     1,
-     3,
-     (torch.tensor([0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 1], [1, 4]], dtype=torch.int64))),
-
-    ((torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64)),
-     0,
-     2,
-     (torch.tensor([1, 2, 0], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1.], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3]], dtype=torch.int64))),
-
-    ((torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64)),
-     1,
-     2,
-     (torch.tensor([0], dtype=torch.int32),
-      torch.tensor([1.], dtype=torch.float32),
-      torch.tensor([[0, 1]], dtype=torch.int64))),
-
-    ((torch.tensor([1, 2, 0, 3, 4, 5], dtype=torch.int32),
-      torch.tensor([0.5, 0.5, 1., 0.33, 0.33, 0.33], dtype=torch.float32),
-      torch.tensor([[0, 2], [2, 3], [3, 6]], dtype=torch.int64)),
-     1,
-     1,
-     (torch.zeros(0, dtype=torch.int32),
-      torch.zeros(0, dtype=torch.float32),
-      torch.zeros(0, 2, dtype=torch.int64))),
+@pytest.mark.parametrize("metadata_tuple_list", [
+    [],
+    [(np.array([0], dtype='int32'), np.array([1.], dtype='float32')),
+     (np.array([0, 1], dtype='int32'), np.array([0.5, 0.5], dtype='float32')),
+     (np.array([0, 1, 2], dtype='int32'), np.array([0.33, 0.33, 0.33], dtype='float32')),
+     (np.array([0, 1, 2, 3], dtype='int32'), np.array([0.25, 0.25, 0.25, 0.25], dtype='float32')),
+     (np.array([0, 1, 2, 3, 4], dtype='int32'), np.array([0.2, 0.2, 0.2, 0.2, 0.2], dtype='float32')),
+    ],
+    [(np.array([], dtype='int32'), np.array([], dtype='float32')),
+     (np.array([0], dtype='int32'), np.array([1.], dtype='float32')),
+     (np.array([0, 1], dtype='int32'), np.array([0.5, 0.5], dtype='float32')),
+     (np.array([0, 1, 2], dtype='int32'), np.array([0.33, 0.33, 0.33], dtype='float32')),
+     (np.array([], dtype='int32'), np.array([], dtype='float32')),
+     (np.array([], dtype='int32'), np.array([], dtype='float32')),
+     (np.array([0, 1, 2, 3, 4], dtype='int32'), np.array([0.2, 0.2, 0.2, 0.2, 0.2], dtype='float32')),
+     (np.array([0, 1, 2, 3], dtype='int32'), np.array([0.25, 0.25, 0.25, 0.25], dtype='float32')),
+     (np.array([0], dtype='int32'), np.array([1.], dtype='float32')),
+     (np.array([], dtype='int32'), np.array([], dtype='float32')),
+    ],
 ])
-def test_metadata_bucket_get_slice(metadata_tensors, start, end, sliced_metadata_tensors):
-    _compare_metadata_tensors(*data_io.MetadataBucket(*metadata_tensors).get_slice(start, end).as_tuple(),
-                              *sliced_metadata_tensors)
+def test_metadata_bucket_get_slice(metadata_tuple_list):
+    metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
+    # For various slice sizes taken from various positions in the metadata...
+    for slice_size in {0, 1, 2, len(metadata_tuple_list) // 2, len(metadata_tuple_list)}:
+        for start in range(0, len(metadata_tuple_list)):
+            end = start + slice_size
+            # Check that the sliced MetadataBucket is identical to the
+            # MetadataBucket created from the slice of the original tuple list
+            # using the same indices.
+            sliced_metadata_bucket = metadata_bucket.get_slice(start, end)
+            metadata_bucket_from_slice = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list[start:end])
+            _compare_metadata_tensors(*sliced_metadata_bucket.as_tuple(), *metadata_bucket_from_slice.as_tuple())
 
 
 @pytest.mark.parametrize("metadata_tensors,repeats,repeated_metadata_tensors", [
