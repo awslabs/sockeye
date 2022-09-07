@@ -29,7 +29,7 @@ from .log import setup_main_logger
 from .model import SockeyeModel, load_model
 from .vocab import Vocab
 from .utils import check_condition
-from .knn import KNNConfig, get_state_dump_filename, get_word_dump_filename
+from .knn import KNNConfig, get_state_store_filename, get_word_store_filename
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = logging.getLogger(__name__)
@@ -90,13 +90,13 @@ class NumpyMemmapStorage(BlockMMapStorage):
             self.tail_idx += num_entries
 
 
-class StateDumper:
+class DecoderStateGenerator:
 
     def __init__(self,
                  model: SockeyeModel,
                  source_vocabs: List[Vocab],
                  target_vocabs: List[Vocab],
-                 dump_prefix: str,
+                 output_prefix: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
                  state_data_type: str,
@@ -110,12 +110,12 @@ class StateDumper:
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
 
-        self.dump_prefix = dump_prefix
-        self.state_dump_file = None
-        self.words_dump_file = None
+        self.output_prefix = output_prefix
+        self.state_store_file = None
+        self.words_store_file = None
 
         # info for KNNConfig
-        self.dump_size = 0
+        self.num_states = 0
         self.dimension = None
         self.state_data_type = utils.get_numpy_dtype(state_data_type)
         self.word_data_type = utils.get_numpy_dtype(word_data_type)
@@ -128,22 +128,22 @@ class StateDumper:
                 token_count += min(len(line.strip().split(' ')) + 1, max_seq_len)  # +1 for EOS
         return token_count
 
-    def init_dump_file(self, initial_size: int) -> None:
+    def init_store_file(self, initial_size: int) -> None:
         self.dimension = self.model.config.config_decoder.model_size
 
-        self.state_dump_file = NumpyMemmapStorage(get_state_dump_filename(self.dump_prefix),
+        self.state_store_file = NumpyMemmapStorage(get_state_store_filename(self.output_prefix),
                                                   self.dimension, self.state_data_type)
-        self.words_dump_file = NumpyMemmapStorage(get_word_dump_filename(self.dump_prefix),
+        self.words_store_file = NumpyMemmapStorage(get_word_store_filename(self.output_prefix),
                                                   1, self.word_data_type)
-        self.state_dump_file.open(initial_size, 1)
-        self.words_dump_file.open(initial_size, 1)
+        self.state_store_file.open(initial_size, 1)
+        self.words_store_file.open(initial_size, 1)
 
-    def build_states_and_dump(self,
+    def generate_states_and_store(self,
                               sources: List[str],
                               targets: List[str],
                               batch_size: int) -> None:
-        assert self.state_dump_file != None, \
-               "You should call probe_token_count first to initialize the dump files."
+        assert self.state_store_file != None, \
+               "You should call probe_token_count first to initialize the store files."
 
         # get data iter
         data_iter = data_io.get_scoring_data_iters(
@@ -173,16 +173,16 @@ class StateDumper:
             flat_target = batch.target[pad_mask].cpu().detach().numpy()
             flat_states = decoder_states[pad_mask].cpu().detach().numpy()
 
-            # dump
-            self.state_dump_file.add(flat_states)
-            self.words_dump_file.add(flat_target)
+            # store
+            self.state_store_file.add(flat_states)
+            self.words_store_file.add(flat_target)
 
     def save_config(self):
-        config = KNNConfig(self.dump_size, self.dimension, utils.dtype_to_str(self.state_data_type), utils.dtype_to_str(self.word_data_type), "", -1)
-        config.save(self.dump_prefix + ".conf.yaml")
+        config = KNNConfig(self.num_states, self.dimension, utils.dtype_to_str(self.state_data_type), utils.dtype_to_str(self.word_data_type), "", -1)
+        config.save(self.output_prefix + ".conf.yaml")
 
 
-def dump(args: argparse.Namespace):
+def store(args: argparse.Namespace):
     use_cpu = args.use_cpu
     if not pt.cuda.is_available():
         logger.info("CUDA not available, using cpu")
@@ -212,17 +212,17 @@ def dump(args: argparse.Namespace):
     if args.state_dtype is None:
         args.state_dtype = utils.dtype_to_str(model.dtype)
 
-    dumper = StateDumper(model, source_vocabs, target_vocabs, args.dump_prefix, max_seq_len_source, max_seq_len_target,
+    generator = DecoderStateGenerator(model, source_vocabs, target_vocabs, args.output_prefix, max_seq_len_source, max_seq_len_target,
                          args.state_dtype, args.word_dtype, device)
-    dumper.dump_size = StateDumper.probe_token_count(targets[0], max_seq_len_target)
-    dumper.init_dump_file(dumper.dump_size)
-    dumper.build_states_and_dump(sources, targets, args.batch_size)
-    dumper.save_config()
+    generator.num_states = DecoderStateGenerator.probe_token_count(targets[0], max_seq_len_target)
+    generator.init_store_file(generator.num_states)
+    generator.generate_states_and_store(sources, targets, args.batch_size)
+    generator.save_config()
 
 
 def main():
-    params = arguments.ConfigArgumentParser(description='CLI to build a state dump.')
-    arguments.add_state_dumping_args(params)
+    params = arguments.ConfigArgumentParser(description='CLI to generate decoder states from parallel data with a trained model, and build a data store from it.')
+    arguments.add_state_generation_args(params)
     args = params.parse_args()
     check_condition(args.batch_type == C.BATCH_TYPE_SENTENCE, "Batching by number of words is not supported")
 
@@ -232,7 +232,7 @@ def main():
 
     utils.log_basic_info(args)
 
-    dump(args)
+    store(args)
 
 
 if __name__ == "__main__":

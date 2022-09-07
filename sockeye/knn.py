@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 @dataclass
 class KNNConfig(config.Config):
     """
-    KNNConfig defines knn-specific configurations, including the information about the data dump
+    KNNConfig defines knn-specific configurations, including the information about the data store
     as well as the index itself.
 
-    :param index_size: Size of the index and the data dump.
+    :param index_size: Size of the index and the data store.
     :param dimension: Number of dimensions of the decoder states.
     :param state_data_type: Data type of the decoder states (keys).
     :param word_data_type: Data type of the stored word indexes (values).
@@ -121,10 +121,10 @@ class FaissIndexBuilder:
         return index
 
 
-def get_state_dump_filename(prefix: str) -> str:
+def get_state_store_filename(prefix: str) -> str:
     return prefix + ".states.npy"
 
-def get_word_dump_filename(prefix: str) -> str:
+def get_word_store_filename(prefix: str) -> str:
     return prefix + ".words.npy"
 
 def main():
@@ -134,10 +134,10 @@ def main():
     arguments.add_device_args(params)
     args = params.parse_args()
 
-    state_dump_filename = get_state_dump_filename(args.input_dump_prefix)
-    word_dump_filename = get_word_dump_filename(args.input_dump_prefix)
-    utils.check_condition(os.path.exists(state_dump_filename), f"Input file {state_dump_filename} not found!")
-    utils.check_condition(os.path.exists(word_dump_filename), f"Input file {word_dump_filename} not found!")
+    state_store_filename = get_state_store_filename(args.input_store_prefix)
+    word_store_filename = get_word_store_filename(args.input_store_prefix)
+    utils.check_condition(os.path.exists(state_store_filename), f"Input file {state_store_filename} not found!")
+    utils.check_condition(os.path.exists(word_store_filename), f"Input file {word_store_filename} not found!")
     utils.check_condition(os.path.exists(args.config_file), f"Config file {args.config_file} not found!")
     utils.init_faiss()
 
@@ -152,7 +152,7 @@ def main():
     if args.train_data_size is not None:
         config.train_data_size = args.train_data_size
 
-    keys = np.memmap(state_dump_filename, dtype=config.state_data_type, mode='r', shape=(config.index_size, config.dimension))
+    keys = np.memmap(state_store_filename, dtype=config.state_data_type, mode='r', shape=(config.index_size, config.dimension))
     builder = FaissIndexBuilder(config, not args.use_cpu, args.device_id)
     train_sample = None
     if args.train_data_input_file is not None:
@@ -168,7 +168,7 @@ def main():
         os.mkdir(args.output_dir)
         faiss.write_index(index_cpu, os.path.join(args.output_dir, "key_index"))
         config.save(os.path.join(args.output_dir, "config.yaml"))
-        shutil.copy(word_dump_filename, os.path.join(args.output_dir, "vals.npy"))
+        shutil.copy(word_store_filename, os.path.join(args.output_dir, "vals.npy"))
 
 
 if __name__ == "__main__":

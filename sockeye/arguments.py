@@ -1180,19 +1180,19 @@ def add_score_cli_args(params):
     add_logging_args(params)
 
 
-def add_state_dumping_args(params):
+def add_state_generation_args(params):
     add_training_data_args(params, required=True)
     add_vocab_args(params)
     add_device_args(params)
     add_batch_args(params, default_batch_size=56, default_batch_type=C.BATCH_TYPE_SENTENCE)
 
-    decode_params = params.add_argument_group("Decoder state dumping parameters")
+    decode_params = params.add_argument_group("Decoder state generation parameters")
 
     params.add_argument('--state-dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16],
-                        help="Data type of the decoder state dump. Default: %(default)s infers from saved model.")
+                        help="Data type of the decoder state store. Default: %(default)s infers from saved model.")
 
     params.add_argument('--word-dtype', default=C.DTYPE_INT32, choices=[None, C.DTYPE_INT16, C.DTYPE_INT32],
-                        help="Data type of the word index dump. Default: int32.")
+                        help="Data type of the word index store. Default: int32.")
 
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
@@ -1207,8 +1207,8 @@ def add_state_dumping_args(params):
     add_length_penalty_args(params)
     add_brevity_penalty_args(params)
 
-    params.add_argument("--dump-prefix", "-do", default=None,
-                        help="File to dump the decoder states")
+    params.add_argument("--output-prefix", "-o", default=None,
+                        help="Prefix of the file that stores the decoder states")
 
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                         help="Data type. Default: %(default)s infers from saved model.")
@@ -1486,14 +1486,14 @@ def add_knn_mt_args(params):
 
 
 def add_build_knn_index_args(params):
-    params.add_argument('-i', '--input-dump-prefix',
+    params.add_argument('-i', '--input-store-prefix',
                         required=True,
                         type=str,
-                        help='The path prefix to the dumped decoder states and values (without .[states|words].npy).')
+                        help='The path prefix to the stored decoder states and values (without .[states|words].npy).')
     params.add_argument('-c', '--config-file',
                         required=True,
                         help='The path to the config yaml file. '
-                             '(If the state dump CLI was used, the yaml fields should have been auto-generated.)')
+                             '(If the "generate_decoder_states" CLI was used, the yaml fields should have been auto-generated.)')
     params.add_argument('-o', '--output-dir',
                         required=True,
                         type=str,
