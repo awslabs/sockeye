@@ -383,6 +383,45 @@ def test_metadata_bucket_creation(metadata_tuple_list, metadata_tensors):
     _compare_metadata_tensors(*metadata_bucket_rt.as_tuple(), *metadata_tensors)
 
 
+@pytest.mark.parametrize("start,end,expected_batch", [
+    (0, 0, (torch.zeros(0, 0, dtype=torch.int32), torch.zeros(0, 0, dtype=torch.float32))),
+    (0, 1, (torch.tensor([[]], dtype=torch.int32), torch.tensor([[]], dtype=torch.float32))),
+    (0, 2, (torch.tensor([[], []], dtype=torch.int32), torch.tensor([[], []], dtype=torch.float32))),
+    (0, 2, (torch.tensor([[], []], dtype=torch.int32), torch.tensor([[], []], dtype=torch.float32))),
+    (2, 2, (torch.zeros(0, 0, dtype=torch.int32), torch.zeros(0, 0, dtype=torch.float32))),
+    (2, 3, (torch.tensor([[0, 1]], dtype=torch.int32), torch.tensor([[0.5, 0.5]], dtype=torch.float32))),
+    (2, 4, (torch.tensor([[0, 1], [0, C.PAD_ID]], dtype=torch.int32),
+            torch.tensor([[0.5, 0.5], [1., 0.]], dtype=torch.float32))),
+    (2, 5, (torch.tensor([[0, 1, C.PAD_ID, C.PAD_ID],
+                         [0, C.PAD_ID, C.PAD_ID, C.PAD_ID],
+                         [0, 1, 2, 3]], dtype=torch.int32),
+            torch.tensor([[0.5, 0.5, 0., 0.], [1., 0., 0., 0.], [0.25, 0.25, 0.25, 0.25]], dtype=torch.float32))),
+    (5, 8, (torch.tensor([[0, 1, 2, C.PAD_ID, C.PAD_ID],
+                          [C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID, C.PAD_ID],
+                          [0, 1, 2, 3, 4]], dtype=torch.int32),
+            torch.tensor([[0.33, 0.33, 0.33, 0., 0.],
+                          [0., 0., 0., 0., 0.],
+                          [0.2, 0.2, 0.2, 0.2, 0.2]], dtype=torch.float32))),
+])
+def test_metadata_bucket_get_batch(start, end, expected_batch):
+    metadata_tuple_list = [
+        (np.array([], dtype='int32'), np.array([], dtype='float32')),
+        (np.array([], dtype='int32'), np.array([], dtype='float32')),
+        (np.array([0, 1], dtype='int32'), np.array([0.5, 0.5], dtype='float32')),
+        (np.array([0], dtype='int32'), np.array([1.], dtype='float32')),
+        (np.array([0, 1, 2, 3], dtype='int32'), np.array([0.25, 0.25, 0.25, 0.25], dtype='float32')),
+        (np.array([0, 1, 2], dtype='int32'), np.array([0.33, 0.33, 0.33], dtype='float32')),
+        (np.array([], dtype='int32'), np.array([], dtype='float32')),
+        (np.array([0, 1, 2, 3, 4], dtype='int32'), np.array([0.2, 0.2, 0.2, 0.2, 0.2], dtype='float32')),
+    ]
+    metadata_bucket = data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list)
+    batch = metadata_bucket.get_batch(start, end)
+    assert batch[0].dtype == expected_batch[0].dtype
+    assert torch.equal(batch[0], expected_batch[0])
+    assert batch[1].dtype == expected_batch[1].dtype
+    assert torch.allclose(batch[1], expected_batch[1])
+
+
 metadata_tuple_lists = [
     [],
     [(np.array([0], dtype='int32'), np.array([1.], dtype='float32')),

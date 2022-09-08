@@ -597,7 +597,7 @@ def save_shard(shard_idx: int,
     sources_sentences, targets_sentences = create_sequence_readers(shard_sources, shard_targets, source_vocabs, target_vocabs)
     metadata_sequences = None  # type: Optional[MetadataReader]
     if shard_metadata is not None:
-        check_condition(metadata_vocab is not None, 'shard_metadata also requires metadata_vocab.')
+        check_condition(metadata_vocab is not None, 'shard_metadata also requires metadata_vocab')
         metadata_sequences = MetadataReader(shard_metadata, metadata_vocab)
 
     for sources, targets, _ in parallel_iter(sources_sentences, targets_sentences, metadata_sequences):
@@ -788,7 +788,9 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
                              max_seq_len_source: int,
                              max_seq_len_target: int,
                              batch_size: int,
-                             permute: bool = False) -> 'ParallelSampleIter':
+                             permute: bool = False,
+                             validation_metadata: Optional[str] = None,
+                             metadata_vocab: Optional[vocab.Vocab] = None) -> 'ParallelSampleIter':
     """
     Returns a ParallelSampleIter for the validation data.
     """
@@ -806,6 +808,10 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_sources_sentences, validation_targets_sentences = create_sequence_readers(validation_sources,
                                                                                          validation_targets,
                                                                                          source_vocabs, target_vocabs)
+    validation_metadata_sequences = None  # type: Optional[MetadataReader]
+    if validation_metadata is not None:
+        check_condition(metadata_vocab is not None, 'validation_metadata also requires metadata_vocab')
+        validation_metadata_sequences = MetadataReader(validation_metadata, metadata_vocab)
 
     validation_data_statistics = get_data_statistics(validation_sources_sentences,
                                                      validation_targets_sentences,
@@ -817,7 +823,8 @@ def get_validation_data_iter(data_loader: RawParallelDatasetLoader,
     validation_data_statistics.log(bucket_batch_sizes)
 
     validation_data = data_loader.load(validation_sources_sentences, validation_targets_sentences,
-                                       validation_data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
+                                       validation_data_statistics.num_sents_per_bucket,
+                                       metadata_iterable=validation_metadata_sequences).fill_up(bucket_batch_sizes)
 
     return ParallelSampleIter(data=validation_data,
                               buckets=buckets,
@@ -882,14 +889,6 @@ def get_prepared_data_iters(prepared_data_dir: str,
     check_condition(len(target_vocabs) == len(data_info.targets),
                     "Wrong number of target vocabularies. Found %d, need %d." % (len(target_vocabs),
                                                                                  len(data_info.targets)))
-    if metadata_vocab is not None:
-        if validation_metadata is None:
-            logger.warning('Metadata exists for prepared training data but not validation data. '
-                           'All validation data will use empty metadata.')
-    else:
-        check_condition(validation_metadata is None,
-                        'Validation metadata is specified but the prepared training data does not include metadata. '
-                        'Training metadata must be available to train a model that supports metadata.')
 
     buckets = config_data.data_statistics.buckets
     max_seq_len_source = config_data.max_seq_len_source
@@ -920,10 +919,12 @@ def get_prepared_data_iters(prepared_data_dir: str,
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
                                                validation_targets=validation_targets,
+                                               validation_metadata=validation_metadata,
                                                buckets=buckets,
                                                bucket_batch_sizes=bucket_batch_sizes,
                                                source_vocabs=source_vocabs,
                                                target_vocabs=target_vocabs,
+                                               metadata_vocab=metadata_vocab,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
@@ -950,7 +951,10 @@ def get_training_data_iters(sources: List[str],
                             bucket_scaling: bool = True,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter', Optional['BaseParallelSampleIter'],
+                            permute: bool = True,
+                            metadata: Optional[str] = None,
+                            validation_metadata: Optional[str] = None,
+                            metadata_vocab: Optional[vocab.Vocab] = None) -> Tuple['BaseParallelSampleIter', Optional['BaseParallelSampleIter'],
                                                            'DataConfig', 'DataInfo']:
     """
     Returns data iterators for training and validation data.
@@ -975,7 +979,9 @@ def get_training_data_iters(sources: List[str],
     :param batch_sentences_multiple_of: Round the number of sentences in each
         bucket's batch to a multiple of this value (word-based batching only).
     :param permute: Randomly shuffle the parallel data.
-
+    :param metadata: Optional path to training metadata.
+    :param validation_metadata: Optional path to validation metadata.
+    :param metadata_vocab: Vocabulary for metadata (if specified) or None.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -996,6 +1002,10 @@ def get_training_data_iters(sources: List[str],
                                                                                                max_seq_len_target)]
 
     sources_sentences, targets_sentences = create_sequence_readers(sources, targets, source_vocabs, target_vocabs)
+    metadata_sequences = None  # type: Optional[MetadataReader]
+    if (metadata is not None) or (validation_metadata is not None):
+        check_condition(metadata_vocab is not None, 'metadata and validation_metadata also require metadata_vocab')
+        metadata_sequences = MetadataReader(metadata, metadata_vocab)
 
     # Pass 2: Get data statistics and determine the number of data points for each bucket.
     data_statistics = get_data_statistics(sources_sentences, targets_sentences, buckets,
@@ -1016,7 +1026,8 @@ def get_training_data_iters(sources: List[str],
                                            pad_id=C.PAD_ID)
 
     training_data = data_loader.load(sources_sentences, targets_sentences,
-                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
+                                     data_statistics.num_sents_per_bucket,
+                                     metadata_iterable=metadata_sequences).fill_up(bucket_batch_sizes)
 
     data_info = DataInfo(sources=sources,
                          targets=targets,
@@ -1044,10 +1055,12 @@ def get_training_data_iters(sources: List[str],
     validation_iter = get_validation_data_iter(data_loader=data_loader,
                                                validation_sources=validation_sources,
                                                validation_targets=validation_targets,
+                                               validation_metadata=validation_metadata,
                                                buckets=buckets,
                                                bucket_batch_sizes=bucket_batch_sizes,
                                                source_vocabs=source_vocabs,
                                                target_vocabs=target_vocabs,
+                                               metadata_vocab=metadata_vocab,
                                                max_seq_len_source=max_seq_len_source,
                                                max_seq_len_target=max_seq_len_target,
                                                batch_size=batch_size,
@@ -1539,6 +1552,34 @@ class MetadataBucket:
         """
         start, end = self.slice_indices[i]
         return (self.name_ids[start:end], self.weights[start:end])
+
+    def get_batch(self, start: int, end: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get a padded batch of name ID and weight tensors corresponding to a
+        slice of the metadata.
+
+        :param start: Positive start index.
+        :param end: Positive end index greater than or equal to start index.
+        :returns: Tuple of padded name ID and weight batch tensors that each
+                  have shape (batch_size, max_seq_len) where `batch_size` is
+                  `end` - `start` and `max_seq_len` is the length of the longest
+                  sequence in the batch.
+        """
+        check_condition(0 <= start <= end,
+                        'Metadata batch creation only supports positive indices for which start <= end. '
+                        f'Got: {start} {end}')
+        if start == end:
+            return torch.zeros(0, 0, dtype=torch.int32), torch.zeros(0, 0, dtype=torch.float32)
+        slice_indices = torch.index_select(self.slice_indices, 0, torch.arange(start, end))
+        seq_lens = slice_indices[:, 1] - slice_indices[:, 0]
+        max_seq_len = torch.max(seq_lens)
+        name_ids_batch = torch.full((slice_indices.shape[0], max_seq_len), C.PAD_ID, dtype=torch.int32)  # type: ignore
+        weights_batch = torch.full((slice_indices.shape[0], max_seq_len), 0., dtype=torch.float32)  # type: ignore
+        for i, ((_start, _end), seq_len) in enumerate(zip(slice_indices, seq_lens)):
+            name_ids_batch[i, 0:seq_len] = self.name_ids[_start:_end]
+            weights_batch[i, 0:seq_len] = self.weights[_start:_end]
+        return name_ids_batch, weights_batch
+
 
     def slice_copy(self, start: int, end: int) -> 'MetadataBucket':
         """
@@ -2117,7 +2158,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
                          permute=permute, dtype=dtype)
 
         # create independent lists to be shuffled
-        self.data = ParallelDataSet(list(data.source), list(data.target))
+        self.data = ParallelDataSet(list(data.source),
+                                    list(data.target),
+                                    list(data.metadata) if data.metadata is not None else None)
 
         # create index tuples (buck_idx, batch_start_pos) into buckets.
         # This is the list of all batches across all buckets in the dataset. These will be shuffled.
@@ -2171,7 +2214,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         batch_size = self.bucket_batch_sizes[i].batch_size
         source = self.data.source[i][j:j + batch_size]
         target, label = create_target_and_shifted_label_sequences(self.data.target[i][j:j + batch_size])
-        return create_batch_from_parallel_sample(source, target, label)
+        metadata = self.data.metadata[i].get_batch(j, j + batch_size) if self.data.metadata is not None else None
+        return create_batch_from_parallel_sample(source, target, label, metadata)
 
     def save_state(self, fname: str):
         """
@@ -2228,6 +2272,8 @@ class Batch:
     labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
+    metadata_ids: Optional[torch.Tensor] = None
+    metadata_weights: Optional[torch.Tensor] = None
 
     def load(self, device: torch.device) -> 'Batch':
         source = self.source.to(device)
@@ -2235,7 +2281,10 @@ class Batch:
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
-        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
+        metadata_ids = self.metadata_ids.to(device) if self.metadata_ids is not None else None
+        metadata_weights = self.metadata_weights.to(device) if self.metadata_weights is not None else None
+        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens,
+                     metadata_ids=metadata_ids, metadata_weights=metadata_weights)
 
 
 def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -2250,13 +2299,18 @@ def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) ->
     return target, label
 
 
-def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor, label: torch.Tensor) -> Batch:
+def create_batch_from_parallel_sample(source: torch.Tensor,
+                                      target: torch.Tensor,
+                                      label: torch.Tensor,
+                                      metadata: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
     :param source: Source tensor. Shape: (batch, source_length, num_source_factors).
     :param target: Target tensor. Shape: (batch, target_length, num_target_factors).
     :param label: Time-shifted label tensor. Shape: (batch, target_length, num_target_factors).
+    :param metadata: Optional tuple of metadata name ID and weight tensors.
+                     Shape of each: (batch, metadata_length).
     """
     source_words = source[:, :, 0]
     source_length = (source_words != C.PAD_ID).sum(dim=1)
@@ -2276,4 +2330,7 @@ def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    return Batch(source, source_length, target, target_length, labels, samples, tokens)
+    metadata_ids, metadata_weights = metadata if metadata is not None else (None, None)
+
+    return Batch(source, source_length, target, target_length, labels, samples, tokens,
+                 metadata_ids=metadata_ids, metadata_weights=metadata_weights)

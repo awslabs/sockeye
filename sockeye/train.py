@@ -135,11 +135,6 @@ def check_arg_compatibility(args: argparse.Namespace):
         # Length 1: expand the list to the appropriate length
         args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
 
-    if args.validation_metadata is not None:
-        check_condition((args.metadata is not None) or (args.prepared_data is not None),
-                        'Using --validation-metadata requires training a model that supports metadata. '
-                        'Specify --metadata or --prepared-data (that includes metadata).')
-
     check_condition(not (args.amp and args.apex_amp), 'Use either --amp (safer) or --apex-amp (faster).')
 
     if args.dtype != C.DTYPE_FP32:
@@ -336,6 +331,9 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                         or len(target_vocabs) == len(args.target_factors_num_embed) + 1,
                         "Data was prepared with %d target factors, but only provided %d target factor dimensions." % (
                             len(target_vocabs), len(args.target_factors_num_embed) + 1))
+        if metadata_vocab is not None and validation_metadata is None:
+            logger.warning('Metadata is specified for prepared training data but not validation data. '
+                           'All validation data will use empty metadata.')
 
         if resume_training:
             # Resuming training. Making sure the vocabs in the model and in the prepared data match up
@@ -347,10 +345,11 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             for i, (v, mv) in enumerate(zip(target_vocabs, model_target_vocabs)):
                 utils.check_condition(vocab.are_identical(v, mv),
                                       "Prepared data and resumed model target vocab %d do not match." % i)
-            if metadata_vocab is not None:
-                model_metadata_vocab = vocab.load_metadata_vocab(output_folder)
-                utils.check_condition(vocab.are_identical(metadata_vocab, model_metadata_vocab),
-                                      "Prepared data and resumed model metadata vocab do not match.")
+            model_metadata_vocab = vocab.load_metadata_vocab(output_folder)
+            if model_metadata_vocab is not None:
+                utils.check_condition(metadata_vocab is not None
+                                      and vocab.are_identical(metadata_vocab, model_metadata_vocab),
+                                      "Prepared data metadata vocab must exist and match resumed model metadata vocab.")
 
         check_condition(data_config.num_source_factors == len(validation_sources),
                         'Training and validation data must have the same number of source factors,'
