@@ -52,7 +52,19 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      # max updates independent of the checkpoint interval
      " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none",
      "--beam-size 2 --nbest-size 2",
-     False, 0, 0),
+     False, 0, 0, 0.),
+    # Basic transformer with metadata support: target reversed/tagged with p=0.5
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg_softmax"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
+     # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching
+     # max updates independent of the checkpoint interval
+     " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none",
+     "--beam-size 2 --nbest-size 2",
+     False, 0, 0, 0.5),
     # Basic transformer w/ Neural Vocabulary Selection
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -63,7 +75,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --neural-vocab-selection logit_max --bow-task-weight 2",
      "--beam-size 2 --nbest-size 2",
-     False, 0, 0),
+     False, 0, 0, 0.),
     # Basic transformer w/ prepared data & greedy decoding
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -73,7 +85,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01",
      "--beam-size 1 --greedy",
-     True, 0, 0),
+     True, 0, 0, 0.),
     # Basic transformer with source and target factors, beam-search-stop first decoding
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -87,7 +99,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --target-factors-combine sum --target-factors-share-embedding false"
      " --target-factors-num-embed 8",
      "--beam-size 2 --beam-search-stop first",
-     True, 3, 1),
+     True, 3, 1, 0.),
     # Basic transformer with LHUC DISABLE FOR MX2 FOR NOW (UNKNOWN FAILURE)
     ("--encoder transformer --decoder transformer"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -97,7 +109,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence  --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --lhuc all",
      "--beam-size 2",
-     False, 0, 0),
+     False, 0, 0, 0.),
     # Basic transformer and length ratio prediction, and learned brevity penalty during inference
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -109,7 +121,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --length-task ratio --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
      " --brevity-penalty-type learned --brevity-penalty-weight 1.0",
-     True, 0, 0),
+     True, 0, 0, 0.),
     # Basic transformer and absolute length prediction, and constant brevity penalty during inference
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -121,7 +133,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --length-task length --length-task-weight 1.0 --length-task-layers 1",
      "--beam-size 2"
      " --brevity-penalty-type constant --brevity-penalty-weight 2.0 --brevity-penalty-constant-length-ratio 1.5",
-     False, 0, 0),
+     False, 0, 0, 0.),
     # Basic transformer with clamp-to-dtype during training and inference
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -131,7 +143,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --clamp-to-dtype",
      "--beam-size 2 --clamp-to-dtype",
-     False, 0, 0),
+     False, 0, 0, 0.),
     # Basic transformer, training only the decoder
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
@@ -142,7 +154,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --fixed-param-strategy " + C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
      "--beam-size 2",
-     False, 0, 0),
+     False, 0, 0, 0.),
 ]
 
 # expand test cases across transformer & ssru, as well as use_pytorch true/false
@@ -152,12 +164,13 @@ TEST_CASES = [(train_params.format(decoder=decoder), *other_params)
 
 
 @pytest.mark.parametrize("train_params, translate_params, use_prepared_data,"
-                         "n_source_factors, n_target_factors", TEST_CASES)
+                         "n_source_factors, n_target_factors, p_reverse_with_metadata_tag", TEST_CASES)
 def test_seq_copy(train_params: str,
                   translate_params: str,
                   use_prepared_data: bool,
                   n_source_factors: int,
-                  n_target_factors: int):
+                  n_target_factors: int,
+                  p_reverse_with_metadata_tag: float):
     """
     Task: copy short sequences of digits
     """
@@ -173,7 +186,8 @@ def test_seq_copy(train_params: str,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
                             with_n_source_factors=n_source_factors,
-                            with_n_target_factors=n_target_factors) as data:
+                            with_n_target_factors=n_target_factors,
+                            p_reverse_with_metadata_tag=p_reverse_with_metadata_tag) as data:
         # TODO: Here we temporarily switch off comparing translation and scoring scores, which
         # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).
         check_train_translate(train_params=train_params,

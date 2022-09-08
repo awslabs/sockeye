@@ -40,8 +40,14 @@ def generate_digits_file(source_path: str,
                          line_length: int = 9,
                          sort_target: bool = False,
                          line_count_empty: int = 0,
-                         seed=13):
+                         seed=13,
+                         metadata_path: Optional[str] = None,
+                         p_reverse_with_metadata_tag: float = 0.):
     assert line_count_empty <= line_count
+    metadata_out = None
+    if p_reverse_with_metadata_tag > 0.:
+        assert metadata_path is not None
+        metadata_out = open(metadata_path, "w")
     random_gen = random.Random(seed)
     with open(source_path, "w") as source_out, open(target_path, "w") as target_out:
         all_digits = []
@@ -55,7 +61,15 @@ def generate_digits_file(source_path: str,
             print(C.TOKEN_SEPARATOR.join(digits), file=source_out)
             if sort_target:
                 digits.sort()
+            if p_reverse_with_metadata_tag > 0.:
+                if random.random() < p_reverse_with_metadata_tag:
+                    digits.reverse()
+                    print(r'{"reversed": 1}', file=metadata_out)
+                else:
+                    print('', file=metadata_out)
             print(C.TOKEN_SEPARATOR.join(digits), file=target_out)
+    if metadata_out is not None:
+        metadata_out.close()
 
 
 def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_file_with_tgt_prefix_path: str, \
@@ -146,7 +160,8 @@ def tmp_digits_dataset(prefix: str,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
                        with_n_source_factors: int = 0,
-                       with_n_target_factors: int = 0) -> Dict[str, Any]:
+                       with_n_target_factors: int = 0,
+                       p_reverse_with_metadata_tag: float = 0.) -> Dict[str, Any]:
     """
     Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
     files.
@@ -155,17 +170,23 @@ def tmp_digits_dataset(prefix: str,
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
         train_target_path = os.path.join(work_dir, "train.tgt")
+        train_metadata_path = os.path.join(work_dir, "train.md")
         dev_source_path = os.path.join(work_dir, "dev.src")
         dev_target_path = os.path.join(work_dir, "dev.tgt")
+        dev_metadata_path = os.path.join(work_dir, "dev.md")
         test_source_path = os.path.join(work_dir, "test.src")
         test_target_path = os.path.join(work_dir, "test.tgt")
+        test_metadata_path = os.path.join(work_dir, "test.md")
         test_source_with_target_prefix_path = os.path.join(work_dir, "test_source_with_target_prefix.json")
         generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
-                             line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train)
+                             line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train,
+                             metadata_path=train_metadata_path, p_reverse_with_metadata_tag=p_reverse_with_metadata_tag)
         generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
-                             seed=seed_dev)
+                             seed=seed_dev, metadata_path=dev_metadata_path,
+                             p_reverse_with_metadata_tag=p_reverse_with_metadata_tag)
         generate_digits_file(test_source_path, test_target_path, test_line_count, test_max_length,
-                             line_count_empty=test_line_count_empty, sort_target=sort_target, seed=seed_dev)
+                             line_count_empty=test_line_count_empty, sort_target=sort_target, seed=seed_dev,
+                             metadata_path=test_metadata_path, p_reverse_with_metadata_tag=p_reverse_with_metadata_tag)
         data = {'work_dir': work_dir,
                 'train_source': train_source_path,
                 'train_target': train_target_path,
@@ -205,6 +226,11 @@ def tmp_digits_dataset(prefix: str,
                 data['dev_target_factors'].append(dev_factor_path)
                 data['test_target_factors'].append(test_factor_path)
 
+        if p_reverse_with_metadata_tag > 0.:
+            data['train_metadata'] = train_metadata_path
+            data['dev_metadata'] = dev_metadata_path
+            data['test_metadata'] = test_metadata_path
+
         source_factors_path = None if 'test_source_factors' not in data else data['test_source_factors']
         target_factors_path = None if 'test_target_factors' not in data else data['test_target_factors']
         generate_json_input_file_with_tgt_prefix(test_source_path, test_target_path, test_source_with_target_prefix_path, \
@@ -223,6 +249,9 @@ TRAIN_WITH_SOURCE_FACTORS_COMMON = " --source-factors {source_factors}"
 DEV_WITH_SOURCE_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
 TRAIN_WITH_TARGET_FACTORS_COMMON = " --target-factors {target_factors}"
 DEV_WITH_TARGET_FACTORS_COMMON = " --validation-target-factors {dev_target_factors}"
+
+TRAIN_WITH_METADATA_COMMON = " --metadata {train_metadata}"
+DEV_WITH_METADATA_COMMON = " --validation-metadata {dev_metadata}"
 
 TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
                                      " --validation-source {dev_source} --validation-target {dev_target} " \
@@ -279,6 +308,9 @@ def run_train_translate(train_params: str,
             prepare_params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(
                 target_factors=" ".join(data['train_target_factors']))
 
+        if 'train_metadata' in data:
+            prepare_params += TRAIN_WITH_METADATA_COMMON.format(train_metadata=data['train_metadata'])
+
         if '--weight-tying-type src_trg' in train_params:
             prepare_params += ' --shared-vocab'
 
@@ -298,6 +330,9 @@ def run_train_translate(train_params: str,
             params += DEV_WITH_SOURCE_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
         if 'dev_target_factors' in data:
             params += DEV_WITH_TARGET_FACTORS_COMMON.format(dev_target_factors=" ".join(data['dev_target_factors']))
+
+        if 'dev_metadata' in data:
+            prepare_params += DEV_WITH_METADATA_COMMON.format(dev_metadata=data['dev_metadata'])
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
