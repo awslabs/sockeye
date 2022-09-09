@@ -2330,7 +2330,9 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    metadata_name_ids, metadata_weights = metadata if metadata is not None else (None, None)
+    # Workaround for tracing SockeyeModel without metadata
+    metadata_name_ids, metadata_weights = metadata if metadata is not None else (torch.zeros(0, 0, dtype=torch.int32),
+                                                                                 torch.zeros(0, 0, dtype=torch.float32))
 
     return Batch(source, source_length, target, target_length, labels, samples, tokens,
                  metadata_name_ids=metadata_name_ids, metadata_weights=metadata_weights)

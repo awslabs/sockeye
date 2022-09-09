@@ -287,11 +287,13 @@ class SockeyeModel(pt.nn.Module):
                  vocab selection prediction (if present, otherwise None).
         """
         source_embed = self.embedding_source(source)
-        if self.config.metadata_add == C.METADATA_ADD_SOURCE and metadata_name_ids is not None:
+        if self.config.metadata_add == C.METADATA_ADD_SOURCE \
+        and metadata_name_ids is not None and metadata_name_ids.numel() > 0:
             source_embed = source_embed + self.embedding_metadata(metadata_name_ids, metadata_weights).unsqueeze(1)
         target_embed = self.embedding_target(target)
         source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length)
-        if self.config.metadata_add == C.METADATA_ADD_ENCODED and metadata_name_ids is not None:
+        if self.config.metadata_add == C.METADATA_ADD_ENCODED \
+        and metadata_name_ids is not None and metadata_name_ids.numel() > 0:
             source_encoded = source_encoded + self.embedding_metadata(metadata_name_ids, metadata_weights).unsqueeze(1)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         nvs = None
