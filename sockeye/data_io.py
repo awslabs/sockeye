@@ -2272,7 +2272,7 @@ class Batch:
     labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
-    metadata_ids: Optional[torch.Tensor] = None
+    metadata_name_ids: Optional[torch.Tensor] = None
     metadata_weights: Optional[torch.Tensor] = None
 
     def load(self, device: torch.device) -> 'Batch':
@@ -2281,10 +2281,10 @@ class Batch:
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
-        metadata_ids = self.metadata_ids.to(device) if self.metadata_ids is not None else None
+        metadata_name_ids = self.metadata_name_ids.to(device) if self.metadata_name_ids is not None else None
         metadata_weights = self.metadata_weights.to(device) if self.metadata_weights is not None else None
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens,
-                     metadata_ids=metadata_ids, metadata_weights=metadata_weights)
+                     metadata_name_ids=metadata_name_ids, metadata_weights=metadata_weights)
 
 
 def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -2330,7 +2330,7 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    metadata_ids, metadata_weights = metadata if metadata is not None else (None, None)
+    metadata_name_ids, metadata_weights = metadata if metadata is not None else (None, None)
 
     return Batch(source, source_length, target, target_length, labels, samples, tokens,
-                 metadata_ids=metadata_ids, metadata_weights=metadata_weights)
+                 metadata_name_ids=metadata_name_ids, metadata_weights=metadata_weights)

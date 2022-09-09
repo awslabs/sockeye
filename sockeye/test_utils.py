@@ -353,10 +353,14 @@ def run_train_translate(train_params: str,
             params += TRAIN_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
         if 'train_target_factors' in data:
             params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(data['train_target_factors']))
+        if 'train_metadata' in data:
+            params += TRAIN_WITH_METADATA_COMMON.format(train_metadata=data['train_metadata'])
         if 'dev_source_factors' in data:
             params += DEV_WITH_SOURCE_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
         if 'dev_target_factors' in data:
             params += DEV_WITH_TARGET_FACTORS_COMMON.format(dev_target_factors=" ".join(data['dev_target_factors']))
+        if 'dev_metadata' in data:
+            params += DEV_WITH_METADATA_COMMON.format(dev_metadata=data['dev_metadata'])
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):

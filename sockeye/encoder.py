@@ -159,6 +159,67 @@ class Embedding(Encoder):
         return self.config.num_embed
 
 
+class MetadataEmbedding(Encoder):
+    """
+    Module that generates sequence-level metadata embeddings from parallel name
+    IDs and weights using the method described by Schioppa et al. (2021,
+    https://aclanthology.org/2021.emnlp-main.535/).
+
+    The module looks up embeddings for the IDs, multiplies them by the
+    corresponding weights, and sums in the sequence dimension.
+
+    :param vocab_size: Input vocabulary size.
+    :param num_embed: Output embedding size.
+    :param dropout: Dropout probability.
+    :param dtype: Torch data type for parameters.
+    """
+    def __init__(self,
+                 vocab_size: int,
+                 num_embed: int,
+                 dropout: float = 0.0,
+                 dtype: Optional[pt.dtype] = None) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.num_embed = num_embed
+        self.embedding = pt.nn.Embedding(vocab_size, num_embed, dtype=dtype)
+        self.dropout = pt.nn.Dropout(p=dropout) if dropout > 0.0 else None
+
+    def forward(self, name_ids: pt.Tensor, weights: pt.Tensor) -> pt.Tensor:
+        """
+        Generate sequence-level metadata embeddings for a batch of name ID and
+        weight sequences.
+
+        :param name_ids: Metadata vocabulary IDs. Shape: (batch_size, seq_len).
+        :param weights: Metadata weights. Shape: (batch_size, seq_len).
+        :returns: Sequence-level metadata embeddings (weighted sums). Shape:
+                  (batch_size, num_embed).
+        """
+        # (batch_size, seq_len, num_embed)
+        weighted_embeddings = self.embedding(name_ids) * weights.unsqueeze(-1)
+
+        # (batch_size, num_embed)
+        summed_embeddings = pt.sum(weighted_embeddings, dim=1)
+
+        if self.dropout is not None:
+            summed_embeddings = self.dropout(summed_embeddings)
+
+        return summed_embeddings
+
+    def get_num_hidden(self) -> int:
+        """
+        Return the representation size of this encoder.
+        """
+        return self.num_embed
+
+    def get_encoded_seq_len(self, seq_len: int) -> int:
+        """
+        Sequence-level metadata embeddings are always length 1 (weighted sums).
+
+        :return: The size of the encoded sequence.
+        """
+        return 1
+
+
 class TransformerEncoder(Encoder):
     """
     Non-recurrent encoder based on the transformer architecture in:

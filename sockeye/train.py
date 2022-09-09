@@ -628,7 +628,8 @@ def create_model_config(args: argparse.Namespace,
                         target_vocab_sizes: List[int],
                         max_seq_len_source: int,
                         max_seq_len_target: int,
-                        config_data: data_io.DataConfig) -> model.ModelConfig:
+                        config_data: data_io.DataConfig,
+                        metadata_vocab_size: int = 0) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -638,6 +639,7 @@ def create_model_config(args: argparse.Namespace,
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
     :param config_data: Data config.
+    :param metadata_vocab_size: Optional metadata vocabulary size.
     :return: The model configuration.
     """
     num_embed_source, num_embed_target = get_num_embed(args)
@@ -728,7 +730,9 @@ def create_model_config(args: argparse.Namespace,
                                      neural_vocab_selection=args.neural_vocab_selection,
                                      neural_vocab_selection_block_loss=args.neural_vocab_selection_block_loss,
                                      lhuc=args.lhuc is not None,
-                                     dtype=C.DTYPE_FP32)
+                                     dtype=C.DTYPE_FP32,
+                                     metadata_add=args.metadata_add,
+                                     vocab_size_metadata=metadata_vocab_size)
     return model_config
 
 
@@ -1066,6 +1070,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     model_config = create_model_config(args=args,
                                        source_vocab_sizes=source_vocab_sizes,
                                        target_vocab_sizes=target_vocab_sizes,
+                                       metadata_vocab_size=metadata_vocab_size,
                                        max_seq_len_source=max_seq_len_source,
                                        max_seq_len_target=max_seq_len_target,
                                        config_data=config_data)
@@ -1169,7 +1174,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         # https://github.com/pytorch/pytorch/pull/63552
         with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
             training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
-                                                            batch.target, batch.target_length), strict=False)
+                                                              batch.target, batch.target_length,
+                                                              batch.metadata_name_ids,
+                                                              batch.metadata_weights), strict=False)
         eval_iter.reset()
 
     if utils.is_distributed() and not utils.using_deepspeed():

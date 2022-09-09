@@ -131,6 +131,7 @@ def test_device_args(test_params, expected_params):
               target_factors_num_embed=[],
               target_factors_combine=[C.FACTORS_COMBINE_SUM],
               target_factors_share_embedding=[False],
+              metadata_add=None,
               weight_tying_type="src_trg_softmax",
               transformer_attention_heads=(8, 8),
               transformer_feed_forward_num_hidden=(2048, 2048),

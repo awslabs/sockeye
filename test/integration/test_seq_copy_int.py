@@ -60,9 +60,8 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
      " --weight-tying-type src_trg_softmax"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
-     # Note: We set the checkpoint interval > max updates in order to make sure we create a checkpoint when reaching
-     # max updates independent of the checkpoint interval
-     " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none",
+     " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none"
+     " --metadata-add source",
      "--beam-size 2 --nbest-size 2",
      False, 0, 0, 0.5),
     # Basic transformer w/ Neural Vocabulary Selection

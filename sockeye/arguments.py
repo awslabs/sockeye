@@ -769,6 +769,12 @@ def add_model_parameters(params):
                               help='Share the embeddings with the target language. '
                                    'Can be either one value which will be applied '
                                    'to all target factors, or a list of values. Default: %(default)s.')
+    model_params.add_argument('--metadata-add',
+                              choices=C.METADATA_ADD_CHOICES,
+                              default=None,
+                              help='How to incorporate weighted metadata representations. Source: add to source '
+                                   'representations (embeddings) before running encoder. Encoded: add to encoded '
+                                   'representations before running decoder. Default: %(default)s.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,

@@ -68,14 +68,17 @@ class ModelWithLoss(torch.nn.Module):
         self.model = model
         self.losses = losses
 
-    def forward(self, source: torch.Tensor,
+    def forward(self,
+                source: torch.Tensor,
                 source_length: torch.Tensor,
                 target: torch.Tensor,
                 target_length: torch.Tensor,
-                labels: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor,
-                                                          List[torch.Tensor],
-                                                          List[torch.Tensor]]:
-        model_outputs = self.model(source, source_length, target, target_length)
+                labels: Dict[str, torch.Tensor],
+                metadata_name_ids: Optional[torch.Tensor] = None,
+                metadata_weights: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor,
+                                                                          List[torch.Tensor],
+                                                                          List[torch.Tensor]]:
+        model_outputs = self.model(source, source_length, target, target_length, metadata_name_ids, metadata_weights)
         if utils.using_deepspeed():
             # Guarantee model outputs are float32 before computing losses.
             # Computing losses in DeepSpeed float16 mode can lead to overflow.
@@ -359,7 +362,8 @@ class EarlyStoppingTrainer:
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
             # Forward + loss
             sum_losses, loss_values, num_samples = self.model_object(batch.source, batch.source_length,
-                                                                     batch.target, batch.target_length, batch.labels)
+                                                                     batch.target, batch.target_length, batch.labels,
+                                                                     batch.metadata_name_ids, batch.metadata_weights)
         # Backward
         if utils.using_deepspeed():
             # DeepSpeed backward. DeepSpeed handles all loss scaling.
@@ -452,7 +456,8 @@ class EarlyStoppingTrainer:
                 # Forward: run SockeyeModel directly. The traced model may not
                 # fully support switching between train and eval modes depending
                 # how much Python logic is used in the various submodules.
-                outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length)
+                outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length,
+                                             batch.metadata_name_ids, batch.metadata_weights)
                 # Guarantee model outputs are float32 before computing losses
                 outputs = {name: output.to(torch.float32) for (name, output) in outputs.items()}
                 # Loss
