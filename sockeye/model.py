@@ -124,16 +124,17 @@ class SockeyeModel(pt.nn.Module):
                                                   dtype=self.dtype)
 
         # Optional metadata embedding
-        self.embedding_metadata = None  # type: Optional[encoder.MetadataEmbedding]
+        self.add_metadata_embeddings = None  # type: Optional[pt.jit.ScriptModule]
         if config.metadata_add is not None:
             utils.check_condition(config.vocab_size_metadata > 0,
                                   'Specify vocab_size_metadata when specifying metadata_add')
             # Same size as encoder representations, same dropout as source
             # embeddings
-            self.embedding_metadata = encoder.MetadataEmbedding(vocab_size=config.vocab_size_metadata,
-                                                                num_embed=self.config.config_encoder.model_size,
-                                                                dropout=config.config_embed_source.dropout,
-                                                                dtype=self.dtype)
+            self.add_metadata_embeddings = pt.jit.script(
+                encoder.AddMetadataEmbeddings(vocab_size=config.vocab_size_metadata,
+                                              model_size=self.config.config_encoder.model_size,
+                                              dropout=config.config_embed_source.dropout,
+                                              dtype=self.dtype))
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
@@ -178,7 +179,6 @@ class SockeyeModel(pt.nn.Module):
 
         # traced components (for inference)
         self.traced_embedding_source = None  # type: Optional[pt.jit.ScriptModule]
-        self.traced_embedding_metadata = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_encoder = None  # type: Optional[pt.jit.ScriptModule]
         self.traced_decode_step = None  # type: Optional[pt.jit.ScriptModule]
 
@@ -287,12 +287,12 @@ class SockeyeModel(pt.nn.Module):
                  vocab selection prediction (if present, otherwise None).
         """
         source_embed = self.embedding_source(source)
-        if self.config.metadata_add == C.METADATA_ADD_SOURCE and metadata_name_ids.numel() != 0:
-            source_embed = source_embed + self.embedding_metadata(metadata_name_ids, metadata_weights).unsqueeze(1)
+        if self.config.metadata_add == C.METADATA_ADD_SOURCE:
+            source_embed = self.add_metadata_embeddings(source_embed, metadata_name_ids, metadata_weights)
         target_embed = self.embedding_target(target)
         source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length)
-        if self.config.metadata_add == C.METADATA_ADD_ENCODED and metadata_name_ids.numel() != 0:
-            source_encoded = source_encoded + self.embedding_metadata(metadata_name_ids, metadata_weights).unsqueeze(1)
+        if self.config.metadata_add == C.METADATA_ADD_ENCODED:
+            source_encoded = self.add_metadata_embeddings(source_encoded, metadata_name_ids, metadata_weights)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         nvs = None
         if self.nvs is not None:
