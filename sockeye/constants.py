@@ -17,6 +17,11 @@ Defines various constants used throughout the project
 import torch as pt
 import numpy as np
 
+# As of version 1.12, PyTorch JIT tracing does not support optional inputs
+# (`t: Optional[Tensor] = None`). Instead, we specify a default value
+# `t: Tensor = NONE_TENSOR` which has the property `t.numel() == 0`.
+NONE_TENSOR = pt.zeros(0)
+
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"

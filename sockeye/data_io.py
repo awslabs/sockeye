@@ -2272,8 +2272,8 @@ class Batch:
     labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
-    metadata_name_ids: Optional[torch.Tensor] = None
-    metadata_weights: Optional[torch.Tensor] = None
+    metadata_name_ids: torch.Tensor = C.NONE_TENSOR
+    metadata_weights: torch.Tensor = C.NONE_TENSOR
 
     def load(self, device: torch.device) -> 'Batch':
         source = self.source.to(device)
@@ -2281,10 +2281,10 @@ class Batch:
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
-        metadata_name_ids = self.metadata_name_ids.to(device) if self.metadata_name_ids is not None else None
-        metadata_weights = self.metadata_weights.to(device) if self.metadata_weights is not None else None
+        metadata_name_ids = self.metadata_name_ids.to(device) if self.metadata_name_ids.numel() != 0 else C.NONE_TENSOR
+        metadata_weights = self.metadata_weights.to(device) if self.metadata_weights.numel() != 0 else C.NONE_TENSOR
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens,
-                     metadata_name_ids=metadata_name_ids, metadata_weights=metadata_weights)
+                     metadata_name_ids, metadata_weights)
 
 
 def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -2330,9 +2330,7 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    # Workaround for tracing SockeyeModel without metadata
-    metadata_name_ids, metadata_weights = metadata if metadata is not None else (torch.zeros(0, 0, dtype=torch.int32),
-                                                                                 torch.zeros(0, 0, dtype=torch.float32))
+    metadata_name_ids, metadata_weights = metadata if metadata is not None else (C.NONE_TENSOR, C.NONE_TENSOR)
 
     return Batch(source, source_length, target, target_length, labels, samples, tokens,
                  metadata_name_ids=metadata_name_ids, metadata_weights=metadata_weights)

@@ -287,13 +287,11 @@ class SockeyeModel(pt.nn.Module):
                  vocab selection prediction (if present, otherwise None).
         """
         source_embed = self.embedding_source(source)
-        if self.config.metadata_add == C.METADATA_ADD_SOURCE \
-        and metadata_name_ids is not None and metadata_name_ids.numel() > 0:
+        if self.config.metadata_add == C.METADATA_ADD_SOURCE and metadata_name_ids.numel() != 0:
             source_embed = source_embed + self.embedding_metadata(metadata_name_ids, metadata_weights).unsqueeze(1)
         target_embed = self.embedding_target(target)
         source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length)
-        if self.config.metadata_add == C.METADATA_ADD_ENCODED \
-        and metadata_name_ids is not None and metadata_name_ids.numel() > 0:
+        if self.config.metadata_add == C.METADATA_ADD_ENCODED and metadata_name_ids.numel() != 0:
             source_encoded = source_encoded + self.embedding_metadata(metadata_name_ids, metadata_weights).unsqueeze(1)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         nvs = None
@@ -336,7 +334,7 @@ class SockeyeModel(pt.nn.Module):
         return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length,
-                metadata_name_ids=None, metadata_weights=None):  # pylint: disable=arguments-differ
+                metadata_name_ids=C.NONE_TENSOR, metadata_weights=C.NONE_TENSOR):  # pylint: disable=arguments-differ
         # When updating only the decoder (specified directly or implied by
         # caching the encoder and embedding forward passes), turn off autograd
         # for the encoder and embeddings to save memory.

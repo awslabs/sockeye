@@ -74,8 +74,8 @@ class ModelWithLoss(torch.nn.Module):
                 target: torch.Tensor,
                 target_length: torch.Tensor,
                 labels: Dict[str, torch.Tensor],
-                metadata_name_ids: Optional[torch.Tensor] = None,
-                metadata_weights: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor,
+                metadata_name_ids: torch.Tensor = C.NONE_TENSOR,
+                metadata_weights: torch.Tensor = C.NONE_TENSOR) -> Tuple[torch.Tensor,
                                                                           List[torch.Tensor],
                                                                           List[torch.Tensor]]:
         model_outputs = self.model(source, source_length, target, target_length, metadata_name_ids, metadata_weights)
