@@ -660,6 +660,16 @@ def add_model_parameters(params):
                               help='Number of layers for encoder & decoder. '
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
 
+    model_params.add_argument('--encoder-add-metadata',
+                              type=int_greater_or_equal(0),
+                              default=None,
+                              help='Add metadata embeddings to encoder representations at the specified layer using the '
+                                   'method described by Schioppa et al. (2021, aclanthology.org/2021.emnlp-main.535). '
+                                   'For N encoder layers, a value of 0 corresponds to adding metadata embeddings to '
+                                   'source embeddings before running the encoder. A value of N corresponds to adding '
+                                   'metadata embeddings to the final encoder representations before running the '
+                                   'decoder. Default: %(default)s.')
+
     # transformer arguments
     model_params.add_argument('--transformer-model-size',
                               type=multiple_values(num_values=2, greater_or_equal=1),
@@ -769,12 +779,6 @@ def add_model_parameters(params):
                               help='Share the embeddings with the target language. '
                                    'Can be either one value which will be applied '
                                    'to all target factors, or a list of values. Default: %(default)s.')
-    model_params.add_argument('--metadata-add',
-                              choices=C.METADATA_ADD_CHOICES,
-                              default=None,
-                              help='How to incorporate weighted metadata representations. Source: add to source '
-                                   'representations (embeddings) before running encoder. Encoded: add to encoded '
-                                   'representations before running decoder. Default: %(default)s.')
 
     model_params.add_argument('--weight-tying-type',
                               default=C.WEIGHT_TYING_SRC_TRG_SOFTMAX,

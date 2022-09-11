@@ -41,6 +41,7 @@ class TransformerConfig(config.Config):
     use_lhuc: bool = False
     depth_key_value: int = 0
     use_glu: bool = False
+    add_metadata: Optional[int] = None
 
 
 class TransformerEncoderBlock(pt.nn.Module):

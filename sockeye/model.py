@@ -59,8 +59,7 @@ class ModelConfig(Config):
     :param neural_vocab_selection: When True the model contains a neural vocab selection model that restricts
                                    the target output vocabulary to speed up inference.
     :param neural_vocab_selection_block_loss: When true the gradients of the NVS models are blocked before the encoder.
-    :param metadata_add: Optional method for adding metadata.
-    :param metadata_add: Optional metadata vocabulary size.
+    :param vocab_size_metadata: Optional metadata vocabulary size.
     """
     config_data: data_io.DataConfig
     vocab_source_size: int
@@ -75,8 +74,7 @@ class ModelConfig(Config):
     dtype: str = C.DTYPE_FP32
     neural_vocab_selection: Optional[str] = None
     neural_vocab_selection_block_loss: bool = False
-    metadata_add: Optional[str] = None
-    vocab_size_metadata: int = 0
+    vocab_size_metadata: Optional[int] = None
 
 
 class SockeyeModel(pt.nn.Module):
@@ -124,17 +122,15 @@ class SockeyeModel(pt.nn.Module):
                                                   dtype=self.dtype)
 
         # Optional metadata embedding
-        self.add_metadata_embeddings = None  # type: Optional[pt.jit.ScriptModule]
-        if config.metadata_add is not None:
-            utils.check_condition(config.vocab_size_metadata > 0,
-                                  'Specify vocab_size_metadata when specifying metadata_add')
+        self.embedding_metadata = None  # type: Optional[pt.jit.ScriptModule]
+        if self.config.config_encoder.add_metadata is not None and config.vocab_size_metadata is not None:
             # Same size as encoder representations, same dropout as source
             # embeddings
-            self.add_metadata_embeddings = pt.jit.script(
-                encoder.AddMetadataEmbeddings(vocab_size=config.vocab_size_metadata,
-                                              model_size=self.config.config_encoder.model_size,
-                                              dropout=config.config_embed_source.dropout,
-                                              dtype=self.dtype))
+            self.embedding_metadata = pt.jit.script(
+                encoder.MetadataEmbedding(vocab_size=config.vocab_size_metadata,
+                                          model_size=self.config.config_encoder.model_size,
+                                          dropout=config.config_embed_source.dropout,
+                                          dtype=self.dtype))
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
@@ -270,8 +266,8 @@ class SockeyeModel(pt.nn.Module):
                           source: pt.Tensor,
                           source_length: pt.Tensor,
                           target: pt.Tensor,
-                          metadata_name_ids: Optional[pt.Tensor] = None,
-                          metadata_weights: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor,
+                          metadata_name_ids: pt.Tensor = C.NONE_TENSOR,
+                          metadata_weights: pt.Tensor = C.NONE_TENSOR) -> Tuple[pt.Tensor,
                                                                                  pt.Tensor,
                                                                                  pt.Tensor,
                                                                                  List[pt.Tensor],
@@ -283,16 +279,16 @@ class SockeyeModel(pt.nn.Module):
         :param source: Source input data.
         :param source_length: Length of source inputs.
         :param target: Target input data.
+        :param metadata_name_ids: Optional metadata IDs.
+        :param metadata_weights: Optional metadata weights.
         :return: encoder outputs and lengths, target embeddings, decoder initial states, attention mask and neural
                  vocab selection prediction (if present, otherwise None).
         """
         source_embed = self.embedding_source(source)
-        if self.config.metadata_add == C.METADATA_ADD_SOURCE:
-            source_embed = self.add_metadata_embeddings(source_embed, metadata_name_ids, metadata_weights)
         target_embed = self.embedding_target(target)
-        source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length)
-        if self.config.metadata_add == C.METADATA_ADD_ENCODED:
-            source_encoded = self.add_metadata_embeddings(source_encoded, metadata_name_ids, metadata_weights)
+        metadata_embed = self.embedding_metadata(metadata_name_ids, metadata_weights) \
+            if self.embedding_metadata is not None else C.NONE_TENSOR
+        source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length, metadata_embed)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         nvs = None
         if self.nvs is not None:

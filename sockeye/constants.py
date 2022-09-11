@@ -62,11 +62,6 @@ FACTORS_COMBINE_CHOICES = [FACTORS_COMBINE_SUM,
                            FACTORS_COMBINE_AVERAGE,
                            FACTORS_COMBINE_CONCAT]
 
-# Metadata
-METADATA_ADD_SOURCE = 'source'
-METADATA_ADD_ENCODED = 'encoded'
-METADATA_ADD_CHOICES = [METADATA_ADD_SOURCE, METADATA_ADD_ENCODED]
-
 # encoder names (arguments)
 TRANSFORMER_TYPE = "transformer"
 

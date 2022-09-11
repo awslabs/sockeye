@@ -499,7 +499,8 @@ def create_encoder_config(args: argparse.Namespace,
         depth_key_value=encoder_transformer_model_size,
         use_lhuc=args.lhuc is not None and (C.LHUC_ENCODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         decoder_type=args.decoder,
-        use_glu=args.transformer_feed_forward_use_glu)
+        use_glu=args.transformer_feed_forward_use_glu,
+        add_metadata=args.encoder_add_metadata)
     encoder_num_hidden = encoder_transformer_model_size
 
     return config_encoder, encoder_num_hidden
@@ -629,7 +630,7 @@ def create_model_config(args: argparse.Namespace,
                         max_seq_len_source: int,
                         max_seq_len_target: int,
                         config_data: data_io.DataConfig,
-                        metadata_vocab_size: int = 0) -> model.ModelConfig:
+                        metadata_vocab_size: Optional[int] = None) -> model.ModelConfig:
     """
     Create a ModelConfig from the argument given in the command line.
 
@@ -721,6 +722,7 @@ def create_model_config(args: argparse.Namespace,
     model_config = model.ModelConfig(config_data=config_data,
                                      vocab_source_size=source_vocab_size,
                                      vocab_target_size=target_vocab_size,
+                                     vocab_size_metadata=metadata_vocab_size,
                                      config_embed_source=config_embed_source,
                                      config_embed_target=config_embed_target,
                                      config_encoder=config_encoder,
@@ -730,9 +732,7 @@ def create_model_config(args: argparse.Namespace,
                                      neural_vocab_selection=args.neural_vocab_selection,
                                      neural_vocab_selection_block_loss=args.neural_vocab_selection_block_loss,
                                      lhuc=args.lhuc is not None,
-                                     dtype=C.DTYPE_FP32,
-                                     metadata_add=args.metadata_add,
-                                     vocab_size_metadata=metadata_vocab_size)
+                                     dtype=C.DTYPE_FP32)
     return model_config
 
 
