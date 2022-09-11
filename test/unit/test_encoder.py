@@ -13,6 +13,8 @@
 
 import pytest
 
+import torch
+
 import sockeye.constants as C
 import sockeye.encoder
 import sockeye.transformer
@@ -30,6 +32,31 @@ def test_embedding_encoder(dropout, factor_configs):
                                              factor_configs=factor_configs)
     embedding = sockeye.encoder.Embedding(config)
     assert type(embedding) == sockeye.encoder.Embedding
+
+
+def test_metadata_embedding():
+    vocab_size = 4
+    model_size = 8
+    batch_size = 3
+    metadata_seq_len = 5
+    seq_len = 7
+
+    # Create sequence-level metadata embeddings
+    embedding = sockeye.encoder.MetadataEmbedding(vocab_size=vocab_size, model_size=model_size)
+    name_ids = torch.randint(0, vocab_size, (batch_size, metadata_seq_len), dtype=torch.int32)
+    weights = torch.randn((batch_size, metadata_seq_len), dtype=torch.float32)
+    metadata_embeddings = embedding(name_ids, weights)
+    assert metadata_embeddings.shape == (batch_size, model_size)
+
+    # Add to existing representations (batch major)
+    data = torch.randn((batch_size, seq_len, model_size), dtype=torch.float32)
+    result = sockeye.encoder.add_metadata_embeddings(data, metadata_embeddings, seq_len_dim=1)
+    assert result.shape == data.shape
+
+    # Add to existing representations (time major)
+    data = torch.randn((seq_len, batch_size, model_size), dtype=torch.float32)
+    result = sockeye.encoder.add_metadata_embeddings(data, metadata_embeddings, seq_len_dim=0)
+    assert result.shape == data.shape
 
 
 @pytest.mark.parametrize('lhuc', [
