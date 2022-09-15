@@ -311,9 +311,7 @@ class SockeyeModel(pt.nn.Module):
         step_output, decoder_out, *target_factor_outputs = decode_step_outputs[:self.num_target_factors+1]
 
         # do the query here because it cannot be traced (jit.ignore does not play well with tracing)
-        knn_output = None
-        if self.knn is not None:
-            knn_output = self.knn(decoder_out)
+        knn_output = self.knn(decoder_out) if self.knn is not None else None
 
         new_states = decode_step_outputs[self.num_target_factors+1:]
         return step_output, knn_output, new_states, target_factor_outputs

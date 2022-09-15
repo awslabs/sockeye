@@ -119,9 +119,7 @@ class OutputLayer(pt.nn.Module):
 
 
 class KNN(pt.nn.Module):
-    def __init__(self, keys_index, vals, vocab_size, k=64, temperature=10, state_dump=None) -> None:
-        """
-        """
+    def __init__(self, keys_index: "faiss.Index", vals: np.memmap, vocab_size: int, k=64, temperature=10, state_dump=None) -> None:  # type: ignore  # suppress mypy error becaues faiss is an optional import
         super().__init__()
         self.keys_index = keys_index
         self.vals = vals

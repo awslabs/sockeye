@@ -155,26 +155,27 @@ class DecoderStateGenerator:
             max_seq_len_target=self.max_seq_len_target
         )
 
-        for batch_no, batch in enumerate(data_iter, 1):
-            if (batch_no + 1) % 1000 == 0:
-                logger.info("At batch number {0}".format(batch_no + 1))
-
-            # get decoder states
-            batch = batch.load(self.device)
-            model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
-            if self.traced_model is None:
-                trace_inputs = {'get_decoder_states': model_inputs}
-                self.traced_model = pt.jit.trace_module(self.model, trace_inputs, strict=False)
-            decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
-
-            # flatten batch and sent_len dimensions, remove pads on the target
-            pad_mask = (batch.target != C.PAD_ID).squeeze(2)  # shape: (batch, seq_length)
-            flat_target = batch.target[pad_mask].cpu().detach().numpy()
-            flat_states = decoder_states[pad_mask].cpu().detach().numpy()
-
-            # store
-            self.state_store_file.add(flat_states)
-            self.words_store_file.add(flat_target)
+        with pt.inference_mode():
+            for batch_no, batch in enumerate(data_iter, 1):
+                if (batch_no + 1) % 1000 == 0:
+                    logger.info("At batch number {0}".format(batch_no + 1))
+    
+                # get decoder states
+                batch = batch.load(self.device)
+                model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
+                if self.traced_model is None:
+                    trace_inputs = {'get_decoder_states': model_inputs}
+                    self.traced_model = pt.jit.trace_module(self.model, trace_inputs, strict=False)
+                decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
+    
+                # flatten batch and sent_len dimensions, remove pads on the target
+                pad_mask = (batch.target != C.PAD_ID).squeeze(2)  # shape: (batch, seq_length)
+                flat_target = batch.target[pad_mask].cpu().detach().numpy()
+                flat_states = decoder_states[pad_mask].cpu().detach().numpy()
+    
+                # store
+                self.state_store_file.add(flat_states)
+                self.words_store_file.add(flat_target)
 
     def save_config(self):
         config = KNNConfig(self.num_states, self.dimension, utils.dtype_to_str(self.state_data_type), utils.dtype_to_str(self.word_data_type), "", -1)

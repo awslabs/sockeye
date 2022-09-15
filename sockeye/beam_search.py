@@ -90,8 +90,7 @@ class _SingleModelInference(_Inference):
             if knn_probs is None:  # no knn used
                 probs = pt.log_softmax(logits, dim=-1)
             else:
-                lmbda = self.knn_lambda
-                probs = pt.log(lmbda * pt.softmax(logits, dim=-1) + (1-lmbda) * knn_probs)
+                probs = pt.log(self.knn_lambda * pt.softmax(logits, dim=-1) + (1-self.knn_lambda) * knn_probs)
         else:
             assert knn_probs is None, "Can't skip softmax with KNN."
             probs = logits
@@ -130,7 +129,8 @@ class _EnsembleInference(_Inference):
     def __init__(self,
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 knn_lambda: float = 0.8) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -139,6 +139,7 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
+        self.knn_lambda = knn_lambda
 
     def state_structure(self) -> List:
         return [model.state_structure() for model in self._models]
@@ -173,8 +174,11 @@ class _EnsembleInference(_Inference):
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
-            logits, knn_outputs, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
-            probs = logits.softmax(dim=-1)
+            logits, knn_probs, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
+            if knn_probs is None:
+                probs = logits.softmax(dim=-1)
+            else:
+                probs = self.knn_lambda * pt.softmax(logits, dim=-1) + (1-self.knn_lambda) * knn_probs
             outputs.append(probs)
             if target_factor_outputs:
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
