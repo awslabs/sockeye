@@ -34,8 +34,7 @@ from .knn import KNNConfig, get_state_store_filename, get_word_store_filename
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = logging.getLogger(__name__)
 
-# a general blocked mmap stroage interface
-# TODO: could be implemented with numpy memmap, h5py, zarr, etc.
+# a general blocked mmap stroage interface that could be implemented with numpy memmap, h5py, zarr, etc.
 class BlockMMapStorage:
 
     def __init__(self,

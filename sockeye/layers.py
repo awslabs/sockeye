@@ -120,6 +120,8 @@ class OutputLayer(pt.nn.Module):
 
 class KNN(pt.nn.Module):
     def __init__(self, keys_index, vals, vocab_size, k=64, temperature=10, state_dump=None) -> None:
+        """
+        """
         super().__init__()
         self.keys_index = keys_index
         self.vals = vals
@@ -133,7 +135,7 @@ class KNN(pt.nn.Module):
         distances, indices = self.keys_index.search(data.cpu().numpy().astype(np.float32), self.k)
         # Map indices to tokens
         y = self.vals[(indices+1) % len(self.vals)]
-        y[y == 2] = C.EOS_ID
+        y[y == C.BOS_ID] = C.EOS_ID  # no EOS is inserted in generated data store, so we need to use the BOS of the next sentence as EOS
         # guard vocab index overflow caused by int16
         # in general, it is recommended to use int32
         if not np.all(y >= 0):
@@ -142,10 +144,10 @@ class KNN(pt.nn.Module):
 
         # use exact distance when state_dump is available
         if self.state_dump is not None:
-            raw_keys = pt.from_numpy(self.state_dump[indices]).cuda()  # (data.shape[0], k, dim)
+            raw_keys = pt.from_numpy(self.state_dump[indices]).to(device=data.device)  # (data.shape[0], k, dim)
             distances = pt.norm(data.unsqueeze(1) - raw_keys, p=2, dim=-1)  # data lacks the k axis, so need to expand to create one
         else:
-            # distances = pt.from_numpy(distances).to(device=data.device).half()
+            distances = np.sqrt(distances)  # unlike pytorch, faiss doesn't do sqrt for us
             distances = pt.from_numpy(distances).to(device=data.device)
 
         # pytorch expects long for indexes
