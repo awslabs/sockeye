@@ -14,6 +14,7 @@
 """
 Implements a thin wrapper around Translator to compute BLEU scores on (a sample of) validation data during training.
 """
+import itertools
 import logging
 import os
 import random
@@ -55,6 +56,8 @@ class CheckpointDecoder:
     :param ensemble_mode: Ensemble mode: linear or log_linear combination.
     :param sample_size: Maximum number of sentences to sample and decode. If <=0, all sentences are used.
     :param random_seed: Random seed for sampling. Default: 42.
+    :param metadata: Optional JSON metadata file name.
+    :param metadata_vocab: Optional metadata vocabulary.
     """
 
     def __init__(self,
@@ -75,7 +78,9 @@ class CheckpointDecoder:
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  ensemble_mode: str = 'linear',
                  sample_size: int = -1,
-                 random_seed: int = 42) -> None:
+                 random_seed: int = 42,
+                 metadata: Optional[str] = None,
+                 metadata_vocab: Optional[vocab.Vocab] = None) -> None:
         self.max_input_len = max_input_len
         self.max_output_length_num_stds = max_output_length_num_stds
         self.ensemble_mode = ensemble_mode
@@ -93,29 +98,40 @@ class CheckpointDecoder:
 
             inputs_sentences = [f.readlines() for f in inputs_fins]
             targets_sentences = [f.readlines() for f in references_fins]
+            metadata_lines = exit_stack.enter_context(utils.smart_open(metadata)).readlines() \
+                if metadata is not None else None
 
             utils.check_condition(all(len(l) == len(targets_sentences[0])
                                       for l in chain(inputs_sentences, targets_sentences)),
                                   "Sentences differ in length.")
             utils.check_condition(all(len(sentence.strip()) > 0 for sentence in targets_sentences[0]),
                                   "Empty target validation sentence.")
+            if metadata_lines is not None:
+                utils.check_condition(len(metadata_lines) == len(inputs_sentences[0]),
+                                      "Number of validation metadata lines differs from number of input lines.")
 
             if sample_size <= 0:
                 sample_size = len(inputs_sentences[0])
             if sample_size < len(inputs_sentences[0]):
                 sentences = parallel_subsample(
-                    inputs_sentences + targets_sentences, sample_size, random_seed)
+                    inputs_sentences + targets_sentences + ([metadata_lines] if metadata_lines is not None else []),
+                    sample_size, random_seed)
                 self.inputs_sentences = sentences[0:len(inputs_sentences)]
-                self.targets_sentences = sentences[len(inputs_sentences):]
+                self.targets_sentences = sentences[len(inputs_sentences):-1 if metadata_lines is not None else None]
+                self.metadata_lines = sentences[-1] if metadata_lines is not None else None
             else:
                 self.inputs_sentences, self.targets_sentences = inputs_sentences, targets_sentences
+                self.metadata_lines = metadata_lines
 
             if sample_size < self.batch_size:
                 self.batch_size = sample_size
+
         for factor_idx, factor in enumerate(self.inputs_sentences):
             write_to_file(factor, os.path.join(model_folder, C.DECODE_IN_NAME.format(factor=factor_idx)))
         for factor_idx, factor in enumerate(self.targets_sentences):
             write_to_file(factor, os.path.join(model_folder, C.DECODE_REF_NAME.format(factor=factor_idx)))
+        if self.metadata_lines is not None:
+            write_to_file(self.metadata_lines, os.path.join(model_folder, C.DECODE_METADATA_NAME))
 
         self.inputs_sentences = list(zip(*self.inputs_sentences))  # type: ignore
 
@@ -134,6 +150,7 @@ class CheckpointDecoder:
             models=[self.model],
             source_vocabs=source_vocabs,
             target_vocabs=target_vocabs,
+            metadata_vocab=metadata_vocab,
             restrict_lexicon=None)
 
         logger.info("Created CheckpointDecoder(max_input_len=%d, beam_size=%d, num_sentences=%d)",
@@ -162,8 +179,10 @@ class CheckpointDecoder:
 
             tic = time.time()
             trans_inputs = []  # type: List[inference.TranslatorInput]
-            for i, inputs in enumerate(self.inputs_sentences):
-                trans_inputs.append(inference.make_input_from_multiple_strings(i, inputs))
+            for i, (inputs, metadata) in enumerate(
+                    itertools.zip_longest(self.inputs_sentences,
+                                          (self.metadata_lines if self.metadata_lines is not None else []))):
+                trans_inputs.append(inference.make_input_from_multiple_strings(i, inputs, metadata_string=metadata))
             trans_outputs = self.translator.translate(trans_inputs)
             trans_wall_time = time.time() - tic
             for trans_input, trans_output in zip(trans_inputs, trans_outputs):
@@ -218,7 +237,8 @@ class CheckpointDecoder:
         """
         original_mode = self.model.training
         self.model.eval()
-        one_sentence = [inference.make_input_from_multiple_strings(0, self.inputs_sentences[0])]
+        one_sentence = [inference.make_input_from_multiple_strings(
+            0, self.inputs_sentences[0], metadata_string=self.metadata_lines[0] if self.metadata_lines is not None else None)]
         _ = self.translator.translate(one_sentence)
         self.model.train(original_mode)
 

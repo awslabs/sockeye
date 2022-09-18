@@ -203,7 +203,8 @@ def create_checkpoint_decoder(
         device: torch.device,
         sockeye_model: model.SockeyeModel,
         source_vocabs: List[vocab.Vocab],
-        target_vocabs: List[vocab.Vocab]) -> Optional[checkpoint_decoder.CheckpointDecoder]:
+        target_vocabs: List[vocab.Vocab],
+        metadata_vocab: Optional[vocab.Vocab] = None) -> Optional[checkpoint_decoder.CheckpointDecoder]:
     """
     Returns a checkpoint decoder or None.
 
@@ -212,6 +213,7 @@ def create_checkpoint_decoder(
     :param sockeye_model: The Sockeye model instance.
     :param source_vocabs: The source vocabs.
     :param target_vocabs: The target vocabs.
+    :param metadata_vocab: Optional metadata vocabulary.
     :return: A CheckpointDecoder if --decode-and-evaluate != 0, else None.
     """
     sample_size = args.decode_and_evaluate
@@ -232,10 +234,12 @@ def create_checkpoint_decoder(
         model_folder=args.output,
         inputs=[args.validation_source] + args.validation_source_factors,
         references=[args.validation_target] + args.validation_target_factors,
+        metadata=args.validation_metadata,
         sample_size=sample_size,
         model=sockeye_model,
         source_vocabs=source_vocabs,
         target_vocabs=target_vocabs,
+        metadata_vocab=metadata_vocab,
         device=device)
     cpd.warmup()
     return cpd
@@ -1223,7 +1227,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     # Only primary worker runs checkpoint decoder
     checkpoint_decoder = None
     if utils.is_primary_worker():
-        checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs)
+        checkpoint_decoder = create_checkpoint_decoder(args, device, sockeye_model, source_vocabs, target_vocabs,
+                                                       metadata_vocab=metadata_vocab)
 
     # Clean up GPU and CPU memory used during initialization
     torch.cuda.empty_cache()

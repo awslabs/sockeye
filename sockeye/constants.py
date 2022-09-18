@@ -134,6 +134,7 @@ DECODER_STATE = 'd'
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
+JSON_METADATA_KEY = "metadata"
 JSON_SOURCE_PREFIX_KEY = "source_prefix"
 JSON_SOURCE_PREFIX_FACTORS_KEY = "source_prefix_factors"
 JSON_TARGET_PREFIX_KEY = "target_prefix"
@@ -162,6 +163,7 @@ PARAMS_BEST_NAME = "params.best"
 DECODE_OUT_NAME = "decode.output.{{factor}}.{checkpoint:05d}"
 DECODE_IN_NAME = "decode.source.{factor}"
 DECODE_REF_NAME = "decode.target.{factor}"
+DECODE_METADATA_NAME = "decode.md"
 METRICS_NAME = "metrics"
 TENSORBOARD_NAME = "tensorboard"
 

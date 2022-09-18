@@ -130,6 +130,7 @@ class TranslatorInput:
     sentence_id: SentenceId
     tokens: Tokens
     factors: Optional[List[Tokens]] = None
+    metadata_dict: Optional[Dict[str, float]] = None
     source_prefix_tokens: Optional[Tokens] = None
     source_prefix_factors: Optional[List[Tokens]] = None
     target_prefix_tokens: Optional[Tokens] = None
@@ -142,7 +143,7 @@ class TranslatorInput:
     pass_through_dict: Optional[Dict] = None
 
     def __str__(self):
-        return f'TranslatorInput({self.sentence_id}, {self.tokens}, factors={self.factors}, source_prefix_tokens={self.source_prefix_tokens}, source_prefix_factors={self.source_prefix_factors}, target_prefix_tokens={self.target_prefix_tokens}, target_prefix_factors={self.target_prefix_factors}, use_target_prefix_all_chunks={self.use_target_prefix_all_chunks}, keep_target_prefix_key={self.keep_target_prefix_key}, constraints={self.constraints}, avoid={self.avoid_list})'
+        return f'TranslatorInput({self.sentence_id}, {self.tokens}, factors={self.factors}, metadata_dict={self.metadata_dict}, source_prefix_tokens={self.source_prefix_tokens}, source_prefix_factors={self.source_prefix_factors}, target_prefix_tokens={self.target_prefix_tokens}, target_prefix_factors={self.target_prefix_factors}, use_target_prefix_all_chunks={self.use_target_prefix_all_chunks}, keep_target_prefix_key={self.keep_target_prefix_key}, constraints={self.constraints}, avoid={self.avoid_list})'
 
     def __len__(self):
         return len(self.tokens) + self.num_source_prefix_tokens
@@ -222,6 +223,7 @@ class TranslatorInput:
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
+                                  metadata_dict=self.metadata_dict,
                                   source_prefix_tokens=self.source_prefix_tokens,
                                   source_prefix_factors=self.source_prefix_factors,
                                   target_prefix_tokens=target_prefix_tokens,
@@ -241,6 +243,7 @@ class TranslatorInput:
                                tokens=self.tokens + [C.EOS_SYMBOL],
                                factors=[factor + [C.EOS_SYMBOL] for factor in
                                         self.factors] if self.factors is not None else None,
+                               metadata_dict=self.metadata_dict,
                                source_prefix_tokens=self.source_prefix_tokens,
                                source_prefix_factors=self.source_prefix_factors,
                                target_prefix_tokens=self.target_prefix_tokens,
@@ -315,6 +318,7 @@ def make_input_from_dict(sentence_id: SentenceId,
         tokens = input_dict[C.JSON_TEXT_KEY]
         tokens = list(utils.get_tokens(tokens))
         factors = input_dict.get(C.JSON_FACTORS_KEY)
+        metadata_dict = input_dict.get(C.JSON_METADATA_KEY, None)
         source_prefix_tokens = input_dict.get(C.JSON_SOURCE_PREFIX_KEY)
         source_prefix_tokens = list(utils.get_tokens(source_prefix_tokens)) if source_prefix_tokens is not None else None
         if source_prefix_tokens is not None and not source_prefix_tokens:
@@ -402,6 +406,7 @@ def make_input_from_dict(sentence_id: SentenceId,
             constraints = [list(utils.get_tokens(constraint)) for constraint in constraints]
 
         return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors,
+                               metadata_dict=metadata_dict,
                                source_prefix_tokens=source_prefix_tokens,
                                source_prefix_factors=source_prefix_factors,
                                target_prefix_tokens=target_prefix_tokens,
@@ -456,13 +461,17 @@ def make_input_from_factored_string(sentence_id: SentenceId,
     return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
 
 
-def make_input_from_multiple_strings(sentence_id: SentenceId, strings: List[str]) -> TranslatorInput:
+def make_input_from_multiple_strings(sentence_id: SentenceId,
+                                     strings: List[str],
+                                     metadata_string: Optional[str] = None) -> TranslatorInput:
     """
     Returns a TranslatorInput object from multiple strings, where the first element corresponds to the surface tokens
     and the remaining elements to additional factors. All strings must parse into token sequences of the same length.
 
     :param sentence_id: Sentence id.
     :param strings: A list of strings representing a factored input sequence.
+    :param metadata_string: Optional metadata JSON dictionary string for the
+                            input.
     :return: A TranslatorInput.
     """
     if not bool(strings):
@@ -470,10 +479,11 @@ def make_input_from_multiple_strings(sentence_id: SentenceId, strings: List[str]
 
     tokens = list(utils.get_tokens(strings[0]))
     factors = [list(utils.get_tokens(factor)) for factor in strings[1:]]
+    metadata_dict = utils.json_loads_dict(metadata_string) if metadata_string is not None else None
     if not all(len(factor) == len(tokens) for factor in factors):
         logger.error("Length of string sequences do not match: '%s'", strings)
         return _bad_input(sentence_id, reason=str(strings))
-    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors)
+    return TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, metadata_dict=metadata_dict)
 
 
 @dataclass
@@ -725,6 +735,7 @@ class Translator:
     :param models: List of models.
     :param source_vocabs: Source vocabularies.
     :param target_vocabs: Target vocabularies.
+    :param metadata_vocab: Optional metadata vocabulary.
     :param nbest_size: Size of nbest list of translations.
     :param restrict_lexicon: Lexicon to use for target vocabulary selection. Can be a dict of named lexicons. When
            it is a single lexicon it will be applied to all inputs. If is a Dict the lexicon with the given name will
@@ -756,6 +767,7 @@ class Translator:
                  models: List[SockeyeModel],
                  source_vocabs: List[vocab.Vocab],
                  target_vocabs: List[vocab.Vocab],
+                 metadata_vocab: Optional[vocab.Vocab] = None,
                  beam_size: int = 5,
                  nbest_size: int = 1,
                  restrict_lexicon: Optional[Union[lexicon.RestrictLexicon, Dict[str, lexicon.RestrictLexicon]]] = None,
@@ -779,6 +791,7 @@ class Translator:
         self.source_vocabs = source_vocabs
         self.vocab_targets = target_vocabs
         self.vocab_targets_inv = [vocab.reverse_vocab(v) for v in self.vocab_targets]
+        self.metadata_vocab = metadata_vocab
         self.restrict_lexicon = restrict_lexicon
         assert C.PAD_ID == 0, "pad id should be 0"
         self.stop_ids = {C.EOS_ID, C.PAD_ID}  # type: Set[int]
