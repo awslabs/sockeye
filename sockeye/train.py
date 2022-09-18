@@ -1175,7 +1175,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         with torch.cuda.amp.autocast(cache_enabled=False) if args.amp else utils.no_context():  # type: ignore
             training_model = torch.jit.trace(training_model, (batch.source, batch.source_length,
                                                               batch.target, batch.target_length,
-                                                              batch.metadata_name_ids,
+                                                              batch.metadata_ids,
                                                               batch.metadata_weights), strict=False)
         eval_iter.reset()
 

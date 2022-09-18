@@ -74,11 +74,11 @@ class ModelWithLoss(torch.nn.Module):
                 target: torch.Tensor,
                 target_length: torch.Tensor,
                 labels: Dict[str, torch.Tensor],
-                metadata_name_ids: torch.Tensor = C.NONE_TENSOR,
+                metadata_ids: torch.Tensor = C.NONE_TENSOR,
                 metadata_weights: torch.Tensor = C.NONE_TENSOR) -> Tuple[torch.Tensor,
                                                                           List[torch.Tensor],
                                                                           List[torch.Tensor]]:
-        model_outputs = self.model(source, source_length, target, target_length, metadata_name_ids, metadata_weights)
+        model_outputs = self.model(source, source_length, target, target_length, metadata_ids, metadata_weights)
         if utils.using_deepspeed():
             # Guarantee model outputs are float32 before computing losses.
             # Computing losses in DeepSpeed float16 mode can lead to overflow.
@@ -363,7 +363,7 @@ class EarlyStoppingTrainer:
             # Forward + loss
             sum_losses, loss_values, num_samples = self.model_object(batch.source, batch.source_length,
                                                                      batch.target, batch.target_length, batch.labels,
-                                                                     batch.metadata_name_ids, batch.metadata_weights)
+                                                                     batch.metadata_ids, batch.metadata_weights)
         # Backward
         if utils.using_deepspeed():
             # DeepSpeed backward. DeepSpeed handles all loss scaling.
@@ -457,7 +457,7 @@ class EarlyStoppingTrainer:
                 # fully support switching between train and eval modes depending
                 # how much Python logic is used in the various submodules.
                 outputs = self.sockeye_model(batch.source, batch.source_length, batch.target, batch.target_length,
-                                             batch.metadata_name_ids, batch.metadata_weights)
+                                             batch.metadata_ids, batch.metadata_weights)
                 # Guarantee model outputs are float32 before computing losses
                 outputs = {name: output.to(torch.float32) for (name, output) in outputs.items()}
                 # Loss

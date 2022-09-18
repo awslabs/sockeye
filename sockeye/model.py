@@ -266,7 +266,7 @@ class SockeyeModel(pt.nn.Module):
                           source: pt.Tensor,
                           source_length: pt.Tensor,
                           target: pt.Tensor,
-                          metadata_name_ids: pt.Tensor = C.NONE_TENSOR,
+                          metadata_ids: pt.Tensor = C.NONE_TENSOR,
                           metadata_weights: pt.Tensor = C.NONE_TENSOR) -> Tuple[pt.Tensor,
                                                                                  pt.Tensor,
                                                                                  pt.Tensor,
@@ -279,14 +279,14 @@ class SockeyeModel(pt.nn.Module):
         :param source: Source input data.
         :param source_length: Length of source inputs.
         :param target: Target input data.
-        :param metadata_name_ids: Optional metadata IDs.
+        :param metadata_ids: Optional metadata IDs.
         :param metadata_weights: Optional metadata weights.
         :return: encoder outputs and lengths, target embeddings, decoder initial states, attention mask and neural
                  vocab selection prediction (if present, otherwise None).
         """
         source_embed = self.embedding_source(source)
         target_embed = self.embedding_target(target)
-        metadata_embed = self.embedding_metadata(metadata_name_ids, metadata_weights) \
+        metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights) \
             if self.embedding_metadata is not None else C.NONE_TENSOR
         source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length, metadata_embed)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
@@ -330,7 +330,7 @@ class SockeyeModel(pt.nn.Module):
         return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length,
-                metadata_name_ids=C.NONE_TENSOR, metadata_weights=C.NONE_TENSOR):  # pylint: disable=arguments-differ
+                metadata_ids=C.NONE_TENSOR, metadata_weights=C.NONE_TENSOR):  # pylint: disable=arguments-differ
         # When updating only the decoder (specified directly or implied by
         # caching the encoder and embedding forward passes), turn off autograd
         # for the encoder and embeddings to save memory.
@@ -339,7 +339,7 @@ class SockeyeModel(pt.nn.Module):
                 source,
                 source_length,
                 target,
-                metadata_name_ids,
+                metadata_ids,
                 metadata_weights)
 
         target = self.decoder.decode_seq(target_embed, states=states)

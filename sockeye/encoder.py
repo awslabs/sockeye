@@ -188,24 +188,24 @@ class MetadataEmbedding(Encoder):
         self.embedding = pt.nn.Embedding(vocab_size, model_size, dtype=dtype)
         self.dropout = pt.nn.Dropout(p=dropout) if dropout > 0.0 else None
 
-    def forward(self, name_ids: pt.Tensor, weights: pt.Tensor) -> pt.Tensor:
+    def forward(self, ids: pt.Tensor, weights: pt.Tensor) -> pt.Tensor:
         """
         Generate sequence-level metadata embeddings by computing weighted sums
         of individual ID embeddings.
 
-        :param name_ids: Metadata vocabulary IDs.
-                         Shape: (batch_size, metadata_seq_len).
+        :param ids: Metadata vocabulary IDs.
+                    Shape: (batch_size, metadata_seq_len).
         :param weights: Metadata weights. Shape: (batch_size, metadata_seq_len).
         :returns: Model states with sequence-level metadata embeddings added.
                   Shape: (batch_size, model_size).
         """
-        if name_ids.numel() == 0:
-            # No metadata. Return name_ids for efficiency instead of creating a
-            # new zero-element tensor.
-            return name_ids
+        if ids.numel() == 0:
+            # No metadata. Return ids for efficiency instead of creating a new
+            # zero-element tensor.
+            return ids
 
         # (batch_size, metadata_seq_len, model_size)
-        weighted_embeddings = self.embedding(name_ids) * weights.unsqueeze(-1)
+        weighted_embeddings = self.embedding(ids) * weights.unsqueeze(-1)
 
         # (batch_size, model_size)
         summed_embeddings = pt.sum(weighted_embeddings, dim=1)

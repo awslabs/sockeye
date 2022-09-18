@@ -335,10 +335,10 @@ def test_compute_slice_indices_from_sequence_lengths():
     assert torch.equal(data_io.compute_slice_indices_from_sequence_lengths(seq_lens), slice_indices)
 
 
-def _compare_metadata_tensors(name_ids1, weights1, slice_indices1, name_ids2, weights2, slice_indices2):
+def _compare_metadata_tensors(ids1, weights1, slice_indices1, ids2, weights2, slice_indices2):
         # Equal
-        assert name_ids1.dtype == name_ids2.dtype
-        assert torch.equal(name_ids1, name_ids2)
+        assert ids1.dtype == ids2.dtype
+        assert torch.equal(ids1, ids2)
         # All close
         assert weights1.dtype == weights2.dtype
         assert torch.allclose(weights1, weights2)
@@ -373,9 +373,9 @@ def test_metadata_bucket_creation(metadata_tuple_list, metadata_tensors):
     assert len(metadata_bucket) == len(metadata_tuple_list)
 
     # Test slicing individual sequences
-    for i, (name_ids_np, weights_np) in enumerate(metadata_tuple_list):
-        name_ids, weights = metadata_bucket.get(i)
-        assert torch.equal(name_ids, torch.tensor(name_ids_np))
+    for i, (ids_np, weights_np) in enumerate(metadata_tuple_list):
+        ids, weights = metadata_bucket.get(i)
+        assert torch.equal(ids, torch.tensor(ids_np))
         assert torch.allclose(weights, torch.tensor(weights_np))
 
     # Test tuple round trip
@@ -535,9 +535,9 @@ def _get_random_bucketed_data(
         for count, bucket in zip(bucket_counts, buckets):
             metadata_tuple_list = []
             for _ in range(count):
-                name_ids = np.random.randint(0, 10, (random.randint(0, bucket[0]),))
-                weights = np.random.rand(*name_ids.shape)
-                metadata_tuple_list.append((name_ids, weights))
+                ids = np.random.randint(0, 10, (random.randint(0, bucket[0]),))
+                weights = np.random.rand(*ids.shape)
+                metadata_tuple_list.append((ids, weights))
             metadata.append(data_io.MetadataBucket.from_numpy_tuple_list(metadata_tuple_list))
     return source, target, metadata
 
@@ -558,9 +558,9 @@ def test_parallel_data_set(include_metadata):
         for md1, md2 in zip(metadata1, metadata2):
             assert len(md1) == len(md2)
             for i in range(len(md1)):
-                name_ids1, weights1 = md1.get(i)
-                name_ids2, weights2 = md2.get(i)
-                assert torch.equal(name_ids1, name_ids2)
+                ids1, weights1 = md1.get(i)
+                ids2, weights2 = md2.get(i)
+                assert torch.equal(ids1, ids2)
                 assert torch.allclose(weights1, weights2)
 
     with TemporaryDirectory() as work_dir:

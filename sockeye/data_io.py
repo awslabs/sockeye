@@ -484,7 +484,7 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays, metadata as tuples of tensors
-        # (name_ids, weights)
+        # (ids, weights)
         for sources, targets, metadata in parallel_iter(source_iterables, target_iterables, metadata_iterable,
                                                         skip_blanks=self.skip_blanks):
             sources = [[] if stream is None else stream for stream in sources]
@@ -517,7 +517,7 @@ class RawParallelDatasetLoader:
                     t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
             if metadata_iterable is not None:
-                # Tuple of metadata (name_ids, weights)
+                # Tuple of metadata (ids, weights)
                 metadata_lists[buck_index].append((
                     np.array(metadata[0] if metadata is not None else [], dtype=self.dtype),
                     np.array(metadata[1] if metadata is not None else [], dtype='float32'),
@@ -1307,8 +1307,8 @@ class SequenceReader:
 class MetadataReader:
     """
     Reads JSON metadata lines from path and creates parallel sequences of
-    integer name ids and float weights. Streams from disk, instead of loading
-    all samples into memory. Empty sequences are yielded as None.
+    integer ids and float weights. Streams from disk, instead of loading all
+    samples into memory. Empty sequences are yielded as None.
 
     :param path: Path to read JSON metadata from.
     :param vocabulary: Mapping from strings to integer ids.
@@ -1482,27 +1482,26 @@ def compute_slice_indices_from_sequence_lengths(seq_lens: torch.Tensor) -> torch
 
 class MetadataBucket:
     """
-    Metadata for a single bucket: parallel sequences of name IDs and weights
-    stored in a packed format. Metadata sequences represent name/weight pairs
-    and are not token-parallel with the corresponding source or target
-    sequences. Unlike bucketed source and target data, bucketed metadata
-    sequences can be of any length. A MetadataBucket object stores `num_seq`
-    metadata sequences with concatenated length `sum_seq_len`.
+    Metadata for a single bucket: parallel sequences of IDs and weights stored
+    in a packed format. Metadata sequences represent ID/weight pairs and are not
+    token-parallel with the corresponding source or target sequences. Unlike
+    bucketed source and target data, bucketed metadata sequences can be of any
+    length. A MetadataBucket object stores `num_seq` metadata sequences with
+    concatenated length `sum_seq_len`.
 
-    :param name_ids: Tensor of concatenated name ID sequences. Shape
-                     (sum_seq_len,).
+    :param ids: Tensor of concatenated ID sequences. Shape (sum_seq_len,).
     :param weights: Tensor of concatenated weight sequences. Shape
                     (sum_seq_len,).
     :param slice_indices: Tensor of shape (num_seq, 2) that contains pairs of
                           start/end indices for slicing individual metadata
                           sequences from the packed tensors.
     """
-    def __init__(self, name_ids: torch.Tensor, weights: torch.Tensor, slice_indices: torch.Tensor):
-        assert name_ids.ndim == 1
+    def __init__(self, ids: torch.Tensor, weights: torch.Tensor, slice_indices: torch.Tensor):
+        assert ids.ndim == 1
         assert weights.ndim == 1
         assert slice_indices.ndim == 2
-        assert name_ids.shape == weights.shape
-        self.name_ids = name_ids
+        assert ids.shape == weights.shape
+        self.ids = ids
         self.weights = weights
         self.slice_indices = slice_indices
 
@@ -1515,20 +1514,19 @@ class MetadataBucket:
         sequences as needed.
 
         :param metadata_tuple_list: List of tuples containing sequence-level
-                                    metadata name IDs and weights as NumPy
-                                    arrays.
+                                    metadata IDs and weights as NumPy arrays.
         :return: MetadataBucket containing packed tensors and slice indices.
         """
         if len(metadata_tuple_list) == 0:
-            return MetadataBucket(name_ids=torch.zeros(0, dtype=torch.int32),
+            return MetadataBucket(ids=torch.zeros(0, dtype=torch.int32),
                                   weights=torch.zeros(0, dtype=torch.float32),
                                   slice_indices=torch.zeros(0, 2, dtype=torch.int64))
-        name_ids_list, weights_list = zip(*((name_ids, weights) for name_ids, weights in metadata_tuple_list))
-        seq_lens = torch.tensor([name_ids.shape[0] for name_ids in name_ids_list], dtype=torch.int64)
-        name_ids = torch.from_numpy(np.concatenate(name_ids_list))
+        ids_list, weights_list = zip(*((ids, weights) for ids, weights in metadata_tuple_list))
+        seq_lens = torch.tensor([ids.shape[0] for ids in ids_list], dtype=torch.int64)
+        ids = torch.from_numpy(np.concatenate(ids_list))
         weights = torch.from_numpy(np.concatenate(weights_list))
         slice_indices = compute_slice_indices_from_sequence_lengths(seq_lens)
-        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
+        return MetadataBucket(ids=ids, weights=weights, slice_indices=slice_indices)
 
     def __len__(self) -> int:
         return self.slice_indices.shape[0]
@@ -1540,29 +1538,29 @@ class MetadataBucket:
         """
         Return a tuple view of the stored metadata.
         """
-        return (self.name_ids, self.weights, self.slice_indices)
+        return (self.ids, self.weights, self.slice_indices)
 
     def get(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Get parallel name IDs and weights for a single sequence from the packed
+        Get parallel IDs and weights for a single sequence from the packed
         metadata.
 
         :param i: Sequence index.
-        :returns: Tuple of name ID and weight sequence tensors.
+        :returns: Tuple of ID and weight sequence tensors.
         """
         start, end = self.slice_indices[i]
-        return (self.name_ids[start:end], self.weights[start:end])
+        return (self.ids[start:end], self.weights[start:end])
 
     def get_batch(self, start: int, end: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Get a padded batch of name ID and weight tensors corresponding to a
-        slice of the metadata.
+        Get a padded batch of ID and weight tensors corresponding to a slice of
+        the metadata.
 
         :param start: Positive start index.
         :param end: Positive end index greater than or equal to start index.
-        :returns: Tuple of padded name ID and weight batch tensors that each
-                  have shape (batch_size, max_seq_len) where `batch_size` is
-                  `end` - `start` and `max_seq_len` is the length of the longest
+        :returns: Tuple of padded ID and weight batch tensors that each have
+                  shape (batch_size, max_seq_len) where `batch_size` is
+                  `end - start` and `max_seq_len` is the length of the longest
                   sequence in the batch.
         """
         check_condition(0 <= start <= end,
@@ -1573,12 +1571,12 @@ class MetadataBucket:
         slice_indices = torch.index_select(self.slice_indices, 0, torch.arange(start, end))
         seq_lens = slice_indices[:, 1] - slice_indices[:, 0]
         max_seq_len = torch.max(seq_lens)
-        name_ids_batch = torch.full((slice_indices.shape[0], max_seq_len), C.PAD_ID, dtype=torch.int32)  # type: ignore
+        ids_batch = torch.full((slice_indices.shape[0], max_seq_len), C.PAD_ID, dtype=torch.int32)  # type: ignore
         weights_batch = torch.full((slice_indices.shape[0], max_seq_len), 0., dtype=torch.float32)  # type: ignore
         for i, ((_start, _end), seq_len) in enumerate(zip(slice_indices, seq_lens)):
-            name_ids_batch[i, 0:seq_len] = self.name_ids[_start:_end]
+            ids_batch[i, 0:seq_len] = self.ids[_start:_end]
             weights_batch[i, 0:seq_len] = self.weights[_start:_end]
-        return name_ids_batch, weights_batch
+        return ids_batch, weights_batch
 
 
     def slice_copy(self, start: int, end: int) -> 'MetadataBucket':
@@ -1592,15 +1590,15 @@ class MetadataBucket:
         check_condition(0 <= start <= end,
                         f'Metadata slicing only supports positive indices for which start <= end. Got: {start} {end}')
         if start == end:
-            return MetadataBucket(name_ids=torch.zeros(0, dtype=torch.int32),
+            return MetadataBucket(ids=torch.zeros(0, dtype=torch.int32),
                                   weights=torch.zeros(0, dtype=torch.float32),
                                   slice_indices=torch.zeros(0, 2, dtype=torch.int64))
         slice_indices = self.slice_indices[start:end].clone()
-        name_ids = self.name_ids[slice_indices[0, 0]:slice_indices[-1, 1]].clone()  # type: ignore
+        ids = self.ids[slice_indices[0, 0]:slice_indices[-1, 1]].clone()  # type: ignore
         weights = self.weights[slice_indices[0, 0]:slice_indices[-1, 1]].clone()  # type: ignore
         # Offset by starting point in packed metadata
         slice_indices -= self.slice_indices[start, 0]
-        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
+        return MetadataBucket(ids=ids, weights=weights, slice_indices=slice_indices)
 
     def index_select(self, indices: torch.Tensor) -> 'MetadataBucket':
         """
@@ -1612,12 +1610,12 @@ class MetadataBucket:
         """
         check_condition(indices.ndim == 1, 'Indices should be specified as a 1-D tensor')
         slice_indices = torch.index_select(self.slice_indices, 0, indices)
-        name_ids = torch.cat([self.name_ids[start:end] for start, end in slice_indices], dim=0)
+        ids = torch.cat([self.ids[start:end] for start, end in slice_indices], dim=0)
         weights = torch.cat([self.weights[start:end] for start, end in slice_indices], dim=0)
         seq_lens = slice_indices[:, 1] - slice_indices[:, 0]
         # Recompute slice indices for selected/packed metadata
         slice_indices = compute_slice_indices_from_sequence_lengths(seq_lens)
-        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
+        return MetadataBucket(ids=ids, weights=weights, slice_indices=slice_indices)
 
     def repeat(self, repeats: int) -> 'MetadataBucket':
         """
@@ -1629,15 +1627,15 @@ class MetadataBucket:
         check_condition(repeats >= 0,
                         f'Metadata cannot be repeated a negative number of times. Got: {repeats}')
         if repeats == 0:
-            return MetadataBucket(name_ids=torch.zeros(0, dtype=torch.int32),
+            return MetadataBucket(ids=torch.zeros(0, dtype=torch.int32),
                                   weights=torch.zeros(0, dtype=torch.float32),
                                   slice_indices=torch.zeros(0, 2, dtype=torch.int64))
-        name_ids = self.name_ids.repeat(repeats)
+        ids = self.ids.repeat(repeats)
         weights = self.weights.repeat(repeats)
         # Each copy of the indices is offset by its copy number times the
         # size of the packed metadata
-        slice_indices = torch.cat([self.slice_indices + i * self.name_ids.shape[0] for i in range(repeats)], dim=0)
-        return MetadataBucket(name_ids=name_ids, weights=weights, slice_indices=slice_indices)
+        slice_indices = torch.cat([self.slice_indices + i * self.ids.shape[0] for i in range(repeats)], dim=0)
+        return MetadataBucket(ids=ids, weights=weights, slice_indices=slice_indices)
 
     def fill_up(self, desired_indices: torch.Tensor) -> 'MetadataBucket':
         """
@@ -1648,10 +1646,10 @@ class MetadataBucket:
         :returns: Filled-up MetadataBucket.
         """
         check_condition(len(self) > 0, 'Cannot fill up an empty MetadataBucket (no examples to copy)')
-        name_ids, weights, slice_indices = self.index_select(desired_indices).as_tuple()
+        ids, weights, slice_indices = self.index_select(desired_indices).as_tuple()
         # Offset by size of existing packed metadata
-        slice_indices += self.name_ids.shape[0]
-        return MetadataBucket(name_ids=torch.cat((self.name_ids, name_ids), dim=0),
+        slice_indices += self.ids.shape[0]
+        return MetadataBucket(ids=torch.cat((self.ids, ids), dim=0),
                               weights=torch.cat((self.weights, weights), dim=0),
                               slice_indices=torch.cat((self.slice_indices, slice_indices), dim=0))
 
@@ -2272,7 +2270,7 @@ class Batch:
     labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
-    metadata_name_ids: torch.Tensor = C.NONE_TENSOR
+    metadata_ids: torch.Tensor = C.NONE_TENSOR
     metadata_weights: torch.Tensor = C.NONE_TENSOR
 
     def load(self, device: torch.device) -> 'Batch':
@@ -2281,10 +2279,10 @@ class Batch:
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
-        metadata_name_ids = self.metadata_name_ids.to(device) if self.metadata_name_ids.numel() != 0 else C.NONE_TENSOR
+        metadata_ids = self.metadata_ids.to(device) if self.metadata_ids.numel() != 0 else C.NONE_TENSOR
         metadata_weights = self.metadata_weights.to(device) if self.metadata_weights.numel() != 0 else C.NONE_TENSOR
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens,
-                     metadata_name_ids, metadata_weights)
+                     metadata_ids, metadata_weights)
 
 
 def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -2309,7 +2307,7 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
     :param source: Source tensor. Shape: (batch, source_length, num_source_factors).
     :param target: Target tensor. Shape: (batch, target_length, num_target_factors).
     :param label: Time-shifted label tensor. Shape: (batch, target_length, num_target_factors).
-    :param metadata: Optional tuple of metadata name ID and weight tensors.
+    :param metadata: Optional tuple of metadata ID and weight tensors.
                      Shape of each: (batch, metadata_length).
     """
     source_words = source[:, :, 0]
@@ -2330,7 +2328,7 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    metadata_name_ids, metadata_weights = metadata if metadata is not None else (C.NONE_TENSOR, C.NONE_TENSOR)
+    metadata_ids, metadata_weights = metadata if metadata is not None else (C.NONE_TENSOR, C.NONE_TENSOR)
 
     return Batch(source, source_length, target, target_length, labels, samples, tokens,
-                 metadata_name_ids=metadata_name_ids, metadata_weights=metadata_weights)
+                 metadata_ids=metadata_ids, metadata_weights=metadata_weights)

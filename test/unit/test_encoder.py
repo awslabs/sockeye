@@ -43,9 +43,9 @@ def test_metadata_embedding():
 
     # Create sequence-level metadata embeddings
     embedding = sockeye.encoder.MetadataEmbedding(vocab_size=vocab_size, model_size=model_size)
-    name_ids = torch.randint(0, vocab_size, (batch_size, metadata_seq_len), dtype=torch.int32)
+    ids = torch.randint(0, vocab_size, (batch_size, metadata_seq_len), dtype=torch.int32)
     weights = torch.randn((batch_size, metadata_seq_len), dtype=torch.float32)
-    metadata_embeddings = embedding(name_ids, weights)
+    metadata_embeddings = embedding(ids, weights)
     assert metadata_embeddings.shape == (batch_size, model_size)
 
     # Add to existing representations (batch major)
