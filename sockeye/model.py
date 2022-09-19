@@ -494,15 +494,14 @@ class SockeyeModel(pt.nn.Module):
         vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"),
                          dtype=utils.get_numpy_dtype(knn_config.word_data_type),
                          mode='r',
-                         shape=(knn_config.index_size, 1))
+                         shape=(knn_config.index_size, 1))  # type: np.memmap
+        state_store = None  # type: Optional[np.memmap]
         if os.path.isfile(os.path.join(knn_index_folder, "keys.npy")):
-            state_dump = np.memmap(os.path.join(knn_index_folder, "keys.npy"),
+            state_store = np.memmap(os.path.join(knn_index_folder, "keys.npy"),
                                    dtype=utils.get_numpy_dtype(knn_config.state_data_type),
                                    mode='r',
                                    shape=(knn_config.index_size, knn_config.dimension))
-        else:
-            state_dump = None
-        self.knn = layers.KNN(keys_index, vals, vocab_size=self.config.vocab_target_size, state_dump=state_dump)
+        self.knn = layers.KNN(keys_index, vals, vocab_size=self.config.vocab_target_size, state_store=state_store)
 
     @staticmethod
     def save_version(folder: str):

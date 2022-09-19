@@ -119,14 +119,14 @@ class OutputLayer(pt.nn.Module):
 
 
 class KNN(pt.nn.Module):
-    def __init__(self, keys_index: "faiss.Index", vals: np.memmap, vocab_size: int, k=64, temperature=10, state_dump=None) -> None:  # type: ignore  # suppress mypy error becaues faiss is an optional import
+    def __init__(self, keys_index: "faiss.Index", vals: np.memmap, vocab_size: int, k=64, temperature=10, state_store: Optional[np.memmap] = None) -> None:  # type: ignore  # suppress mypy error becaues faiss is an optional import
         super().__init__()
         self.keys_index = keys_index
         self.vals = vals
         self.vocab_size = vocab_size
         self.k = k
         self.temperature = temperature
-        self.state_dump = state_dump
+        self.state_store = state_store
 
     def forward(self, data: pt.Tensor):
         # faiss only supports float32
@@ -140,9 +140,9 @@ class KNN(pt.nn.Module):
             y = y.astype(np.int32)
             y[y < 0] = 65535 + y[y < 0]
 
-        # use exact distance when state_dump is available
-        if self.state_dump is not None:
-            raw_keys = pt.from_numpy(self.state_dump[indices]).to(device=data.device)  # (data.shape[0], k, dim)
+        # use exact distance when state_store is available
+        if self.state_store is not None:
+            raw_keys = pt.from_numpy(self.state_store[indices]).to(device=data.device)  # (data.shape[0], k, dim)
             distances = pt.norm(data.unsqueeze(1) - raw_keys, p=2, dim=-1)  # data lacks the k axis, so need to expand to create one
         else:
             distances = np.sqrt(distances)  # unlike pytorch, faiss doesn't do sqrt for us
