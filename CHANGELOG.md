@@ -23,6 +23,12 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 - For distributed training, replicating examples so that each worker has at least one per bucket now correctly uses `repeat` instead of `repeat_interleave`.
 
+## [3.1.23]
+
+### Changed
+
+- Change decoder softmax size logging level from info to debug.
+
 ## [3.1.22]
 
 ### Added

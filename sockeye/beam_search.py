@@ -652,7 +652,7 @@ class Search(pt.nn.Module):
         self.output_vocab_sizes.update(size)
 
     def log_search_stats(self):
-        logger.info(f'decoder softmax size: {self.output_vocab_sizes.mean:.1f} (avg)')
+        logger.debug(f'decoder softmax size: {self.output_vocab_sizes.mean:.1f} (avg)')
 
 
 class GreedySearch(Search):
