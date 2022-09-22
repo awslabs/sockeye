@@ -1001,6 +1001,8 @@ class Translator:
                                                                            pt.Tensor,
                                                                            Optional[lexicon.RestrictLexicon],
                                                                            pt.Tensor,
+                                                                           pt.Tensor,
+                                                                           pt.Tensor,
                                                                            Optional[pt.Tensor],
                                                                            Optional[pt.Tensor]]:
         """
@@ -1008,9 +1010,9 @@ class Translator:
         the bucket key (padded source length), a tensor of maximum output lengths for each sentence in the batch.
 
         :param trans_inputs: List of TranslatorInputs.
-        :return tensor of source ids (shape=(batch_size, bucket_key, num_factors)),
-                tensor of valid source lengths, lexicon for vocabulary restriction, tensor of maximum output lengths,
-                optional target prefix, and optional target prefix factors.
+        :return tensor of source ids (shape=(batch_size, bucket_key, num_factors)), tensor of valid source lengths,
+            lexicon for vocabulary restriction, tensor of maximum output lengths, tensors of metadata IDs and weights
+            each with shape=(batch_size, max_md_seq_len), optional target prefix, and optional target prefix factors.
         """
         batch_size = len(trans_inputs)
         lengths = [len(inp) for inp in trans_inputs]
@@ -1021,11 +1023,16 @@ class Translator:
         # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
         source_np = np.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
 
+        metadata_ids_list = []  # type: List[np.ndarray]
+        metadata_weights_list = []  # type: List[np.ndarray]
+        metadata_max_seq_len = 0
+
         target_prefix_np = np.zeros((batch_size, max_target_prefix_length), dtype='int32') \
             if max_target_prefix_length > 0 else None
         target_prefix_factors_np = np.zeros((batch_size, max_target_prefix_factors_length,
                                              self.num_target_factors - 1), dtype='int32') \
             if self.num_target_factors > 1 and max_target_prefix_factors_length > 0 else None
+
         restrict_lexicon = None  # type: Optional[lexicon.RestrictLexicon]
 
         max_output_lengths = []  # type: List[int]
@@ -1060,6 +1067,18 @@ class Translator:
                     source_np[j, :num_tokens, i] = tokens2ids(itertools.chain(source_prefix_factor, factor),
                                                               self.source_vocabs[i])[:num_tokens]
 
+            # Only process metadata if the model supports metadata
+            if self.metadata_vocab is not None:
+                if not trans_input.metadata_dict:
+                    # None or {}
+                    metadata_ids_list.append(np.array([], dtype='int32'))
+                    metadata_weights_list.append(np.array([], dtype='float32'))
+                else:
+                    _ids, _weights = zip(*trans_input.metadata_dict.items())
+                    metadata_ids_list.append(np.array(tokens2ids(_ids, self.metadata_vocab), dtype='int32'))
+                    metadata_weights_list.append(np.array(_weights, dtype='float32'))
+                    metadata_max_seq_len = max(metadata_max_seq_len, len(_ids))
+
             # Check if vocabulary selection/restriction is enabled:
             # - First, see if the translator input provides a lexicon (used for multiple lexicons)
             # - If not, see if the translator itself provides a lexicon (used for single lexicon)
@@ -1087,6 +1106,20 @@ class Translator:
         target_prefix_factors = pt.tensor(target_prefix_factors_np, device=self.device, dtype=pt.int32) \
             if target_prefix_factors_np is not None else None
 
+        if metadata_max_seq_len == 0:
+            # No metadata
+            metadata_ids = C.NONE_TENSOR
+            metadata_weights = C.NONE_TENSOR
+        else:
+            metadata_ids_np = np.zeros((batch_size, metadata_max_seq_len), dtype='int32')
+            for i, ids in enumerate(metadata_ids_list):
+                metadata_ids_np[i, :ids.shape[0]] = ids
+            metadata_ids = pt.tensor(metadata_ids_np, device=self.device, dtype=pt.int32)
+            metadata_weights_np = np.zeros((batch_size, metadata_max_seq_len), dtype='float32')
+            for i, weights in enumerate(metadata_weights_list):
+                metadata_weights_np[i, :weights.shape[0]] = weights
+            metadata_weights = pt.tensor(metadata_weights_np, device=self.device, dtype=pt.float32)
+
         # During inference, if C.TARGET_FACTOR_SHIFT is True, predicted target_factors are left-shifted
         # (see _unshift_target_factors function()) so that they re-align with the words.
         # With that, target_prefix_factors need to be also right-shifted here if C.TARGET_FACTOR_SHIFT is True so
@@ -1095,7 +1128,8 @@ class Translator:
             if target_prefix_factors is not None and \
                C.TARGET_FACTOR_SHIFT else target_prefix_factors
 
-        return source, source_length, restrict_lexicon, max_out_lengths, target_prefix, target_prefix_factors
+        return (source, source_length, restrict_lexicon, max_out_lengths,
+                metadata_ids, metadata_weights, target_prefix, target_prefix_factors)
 
     def _get_translation_tokens_and_factors(self, target_ids: List[List[int]]) -> Tuple[List[str],
                                                                                         str,
@@ -1178,6 +1212,8 @@ class Translator:
                       source_length: pt.Tensor,
                       restrict_lexicon: Optional[lexicon.RestrictLexicon],
                       max_output_lengths: pt.Tensor,
+                      metadata_ids: Optional[pt.Tensor] = None,
+                      metadata_weights: Optional[pt.Tensor] = None,
                       target_prefix: Optional[pt.Tensor] = None,
                       target_prefix_factors: Optional[pt.Tensor] = None) -> List[Translation]:
         """
@@ -1188,6 +1224,10 @@ class Translator:
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param max_output_lengths: Tensor of maximum output lengths per input in source.
                  Shape: (batch_size,). Dtype: int32.
+        :param metadata_ids: Optional metadata IDs.
+                             Shape: (batch_size, max_md_seq_len)
+        :param metadata_weights: Optional metadata weights.
+                                 Shape: (batch_size, max_md_seq_len)
         :param target_prefix: Target prefix ids.
         :param target_prefix_factors: Target prefix factors ids.
 
@@ -1197,6 +1237,8 @@ class Translator:
                                                         source_length,
                                                         restrict_lexicon,
                                                         max_output_lengths,
+                                                        metadata_ids,
+                                                        metadata_weights,
                                                         target_prefix,
                                                         target_prefix_factors))
 

@@ -122,15 +122,17 @@ class SockeyeModel(pt.nn.Module):
                                                   dtype=self.dtype)
 
         # Optional metadata embedding
-        self.embedding_metadata = None  # type: Optional[pt.jit.ScriptModule]
+        self.embedding_metadata = None  # type: Optional[encoder.MetadataEmbedding]
+        self.scripted_embedding_metadata = None  # type: Optional[pt.jit.ScriptModule]
         if self.config.config_encoder.add_metadata is not None and config.vocab_size_metadata is not None:
             # Same size as encoder representations, same dropout as source
             # embeddings
-            self.embedding_metadata = pt.jit.script(
-                encoder.MetadataEmbedding(vocab_size=config.vocab_size_metadata,
-                                          model_size=self.config.config_encoder.model_size,
-                                          dropout=config.config_embed_source.dropout,
-                                          dtype=self.dtype))
+            self.embedding_metadata = encoder.MetadataEmbedding(
+                vocab_size=config.vocab_size_metadata,
+                model_size=self.config.config_encoder.model_size,
+                dropout=config.config_embed_source.dropout,
+                dtype=self.dtype)
+            self.scripted_embedding_metadata = pt.jit.script(self.embedding_metadata)
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
@@ -216,25 +218,44 @@ class SockeyeModel(pt.nn.Module):
     def state_structure(self):
         return self.decoder.state_structure()
 
-    def encode(self, inputs: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
+    def encode(self,
+               inputs: pt.Tensor,
+               valid_length: pt.Tensor,
+               metadata_ids: pt.Tensor = C.NONE_TENSOR,
+               metadata_weights: pt.Tensor = C.NONE_TENSOR) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """
         Encodes the input sequence.
 
         :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
         :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :param metadata_ids: Optional metadata IDs. Shape: (batch_size, max_md_seq_len)
+        :param metadata_weights: Optional metadata weights. Shape: (batch_size, max_md_seq_len)
         :return: Encoder outputs, encoded output lengths, attention mask
         """
         if self.traced_embedding_source is None:
             logger.debug("Tracing embedding_source")
             self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
         source_embed = self.traced_embedding_source(inputs)
+
+        if self.embedding_metadata is not None:
+            if self.inference_only:
+                metadata_embed = self.scripted_embedding_metadata(metadata_ids, metadata_weights)
+            else:
+                metadata_embed = self.embedding_metadata(metadata_ids.clone(), metadata_weights.clone())
+        else:
+            metadata_embed = C.NONE_TENSOR
+
         if self.traced_encoder is None:
             logger.debug("Tracing encoder")
-            self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length))
-        source_encoded, source_encoded_length, att_mask = self.traced_encoder(source_embed, valid_length)
+            self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length, metadata_embed))
+        source_encoded, source_encoded_length, att_mask = self.traced_encoder(source_embed, valid_length, metadata_embed)
         return source_encoded, source_encoded_length, att_mask
 
-    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: pt.Tensor,
+    def encode_and_initialize(self,
+                              inputs: pt.Tensor,
+                              valid_length: pt.Tensor,
+                              metadata_ids: Optional[pt.Tensor] = None,
+                              metadata_weights: Optional[pt.Tensor] = None,
                               constant_length_ratio: float = 0.0) -> Tuple[List[pt.Tensor], pt.Tensor,
                                                                            Optional[pt.Tensor]]:
         """
@@ -243,13 +264,18 @@ class SockeyeModel(pt.nn.Module):
 
         :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
         :param valid_length: Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :param metadata_ids: Optional metadata IDs.
+                             Shape: (batch_size, max_md_seq_len)
+        :param metadata_weights: Optional metadata weights.
+                                 Shape: (batch_size, max_md_seq_len)
         :param constant_length_ratio: Constant length ratio
         :return: Initial states for the decoder, predicted output length of shape (batch_size,), 0 if not available.
                  Returns the neural vocabulary selection model prediction if enabled, None otherwise.
         """
 
         # Encode input. Shape: (batch, length, num_hidden), (batch,)
-        source_encoded, source_encoded_lengths, att_mask = self.encode(inputs, valid_length=valid_length)
+        source_encoded, source_encoded_lengths, att_mask = self.encode(
+            inputs, valid_length=valid_length, metadata_ids=metadata_ids, metadata_weights=metadata_weights)
 
         predicted_output_length = self.predict_output_length(source_encoded,
                                                              source_encoded_lengths,
@@ -286,8 +312,8 @@ class SockeyeModel(pt.nn.Module):
         """
         source_embed = self.embedding_source(source)
         target_embed = self.embedding_target(target)
-        metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights) \
-            if self.embedding_metadata is not None else C.NONE_TENSOR
+        metadata_embed = self.scripted_embedding_metadata(metadata_ids, metadata_weights) \
+            if self.scripted_embedding_metadata is not None else C.NONE_TENSOR
         source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length, metadata_embed)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         nvs = None

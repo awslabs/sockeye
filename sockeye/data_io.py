@@ -1332,8 +1332,8 @@ class MetadataReader:
                 if len(data) == 0:
                     yield None
                     continue
-                names, weights = zip(*data.items())
-                yield [tokens2ids(names, self.vocab), list(float(value) for value in weights)]
+                ids, weights = zip(*data.items())
+                yield [tokens2ids(ids, self.vocab), list(float(value) for value in weights)]
 
 
 def create_sequence_readers(sources: List[str], targets: List[str],

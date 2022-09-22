@@ -250,7 +250,9 @@ class _TestInference(sockeye.beam_search._Inference):
 
     def encode_and_initialize(self,
                               inputs: pt.Tensor,
-                              valid_length: Optional[pt.Tensor] = None):
+                              valid_length: Optional[pt.Tensor] = None,
+                              metadata_ids: Optional[pt.Tensor] = None,
+                              metadata_weights: Optional[pt.Tensor] = None):
         batch_size = inputs.shape[0]
         # 'lengths'
         internal_lengths = pt.zeros(batch_size, 1, dtype=pt.int)

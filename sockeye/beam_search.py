@@ -39,7 +39,9 @@ class _Inference(ABC):
     @abstractmethod
     def encode_and_initialize(self,
                               inputs: pt.Tensor,
-                              valid_length: pt.Tensor):
+                              valid_length: pt.Tensor,
+                              metadata_ids: Optional[pt.Tensor] = None,
+                              metadata_weights: Optional[pt.Tensor] = None):
         raise NotImplementedError()
 
     @abstractmethod
@@ -73,8 +75,13 @@ class _SingleModelInference(_Inference):
     def state_structure(self) -> List:
         return [self._model.state_structure()]
 
-    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: pt.Tensor):
-        states, predicted_output_length, nvs_prediction = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
+    def encode_and_initialize(self,
+                              inputs: pt.Tensor,
+                              valid_length: pt.Tensor,
+                              metadata_ids: Optional[pt.Tensor] = None,
+                              metadata_weights: Optional[pt.Tensor] = None):
+        states, predicted_output_length, nvs_prediction = self._model.encode_and_initialize(
+            inputs, valid_length, metadata_ids, metadata_weights, self._const_lr)
         return states, predicted_output_length, nvs_prediction
 
     def decode_step(self,
@@ -133,12 +140,17 @@ class _EnsembleInference(_Inference):
     def state_structure(self) -> List:
         return [model.state_structure() for model in self._models]
 
-    def encode_and_initialize(self, inputs: pt.Tensor, valid_length: pt.Tensor):
+    def encode_and_initialize(self,
+                              inputs: pt.Tensor,
+                              valid_length: pt.Tensor,
+                              metadata_ids: Optional[pt.Tensor] = None,
+                              metadata_weights: Optional[pt.Tensor] = None):
         model_states = []  # type: List[pt.Tensor]
         predicted_output_lengths = []  # type: List[pt.Tensor]
         nvs_predictions = []
         for model in self._models:
-            states, predicted_output_length, nvs_prediction = model.encode_and_initialize(inputs, valid_length, self._const_lr)
+            states, predicted_output_length, nvs_prediction = model.encode_and_initialize(
+                inputs, valid_length, metadata_ids, metadata_weights, self._const_lr)
             if nvs_prediction is not None:
                 nvs_predictions.append(nvs_prediction)
 
@@ -673,6 +685,8 @@ class GreedySearch(Search):
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.RestrictLexicon] = None,
                 max_output_lengths: pt.Tensor = None,
+                metadata_ids: pt.Tensor = None,
+                metadata_weights: pt.Tensor = None,
                 target_prefix: Optional[pt.Tensor] = None,
                 target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
         """
@@ -683,6 +697,10 @@ class GreedySearch(Search):
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param max_output_lengths: ndarray of maximum output lengths per input in source.
                 Shape: (batch_size=1,). Dtype: int32.
+        :param metadata_ids: Optional metadata IDs.
+                             Shape: (batch_size, max_md_seq_len)
+        :param metadata_weights: Optional metadata weights.
+                                 Shape: (batch_size, max_md_seq_len)
         :param target_prefix: Target prefix ids. Shape: (batch_size=1, max target prefix length).
         :param target_prefix_factors: Target prefix factor ids.
                 Shape: (batch_size=1, max target prefix factors length, num_target_factors).
@@ -701,7 +719,8 @@ class GreedySearch(Search):
         outputs = []  # type: List[pt.Tensor]
 
         # (0) encode source sentence, returns a list
-        model_states, _, nvs_prediction = self._inference.encode_and_initialize(source, source_length)
+        model_states, _, nvs_prediction = self._inference.encode_and_initialize(source, source_length,
+                                                                                metadata_ids, metadata_weights)
         # TODO: check for disabled predicted output length
 
         vocab_slice_ids = None  # type: Optional[pt.Tensor]
@@ -856,6 +875,8 @@ class BeamSearch(Search):
                 source_length: pt.Tensor,
                 restrict_lexicon: Optional[lexicon.RestrictLexicon],
                 max_output_lengths: pt.Tensor,
+                metadata_ids: pt.Tensor = None,
+                metadata_weights: pt.Tensor = None,
                 target_prefix: Optional[pt.Tensor] = None,
                 target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
         """
@@ -866,6 +887,10 @@ class BeamSearch(Search):
         :param restrict_lexicon: Lexicon to use for vocabulary restriction.
         :param max_output_lengths: Tensor of maximum output lengths per input in source.
                 Shape: (batch_size,). Dtype: int32.
+        :param metadata_ids: Optional metadata IDs.
+                             Shape: (batch_size, max_md_seq_len)
+        :param metadata_weights: Optional metadata weights.
+                                 Shape: (batch_size, max_md_seq_len)
         :param target_prefix: Target prefix ids. Shape: (batch_size, max prefix length).
         :param target_prefix_factors: Target prefix factors ids.
                 Shape: (batch_size, max prefix factors length, num_target_factors).
@@ -915,7 +940,8 @@ class BeamSearch(Search):
                                               device=self.device, dtype=self.dtype)]
 
         # (0) encode source sentence, returns a list
-        model_states, estimated_reference_lengths, nvs_prediction = self._inference.encode_and_initialize(source, source_length)
+        model_states, estimated_reference_lengths, nvs_prediction = self._inference.encode_and_initialize(
+            source, source_length, metadata_ids, metadata_weights)
         # repeat states to beam_size
         if self._traced_repeat_states is None:
             logger.debug("Tracing repeat_states")
