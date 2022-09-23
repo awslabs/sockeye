@@ -72,12 +72,12 @@ def run_translate(args: argparse.Namespace):
         use_cpu = True
     device = pt.device('cpu') if use_cpu else pt.device('cuda', args.device_id)
     logger.info(f"Translate Device: {device}")
-    models, source_vocabs, target_vocabs = load_models(device=device,
-                                                       model_folders=args.models,
-                                                       checkpoints=args.checkpoints,
-                                                       dtype=args.dtype,
-                                                       clamp_to_dtype=args.clamp_to_dtype,
-                                                       inference_only=True)
+    models, source_vocabs, target_vocabs, metadata_vocab = load_models(device=device,
+                                                                       model_folders=args.models,
+                                                                       checkpoints=args.checkpoints,
+                                                                       dtype=args.dtype,
+                                                                       clamp_to_dtype=args.clamp_to_dtype,
+                                                                       inference_only=True)
 
     restrict_lexicon = None  # type: Optional[Union[RestrictLexicon, Dict[str, RestrictLexicon]]]
     if args.restrict_lexicon is not None:
@@ -132,6 +132,7 @@ def run_translate(args: argparse.Namespace):
                                       models=models,
                                       source_vocabs=source_vocabs,
                                       target_vocabs=target_vocabs,
+                                      metadata_vocab=metadata_vocab,
                                       restrict_lexicon=restrict_lexicon,
                                       strip_unknown_words=args.strip_unknown_words,
                                       sample=args.sample,

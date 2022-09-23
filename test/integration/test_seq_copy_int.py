@@ -274,13 +274,14 @@ def _test_checkpoint_decoder(dev_source_path: str, dev_target_path: str, model_p
         num_dev_sent = sum(1 for _ in dev_fd)
     sample_size = min(1, int(num_dev_sent * 0.1))
 
-    model, source_vocabs, target_vocabs = load_model(model_folder=model_path, device=pt.device('cpu'))
+    model, source_vocabs, target_vocabs, metadata_vocab = load_model(model_folder=model_path, device=pt.device('cpu'))
 
     cp_decoder = sockeye.checkpoint_decoder.CheckpointDecoder(device=pt.device('cpu'),
                                                               inputs=[dev_source_path],
                                                               references=[dev_target_path],
                                                               source_vocabs=source_vocabs,
                                                               target_vocabs=target_vocabs,
+                                                              metadata_vocab=metadata_vocab,
                                                               model=model,
                                                               model_folder=model_path,
                                                               sample_size=sample_size,

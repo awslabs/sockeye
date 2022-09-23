@@ -70,7 +70,7 @@ def test_quantize():
         del fp32_params
 
         # Check loaded float16 model
-        model, _, _ = sockeye.model.load_model(model_dir)
+        model, _, _, _ = sockeye.model.load_model(model_dir)
         assert model.dtype == torch.float16
         for param in model.parameters():
             assert param.dtype == torch.float16

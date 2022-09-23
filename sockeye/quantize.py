@@ -46,7 +46,7 @@ def quantize(args: argparse.Namespace):
     params_fname = os.path.join(args.model, C.PARAMS_BEST_NAME)
     config_fname = os.path.join(args.model, C.CONFIG_NAME)
 
-    model, _, _ = load_model(args.model, device=pt.device('cpu'))
+    model, _, _, _ = load_model(args.model, device=pt.device('cpu'))
     original_dtype = model.config.dtype
 
     if original_dtype == args.dtype:

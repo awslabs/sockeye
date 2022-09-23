@@ -57,7 +57,7 @@ def score(args: argparse.Namespace):
     device = pt.device('cpu') if use_cpu else pt.device('cuda', args.device_id)
     logger.info(f"Scoring device: {device}")
 
-    model, source_vocabs, target_vocabs = load_model(args.model, device=device, dtype=args.dtype)
+    model, source_vocabs, target_vocabs, metadata_vocab = load_model(args.model, device=device, dtype=args.dtype)
     model.eval()
 
     max_seq_len_source = model.max_supported_len_source

@@ -89,9 +89,9 @@ def main():
 def embeddings(args: argparse.Namespace):
     logger.info("Arguments: %s", args)
 
-    sockeye_model, source_vocabs, target_vocabs = model.load_model(args.model,
-                                                                   checkpoint=args.checkpoint,
-                                                                   device=pt.device('cpu'))
+    sockeye_model, source_vocabs, target_vocabs, _ = model.load_model(args.model,
+                                                                      checkpoint=args.checkpoint,
+                                                                      device=pt.device('cpu'))
     sockeye_model.eval()
 
     if args.side == "source":

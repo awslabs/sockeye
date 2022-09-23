@@ -122,17 +122,15 @@ class SockeyeModel(pt.nn.Module):
                                                   dtype=self.dtype)
 
         # Optional metadata embedding
-        self.embedding_metadata = None  # type: Optional[encoder.MetadataEmbedding]
-        self.scripted_embedding_metadata = None  # type: Optional[pt.jit.ScriptModule]
+        self.embedding_metadata = None  # type: Optional[pt.jit.ScriptModule]
         if self.config.config_encoder.add_metadata is not None and config.vocab_size_metadata is not None:
             # Same size as encoder representations, same dropout as source
             # embeddings
-            self.embedding_metadata = encoder.MetadataEmbedding(
-                vocab_size=config.vocab_size_metadata,
-                model_size=self.config.config_encoder.model_size,
-                dropout=config.config_embed_source.dropout,
-                dtype=self.dtype)
-            self.scripted_embedding_metadata = pt.jit.script(self.embedding_metadata)
+            self.embedding_metadata = pt.jit.script(
+                encoder.MetadataEmbedding(vocab_size=config.vocab_size_metadata,
+                                          model_size=self.config.config_encoder.model_size,
+                                          dropout=config.config_embed_source.dropout,
+                                          dtype=self.dtype))
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
@@ -238,10 +236,13 @@ class SockeyeModel(pt.nn.Module):
         source_embed = self.traced_embedding_source(inputs)
 
         if self.embedding_metadata is not None:
-            if self.inference_only:
-                metadata_embed = self.scripted_embedding_metadata(metadata_ids, metadata_weights)
-            else:
-                metadata_embed = self.embedding_metadata(metadata_ids.clone(), metadata_weights.clone())
+            if not self.inference_only:
+                # When running the checkpoint decoder (calling this method when
+                # inference_only = False), we need a non-inference mode copy of
+                # the metadata weights (float32) or PyTorch will raise an error.
+                # The ids (int32) do not need a non-inference mode copy.
+                metadata_weights = pt.tensor(metadata_weights, requires_grad=True)
+            metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights)
         else:
             metadata_embed = C.NONE_TENSOR
 
@@ -312,8 +313,8 @@ class SockeyeModel(pt.nn.Module):
         """
         source_embed = self.embedding_source(source)
         target_embed = self.embedding_target(target)
-        metadata_embed = self.scripted_embedding_metadata(metadata_ids, metadata_weights) \
-            if self.scripted_embedding_metadata is not None else C.NONE_TENSOR
+        metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights) \
+            if self.embedding_metadata is not None else C.NONE_TENSOR
         source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length, metadata_embed)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         nvs = None
@@ -701,7 +702,10 @@ def load_model(model_folder: str,
                train_decoder_only: bool = False,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
-               forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
+               forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel,
+                                                          List[vocab.Vocab],
+                                                          List[vocab.Vocab],
+                                                          Optional[vocab.Vocab]]:
     """
     Load a model from model_folder.
 
@@ -716,10 +720,11 @@ def load_model(model_folder: str,
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
-    :return: List of models, source vocabularies, target vocabularies.
+    :return: List of models, source vocabularies, target vocabularies, optional metadata vocabulary.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
     target_vocabs = vocab.load_target_vocabs(model_folder)
+    metadata_vocab = vocab.load_metadata_vocab(model_folder)
     model_version = utils.load_version(os.path.join(model_folder, C.VERSION_NAME))
     logger.info("Model version: %s", model_version)
     utils.check_version(model_version)
@@ -761,7 +766,7 @@ def load_model(model_folder: str,
                           "Number of loaded target vocabularies (%d) does not match "
                           "number of target factors for model '%s' (%d)" % (len(target_vocabs), model_folder,
                                                                             model.num_target_factors))
-    return model, source_vocabs, target_vocabs
+    return model, source_vocabs, target_vocabs, metadata_vocab
 
 
 def load_models(device: pt.device,
@@ -774,7 +779,9 @@ def load_models(device: pt.device,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
                 forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel],
-                                                           List[vocab.Vocab], List[vocab.Vocab]]:
+                                                           List[vocab.Vocab],
+                                                           List[vocab.Vocab],
+                                                           Optional[vocab.Vocab]]:
     """
     Loads a list of models for inference.
 
@@ -789,13 +796,14 @@ def load_models(device: pt.device,
     :param allow_missing: Allow missing parameters in the loaded models.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
-    :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
+    :return: List of models, source vocabularies, target vocabularies, optional metadata vocabulary.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
     load_time_start = time.time()
     models = []  # type: List[SockeyeModel]
     source_vocabs = []  # type: List[List[vocab.Vocab]]
     target_vocabs = []  # type: List[List[vocab.Vocab]]
+    metadata_vocabs = []  # type: List[Optional[vocab.Vocab]]
 
     if checkpoints is None:
         checkpoints = [None] * len(model_folders)
@@ -803,19 +811,20 @@ def load_models(device: pt.device,
         utils.check_condition(len(checkpoints) == len(model_folders), "Must provide checkpoints for each model")
 
     for model_folder, checkpoint in zip(model_folders, checkpoints):
-        model, src_vcbs, trg_vcbs = load_model(model_folder,
-                                               device=device,
-                                               dtype=dtype,
-                                               clamp_to_dtype=clamp_to_dtype,
-                                               checkpoint=checkpoint,
-                                               inference_only=inference_only,
-                                               train_decoder_only=train_decoder_only,
-                                               allow_missing=allow_missing,
-                                               set_grad_req_null=set_grad_req_null,
-                                               forward_pass_cache_size=forward_pass_cache_size)
+        model, src_vcbs, trg_vcbs, md_vcb = load_model(model_folder,
+                                                       device=device,
+                                                       dtype=dtype,
+                                                       clamp_to_dtype=clamp_to_dtype,
+                                                       checkpoint=checkpoint,
+                                                       inference_only=inference_only,
+                                                       train_decoder_only=train_decoder_only,
+                                                       allow_missing=allow_missing,
+                                                       set_grad_req_null=set_grad_req_null,
+                                                       forward_pass_cache_size=forward_pass_cache_size)
         models.append(model)
         source_vocabs.append(src_vcbs)
         target_vocabs.append(trg_vcbs)
+        metadata_vocabs.append(md_vcb)
 
     first_model_vocabs = source_vocabs[0]
     for fi in range(len(first_model_vocabs)):
@@ -825,7 +834,9 @@ def load_models(device: pt.device,
     for fi in range(len(first_model_vocabs)):
         utils.check_condition(vocab.are_identical(*[target_vocabs[i][fi] for i in range(len(target_vocabs))]),
                               "Target vocabulary ids do not match. Factor %d" % fi)
+    utils.check_condition((not any(metadata_vocabs)) or vocab.are_identical(*metadata_vocabs),
+                          "Metadata vocabulary ids do not match.")
 
     load_time = time.time() - load_time_start
     logger.info("%d model(s) loaded in %.4fs", len(models), load_time)
-    return models, source_vocabs[0], target_vocabs[0]
+    return models, source_vocabs[0], target_vocabs[0], metadata_vocabs[0]
