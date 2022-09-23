@@ -223,7 +223,7 @@ class TranslatorInput:
             yield TranslatorInput(sentence_id=self.sentence_id,
                                   tokens=self.tokens[i:i + chunk_size],
                                   factors=factors,
-                                  metadata_dict=self.metadata_dict,
+                                  metadata_dict=self.metadata_dict.copy() if self.metadata_dict is not None else None,
                                   source_prefix_tokens=self.source_prefix_tokens,
                                   source_prefix_factors=self.source_prefix_factors,
                                   target_prefix_tokens=target_prefix_tokens,

@@ -137,6 +137,19 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
                 assert factor == expected_factor[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
 
 
+@pytest.mark.parametrize("sentence_id, sentence, metadata_dict, chunk_size",
+                         [(1, "a test", None, 2),
+                          (1, "a test", {}, 2),
+                          (1, "a test", {'a': 1}, 2),
+                          (1, "a test", {'a': 1}, 1)])
+def test_translator_input_with_metadata(sentence_id, sentence, metadata_dict, chunk_size):
+    tokens = sentence.split()
+    trans_input = sockeye.inference.TranslatorInput(sentence_id=sentence_id, tokens=tokens, metadata_dict=metadata_dict)
+    for chunked_input in trans_input.chunks(chunk_size):
+        # The metadata dict is copied as is to each chunk
+        assert chunked_input.metadata_dict == metadata_dict
+
+
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size, source_prefix, source_prefix_factors",
                          [(1, "a test", None, 4, "prefix test", None),
                           (1, "a test", None, 2, "prefix test", None),
