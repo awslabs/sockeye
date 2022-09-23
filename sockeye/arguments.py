@@ -1212,6 +1212,13 @@ def add_inference_args(params):
                                help='List of input files containing additional source factors,'
                                     'each token-parallel to the source. Default: %(default)s.')
 
+    decode_params.add_argument(C.INFERENCE_ARG_INPUT_METADATA_LONG, C.INFERENCE_ARG_INPUT_METADATA_SHORT,
+                               default=None,
+                               type=regular_file(),
+                               help='Input file containing sentence-level metadata (line-parallel with source). One '
+                                    'JSON dictionary per line containing name-weight (str-float) pairs. '
+                                    'Default: %(default)s.')
+
     decode_params.add_argument('--json-input',
                                action='store_true',
                                default=False,

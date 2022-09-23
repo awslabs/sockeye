@@ -158,6 +158,7 @@ def test_model_parameters(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('-m model', dict(input=None,
                       input_factors=None,
+                      input_metadata=None,
                       json_input=False,
                       output=None,
                       checkpoints=None,

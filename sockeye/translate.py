@@ -16,6 +16,7 @@ Translation CLI.
 """
 
 import argparse
+import itertools
 import logging
 import sys
 import time
@@ -151,13 +152,15 @@ def run_translate(args: argparse.Namespace):
                        chunk_size=args.chunk_size,
                        input_file=args.input,
                        input_factors=args.input_factors,
+                       input_metadata=args.input_metadata,
                        input_is_json=args.json_input)
 
 
 def make_inputs(input_file: Optional[str],
                 translator: inference.Translator,
                 input_is_json: bool,
-                input_factors: Optional[List[str]] = None) -> Generator[inference.TranslatorInput, None, None]:
+                input_factors: Optional[List[str]] = None,
+                input_metadata: Optional[str] = None) -> Generator[inference.TranslatorInput, None, None]:
     """
     Generates TranslatorInput instances from input. If input is None, reads from stdin. If num_input_factors > 1,
     the function will look for factors attached to each token, separated by '|'.
@@ -168,10 +171,12 @@ def make_inputs(input_file: Optional[str],
     :param translator: Translator that will translate each line of input.
     :param input_is_json: Whether the input is in json format.
     :param input_factors: Source factor files.
+    :param input_metadata: Optional metadata file.
     :return: TranslatorInput objects.
     """
     if input_file is None:
         check_condition(input_factors is None, "Translating from STDIN, not expecting any factor files.")
+        check_condition(input_metadata is None, "Translating from STDIN, not expecting a metadata file.")
         for sentence_id, line in enumerate(sys.stdin, 1):
             if input_is_json:
                 yield inference.make_input_from_json_string(sentence_id=sentence_id,
@@ -190,13 +195,16 @@ def make_inputs(input_file: Optional[str],
                                 translator.num_source_factors, len(inputs)))
         with ExitStack() as exit_stack:
             streams = [exit_stack.enter_context(smart_open(i)) for i in inputs]
-            for sentence_id, inputs in enumerate(zip(*streams), 1):
+            metadata_stream = exit_stack.enter_context(smart_open(input_metadata)) if input_metadata is not None else []
+            for sentence_id, (inputs, metadata) in enumerate(itertools.zip_longest(zip(*streams), metadata_stream), 1):
                 if input_is_json:
                     yield inference.make_input_from_json_string(sentence_id=sentence_id,
                                                                 json_string=inputs[0],
                                                                 translator=translator)
                 else:
-                    yield inference.make_input_from_multiple_strings(sentence_id=sentence_id, strings=list(inputs))
+                    yield inference.make_input_from_multiple_strings(sentence_id=sentence_id,
+                                                                     strings=list(inputs),
+                                                                     metadata_string=metadata)
 
 
 def read_and_translate(translator: inference.Translator,
@@ -204,6 +212,7 @@ def read_and_translate(translator: inference.Translator,
                        chunk_size: Optional[int],
                        input_file: Optional[str] = None,
                        input_factors: Optional[List[str]] = None,
+                       input_metadata: Optional[str] = None,
                        input_is_json: bool = False) -> None:
     """
     Reads from either a file or stdin and translates each line, calling the output_handler with the result.
@@ -213,6 +222,7 @@ def read_and_translate(translator: inference.Translator,
     :param chunk_size: The size of the portion to read at a time from the input.
     :param input_file: Optional path to file which will be translated line-by-line if included, if none use stdin.
     :param input_factors: Optional list of paths to files that contain source factors.
+    :param input_metadata: Optional path to metadata file.
     :param input_is_json: Whether the input is in json format.
     """
     if chunk_size is None:
@@ -231,7 +241,8 @@ def read_and_translate(translator: inference.Translator,
     logger.info("Translating...")
 
     total_time, total_lines = 0.0, 0
-    for chunk in grouper(make_inputs(input_file, translator, input_is_json, input_factors), size=chunk_size):
+    for chunk in grouper(make_inputs(input_file, translator, input_is_json, input_factors, input_metadata),
+                         size=chunk_size):
         chunk_time = translate(output_handler, chunk, translator)
         total_lines += len(chunk)
         total_time += chunk_time
