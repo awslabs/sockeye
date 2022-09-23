@@ -237,10 +237,14 @@ class SockeyeModel(pt.nn.Module):
 
         if self.embedding_metadata is not None:
             if not self.inference_only:
-                # When running the checkpoint decoder (calling this method when
-                # inference_only = False), we need a non-inference mode copy of
-                # the metadata weights (float32) or PyTorch will raise an error.
-                # The ids (int32) do not need a non-inference mode copy.
+                # There appears to be a conflict when calling the scripted
+                # metadata embedding layer in inference mode after it has been
+                # included in a non-inference mode trace of the entire model.
+                # As a workaround, we detect this case (calling this method when
+                # inference_only = False, such as when running the checkpoint
+                # decoder) and create a non-inference mode copy of the metadata
+                # weights (float32). The ids (int32) do not need a non-inference
+                # mode copy because integer tensors cannot require gradients.
                 metadata_weights = pt.tensor(metadata_weights, requires_grad=True)
             metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights)
         else:
