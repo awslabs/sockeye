@@ -140,8 +140,8 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
 @pytest.mark.parametrize("sentence_id, sentence, metadata_dict, chunk_size",
                          [(1, "a test", None, 2),
                           (1, "a test", {}, 2),
-                          (1, "a test", {'a': 1}, 2),
-                          (1, "a test", {'a': 1}, 1)])
+                          (1, "a test", {'a': 1, 'b': 0.5, 'c': 0.33}, 2),
+                          (1, "a test", {'a': 1, 'b': 0.5, 'c': 0.33}, 1)])
 def test_translator_input_with_metadata(sentence_id, sentence, metadata_dict, chunk_size):
     tokens = sentence.split()
     trans_input = sockeye.inference.TranslatorInput(sentence_id=sentence_id, tokens=tokens, metadata_dict=metadata_dict)
@@ -322,6 +322,17 @@ def test_make_input_from_valid_json_string(text, factors):
         assert inp.factors is None
 
 
+@pytest.mark.parametrize("json_str,expected_metadata_dict",
+                         [(r'{"text": "this is a test", "metadata": {}}', {}),
+                          (r'{"text": "this is a test", "metadata": {"a": 1, "b": 0.5, "c": 0.33}}',
+                           {'a': 1, 'b': 0.5, 'c': 0.33})])
+def test_make_input_from_valid_json_string_metadata(json_str, expected_metadata_dict):
+    sentence_id = 1
+    translator = mock_translator()
+    inp = sockeye.inference.make_input_from_json_string(sentence_id, json_str, translator)
+    assert inp.metadata_dict == expected_metadata_dict
+
+
 def test_make_input_from_valid_json_string_restrict_lexicon():
     sentence_id = 1
     text = 'this is a test'
@@ -400,6 +411,12 @@ def test_make_input_from_multiple_strings(strings):
     assert len(inp) == len(expected_tokens)
     assert inp.tokens == expected_tokens
     assert inp.factors == expected_factors
+
+
+def test_make_input_from_multiple_strings_metadata():
+    inp = sockeye.inference.make_input_from_multiple_strings(1, strings=["this is a test"],
+                                                             metadata_string='{"a": 1, "b": 0.5, "c": 0.33}')
+    assert inp.metadata_dict == {'a': 1, 'b': 0.5, 'c': 0.33}
 
 
 def test_get_best_word_indices_for_kth_hypotheses():
