@@ -25,7 +25,8 @@ from sockeye import constants as C
 from sockeye.test_utils import run_train_translate, run_translate_restrict, \
     TRANSLATE_PARAMS_COMMON, TRANSLATE_WITH_FACTORS_COMMON, TRANSLATE_WITH_METADATA_COMMON, \
     collect_translate_output_and_scores, SCORE_PARAMS_COMMON, \
-    SCORE_WITH_SOURCE_FACTORS_COMMON, SCORE_WITH_TARGET_FACTORS_COMMON, TRANSLATE_WITH_JSON_FORMAT
+    SCORE_WITH_SOURCE_FACTORS_COMMON, SCORE_WITH_TARGET_FACTORS_COMMON, SCORE_WITH_METADATA_COMMON, \
+    TRANSLATE_WITH_JSON_FORMAT
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +205,8 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
         params += SCORE_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['test_source_factors']))
     if target_with_target_prefix_factor_paths:
         params += SCORE_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(target_with_target_prefix_factor_paths))
+    if 'test_metadata' in data:
+        params += SCORE_WITH_METADATA_COMMON.format(metadata=data['test_metadata'])
 
     logger.info("Scoring with params %s", params)
     with patch.object(sys, "argv", params.split()):
@@ -224,6 +227,8 @@ def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_score
         params += SCORE_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['test_source_factors']))
     if target_factor_paths:
         params += SCORE_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(target_factor_paths))
+    if 'test_metadata' in data:
+        params += SCORE_WITH_METADATA_COMMON.format(metadata=data['test_metadata'])
 
     logger.info("Scoring with params %s", params)
     with patch.object(sys, "argv", params.split()):

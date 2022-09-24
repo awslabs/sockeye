@@ -78,8 +78,10 @@ def score(args: argparse.Namespace):
     score_iter = data_io.get_scoring_data_iters(
         sources=sources,
         targets=targets,
+        metadata=args.metadata,
         source_vocabs=source_vocabs,
         target_vocabs=target_vocabs,
+        metadata_vocab=metadata_vocab,
         batch_size=args.batch_size,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target)

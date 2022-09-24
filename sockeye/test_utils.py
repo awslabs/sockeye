@@ -273,6 +273,8 @@ SCORE_PARAMS_COMMON = "--use-cpu --model {model} --source {source} --target {tar
 SCORE_WITH_SOURCE_FACTORS_COMMON = " --source-factors {source_factors}"
 SCORE_WITH_TARGET_FACTORS_COMMON = " --target-factors {target_factors}"
 
+SCORE_WITH_METADATA_COMMON = " --metadata {metadata}"
+
 
 def run_train_translate(train_params: str,
                         translate_params: str,

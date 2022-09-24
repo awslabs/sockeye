@@ -1075,7 +1075,9 @@ def get_scoring_data_iters(sources: List[str],
                            target_vocabs: List[vocab.Vocab],
                            batch_size: int,
                            max_seq_len_source: int,
-                           max_seq_len_target: int) -> 'BaseParallelSampleIter':
+                           max_seq_len_target: int,
+                           metadata: Optional[str] = None,
+                           metadata_vocab: Optional[vocab.Vocab] = None) -> 'BaseParallelSampleIter':
     """
     Returns a data iterator for scoring. The iterator loads data on demand,
     batch by batch, and does not skip any lines. Lines that are too long
@@ -1088,6 +1090,8 @@ def get_scoring_data_iters(sources: List[str],
     :param batch_size: Batch size.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
+    :param metadata: Optional path to training metadata.
+    :param metadata_vocab: Vocabulary for metadata (if specified) or None.
     :return: The scoring data iterator.
     """
     logger.info("==============================")
@@ -1107,8 +1111,10 @@ def get_scoring_data_iters(sources: List[str],
     scoring_iter = BatchedRawParallelSampleIter(data_loader=data_loader,
                                                 sources=sources,
                                                 targets=targets,
+                                                metadata=metadata,
                                                 source_vocabs=source_vocabs,
                                                 target_vocabs=target_vocabs,
+                                                metadata_vocab=metadata_vocab,
                                                 bucket=bucket,
                                                 batch_size=batch_size,
                                                 max_lens=(max_seq_len_source, max_seq_len_target),
@@ -1962,7 +1968,9 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                  max_lens: Tuple[int, int],
                  num_source_factors: int = 1,
                  num_target_factors: int = 1,
-                 dtype='int32') -> None:
+                 dtype='int32',
+                 metadata: Optional[str] = None,
+                 metadata_vocab: Optional[vocab.Vocab] = None) -> None:
         super().__init__(buckets=[bucket],
                          batch_size=batch_size,
                          bucket_batch_sizes=[BucketBatchSize(bucket, batch_size, None)],
@@ -1973,8 +1981,15 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         self.data_loader = data_loader
         self.sources_sentences, self.targets_sentences = create_sequence_readers(sources, targets,
                                                                                  source_vocabs, target_vocabs)
+        self.metadata_sequences = None  # type: Optional[MetadataReader]
+        if metadata is not None:
+            check_condition(metadata_vocab is not None, 'metadata also requires metadata_vocab')
+            self.metadata_sequences = MetadataReader(metadata, metadata_vocab)
+
         self.sources_iters = [iter(s) for s in self.sources_sentences]
         self.targets_iters = [iter(s) for s in self.targets_sentences]
+        self.metadata_iter = iter(self.metadata_sequences) if self.metadata_sequences is not None else None
+
         self.max_len_source, self.max_len_target = max_lens
         self.next_batch = None  # type: Optional[Batch]
         self.sentno = 1
@@ -1990,9 +2005,10 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         # Read batch_size lines from the source stream
         sources_sentences = [[] for _ in self.sources_sentences]  # type: List[List[str]]
         targets_sentences = [[] for _ in self.targets_sentences]  # type: List[List[str]]
+        metadata_sequences = [] if self.metadata_sequences is not None else None  # type: Optional[List[str]]
         num_read = 0
-        for num_read, (sources, targets, _) in enumerate(
-                parallel_iterate(self.sources_iters, self.targets_iters, skip_blanks=False), 1):
+        for num_read, (sources, targets, metadata) in enumerate(
+                parallel_iterate(self.sources_iters, self.targets_iters, self.metadata_iter, skip_blanks=False), 1):
             source_len = 0 if sources[0] is None else len(sources[0])
             target_len = 0 if targets[0] is None else len(targets[0])
             if source_len > self.max_len_source:
@@ -2010,6 +2026,8 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
                 sources_sentences[i].append(source)
             for i, target in enumerate(targets):
                 targets_sentences[i].append(target)
+            if metadata_sequences is not None:
+                metadata_sequences.append(metadata)
             if num_read == self.batch_size:
                 break
 
@@ -2022,11 +2040,13 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
             self.next_batch = None
             return False
 
-        dataset = self.data_loader.load(sources_sentences, targets_sentences, [num_read])
+        dataset = self.data_loader.load(source_iterables=sources_sentences, target_iterables=targets_sentences,
+                                        metadata_iterable=metadata_sequences, num_samples_per_bucket=[num_read])
 
         source = dataset.source[0]
         target, label = create_target_and_shifted_label_sequences(dataset.target[0])
-        self.next_batch = create_batch_from_parallel_sample(source, target, label)
+        metadata = dataset.metadata[0].get_batch(0, num_read) if dataset.metadata is not None else None
+        self.next_batch = create_batch_from_parallel_sample(source, target, label, metadata)
         return True
 
     def next(self) -> 'Batch':

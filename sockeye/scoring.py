@@ -123,7 +123,10 @@ class Scorer:
         # TODO: scoring should support multiple devices
         batch = batch.load(self.device)
 
-        model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
+        # Metadata weights (float32) need to be in non-inference mode
+        # (requires_grad=True) to work with a traced model.
+        model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length,
+                        batch.metadata_ids, pt.tensor(batch.metadata_weights, requires_grad=True))
         if self.traced_model is None:
             self.traced_model = pt.jit.trace(self.model, model_inputs, strict=False)
         outputs = self.traced_model(*model_inputs)  # type: Dict[str, pt.Tensor]
