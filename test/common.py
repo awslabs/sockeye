@@ -23,7 +23,7 @@ import sockeye.score
 import sockeye.translate
 from sockeye import constants as C
 from sockeye.test_utils import run_train_translate, run_translate_restrict, \
-    TRANSLATE_PARAMS_COMMON, TRANSLATE_WITH_FACTORS_COMMON, \
+    TRANSLATE_PARAMS_COMMON, TRANSLATE_WITH_FACTORS_COMMON, TRANSLATE_WITH_METADATA_COMMON, \
     collect_translate_output_and_scores, SCORE_PARAMS_COMMON, \
     SCORE_WITH_SOURCE_FACTORS_COMMON, SCORE_WITH_TARGET_FACTORS_COMMON, TRANSLATE_WITH_JSON_FORMAT
 
@@ -109,6 +109,8 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
                                translate_params_equiv)
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
+    if 'test_metadata' in data:
+        params += TRANSLATE_WITH_METADATA_COMMON.format(input_metadata=data['test_metadata'])
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()
     # Collect translate outputs and scores

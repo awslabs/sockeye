@@ -262,6 +262,8 @@ TRANSLATE_PARAMS_COMMON = "--use-cpu --models {model} --input {input} --output {
 
 TRANSLATE_WITH_FACTORS_COMMON = " --input-factors {input_factors}"
 
+TRANSLATE_WITH_METADATA_COMMON = " --input-metadata {input_metadata}"
+
 TRANSLATE_WITH_JSON_FORMAT = " --json-input"
 
 TRANSLATE_PARAMS_RESTRICT = "--restrict-lexicon {lexicon} --restrict-lexicon-topk {topk}"
@@ -407,6 +409,9 @@ def run_train_translate(train_params: str,
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
 
+    if 'test_metadata' in data:
+        params += TRANSLATE_WITH_METADATA_COMMON.format(input_metadata=data['test_metadata'])
+
     logger.info("Translating with params %s", params)
     with patch.object(sys, "argv", params.split()):
         sockeye.translate.main()
@@ -458,6 +463,8 @@ def run_translate_restrict(data: Dict[str, Any], translate_params: str) -> Dict[
                                   TRANSLATE_PARAMS_RESTRICT.format(lexicon=data['lexicon'], topk=1))
     if 'test_source_factors' in data:
         params += TRANSLATE_WITH_FACTORS_COMMON.format(input_factors=" ".join(data['test_source_factors']))
+    if 'test_metadata' in data:
+        params += TRANSLATE_WITH_METADATA_COMMON.format(input_metadata=data['test_metadata'])
     with patch.object(sys, "argv", params.split()):
         translate_mod.main()
 
