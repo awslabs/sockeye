@@ -235,25 +235,14 @@ class SockeyeModel(pt.nn.Module):
             self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
         source_embed = self.traced_embedding_source(inputs)
 
-        if self.embedding_metadata is not None:
-            if not self.inference_only:
-                # There appears to be a conflict when calling the scripted
-                # metadata embedding layer in inference mode after it has been
-                # included in a non-inference mode trace of the entire model.
-                # As a workaround, we detect this case (calling this method when
-                # inference_only = False, such as when running the checkpoint
-                # decoder) and create a non-inference mode copy of the metadata
-                # weights (float32). The ids (int32) do not need a non-inference
-                # mode copy because integer tensors cannot require gradients.
-                metadata_weights = pt.tensor(metadata_weights, requires_grad=True)
-            metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights)
-        else:
-            metadata_embed = C.NONE_TENSOR
+        metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights) \
+            if self.embedding_metadata is not None else C.NONE_TENSOR
 
         if self.traced_encoder is None:
             logger.debug("Tracing encoder")
             self.traced_encoder = pt.jit.trace(self.encoder, (source_embed, valid_length, metadata_embed))
         source_encoded, source_encoded_length, att_mask = self.traced_encoder(source_embed, valid_length, metadata_embed)
+
         return source_encoded, source_encoded_length, att_mask
 
     def encode_and_initialize(self,

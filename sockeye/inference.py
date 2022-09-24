@@ -1118,7 +1118,13 @@ class Translator:
             metadata_weights_np = np.zeros((batch_size, metadata_max_seq_len), dtype='float32')
             for i, weights in enumerate(metadata_weights_list):
                 metadata_weights_np[i, :weights.shape[0]] = weights
-            metadata_weights = pt.tensor(metadata_weights_np, device=self.device, dtype=pt.float32)
+            # As of version 1.12, PyTorch raises an error when using inference
+            # mode tensors with a scripted MetadataEmbedding module even if the
+            # module is called in inference mode. As a workaround, we create the
+            # weights tensor in non-inference mode by specifying
+            # requires_grad=True. The ids do not require this option because
+            # int32 tensors never require gradients.
+            metadata_weights = pt.tensor(metadata_weights_np, device=self.device, dtype=pt.float32, requires_grad=True)
 
         # During inference, if C.TARGET_FACTOR_SHIFT is True, predicted target_factors are left-shifted
         # (see _unshift_target_factors function()) so that they re-align with the words.
