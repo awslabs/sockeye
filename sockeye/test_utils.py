@@ -334,7 +334,7 @@ def run_train_translate(train_params: str,
             params += DEV_WITH_TARGET_FACTORS_COMMON.format(dev_target_factors=" ".join(data['dev_target_factors']))
 
         if 'dev_metadata' in data:
-            prepare_params += DEV_WITH_METADATA_COMMON.format(dev_metadata=data['dev_metadata'])
+            params += DEV_WITH_METADATA_COMMON.format(dev_metadata=data['dev_metadata'])
 
         logger.info("Starting training with parameters %s.", train_params)
         with patch.object(sys, "argv", params.split()):
