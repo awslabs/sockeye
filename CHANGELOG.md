@@ -15,6 +15,13 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Added
 
+- Sockeye can now train models that leverage sentence-level metadata in the form of name-weight pairs using the method described by Schioppa et al. ([2021](https://aclanthology.org/2021.emnlp-main.535)).
+  - The name-weight pairs for a given sentence are always specified as a JSON dictionary. The weights can encode tags (0 or 1) and scores (floating point values). Pairs with a weight of 0 do not need to be specified. For example, a data set might contain sentences from both "news" and "chat" domains as well as scores from an external language model. The JSON metadata for the first two sentences might be `{"news": 1, "lm_score": 0.37}` and `{"chat": 1, "lm_score": 0.25}`.
+  - To specify metadata for training sentences, use `sockeye-train` and `sockeye-prepare-data` argument `--metadata`. To specify metadata for validation sentences, use `sockeye-train` argument `--validation-metadata`. These files should be line-parallel with source and target files and contain one JSON dictionary per line. Blank lines are treated as empty dictionaries. A validation metadata file does not need to be specified when none of the validation sentences have metadata.
+  - To train a metadata-aware model, use `sockeye-train` argument `--encoder-add-metadata N`. For a given sentence, the model maps each name in the metadata dictionary to an embedding, multiplies it by the corresponding weight, and sums the results for a sentence-level embedding. The sentence-level embedding is then added to the encoder representation for each position at layer `N`. For `M` encoder layers, a value of `0` corresponds to adding metadata embeddings to source embeddings before running the encoder and a value of `M` corresponds to adding metadata embeddings to the final encoder representations before running the decoder.
+  - To specify metadata during inference, use `sockeye-translate` argument `--input-metadata`. Alternatively, use `--json-input` and specify `"metadata"` entries for sentences with metadata. For example: `{"text": "sample input", "metadata": {"news": 1, "lm_score": 0.37}}`. No metadata file or JSON input entries are needed when no input sentences contain metadata.
+  - To specify metadata for scoring, use `sockeye-score` argument `--metadata`. A metadata file does not need to be specified when no input sentences contain metadata.
+
 ### Changed
 
 - Sockeye uses a new dictionary-based prepared data format that supports metadata (version 7). The previous format (version 6) is still supported.
