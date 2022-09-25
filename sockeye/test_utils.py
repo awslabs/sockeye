@@ -25,6 +25,7 @@ import sockeye.constants as C
 import sockeye.prepare_data
 import sockeye.train
 import sockeye.translate
+import sockeye.utils
 import sockeye.lexicon
 
 logger = logging.getLogger(__name__)
@@ -72,8 +73,13 @@ def generate_digits_file(source_path: str,
         metadata_out.close()
 
 
-def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_file_with_tgt_prefix_path: str, \
-                                          src_factors_path: Optional[List[str]] = None, tgt_factors_path: List[str] = None, seed=13):
+def generate_json_input_file_with_tgt_prefix(src_path:str,
+                                             tgt_path: str,
+                                             json_file_with_tgt_prefix_path: str,
+                                             src_factors_path: Optional[List[str]] = None,
+                                             tgt_factors_path: Optional[List[str]] = None,
+                                             metadata_path: Optional[str] = None,
+                                             seed=13):
     random_gen = random.Random(seed)
     with open(src_path, "r") as src_reader, open(tgt_path, "r") as tgt_reader:
         with open(json_file_with_tgt_prefix_path, "w") as out:
@@ -87,6 +93,9 @@ def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_f
             if tgt_factors_path is not None:
                 list_tgt_factors = [open(tgt_factors, "r") for tgt_factors in tgt_factors_path]
                 list_tgt_factors = [[tf.strip().split() for tf in tgt_factors] for tgt_factors in list_tgt_factors]
+
+            if metadata_path is not None:
+                metadata_lines = [line.strip() for line in open(metadata_path, "r")]
 
             for i, stdigits in enumerate(zip(src_reader, tgt_reader)):
                 src_digits, tgt_digits = stdigits[0].strip(), stdigits[1].strip()
@@ -102,18 +111,20 @@ def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_f
                         list_tgt_factors[k][i] = list_tgt_factors[k][i][:random_pos]
                 tgt_prefix = C.TOKEN_SEPARATOR.join(tgt_prefix)
                 if src_factors_path is None and tgt_factors_path is None:
-                    jsone_line = {"text": src_digits, "target_prefix": tgt_prefix}
+                    json_line = {"text": src_digits, "target_prefix": tgt_prefix}
                 elif src_factors_path is not None and tgt_factors_path is None:
-                    jsone_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], \
+                    json_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], \
                     "target_prefix": tgt_prefix}
                 elif tgt_factors_path is not None and src_factors_path is None:
-                    jsone_line = {"text": src_digits, "target_prefix_factors": [C.TOKEN_SEPARATOR.join(tgt_factors[i]) for tgt_factors in list_tgt_factors], \
+                    json_line = {"text": src_digits, "target_prefix_factors": [C.TOKEN_SEPARATOR.join(tgt_factors[i]) for tgt_factors in list_tgt_factors], \
                     "target_prefix": tgt_prefix}
                 else:
-                    jsone_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], \
+                    json_line = {"text": src_digits, "factors": [src_factors[i] for src_factors in list_src_factors], \
                     "target_prefix_factors": [C.TOKEN_SEPARATOR.join(tgt_factors[i]) for tgt_factors in list_tgt_factors], \
                     "target_prefix": tgt_prefix}
-                print(json.dumps(jsone_line), file=out)
+                if metadata_path is not None and metadata_lines[i]:
+                    json_line[C.JSON_METADATA_KEY] = sockeye.utils.json_loads_dict(metadata_lines[i])
+                print(json.dumps(json_line), file=out)
 
 
 def generate_low_high_factors(input_path: str, output_path: str):
@@ -233,8 +244,9 @@ def tmp_digits_dataset(prefix: str,
 
         source_factors_path = None if 'test_source_factors' not in data else data['test_source_factors']
         target_factors_path = None if 'test_target_factors' not in data else data['test_target_factors']
+        metadata_path = None if 'test_metadata' not in data else data['test_metadata']
         generate_json_input_file_with_tgt_prefix(test_source_path, test_target_path, test_source_with_target_prefix_path, \
-            source_factors_path, target_factors_path)
+            source_factors_path, target_factors_path, metadata_path)
         yield data
 
 
