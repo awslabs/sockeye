@@ -468,6 +468,15 @@ class SockeyeModel(pt.nn.Module):
         # their original non-traced versions so there are no separate parameters
         # to load.
         missing = [key for key in missing if 'traced' not in key]
+        # Special cases
+        allowed_to_be_missing = set()
+        for key in missing:
+            if 'metadata' in key:
+                # Support initializing metadata aware models with non metadata
+                # aware model parameters
+                logger.info(f'Using random initialization for metadata parameter: {key}')
+                allowed_to_be_missing.add(key)
+        missing = [key for key in missing if key not in allowed_to_be_missing]
         if not allow_missing:
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:
