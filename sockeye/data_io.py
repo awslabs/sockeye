@@ -37,7 +37,7 @@ from . import config
 from . import constants as C
 from . import utils
 from . import vocab
-from .utils import check_condition, smart_open, get_tokens, OnlineMeanAndVariance, combine_means, combine_stds
+from .utils import check_condition, is_distributed, smart_open, get_tokens, OnlineMeanAndVariance, combine_means, combine_stds
 
 logger = logging.getLogger(__name__)
 
@@ -2349,6 +2349,15 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
     metadata_ids, metadata_weights = metadata if metadata is not None else (C.NONE_TENSOR, C.NONE_TENSOR)
+    if utils.is_distributed() and metadata_ids.numel() == 0:
+        # When no metadata is present, metadata-based parameters don't
+        # participate in the model's forward pass, which causes issues for
+        # distributed training. Setting `find_unused_parameters=True` works for
+        # PyTorch DistributedDataParallel, but not for DeepSpeed. Instead, we
+        # replace empty metadata with a single zero-weighted padding ID for each
+        # example so that metadata-based parameters are always used.
+        metadata_ids = torch.full((source.shape[0], 1), C.PAD_ID, device=source.device, dtype=torch.int32)
+        metadata_weights = torch.zeros((source.shape[0], 1), device=source.device, dtype=torch.float32)
 
     return Batch(source, source_length, target, target_length, labels, samples, tokens,
                  metadata_ids=metadata_ids, metadata_weights=metadata_weights)
