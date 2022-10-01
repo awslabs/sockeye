@@ -1691,11 +1691,10 @@ class ParallelDataSet:
             check_condition(self.metadata is None, 'Cannot save data in legacy format when using metadata')
             torch.save(self.source + self.target, fname)
         else:
-            torch.save({C.DATA_KEY_SOURCE: self.source,
-                        C.DATA_KEY_TARGET: self.target,
-                        C.DATA_KEY_METADATA: [metadata_bucket.as_tuple() for metadata_bucket in self.metadata]
-                                             if self.metadata is not None else None},
-                       fname)
+            data_dict = {C.DATA_KEY_SOURCE: self.source, C.DATA_KEY_TARGET: self.target}  # type: Dict[str, Any]
+            if self.metadata is not None:
+                data_dict[C.DATA_KEY_METADATA] = [metadata_bucket.as_tuple() for metadata_bucket in self.metadata]
+            torch.save(data_dict, fname)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1714,13 +1713,14 @@ class ParallelDataSet:
             metadata = None
         else:
             # Current format (data version 7)
-            check_condition(isinstance(data, dict) and data.keys() == set(C.DATA_KEYS),
+            check_condition(isinstance(data, dict) and C.DATA_KEY_SOURCE in data and C.DATA_KEY_TARGET in data,
                             f'Unknown data format for file {fname}. '
                             'Please rerun data preparation with this version of Sockeye.')
             source = data[C.DATA_KEY_SOURCE]
             target = data[C.DATA_KEY_TARGET]
-            metadata = [MetadataBucket(*metadata_bucket_tuple) for metadata_bucket_tuple in data[C.DATA_KEY_METADATA]] \
-                       if data[C.DATA_KEY_METADATA] is not None else None
+            metadata_val = data.get(C.DATA_KEY_METADATA, None)
+            metadata = [MetadataBucket(*metadata_bucket_tuple) for metadata_bucket_tuple in metadata_val] \
+                       if metadata_val is not None else None
         if utils.is_distributed():
             split_index = torch.distributed.get_rank()
             total_splits = torch.distributed.get_world_size()
