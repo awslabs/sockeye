@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.24]
+
+### Fixed
+
+- Updated DeepSpeed checkpoint conversion to support newer versions of DeepSpeed.
+
 ## [3.1.23]
 
 ### Changed
