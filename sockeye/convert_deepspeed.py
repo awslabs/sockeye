@@ -53,7 +53,7 @@ def get_fp32_state_dict_from_zero1_checkpoint(checkpoint_dir: str) -> collection
     state_dicts = [torch.load(fname, map_location=torch.device('cpu')) for fname in optim_files]
     # Collect data from state dicts
     _world_size = state_dicts[0][OPTIMIZER_STATE_DICT][PARTITION_COUNT]
-    world_size = max(_world_size) if isinstance(_world_size, list) else world_size
+    world_size = max(_world_size) if isinstance(_world_size, list) else _world_size
     fp32_flat_groups = [state_dict[OPTIMIZER_STATE_DICT][SINGLE_PARTITION_OF_FP32_GROUPS] for state_dict in state_dicts]
     # Load model state. Stage 1 uses the same state file as stage 2.
     model_state_file = get_model_state_file(checkpoint_dir, zero_stage=2)
