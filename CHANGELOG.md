@@ -32,6 +32,12 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 - For distributed training, replicating examples so that each worker has at least one per bucket now correctly uses `repeat` instead of `repeat_interleave`.
 
+## [3.1.24]
+
+### Fixed
+
+- Updated DeepSpeed checkpoint conversion to support newer versions of DeepSpeed.
+
 ## [3.1.23]
 
 ### Changed
