@@ -205,7 +205,8 @@ class MetadataEmbedding(Encoder):
             return ids
 
         # (batch_size, metadata_seq_len, model_size)
-        weighted_embeddings = self.embedding(ids) * weights.unsqueeze(-1)
+        embeddings = self.embedding(ids)
+        weighted_embeddings = embeddings * weights.unsqueeze(-1).to(embeddings.dtype)
 
         # (batch_size, model_size)
         summed_embeddings = pt.sum(weighted_embeddings, dim=1)
