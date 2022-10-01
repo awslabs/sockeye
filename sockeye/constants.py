@@ -166,6 +166,7 @@ DECODE_REF_NAME = "decode.target.{factor}"
 DECODE_METADATA_NAME = "decode.md"
 METRICS_NAME = "metrics"
 TENSORBOARD_NAME = "tensorboard"
+DEEPSPEED_LATEST_NAME = "latest"
 
 # training resumption constants
 TRAINING_STATE_DIRNAME = "training_state"
