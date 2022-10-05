@@ -196,7 +196,7 @@ class MetadataEmbedding(Encoder):
         :param ids: Metadata vocabulary IDs.
                     Shape: (batch_size, metadata_seq_len).
         :param weights: Metadata weights. Shape: (batch_size, metadata_seq_len).
-        :returns: Model states with sequence-level metadata embeddings added.
+        :returns: Sequence-level metadata embeddings.
                   Shape: (batch_size, model_size).
         """
         if ids.numel() == 0:
