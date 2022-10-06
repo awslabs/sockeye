@@ -2290,8 +2290,8 @@ class Batch:
     labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
-    metadata_ids: torch.Tensor = C.NONE_TENSOR
-    metadata_weights: torch.Tensor = C.NONE_TENSOR
+    metadata_ids: torch.Tensor = C.NONE_TENSOR_INT32
+    metadata_weights: torch.Tensor = C.NONE_TENSOR_FLOAT32
 
     def load(self, device: torch.device) -> 'Batch':
         source = self.source.to(device)
@@ -2299,8 +2299,8 @@ class Batch:
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
-        metadata_ids = self.metadata_ids.to(device) if self.metadata_ids.numel() != 0 else C.NONE_TENSOR
-        metadata_weights = self.metadata_weights.to(device) if self.metadata_weights.numel() != 0 else C.NONE_TENSOR
+        metadata_ids = self.metadata_ids.to(device) if self.metadata_ids.numel() != 0 else C.NONE_TENSOR_INT32
+        metadata_weights = self.metadata_weights.to(device) if self.metadata_weights.numel() != 0 else C.NONE_TENSOR_FLOAT32
         return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens,
                      metadata_ids, metadata_weights)
 
@@ -2348,7 +2348,7 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    metadata_ids, metadata_weights = metadata if metadata is not None else (C.NONE_TENSOR, C.NONE_TENSOR)
+    metadata_ids, metadata_weights = metadata if metadata is not None else (C.NONE_TENSOR_INT32, C.NONE_TENSOR_FLOAT32)
     if utils.is_distributed() and metadata_ids.numel() == 0:
         # When no metadata is present, metadata-based parameters don't
         # participate in the model's forward pass, which causes issues for

@@ -227,8 +227,8 @@ class SockeyeModel(pt.nn.Module):
     def encode(self,
                inputs: pt.Tensor,
                valid_length: pt.Tensor,
-               metadata_ids: pt.Tensor = C.NONE_TENSOR,
-               metadata_weights: pt.Tensor = C.NONE_TENSOR) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
+               metadata_ids: pt.Tensor = C.NONE_TENSOR_INT32,
+               metadata_weights: pt.Tensor = C.NONE_TENSOR_FLOAT32) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         """
         Encodes the input sequence.
 
@@ -244,7 +244,7 @@ class SockeyeModel(pt.nn.Module):
         source_embed = self.traced_embedding_source(inputs)
 
         metadata_embed = [embedding(metadata_ids, metadata_weights) for embedding in self.embedding_metadata] \
-                         if self.embedding_metadata is not None else [C.NONE_TENSOR]
+                         if self.embedding_metadata is not None else [C.NONE_TENSOR_FLOAT32]
 
         if self.traced_encoder is None:
             logger.debug("Tracing encoder")
@@ -294,8 +294,8 @@ class SockeyeModel(pt.nn.Module):
                           source: pt.Tensor,
                           source_length: pt.Tensor,
                           target: pt.Tensor,
-                          metadata_ids: pt.Tensor = C.NONE_TENSOR,
-                          metadata_weights: pt.Tensor = C.NONE_TENSOR) -> Tuple[pt.Tensor,
+                          metadata_ids: pt.Tensor = C.NONE_TENSOR_INT32,
+                          metadata_weights: pt.Tensor = C.NONE_TENSOR_FLOAT32) -> Tuple[pt.Tensor,
                                                                                  pt.Tensor,
                                                                                  pt.Tensor,
                                                                                  List[pt.Tensor],
@@ -315,7 +315,7 @@ class SockeyeModel(pt.nn.Module):
         source_embed = self.embedding_source(source)
         target_embed = self.embedding_target(target)
         metadata_embed = [embedding(metadata_ids, metadata_weights) for embedding in self.embedding_metadata] \
-                         if self.embedding_metadata is not None else [C.NONE_TENSOR]
+                         if self.embedding_metadata is not None else [C.NONE_TENSOR_FLOAT32]
         source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length, metadata_embed)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         nvs = None
@@ -358,7 +358,8 @@ class SockeyeModel(pt.nn.Module):
         return step_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length,
-                metadata_ids=C.NONE_TENSOR, metadata_weights=C.NONE_TENSOR):  # pylint: disable=arguments-differ
+                metadata_ids=C.NONE_TENSOR_INT32,
+                metadata_weights=C.NONE_TENSOR_FLOAT32):  # pylint: disable=arguments-differ
         # When updating only the decoder (specified directly or implied by
         # caching the encoder and embedding forward passes), turn off autograd
         # for the encoder and embeddings to save memory.

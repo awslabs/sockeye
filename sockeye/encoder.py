@@ -200,9 +200,10 @@ class MetadataEmbedding(Encoder):
                   Shape: (batch_size, model_size).
         """
         if ids.numel() == 0:
-            # No metadata. Return ids for efficiency instead of creating a new
-            # zero-element tensor.
-            return ids
+            # No metadata. Return weights for efficiency instead of creating a
+            # new zero-element tensor.
+            assert weights.numel() == 0
+            return weights
 
         # (batch_size, metadata_seq_len, model_size)
         embeddings = self.embedding(ids)
@@ -294,7 +295,9 @@ class TransformerEncoder(Encoder):
     def forward(self,
                 data: pt.Tensor,
                 valid_length: pt.Tensor,
-                metadata_embeddings: List[pt.Tensor] = [C.NONE_TENSOR]) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
+                metadata_embeddings: List[pt.Tensor] = [C.NONE_TENSOR_FLOAT32]) -> Tuple[pt.Tensor,
+                                                                                         pt.Tensor,
+                                                                                         pt.Tensor]:
 
         # positional embedding
         data = self.pos_embedding(data)

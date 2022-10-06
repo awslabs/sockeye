@@ -1108,8 +1108,8 @@ class Translator:
 
         if metadata_max_seq_len == 0:
             # No metadata
-            metadata_ids = C.NONE_TENSOR
-            metadata_weights = C.NONE_TENSOR
+            metadata_ids = C.NONE_TENSOR_INT32
+            metadata_weights = C.NONE_TENSOR_FLOAT32
         else:
             metadata_ids_np = np.zeros((batch_size, metadata_max_seq_len), dtype='int32')
             for i, ids in enumerate(metadata_ids_list):

@@ -19,8 +19,9 @@ import numpy as np
 
 # As of version 1.12, PyTorch JIT tracing does not support optional inputs
 # (`t: Optional[Tensor] = None`). Instead, we specify a default value
-# `t: Tensor = NONE_TENSOR` which has the property `t.numel() == 0`.
-NONE_TENSOR = pt.zeros(0)
+# `t: Tensor = NONE_TENSOR_DTYPE` which has the property `t.numel() == 0`.
+NONE_TENSOR_FLOAT32 = pt.zeros(0, dtype=pt.float32)
+NONE_TENSOR_INT32 = pt.zeros(0, dtype=pt.int32)
 
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"

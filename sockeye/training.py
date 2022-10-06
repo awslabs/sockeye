@@ -74,10 +74,10 @@ class ModelWithLoss(torch.nn.Module):
                 target: torch.Tensor,
                 target_length: torch.Tensor,
                 labels: Dict[str, torch.Tensor],
-                metadata_ids: torch.Tensor = C.NONE_TENSOR,
-                metadata_weights: torch.Tensor = C.NONE_TENSOR) -> Tuple[torch.Tensor,
-                                                                          List[torch.Tensor],
-                                                                          List[torch.Tensor]]:
+                metadata_ids: torch.Tensor = C.NONE_TENSOR_INT32,
+                metadata_weights: torch.Tensor = C.NONE_TENSOR_FLOAT32) -> Tuple[torch.Tensor,
+                                                                                 List[torch.Tensor],
+                                                                                 List[torch.Tensor]]:
         model_outputs = self.model(source, source_length, target, target_length, metadata_ids, metadata_weights)
         if utils.using_deepspeed():
             # Guarantee model outputs are float32 before computing losses.
