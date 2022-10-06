@@ -173,7 +173,7 @@ SORT_CASES = [
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
-     " --transformer-feed-forward-num-hidden 64 --encoder-add-metadata 2" + COMMON_TRAINING_PARAMS,
+     " --transformer-feed-forward-num-hidden 64 --encoder-add-metadata all" + COMMON_TRAINING_PARAMS,
      "--beam-size 1 --prevent-unk",
      True, 0, 0, 0.5,
      1.03,

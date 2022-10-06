@@ -61,7 +61,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --weight-tying-type src_trg_softmax"
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 20 --optimizer adam --initial-learning-rate 0.01 --learning-rate-scheduler none"
-     " --encoder-add-metadata 0",
+     " --encoder-add-metadata all",
      "--beam-size 2 --nbest-size 2",
      False, 0, 0, 0.5),
     # Basic transformer w/ Neural Vocabulary Selection

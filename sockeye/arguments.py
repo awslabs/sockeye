@@ -661,14 +661,15 @@ def add_model_parameters(params):
                                    'Use "x:x" to specify separate values for encoder & decoder. Default: %(default)s.')
 
     model_params.add_argument('--encoder-add-metadata',
-                              type=int_greater_or_equal(0),
+                              choices=C.ENCODER_ADD_METADATA_CHOICES,
                               default=None,
-                              help='Add metadata embeddings to encoder representations at the specified layer using the '
-                                   'method described by Schioppa et al. (2021, aclanthology.org/2021.emnlp-main.535). '
-                                   'For N encoder layers, a value of 0 corresponds to adding metadata embeddings to '
-                                   'source embeddings before running the encoder. A value of N corresponds to adding '
-                                   'metadata embeddings to the final encoder representations before running the '
-                                   'decoder. Default: %(default)s.')
+                              help='Compute metadata embeddings using the method described by Schioppa et al. (2021, '
+                                   'aclanthology.org/2021.emnlp-main.535) and add them to encoder representations. '
+                                   'Last: learn a single set of embedding weights and add embeddings after the last '
+                                   'encoder layer. All_tied: learn a single set of embedding weights and add '
+                                   'embeddings after all encoder layers. All: learn a separate set of embedding '
+                                   'weights for each encoder layer and add them after each corresponding layer. '
+                                   'Default: %(default)s.')
 
     # transformer arguments
     model_params.add_argument('--transformer-model-size',

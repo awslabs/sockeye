@@ -50,12 +50,12 @@ def test_metadata_embedding():
 
     # Add to existing representations (batch major)
     data = torch.randn((batch_size, seq_len, model_size), dtype=torch.float32)
-    result = sockeye.encoder.add_metadata_embeddings(data, metadata_embeddings, seq_len_dim=1)
+    result = sockeye.encoder.add_metadata_embeddings(data, [metadata_embeddings], 0, seq_len_dim=1)
     assert result.shape == data.shape
 
     # Add to existing representations (time major)
     data = torch.randn((seq_len, batch_size, model_size), dtype=torch.float32)
-    result = sockeye.encoder.add_metadata_embeddings(data, metadata_embeddings, seq_len_dim=0)
+    result = sockeye.encoder.add_metadata_embeddings(data, [metadata_embeddings], 0, seq_len_dim=0)
     assert result.shape == data.shape
 
 

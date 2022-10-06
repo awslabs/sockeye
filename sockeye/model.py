@@ -121,16 +121,24 @@ class SockeyeModel(pt.nn.Module):
         self.embedding_target = encoder.Embedding(config.config_embed_target, embedding=target_embedding,
                                                   dtype=self.dtype)
 
-        # Optional metadata embedding
-        self.embedding_metadata = None  # type: Optional[pt.jit.ScriptModule]
+        # Optional metadata embedding modules
+        self.embedding_metadata = None  # type: Optional[pt.nn.ModuleList]
         if self.config.config_encoder.add_metadata is not None and config.vocab_size_metadata is not None:
+            # Either a single module or one module per encoder layer
+            if self.config.config_encoder.add_metadata in {C.ENCODER_ADD_METADATA_LAST, C.ENCODER_ADD_METADATA_ALL_TIED}:
+                num_modules = 1
+            elif self.config.config_encoder.add_metadata == C.ENCODER_ADD_METADATA_ALL:
+                num_modules = self.config.config_encoder.num_layers
+            else:
+                raise ValueError(f'Unknown value for add_metadata: {self.config.config_encoder.add_metadata}')
             # Same size as encoder representations, same dropout as source
             # embeddings
-            self.embedding_metadata = pt.jit.script(
-                encoder.MetadataEmbedding(vocab_size=config.vocab_size_metadata,
-                                          model_size=self.config.config_encoder.model_size,
-                                          dropout=config.config_embed_source.dropout,
-                                          dtype=self.dtype))
+            self.embedding_metadata = pt.nn.ModuleList(
+                pt.jit.script(encoder.MetadataEmbedding(vocab_size=config.vocab_size_metadata,
+                                                        model_size=self.config.config_encoder.model_size,
+                                                        dropout=config.config_embed_source.dropout,
+                                                        dtype=self.dtype))
+                for _ in range(num_modules))
 
         # encoder & decoder first (to know the decoder depth)
         self.encoder = encoder.get_transformer_encoder(self.config.config_encoder, inference_only=inference_only,
@@ -235,8 +243,8 @@ class SockeyeModel(pt.nn.Module):
             self.traced_embedding_source = pt.jit.trace(self.embedding_source, inputs)
         source_embed = self.traced_embedding_source(inputs)
 
-        metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights) \
-            if self.embedding_metadata is not None else C.NONE_TENSOR
+        metadata_embed = [embedding(metadata_ids, metadata_weights) for embedding in self.embedding_metadata] \
+                         if self.embedding_metadata is not None else [C.NONE_TENSOR]
 
         if self.traced_encoder is None:
             logger.debug("Tracing encoder")
@@ -306,8 +314,8 @@ class SockeyeModel(pt.nn.Module):
         """
         source_embed = self.embedding_source(source)
         target_embed = self.embedding_target(target)
-        metadata_embed = self.embedding_metadata(metadata_ids, metadata_weights) \
-            if self.embedding_metadata is not None else C.NONE_TENSOR
+        metadata_embed = [embedding(metadata_ids, metadata_weights) for embedding in self.embedding_metadata] \
+                         if self.embedding_metadata is not None else [C.NONE_TENSOR]
         source_encoded, source_encoded_length, att_mask = self.encoder(source_embed, source_length, metadata_embed)
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_length, target_embed)
         nvs = None

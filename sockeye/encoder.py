@@ -224,7 +224,10 @@ class MetadataEmbedding(Encoder):
 
 
 @pt.jit.script
-def add_metadata_embeddings(data: pt.Tensor, metadata_embeddings: pt.Tensor, seq_len_dim: int = 1) -> pt.Tensor:
+def add_metadata_embeddings(data: pt.Tensor,
+                            metadata_embeddings: List[pt.Tensor],
+                            index: int,
+                            seq_len_dim: int = 1) -> pt.Tensor:
     """
     Adds sequence-level metadata embeddings to model representations with
     broadcasting in the sequence dimension. This function uses shape information
@@ -233,18 +236,19 @@ def add_metadata_embeddings(data: pt.Tensor, metadata_embeddings: pt.Tensor, seq
     :param data: Model representations.
                  Shape: (batch_size, seq_len, model_size) or
                  (seq_len, batch_size, model_size) based on `seq_len_dim`.
-    :param metadata_embeddings: Sequence-level metadata embeddings.
-                                Shape: (batch_size, model_size).
+    :param metadata_embeddings: List of sequence-level metadata embeddings.
+                                Shape of each: (batch_size, model_size).
+    :param index: Index of metadata embeddings to add.
     :param seq_len_dim: Sequence dimension.
     :returns: Element-wise sum of model representations and broadcasted metadata
               embeddings. Shape: (batch_size, seq_len, model_size) or
               (seq_len, batch_size, model_size) based on `seq_len_dim`.
     """
-    if metadata_embeddings.numel() == 0:
+    if metadata_embeddings[index].numel() == 0:
         # No metadata
         return data
 
-    return data + metadata_embeddings.unsqueeze(seq_len_dim)
+    return data + metadata_embeddings[index].unsqueeze(seq_len_dim)
 
 
 class TransformerEncoder(Encoder):
@@ -290,10 +294,7 @@ class TransformerEncoder(Encoder):
     def forward(self,
                 data: pt.Tensor,
                 valid_length: pt.Tensor,
-                metadata_embeddings: pt.Tensor = C.NONE_TENSOR) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
-
-        if self.config.add_metadata == 0:
-            data = add_metadata_embeddings(data, metadata_embeddings, seq_len_dim=1)
+                metadata_embeddings: List[pt.Tensor] = [C.NONE_TENSOR]) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
 
         # positional embedding
         data = self.pos_embedding(data)
@@ -309,16 +310,20 @@ class TransformerEncoder(Encoder):
         att_mask = att_mask.expand(-1, max_len, -1)
 
         data = data.transpose(1, 0)  # batch to time major
-        for i, layer in enumerate(self.layers, 1):
+        for i, layer in enumerate(self.layers):
             data = layer(data, att_mask=att_mask)
-            if i == self.config.add_metadata and i < len(self.layers):
-                data = add_metadata_embeddings(data, metadata_embeddings, seq_len_dim=0)
+            if self.config.add_metadata == C.ENCODER_ADD_METADATA_ALL:
+                # One embedding per layer
+                data = add_metadata_embeddings(data, metadata_embeddings, i, seq_len_dim=0)
+            elif self.config.add_metadata == C.ENCODER_ADD_METADATA_ALL_TIED:
+                # Single embedding added after each layer
+                data = add_metadata_embeddings(data, metadata_embeddings, 0, seq_len_dim=0)
+            elif i == len(self.layers) - 1 and self.config.add_metadata == C.ENCODER_ADD_METADATA_LAST:
+                # Single embedding added after the last layer
+                data = add_metadata_embeddings(data, metadata_embeddings, 0, seq_len_dim=0)
 
         data = self.final_process(data)
         data = data.transpose(1, 0)  # time to batch major
-
-        if self.config.add_metadata == len(self.layers):
-            data = add_metadata_embeddings(data, metadata_embeddings, seq_len_dim=1)
 
         return data, valid_length, single_head_att_mask
 
