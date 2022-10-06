@@ -119,6 +119,17 @@ class OutputLayer(pt.nn.Module):
 
 
 class KNN(pt.nn.Module):
+    """
+    An alternative output layer that can produce a output distribution over the vocabulary by using the decoder hidden state to query into an index.
+    For more details, see: https://arxiv.org/abs/2010.00710.
+    :param keys_index: faiss index used for k-NN query.
+    :param vals: a list of word indexes that maps key ids to their corresponding vocabulary ids.
+    :param vocab_size: the size of the output vocabulary.
+    :param k: number of candidates to be retrieved by k-nearest neighbors query.
+    :param temperature: temperature that controls the smoothness of the output distribution.
+    :param state_store: an optional state store object that is used to compute the exact distance between the query and the index.
+    """
+
     def __init__(self, keys_index: "faiss.Index", vals: np.memmap, vocab_size: int, k=64, temperature=10, state_store: Optional[np.memmap] = None) -> None:  # type: ignore  # suppress mypy error becaues faiss is an optional import
         super().__init__()
         self.keys_index = keys_index
@@ -134,11 +145,6 @@ class KNN(pt.nn.Module):
         # Map indices to tokens
         y = self.vals[(indices+1) % len(self.vals)]
         y[y == C.BOS_ID] = C.EOS_ID  # no EOS is inserted in generated data store, so we need to use the BOS of the next sentence as EOS
-        # guard vocab index overflow caused by int16
-        # in general, it is recommended to use int32
-        if not np.all(y >= 0):
-            y = y.astype(np.int32)
-            y[y < 0] = 65535 + y[y < 0]
 
         # use exact distance when state_store is available
         if self.state_store is not None:
@@ -156,7 +162,7 @@ class KNN(pt.nn.Module):
         full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device)
         full_probs.scatter_add_(src=probs, index=y.squeeze(2), dim=-1)
         z = pt.sum(full_probs, dim=-1).unsqueeze(-1)
-        z[z < 1e-6] = 1e-6  # avoid div by 0 (which may happen when distances of all items are large)
+        z[z < C.KNN_EPSILON] = C.KNN_EPSILON  # avoid div by 0 (which may happen when distances of all items are large)
         full_probs.div_(z)
         return full_probs
 

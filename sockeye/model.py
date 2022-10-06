@@ -292,7 +292,7 @@ class SockeyeModel(pt.nn.Module):
         :param vocab_slice_ids: Optional list of vocabulary ids to use
                                 for reduced matrix multiplication at the output layer.
 
-        :return: logits, list of new model states, other target factor logits.
+        :return: logits, KNN output if present otherwise None, list of new model states, other target factor logits.
         """
         decode_step_inputs = [step_input, states]
         if vocab_slice_ids is not None:
@@ -693,9 +693,7 @@ def load_model(model_folder: str,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
                forward_pass_cache_size: int = 0,
-               knn_index: Optional[str] = None,
-               knn_cache_size: Optional[int] = 0,
-               knn_cache_alpha: Optional[float] = 0.0) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
+               knn_index: Optional[str] = None) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Load a model from model_folder.
 
@@ -738,10 +736,6 @@ def load_model(model_folder: str,
                           ignore_extra=False)
 
     if knn_index is not None:
-        # knn cache not supported for now
-        model.knn_cache = None
-        logger.info('kNN cache disabled')
-
         model.load_knn_index(knn_index)
 
     model.to(device)
@@ -776,10 +770,8 @@ def load_models(device: pt.device,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
                 forward_pass_cache_size: int = 0,
-                knn_index: Optional[str] = None,
-                knn_cache_size: Optional[int] = 0,
-                knn_cache_alpha: Optional[float] = 0.0) -> Tuple[List[SockeyeModel],
-                                                           List[vocab.Vocab], List[vocab.Vocab]]:
+                knn_index: Optional[str] = None) -> Tuple[List[SockeyeModel],
+                                                    List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Loads a list of models for inference.
 
@@ -819,9 +811,7 @@ def load_models(device: pt.device,
                                                allow_missing=allow_missing,
                                                set_grad_req_null=set_grad_req_null,
                                                forward_pass_cache_size=forward_pass_cache_size,
-                                               knn_index=knn_index,
-                                               knn_cache_size=knn_cache_size,
-                                               knn_cache_alpha=knn_cache_alpha)
+                                               knn_index=knn_index)
         models.append(model)
         source_vocabs.append(src_vcbs)
         target_vocabs.append(trg_vcbs)

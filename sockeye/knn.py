@@ -56,6 +56,12 @@ class KNNConfig(config.Config):
 
 
 class FaissIndexBuilder:
+    """
+    Builds a faiss index from a data store containing stored keys (i.e., decoder hidden states for k-NN-based MT).
+    :param config: a KNNConfig object containing the index configuration information
+    :param use_gpu: build index on a gpu
+    :param device_id: device id if building index on gpu
+    """
 
     def __init__(self, config: KNNConfig, use_gpu: bool = False, device_id: int = 0):
         utils.init_faiss()  # faiss will definitely be used for this class, so check here
@@ -65,7 +71,7 @@ class FaissIndexBuilder:
 
     def init_faiss_index(self, train_sample: Optional[np.memmap] = None):
         index = faiss.index_factory(self.config.dimension, self.config.index_type)
-        if self.use_gpu is True:
+        if self.use_gpu:
             res = faiss.StandardGpuResources()
             co = faiss.GpuClonerOptions()
             index = faiss.index_cpu_to_gpu(res, self.device_id, index, co)
@@ -83,13 +89,13 @@ class FaissIndexBuilder:
 
         index.add(keys.astype(np.float32))  # unfortunately, faiss index only supports float32
 
-    def block_add_items(self, index, keys: np.array, block_size: int = 1024*1024):
+    def block_add_items(self, index, keys: np.array, block_size: int = C.DEFAULT_DATA_STORE_BLOCK_SIZE):
         item_count, key_dim = keys.shape
         assert key_dim == self.config.dimension
 
         n_blocks = item_count // block_size
         for i in range(n_blocks):
-            logger.info("adding block no.{0}".format(i))
+            logger.debug(f"adding block no.{i}")
             start = block_size * i
             end = block_size * (i + 1)
             index.add(keys[start:end].astype(np.float32))  # unfortunately, faiss index only supports float32
@@ -121,24 +127,25 @@ class FaissIndexBuilder:
         return index
 
 
-def get_state_store_filename(prefix: str) -> str:
-    return prefix + ".states.npy"
+def get_state_store_path(dir):
+    return os.path.join(dir, C.KNN_STATE_DATA_STORE_NAME)
 
-def get_word_store_filename(prefix: str) -> str:
-    return prefix + ".words.npy"
 
-def main():
-    params = arguments.ConfigArgumentParser(description='CLI to build knn index.')
-    arguments.add_build_knn_index_args(params)
-    arguments.add_logging_args(params)
-    arguments.add_device_args(params)
-    args = params.parse_args()
+def get_word_store_path(dir):
+    return os.path.join(dir, C.KNN_WORD_DATA_STORE_NAME)
 
-    state_store_filename = get_state_store_filename(args.input_store_prefix)
-    word_store_filename = get_word_store_filename(args.input_store_prefix)
+
+def get_config_path(dir):
+    return os.path.join(dir, C.KNN_CONFIG_NAME)
+
+
+def build_knn_index_package(args):
+    state_store_filename = get_state_store_path(args.input_dir)
+    word_store_filename = get_word_store_path(args.input_dir)
+    config_filename = get_config_path(args.input_dir)
     utils.check_condition(os.path.exists(state_store_filename), f"Input file {state_store_filename} not found!")
     utils.check_condition(os.path.exists(word_store_filename), f"Input file {word_store_filename} not found!")
-    utils.check_condition(os.path.exists(args.config_file), f"Config file {args.config_file} not found!")
+    utils.check_condition(os.path.exists(config_filename), f"Config file {config_filename} not found!")
     utils.init_faiss()
 
     setup_main_logger(file_logging=False,
@@ -146,7 +153,7 @@ def main():
                       level=args.loglevel)  # pylint: disable=no-member
     utils.log_basic_info(args)
 
-    config = KNNConfig.load(args.config_file)
+    config = KNNConfig.load(config_filename)
     if args.index_type is not None:
         config.index_type = args.index_type
     if args.train_data_size is not None:
@@ -164,11 +171,26 @@ def main():
     else:
         index_cpu = index
 
+    if not args.output_dir:
+        args.output_dir = args.input_dir
+    elif args.output_dir != args.input_dir:
+        shutil.copy(word_store_filename, os.path.join(args.output_dir, C.KNN_WORD_DATA_STORE_NAME))
+        
     if not os.path.exists(args.output_dir):
         os.mkdir(args.output_dir)
-        faiss.write_index(index_cpu, os.path.join(args.output_dir, "key_index"))
-        config.save(os.path.join(args.output_dir, "config.yaml"))
-        shutil.copy(word_store_filename, os.path.join(args.output_dir, "vals.npy"))
+
+    faiss.write_index(index_cpu, os.path.join(args.output_dir, C.KNN_INDEX_NAME))
+    config.save(os.path.join(args.output_dir, C.KNN_CONFIG_NAME))
+
+
+def main():
+    params = arguments.ConfigArgumentParser(description='CLI to build knn index.')
+    arguments.add_build_knn_index_args(params)
+    arguments.add_logging_args(params)
+    arguments.add_device_args(params)
+    args = params.parse_args()
+
+    build_knn_index_package(args)
 
 
 if __name__ == "__main__":

@@ -18,10 +18,10 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 - Added kNN-MT model from [Khandelwal et al., 2021](https://arxiv.org/abs/2010.00710).
   - Installation: see [faiss document](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md)
   - Building a faiss index from a sockeye model takes two steps:
-    - Dump decoder states: `python3 -m sockeye.dump_decoder_states -m [model] --source [src] --target [tgt] --dump-prefix [output prefix]`
-    - Build index: `python3 -m sockeye.knn -i [input prefix, same as the output above] -c [config yaml from the output above] -o [output dir for index] -t [faiss index signature]`
+    - Generate decoder states: `sockeye-generate_decoder_states -m [model] --source [src] --target [tgt] --output-prefix [output prefix]`
+    - Build index: `sockeye-knn -i [input prefix, same as the output above] -c [config yaml from the output above] -o [output dir for index] -t [faiss index signature]`
     - Faiss index signature reference: [see here](https://github.com/facebookresearch/faiss/wiki/The-index-factory)
-  - Running inference using the built index: `python3 -m sockeye.translate ... --knn-index [output dir for index] --knn-lambda [interpolation weight, default=0.8]`
+  - Running inference using the built index: `sockeye-translate ... --knn-index [output dir for index] --knn-lambda [interpolation weight, default=0.8]`
 
 ## [3.1.27]
 

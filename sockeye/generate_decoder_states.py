@@ -12,11 +12,9 @@
 # permissions and limitations under the License.
 
 import argparse
-import codecs
 import logging
 import os
 from typing import Dict, List
-from abc import abstractclassmethod, abstractmethod
 
 import numpy as np
 import torch as pt
@@ -29,14 +27,20 @@ from .log import setup_main_logger
 from .model import SockeyeModel, load_model
 from .vocab import Vocab
 from .utils import check_condition
-from .knn import KNNConfig, get_state_store_filename, get_word_store_filename
+from .knn import KNNConfig, get_state_store_path, get_word_store_path, get_config_path
 
 # Temporary logger, the real one (logging to a file probably, will be created in the main function)
 logger = logging.getLogger(__name__)
 
-# a general blocked mmap stroage interface that could be implemented with numpy memmap, h5py, zarr, etc.
-class BlockMMapStorage:
 
+class NumpyMemmapStorage:
+    """
+    Wraps a numpy memmap as a datastore for decoder state vectors.
+    :param file_name: disk file path to store the memory-mapped file
+    :param num_dim: number of dimensions of the vectors in the data store
+    :param dtype: data type of the vectors in the data store
+    """
+    
     def __init__(self,
                  file_name: str,
                  num_dim: int,
@@ -49,17 +53,6 @@ class BlockMMapStorage:
         self.tail_idx = 0  # where the next entry should be inserted
         self.size = 0  # size of storage already assigned
 
-    @abstractmethod
-    def open(self, initial_size: int, block_size: int) -> None:
-        pass
-
-    @abstractmethod
-    def add(self, array: np.ndarray) -> None:
-        pass
-
-
-class NumpyMemmapStorage(BlockMMapStorage):
-    
     def open(self, initial_size: int, block_size: int) -> None:
         self.mmap = np.memmap(self.file_name, dtype=self.dtype, mode='w+', shape=(initial_size, self.num_dim))
         self.size = initial_size
@@ -90,12 +83,24 @@ class NumpyMemmapStorage(BlockMMapStorage):
 
 
 class DecoderStateGenerator:
+    """
+    Generate decoder states by using a translation model to force-decode a parallel dataset.
+    :param model: Sockeye translation model used to generate the states.
+    :param source_vocabs: source vocabs for the translation model.
+    :param target_vocabs: target vocabs for the translation model.
+    :param output_dir: path to the memmap storing decoder states.
+    :param max_seq_len_source: maximum source length for decoding.
+    :param max_seq_len_target: maximum source length for decoding.
+    :param state_data_type: data type for storing decoder states.
+    :param word_data_type: data type for storing word indexes.
+    :param device: device (cpu/gpu) for decoding.
+    """
 
     def __init__(self,
                  model: SockeyeModel,
                  source_vocabs: List[Vocab],
                  target_vocabs: List[Vocab],
-                 output_prefix: str,
+                 output_dir: str,
                  max_seq_len_source: int,
                  max_seq_len_target: int,
                  state_data_type: str,
@@ -109,7 +114,7 @@ class DecoderStateGenerator:
         self.max_seq_len_source = max_seq_len_source
         self.max_seq_len_target = max_seq_len_target
 
-        self.output_prefix = output_prefix
+        self.output_dir = output_dir
         self.state_store_file = None
         self.words_store_file = None
 
@@ -122,7 +127,7 @@ class DecoderStateGenerator:
     @staticmethod
     def probe_token_count(target: str, max_seq_len: int) -> int:
         token_count = 0
-        with codecs.open(target, 'r', 'utf-8') as f:
+        with open(target, 'r', 'utf-8') as f:
             for line in f:
                 token_count += min(len(line.strip().split(' ')) + 1, max_seq_len)  # +1 for EOS
         return token_count
@@ -130,17 +135,17 @@ class DecoderStateGenerator:
     def init_store_file(self, initial_size: int) -> None:
         self.dimension = self.model.config.config_decoder.model_size
 
-        self.state_store_file = NumpyMemmapStorage(get_state_store_filename(self.output_prefix),
-                                                  self.dimension, self.state_data_type)
-        self.words_store_file = NumpyMemmapStorage(get_word_store_filename(self.output_prefix),
-                                                  1, self.word_data_type)
+        self.state_store_file = NumpyMemmapStorage(get_state_store_path(self.output_dir),
+                                                   self.dimension, self.state_data_type)
+        self.words_store_file = NumpyMemmapStorage(get_word_store_path(self.output_dir),
+                                                   1, self.word_data_type)  # dim=1 because it's just scalar word index
         self.state_store_file.open(initial_size, 1)
         self.words_store_file.open(initial_size, 1)
 
     def generate_states_and_store(self,
-                              sources: List[str],
-                              targets: List[str],
-                              batch_size: int) -> None:
+                                  sources: List[str],
+                                  targets: List[str],
+                                  batch_size: int) -> None:
         assert self.state_store_file != None, \
                "You should call probe_token_count first to initialize the store files."
 
@@ -158,7 +163,7 @@ class DecoderStateGenerator:
         with pt.inference_mode():
             for batch_no, batch in enumerate(data_iter, 1):
                 if (batch_no + 1) % 1000 == 0:
-                    logger.info("At batch number {0}".format(batch_no + 1))
+                    logger.debug("At batch number {0}".format(batch_no + 1))
     
                 # get decoder states
                 batch = batch.load(self.device)
@@ -169,7 +174,7 @@ class DecoderStateGenerator:
                 decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
     
                 # flatten batch and sent_len dimensions, remove pads on the target
-                pad_mask = (batch.target != C.PAD_ID).squeeze(2)  # shape: (batch, seq_length)
+                pad_mask = (batch.target != C.PAD_ID)[:, :, 0]  # shape: (batch, seq_length)
                 flat_target = batch.target[pad_mask].cpu().detach().numpy()
                 flat_states = decoder_states[pad_mask].cpu().detach().numpy()
     
@@ -179,7 +184,7 @@ class DecoderStateGenerator:
 
     def save_config(self):
         config = KNNConfig(self.num_states, self.dimension, utils.dtype_to_str(self.state_data_type), utils.dtype_to_str(self.word_data_type), "", -1)
-        config.save(self.output_prefix + ".conf.yaml")
+        config.save(get_config_path(self.output_dir))
 
 
 def store(args: argparse.Namespace):
@@ -212,8 +217,8 @@ def store(args: argparse.Namespace):
     if args.state_dtype is None:
         args.state_dtype = utils.dtype_to_str(model.dtype)
 
-    generator = DecoderStateGenerator(model, source_vocabs, target_vocabs, args.output_prefix, max_seq_len_source, max_seq_len_target,
-                         args.state_dtype, args.word_dtype, device)
+    generator = DecoderStateGenerator(model, source_vocabs, target_vocabs, args.output_dir, max_seq_len_source, max_seq_len_target,
+                         args.state_dtype, C.KNN_WORD_DATA_STORE_DTYPE, device)
     generator.num_states = DecoderStateGenerator.probe_token_count(targets[0], max_seq_len_target)
     generator.init_store_file(generator.num_states)
     generator.generate_states_and_store(sources, targets, args.batch_size)

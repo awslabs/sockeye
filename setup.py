@@ -87,7 +87,8 @@ entry_points = {
         'sockeye-translate = sockeye.translate:main',
         'sockeye-vocab = sockeye.vocab:main',
         'sockeye-rerank = sockeye.rerank:main',
-        'sockeye-knn-index = sockeye.knn:main'
+        'sockeye-knn = sockeye.knn:main',
+        'sockeye-generate-decoder-states = sockeye.generate_decoder_states'
     ],
 }
 args = dict(

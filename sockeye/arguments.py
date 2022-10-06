@@ -19,7 +19,6 @@ import os
 import sys
 import types
 from typing import Any, Callable, Dict, List, Tuple, Optional
-from numpy import dtype
 
 import yaml
 
@@ -1191,9 +1190,6 @@ def add_state_generation_args(params):
     params.add_argument('--state-dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16],
                         help="Data type of the decoder state store. Default: %(default)s infers from saved model.")
 
-    params.add_argument('--word-dtype', default=C.DTYPE_INT32, choices=[None, C.DTYPE_INT16, C.DTYPE_INT32],
-                        help="Data type of the word index store. Default: int32.")
-
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
 
@@ -1207,8 +1203,8 @@ def add_state_generation_args(params):
     add_length_penalty_args(params)
     add_brevity_penalty_args(params)
 
-    params.add_argument("--output-prefix", "-o", default=None,
-                        help="Prefix of the file that stores the decoder states")
+    params.add_argument("--output-dir", "-o", default=None,
+                        help="The path to the directory that stores the decoder states.")
 
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                         help="Data type. Default: %(default)s infers from saved model.")
@@ -1466,14 +1462,6 @@ def add_build_vocab_args(params):
 def add_knn_mt_args(params):
     knn_params = params.add_argument_group("kNN MT parameters")
 
-    knn_params.add_argument('--knn-cache-size',
-                            type=int,
-                            default=0)
-
-    knn_params.add_argument('--knn-cache-alpha',
-                            type=float,
-                            default=0.0)
-
     knn_params.add_argument('--knn-index',
                             type=str,
                             help='Optionally use a KNN index during inference to '
@@ -1486,27 +1474,26 @@ def add_knn_mt_args(params):
 
 
 def add_build_knn_index_args(params):
-    params.add_argument('-i', '--input-store-prefix',
+    params.add_argument('-i', '--input-dir',
                         required=True,
                         type=str,
-                        help='The path prefix to the stored decoder states and values (without .[states|words].npy).')
-    params.add_argument('-c', '--config-file',
-                        required=True,
-                        help='The path to the config yaml file. '
-                             '(If the "generate_decoder_states" CLI was used, the yaml fields should have been auto-generated.)')
+                        help='The directory that contains the stored decoder states and values '
+                             f'({C.KNN_STATE_DATA_STORE_NAME} and {C.KNN_WORD_DATA_STORE_NAME}).')
     params.add_argument('-o', '--output-dir',
-                        required=True,
+                        default=None,
                         type=str,
-                        help='The path to the output directory.')
+                        help='The path to the output directory. Will reuse input directory if not specified.')
     params.add_argument('-t', '--index-type',
                         default=None,
                         type=str,
-                        help='An optional field to specify the type of the index. Will override settings in the config.')
+                        help='An optional field to specify the type of the index. Will override settings in the config. '
+                             'The type is specified with a faiss index factory signature, see here: '
+                             'https://github.com/facebookresearch/faiss/wiki/The-index-factory')
     params.add_argument('--train-data-input-file',
                         default=None,
                         type=str,
                         help='An optional field to reuse an already-built training data sample for the index. '
-                             'Otherwise, a (slow) sampling step might needs to be run.')
+                             'Otherwise, a (slow) sampling step might need to be run.')
     params.add_argument('--train-data-size',
                         default=None,
                         type=int,

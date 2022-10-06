@@ -33,7 +33,7 @@ jobs:
     - name: DeepSpeed requirements
       run: pip install -r requirements/requirements.deepspeed.txt
     - name: Faiss requirements
-      run: pip install -r requirements/requirements.faiss.txt
+      run: pip install -r requirements/requirements.faiss-cpu.txt
     - name: Development requirements
       run: pip install -r requirements/requirements.dev.txt
     - name: Unit tests

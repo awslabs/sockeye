@@ -11,7 +11,6 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import importlib
 import numpy as np
 import pytest
 import torch as pt
@@ -20,7 +19,6 @@ from unittest.mock import patch, mock_open, Mock
 from sockeye.generate_decoder_states import NumpyMemmapStorage, DecoderStateGenerator
 from sockeye.knn import KNNConfig, FaissIndexBuilder
 from sockeye.vocab import build_vocab
-import sockeye.generate_decoder_states
 
 # Only run certain tests in this file if faiss is installed
 try:
