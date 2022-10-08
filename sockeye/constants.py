@@ -334,14 +334,21 @@ FIXED_PARAM_STRATEGY_CHOICES = [FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
                                 FIXED_PARAM_STRATEGY_ENCODER_AND_SOURCE_EMBEDDINGS,
                                 FIXED_PARAM_STRATEGY_ENCODER_HALF_AND_SOURCE_EMBEDDINGS]
 
-# data sharding
+# data saving/loading
+DATA_KEY_SOURCE = 'source'
+DATA_KEY_TARGET = 'target'
+DATA_KEY_INSTANCE_WEIGHTS = 'instance_weights'
+DATA_KEY_LABEL_WEIGHTS = 'label_weights'
 SHARD_NAME = "shard.%05d"
 SHARD_SOURCE = SHARD_NAME + ".source"
 SHARD_TARGET = SHARD_NAME + ".target"
+SHARD_INSTANCE_WEIGHTS = SHARD_NAME + ".instance_weights"
+SHARD_LABEL_WEIGHTS = SHARD_NAME + ".label_weights"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-PREPARED_DATA_VERSION = 6
+PREPARED_DATA_VERSION = 7
+PREPARED_DATA_LEGACY_VERSION = 6
 
 # reranking metric options
 RERANK_BLEU = "bleu"

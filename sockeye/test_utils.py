@@ -40,8 +40,18 @@ def generate_digits_file(source_path: str,
                          line_length: int = 9,
                          sort_target: bool = False,
                          line_count_empty: int = 0,
-                         seed=13):
+                         seed=13,
+                         instance_weights_path: Optional[str] = None,
+                         label_weights_path: Optional[str] = None,
+                         p_noise_with_weights: float = 0.):
     assert line_count_empty <= line_count
+    instance_weights_out = None
+    label_weights_out = None
+    if p_noise_with_weights > 0.:
+        assert instance_weights_path is not None
+        instance_weights_out = open(instance_weights_path, "w")
+        assert label_weights_path is not None
+        label_weights_out = open(label_weights_path, "w")
     random_gen = random.Random(seed)
     with open(source_path, "w") as source_out, open(target_path, "w") as target_out:
         all_digits = []
@@ -55,7 +65,23 @@ def generate_digits_file(source_path: str,
             print(C.TOKEN_SEPARATOR.join(digits), file=source_out)
             if sort_target:
                 digits.sort()
+            # Noise (random digits) with instance and label weights
+            if p_noise_with_weights > 0.:
+                noise_count = 0
+                label_weights = []
+                for i in range(len(digits)):
+                    if random.random() < p_noise_with_weights:
+                        digits[i] = random_gen.choice(_DIGITS)
+                        noise_count += 1
+                        label_weights.append('0.1')
+                    else:
+                        label_weights.append('1')
+                print('0' if not digits else str(1 - (noise_count / len(digits))), file=instance_weights_out)
+                print(' '.join(label_weights), file=label_weights_out)
             print(C.TOKEN_SEPARATOR.join(digits), file=target_out)
+    for stream in (instance_weights_out, label_weights_out):
+        if stream is not None:
+            stream.close()
 
 
 def generate_json_input_file_with_tgt_prefix(src_path:str, tgt_path: str, json_file_with_tgt_prefix_path: str, \
@@ -146,7 +172,8 @@ def tmp_digits_dataset(prefix: str,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
                        with_n_source_factors: int = 0,
-                       with_n_target_factors: int = 0) -> Dict[str, Any]:
+                       with_n_target_factors: int = 0,
+                       p_noise_with_weights: float = 0.) -> Dict[str, Any]:
     """
     Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
     files.
@@ -155,13 +182,17 @@ def tmp_digits_dataset(prefix: str,
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
         train_target_path = os.path.join(work_dir, "train.tgt")
+        train_instance_weights_path = os.path.join(work_dir, "train.instance_weights")
+        train_label_weights_path = os.path.join(work_dir, "train.label_weights")
         dev_source_path = os.path.join(work_dir, "dev.src")
         dev_target_path = os.path.join(work_dir, "dev.tgt")
         test_source_path = os.path.join(work_dir, "test.src")
         test_target_path = os.path.join(work_dir, "test.tgt")
         test_source_with_target_prefix_path = os.path.join(work_dir, "test_source_with_target_prefix.json")
         generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
-                             line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train)
+                             line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train,
+                             instance_weights_path=train_instance_weights_path, label_weights_path=train_label_weights_path,
+                             p_noise_with_weights=p_noise_with_weights)
         generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
                              seed=seed_dev)
         generate_digits_file(test_source_path, test_target_path, test_line_count, test_max_length,
@@ -205,6 +236,10 @@ def tmp_digits_dataset(prefix: str,
                 data['dev_target_factors'].append(dev_factor_path)
                 data['test_target_factors'].append(test_factor_path)
 
+        if p_noise_with_weights > 0.:
+            data['train_instance_weights'] = train_instance_weights_path
+            data['train_label_weights'] = train_label_weights_path
+
         source_factors_path = None if 'test_source_factors' not in data else data['test_source_factors']
         target_factors_path = None if 'test_target_factors' not in data else data['test_target_factors']
         generate_json_input_file_with_tgt_prefix(test_source_path, test_target_path, test_source_with_target_prefix_path, \
@@ -223,6 +258,9 @@ TRAIN_WITH_SOURCE_FACTORS_COMMON = " --source-factors {source_factors}"
 DEV_WITH_SOURCE_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
 TRAIN_WITH_TARGET_FACTORS_COMMON = " --target-factors {target_factors}"
 DEV_WITH_TARGET_FACTORS_COMMON = " --validation-target-factors {dev_target_factors}"
+
+TRAIN_WITH_INSTANCE_WEIGHTS_COMMON = " --instance-weights {train_instance_weights}"
+TRAIN_WITH_LABEL_WEIGHTS_COMMON = " --label-weights {train_label_weights}"
 
 TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
                                      " --validation-source {dev_source} --validation-target {dev_target} " \
@@ -279,6 +317,12 @@ def run_train_translate(train_params: str,
             prepare_params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(
                 target_factors=" ".join(data['train_target_factors']))
 
+        if 'train_instance_weights' in data:
+            prepare_params += \
+                TRAIN_WITH_INSTANCE_WEIGHTS_COMMON.format(train_instance_weights=data['train_instance_weights'])
+        if 'train_label_weights' in data:
+            prepare_params += TRAIN_WITH_LABEL_WEIGHTS_COMMON.format(train_label_weights=data['train_label_weights'])
+
         if '--weight-tying-type src_trg' in train_params:
             prepare_params += ' --shared-vocab'
 
@@ -318,6 +362,10 @@ def run_train_translate(train_params: str,
             params += TRAIN_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
         if 'train_target_factors' in data:
             params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(data['train_target_factors']))
+        if 'train_instance_weights' in data:
+            params += TRAIN_WITH_INSTANCE_WEIGHTS_COMMON.format(train_instance_weights=data['train_instance_weights'])
+        if 'train_label_weights' in data:
+            params += TRAIN_WITH_LABEL_WEIGHTS_COMMON.format(train_label_weights=data['train_label_weights'])
         if 'dev_source_factors' in data:
             params += DEV_WITH_SOURCE_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
         if 'dev_target_factors' in data:

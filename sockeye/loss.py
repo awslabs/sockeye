@@ -49,7 +49,11 @@ class Loss(pt.nn.Module):
                     self._name, self.weight, self.metric.name, self.metric.short_name,
                     self.output_name, self.label_name)
 
-    def __call__(self, outputs: Dict[str, Any], labels: Dict[str, Any]):
+    def __call__(self,
+                 outputs: Dict[str, Any],
+                 labels: Dict[str, Any],
+                 instance_weights: Optional[Dict[str, pt.Tensor]] = None,
+                 label_weights: Optional[Dict[str, pt.Tensor]] = None):
         """
         Loss retrieves the required output and label.
         """
@@ -59,8 +63,10 @@ class Loss(pt.nn.Module):
                               "label '%s' not found. Loss requires this label key" % self.output_name)
         output = outputs[self.output_name]
         label = labels[self.label_name]
+        instance_weight = instance_weights[self.label_name] if instance_weights is not None else None
+        label_weight = label_weights[self.label_name] if label_weights is not None else None
 
-        return super().__call__(output, label)
+        return super().__call__(output, label, instance_weight, label_weight)
 
     @abstractmethod
     def create_metric(self) -> 'LossMetric':
@@ -129,37 +135,30 @@ class LossMetric(ABC):
 class CrossEntropyLoss(Loss):
     """
     Computes a cross-entropy loss, normalized by the number of valid (non-pad) tokens.
-    Uses an efficient implementation for label smoothing and avoids the obscure SoftmaxOutput op.
+    Uses an efficient implementation for label smoothing.
     """
 
     def __init__(self,
                  name: str = C.CROSS_ENTROPY,
                  weight: float = 1.0,
                  label_smoothing: float = 0.0,
-                 dtype: str = C.DTYPE_FP32,
                  output_name: str = C.LOGITS_NAME,
                  label_name: str = C.TARGET_LABEL_NAME,
                  ignore_label: int = C.PAD_ID,
-                 metric_prefix: str = '',
-                 label_smoothing_impl: str = 'mxnet') -> None:
+                 metric_prefix: str = '') -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name,
                          weight=weight, metric_prefix=metric_prefix)
         self.ignore_label = ignore_label
         self._alpha = label_smoothing
-        self._dtype = dtype
-        self._reduction = 'mean'  # TODO: consider sum reduction and normalization outside of loss for reporting
-        if label_smoothing == 0 or label_smoothing_impl == 'torch':
-            self._ce_impl = self._torch_cross_entropy_loss
-        elif label_smoothing > 0.0 and label_smoothing_impl == 'mxnet':
-            self._ce_impl = self._smoothed_loss_as_in_mxnet
-        elif label_smoothing > 0.0 and label_smoothing_impl == 'fairseq':
-            self._ce_impl = self._smoothed_loss_as_in_fairseq
-        else:
-            raise ValueError("unknown label_smoothing impl. choose from mxnet, fairseq, or torch.")
 
-    def _smoothed_loss_as_in_mxnet(self, logits, labels):
+    def forward(self,
+                logits: pt.Tensor,
+                labels: pt.Tensor,
+                instance_weights: Optional[pt.Tensor] = None,
+                label_weights: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
         """
-        Computes label-smoothed cross-entropy loss just like sockeye.loss.CrossEntropyLossWithoutSoftmaxOutput()
+        Computes label-smoothed cross-entropy loss.
+
         Notable details:
         - smoothing with 1/vocab_size, not 1/(vocab_size-1) as in fairseq
         - form taken from https://github.com/dmlc/gluon-nlp/blob/b714eaccc67619d7bdcbd1574d30be87d9c73f0c/src/gluonnlp/loss.py#L4
@@ -174,49 +173,13 @@ class CrossEntropyLoss(Loss):
         all_scores.masked_fill_(pad_mask, 0.0)
 
         nll = (1 - self._alpha) * nll - self._alpha / logits.size(-1) * all_scores
-        num_valid = valid_mask.sum()
-        ce = nll.sum() * self.weight / num_valid
-        return ce
 
-    def _smoothed_loss_as_in_fairseq(self, logits, labels):
-        """
-        Computes smoothed NLL as in fairseq, see
-        # https://github.com/pytorch/fairseq/blob/db0175a882e8ae0f30d89b5a610373dbe032d528/fairseq/criterions/label_smoothed_cross_entropy.py#L33
-        """
-        pred = pt.log_softmax(logits, dim=-1)
-        if labels.dim() == logits.dim() - 1:
-            labels = labels.unsqueeze(-1)
-        nll = -pred.gather(dim=-1, index=labels.long())
-        smooth_loss = pred.sum(dim=-1, keepdim=True)
+        for weights in (instance_weights, label_weights):
+            if weights is not None:
+                nll = nll * weights
+                valid_mask = valid_mask * weights
 
-        pad_mask = labels.eq(self.ignore_label)
-        nll.masked_fill_(pad_mask, 0.0)
-        smooth_loss.masked_fill_(pad_mask, 0.0)
-
-        nll = nll.sum()
-        smooth_loss = smooth_loss.sum()
-
-        alpha_i = self._alpha / (logits.size(-1) - 1)
-        nll = (1.0 - self._alpha - alpha_i) * nll - alpha_i * smooth_loss
-
-        num_valid = (~pad_mask).sum()
-        ce = nll.sum() * self.weight / num_valid
-        return ce
-
-    def _torch_cross_entropy_loss(self, logits, labels):
-        logits = logits.view(-1, logits.size()[-1])
-        # Reshape due to: view size is not compatible with input tensor's size and stride
-        # (at least one dimension spans across two contiguous subspaces). Use .reshape(...) instead.
-        labels = labels.reshape(-1)
-        _kwargs = {'weight': None, 'ignore_index': self.ignore_label, 'reduction': self._reduction}
-        if self._alpha > 0.0:
-            _kwargs['label_smoothing'] = self._alpha
-        ce = pt.nn.functional.cross_entropy(logits, labels.long(), **_kwargs)
-        ce *= self.weight
-        return ce
-
-    def forward(self, logits: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
-        ce = self._ce_impl(logits, labels)
+        ce = nll.sum() * self.weight / valid_mask.sum()
         return ce, pt.ones(1, device=ce.device)
 
     def create_metric(self) -> 'LossMetric':
@@ -278,7 +241,11 @@ class BinaryCrossEntropyBowLoss(Loss):
         self.ce_loss = DynamicBCEWithLogitsLoss(reduction='none')
         self.pos_weight = pos_weight
 
-    def forward(self, output: pt.Tensor, label: pt.Tensor):
+    def forward(self,
+                output: pt.Tensor,
+                label: pt.Tensor,
+                instance_weights: Optional[pt.Tensor] = None,
+                label_weights: Optional[pt.Tensor] = None):
         """
         pred: (batch_size, num_vocab) probabilities.
         labels: (batch_size, target_length) words.
@@ -293,7 +260,7 @@ class BinaryCrossEntropyBowLoss(Loss):
         num_negative = num_total - num_positive
         pos_weight = self.pos_weight * num_negative / num_positive
 
-        # instead of normalizing 1/num_labels, as done by the ce block, we want to also 
+        # instead of normalizing 1/num_labels, as done by the ce block, we want to also
         # normalize by the virtual positive counts implied by the pos_weight
         # Everything is one per sentence, so we get the average positive cases
         # convert it to the additional (therefore pos_weight-1) implied counts
@@ -345,7 +312,11 @@ class PoissonLoss(Loss):
                  label_name: str = C.LENRATIO_LABEL_NAME) -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
 
-    def forward(self, length_predictions: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+    def forward(self,
+                length_predictions: pt.Tensor,
+                labels: pt.Tensor,
+                instance_weights: Optional[pt.Tensor] = None,
+                label_weights: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
         """
         Returns Poisson loss and output given data and expected integers as labels.
 
@@ -377,7 +348,11 @@ class MSELoss(Loss):
                  label_name: str = C.LENRATIO_LABEL_NAME) -> None:
         super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
 
-    def forward(self, length_predictions: pt.Tensor, labels: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+    def forward(self,
+                length_predictions: pt.Tensor,
+                labels: pt.Tensor,
+                instance_weights: Optional[pt.Tensor] = None,
+                label_weights: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
         """
         Returns MSE loss.
 

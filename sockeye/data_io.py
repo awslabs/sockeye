@@ -15,6 +15,7 @@
 Implements data iterators and I/O related functions for sequence-to-sequence models.
 """
 import bisect
+import itertools
 import logging
 import math
 import multiprocessing.pool
@@ -214,7 +215,7 @@ def calculate_length_statistics(source_iterables: Sequence[Iterable[Any]],
     """
     mean_and_variance = OnlineMeanAndVariance()
 
-    for sources, targets in parallel_iter(source_iterables, target_iterables):
+    for sources, targets, _, _, in parallel_iter(source_iterables, target_iterables):
         source_len = len(sources[0])
         target_len = len(targets[0])
         if source_len > max_seq_len_source or target_len > max_seq_len_target:
@@ -355,7 +356,13 @@ class DataStatisticsAccumulator:
 def create_shards(source_fnames: List[str],
                   target_fnames: List[str],
                   num_shards: int,
-                  output_prefix: str) -> Tuple[List[Tuple[Tuple[str, ...], Tuple[str, ...]]], bool]:
+                  output_prefix: str,
+                  instance_weights_fname: Optional[str] = None,
+                  label_weights_fname: Optional[str] = None) -> Tuple[List[Tuple[Tuple[str, ...],
+                                                                           Tuple[str, ...],
+                                                                           Optional[str],
+                                                                           Optional[str]]],
+                                                                bool]:
     """
     Assign source/target sentence pairs to shards at random.
 
@@ -363,28 +370,46 @@ def create_shards(source_fnames: List[str],
     :param target_fnames: The path to the target text (and optional token-parallel factor files).
     :param num_shards: The total number of shards.
     :param output_prefix: The prefix under which the shard files will be created.
-    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each shard
-             and a flag of whether the returned file names are temporary and can be deleted.
+    :param instance_weights_fname: Optional path to file with instance weights (line-parallel with target).
+    :param label_weights_fname: Optional path to file with label weights (token-parallel with target).
+    :return: List of tuples of source (and source factor) file names, target (and target factor) file names, instance
+             weight file names (or None's), and label weight file names (or None's) for each shard and a flag of whether
+             the returned file names are temporary and can be deleted.
     """
     if num_shards == 1:
-        return [(tuple(source_fnames), tuple(target_fnames))], True
+        return ([(tuple(source_fnames), tuple(target_fnames), instance_weights_fname, label_weights_fname)], True)
     os.makedirs(output_prefix, exist_ok=True)
     sources_shard_fnames = [[os.path.join(output_prefix, C.SHARD_SOURCE % i) + ".%d" % f for i in range(num_shards)]
                             for f in range(len(source_fnames))]
     targets_shard_fnames = [[os.path.join(output_prefix, C.SHARD_TARGET % i) + ".%d" % f for i in range(num_shards)]
                             for f in range(len(target_fnames))]
+    instance_weights_shard_fnames = [os.path.join(output_prefix, C.SHARD_INSTANCE_WEIGHTS % i)
+                                     for i in range(num_shards)] if instance_weights_fname is not None else []
+    label_weights_shard_fnames = [os.path.join(output_prefix, C.SHARD_LABEL_WEIGHTS % i)
+                                  for i in range(num_shards)] if label_weights_fname is not None else []
 
     with ExitStack() as exit_stack:
         sources_shards = [[exit_stack.enter_context(smart_open(f, mode="wb")) for f in sources_shard_fnames[i]] for i in
                           range(len(source_fnames))]
         targets_shards = [[exit_stack.enter_context(smart_open(f, mode="wb")) for f in targets_shard_fnames[i]] for i in
                           range(len(target_fnames))]
+        instance_weights_shards = [exit_stack.enter_context(smart_open(f, mode="wb"))
+                                   for f in instance_weights_shard_fnames]
+        label_weights_shards = [exit_stack.enter_context(smart_open(f, mode="wb")) for f in label_weights_shard_fnames]
 
         source_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in source_fnames]
         target_readers = [exit_stack.enter_context(smart_open(f, mode="rb")) for f in target_fnames]
+        instance_weights_reader = exit_stack.enter_context(smart_open(instance_weights_fname, mode="rb")) \
+            if instance_weights_fname is not None else None
+        label_weights_reader = exit_stack.enter_context(smart_open(label_weights_fname, mode="rb")) \
+            if label_weights_fname is not None else None
 
         random_shard_iter = iter(lambda: random.randrange(num_shards), None)
-        for (sources, targets), random_shard_index in zip(parallel_iter(source_readers, target_readers, True, False), random_shard_iter):
+        for ((sources, targets, instance_weight, label_weights),
+             random_shard_index) in zip(parallel_iter(source_readers, target_readers,
+                                                      instance_weights_reader, label_weights_reader,
+                                                      skip_blanks=True, check_token_parallel=True),
+                                        random_shard_iter):
             random_shard_index = cast(int, random_shard_index)
             for i, line in enumerate(sources):
                 file = sources_shards[i][random_shard_index]
@@ -392,15 +417,28 @@ def create_shards(source_fnames: List[str],
             for i, line in enumerate(targets):
                 file = targets_shards[i][random_shard_index]
                 file.write(line)
+            if instance_weight is not None:
+                file = instance_weights_shards[random_shard_index]
+                file.write(instance_weight)
+            if label_weights is not None:
+                file = label_weights_shards[random_shard_index]
+                file.write(label_weights)
+
     sources_shard_fnames_by_shards = zip(*sources_shard_fnames)
     targets_shard_fnames_by_shards = zip(*targets_shard_fnames)
 
-    return list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards)), False
+    return (list(itertools.zip_longest(sources_shard_fnames_by_shards,
+                                       targets_shard_fnames_by_shards,
+                                       instance_weights_shard_fnames,
+                                       label_weights_shard_fnames)),
+            False)
 
 
 class RawParallelDatasetLoader:
     """
-    Loads a data set of variable-length parallel source/target sequences into buckets of tensors.
+    Loads a data set of variable-length parallel source/target sequences with
+    optional instance weights, and optional label weights into buckets of
+    tensors.
 
     :param buckets: Bucket list.
     :param eos_id: End-of-sentence id.
@@ -441,7 +479,9 @@ class RawParallelDatasetLoader:
     def load(self,
              source_iterables: Sequence[Iterable],
              target_iterables: Sequence[Iterable],
-             num_samples_per_bucket: List[int]) -> 'ParallelDataSet':
+             num_samples_per_bucket: List[int],
+             instance_weights_iterable: Optional[Iterable] = None,
+             label_weights_iterable: Optional[Iterable] = None) -> 'ParallelDataSet':
 
         assert len(num_samples_per_bucket) == len(self.buckets)
         num_source_factors = len(source_iterables)
@@ -451,6 +491,11 @@ class RawParallelDatasetLoader:
                        for (source_len, _), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
                        for (_, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
+        data_instance_weights = [np.zeros((num_samples, 1), dtype='float32') for num_samples in num_samples_per_bucket] \
+            if instance_weights_iterable is not None else None  # type Optional[List[np.ndarray]]
+        data_label_weights = [np.zeros((num_samples, target_len), dtype='float32')
+                              for (_, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)] \
+            if label_weights_iterable is not None else None  # type Optional[List[np.ndarray]]
 
         bucket_sample_index = [0 for _ in self.buckets]
 
@@ -461,7 +506,10 @@ class RawParallelDatasetLoader:
         num_pad_target = 0
 
         # Bucket sentences as padded np arrays
-        for sources, targets in parallel_iter(source_iterables, target_iterables, skip_blanks=self.skip_blanks):
+        for (sources, targets, instance_weight, label_weights) in parallel_iter(source_iterables, target_iterables,
+                                                                                instance_weights_iterable,
+                                                                                label_weights_iterable,
+                                                                                skip_blanks=self.skip_blanks):
             sources = [[] if stream is None else stream for stream in sources]
             targets = [[] if stream is None else stream for stream in targets]
             source_len = len(sources[0])
@@ -473,6 +521,7 @@ class RawParallelDatasetLoader:
                 else:
                     buck_index = len(self.buckets)
                     buck = self.buckets[buck_index]
+            assert buck_index is not None
 
             num_tokens_source += buck[0]
             num_tokens_target += buck[1]
@@ -491,18 +540,32 @@ class RawParallelDatasetLoader:
                     # sequence: <BOS> <BOS> ...
                     t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
+            if instance_weight is not None:
+                assert data_instance_weights is not None
+                data_instance_weights[buck_index][sample_index, 0] = instance_weight
+            if label_weights is not None:
+                assert data_label_weights is not None
+                data_label_weights[buck_index][sample_index, 0:len(label_weights)] = label_weights
+                # <EOS> weight is the average of label weights for the sequence
+                data_label_weights[buck_index][sample_index, len(label_weights)] = \
+                    np.average(data_label_weights[buck_index][sample_index, 0:len(label_weights)])
 
             bucket_sample_index[buck_index] += 1
 
         data_source_tensors = [torch.from_numpy(data) for data in data_source]
         data_target_tensors = [torch.from_numpy(data) for data in data_target]
+        data_instance_weights_tensors = [torch.from_numpy(data) for data in data_instance_weights] \
+                                        if data_instance_weights is not None else None
+        data_label_weights_tensors = [torch.from_numpy(data) for data in data_label_weights] \
+                                     if data_label_weights is not None else None
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-        return ParallelDataSet(data_source_tensors, data_target_tensors)
+        return ParallelDataSet(data_source_tensors, data_target_tensors,
+                               data_instance_weights_tensors, data_label_weights_tensors)
 
 
 def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
@@ -527,11 +590,12 @@ def save_shard(shard_idx: int,
                length_ratio_std: float,
                buckets: List[Tuple[int, int]],
                output_prefix: str,
-               keep_tmp_shard_files: bool):
+               keep_tmp_shard_files: bool,
+               shard_instance_weights: Optional[str] = None,
+               shard_label_weights: Optional[str] = None):
     """
-    Load raw shard source and target data files, map to integers using the corresponding vocabularies,
-    convert data into tensors and save to disk.
-    Optionally it can delete the source/target files.
+    Load raw shard source, target, optional instance weight, and optional label weight files, map tokens to integers
+    using the corresponding vocabularies, convert data into tensors and save to disk. Optionally delete the raw files.
 
     :param shard_idx: The index of the shard.
     :param data_loader: A loader for loading parallel data from sources and target.
@@ -544,6 +608,8 @@ def save_shard(shard_idx: int,
     :param buckets: Bucket list.
     :param output_prefix: The prefix of the output file name.
     :param keep_tmp_shard_files: Keep the sources/target files when it is True otherwise delete them.
+    :param shard_instance_weights: Optional instance weight file name.
+    :param shard_label_weights: Optional label weight file name.
     :return: Shard statistics.
     """
 
@@ -553,8 +619,12 @@ def save_shard(shard_idx: int,
 
     # Shards contain the raw sentences. Need to map to integers using the vocabs and add BOS/EOS
     sources_sentences, targets_sentences = create_sequence_readers(shard_sources, shard_targets, source_vocabs, target_vocabs)
+    instance_weights_sequences = WeightsReader(shard_instance_weights, multiple_weights_per_line=False) \
+        if shard_instance_weights is not None else None
+    label_weights_sequences = WeightsReader(shard_label_weights, multiple_weights_per_line=True) \
+        if shard_label_weights is not None else None
 
-    for sources, targets in parallel_iter(sources_sentences, targets_sentences):
+    for sources, targets, _, _ in parallel_iter(sources_sentences, targets_sentences):
         source_len = len(sources[0])
         target_len = len(targets[0])
 
@@ -564,7 +634,9 @@ def save_shard(shard_idx: int,
     shard_stats = shard_stat_accumulator.statistics
 
     # Convert to tensors
-    dataset = data_loader.load(sources_sentences, targets_sentences, shard_stats.num_sents_per_bucket)
+    dataset = data_loader.load(sources_sentences, targets_sentences, shard_stats.num_sents_per_bucket,
+                               instance_weights_iterable=instance_weights_sequences,
+                               label_weights_iterable=label_weights_sequences)
     shard_fname = os.path.join(output_prefix, C.SHARD_NAME % shard_idx)
     shard_stats.log()
     logger.info("Writing '%s'", shard_fname)
@@ -573,6 +645,10 @@ def save_shard(shard_idx: int,
     if not keep_tmp_shard_files:
         for f in chain(shard_sources, shard_targets):
             os.remove(f)
+        if shard_instance_weights is not None:
+            os.remove(shard_instance_weights)
+        if shard_label_weights is not None:
+            os.remove(shard_label_weights)
 
     return shard_stat_accumulator.statistics
 
@@ -593,7 +669,10 @@ def prepare_data(source_fnames: List[str],
                  bucket_scaling: bool = True,
                  keep_tmp_shard_files: bool = False,
                  pool: multiprocessing.pool.Pool = None,
-                 shards: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None):
+                 shards: List[Tuple[Tuple[str, ...],
+                                    Tuple[str, ...],
+                                    Optional[str],
+                                    Optional[str]]] = None):
     """
     :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.
     """
@@ -604,7 +683,7 @@ def prepare_data(source_fnames: List[str],
 
     # Get target/source length ratios.
     stats_args = ((source_path, target_path, source_vocabs, target_vocabs, max_seq_len_source, max_seq_len_target)
-                  for source_path, target_path in shards)
+                  for source_path, target_path, _, _, in shards)
     length_stats = pool.starmap(analyze_sequence_lengths, stats_args)
     shards_num_sents = [stat.num_sents for stat in length_stats]
     shards_mean = [stat.length_ratio_mean for stat in length_stats]
@@ -632,7 +711,9 @@ def prepare_data(source_fnames: List[str],
     # Process shards in parallel
     args = ((shard_idx, data_loader, shard_sources, shard_targets, source_vocabs, target_vocabs,
              length_statistics.length_ratio_mean, length_statistics.length_ratio_std, buckets, output_prefix,
-             keep_tmp_shard_files) for shard_idx, (shard_sources, shard_targets) in enumerate(shards))
+             keep_tmp_shard_files, shard_instance_weights, shard_label_weights)
+            for shard_idx, (shard_sources, shard_targets,
+                            shard_instance_weights, shard_label_weights) in enumerate(shards))
     per_shard_statistics = pool.starmap(save_shard, args)
 
     # Combine per shard statistics to obtain global statistics
@@ -714,7 +795,7 @@ def get_data_statistics(source_readers: Optional[Sequence[Iterable]],
                                                        length_ratio_std)
 
     if source_readers is not None:
-        for sources, targets in parallel_iter(source_readers, target_readers):
+        for sources, targets, _, _ in parallel_iter(source_readers, target_readers):
             buck_idx, _ = get_parallel_bucket(buckets, len(sources[0]), len(targets[0]))
             data_stats_accumulator.sequence_pair(sources[0], targets[0], buck_idx)
     else:  # Allow stats for target only data
@@ -884,8 +965,12 @@ def get_training_data_iters(sources: List[str],
                             bucket_scaling: bool = True,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1,
-                            permute: bool = True) -> Tuple['BaseParallelSampleIter', Optional['BaseParallelSampleIter'],
-                                                           'DataConfig', 'DataInfo']:
+                            permute: bool = True,
+                            instance_weights: Optional[str] = None,
+                            label_weights: Optional[str] = None) -> Tuple['BaseParallelSampleIter',
+                                                                             Optional['BaseParallelSampleIter'],
+                                                                             'DataConfig',
+                                                                             'DataInfo']:
     """
     Returns data iterators for training and validation data.
 
@@ -909,7 +994,8 @@ def get_training_data_iters(sources: List[str],
     :param batch_sentences_multiple_of: Round the number of sentences in each
         bucket's batch to a multiple of this value (word-based batching only).
     :param permute: Randomly shuffle the parallel data.
-
+    :param instance_weights: Optional path to training instance weights.
+    :param label_weights: Optional path to training label weights.
     :return: Tuple of (training data iterator, validation data iterator, data config).
     """
     logger.info("===============================")
@@ -930,6 +1016,10 @@ def get_training_data_iters(sources: List[str],
                                                                                                max_seq_len_target)]
 
     sources_sentences, targets_sentences = create_sequence_readers(sources, targets, source_vocabs, target_vocabs)
+    instance_weights_sequences = WeightsReader(instance_weights, multiple_weights_per_line=False) \
+        if instance_weights is not None else None
+    label_weights_sequences = WeightsReader(label_weights, multiple_weights_per_line=True) \
+        if label_weights is not None else None
 
     # Pass 2: Get data statistics and determine the number of data points for each bucket.
     data_statistics = get_data_statistics(sources_sentences, targets_sentences, buckets,
@@ -950,7 +1040,9 @@ def get_training_data_iters(sources: List[str],
                                            pad_id=C.PAD_ID)
 
     training_data = data_loader.load(sources_sentences, targets_sentences,
-                                     data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
+                                     data_statistics.num_sents_per_bucket,
+                                     instance_weights_iterable=instance_weights_sequences,
+                                     label_weights_iterable=label_weights_sequences).fill_up(bucket_batch_sizes)
 
     data_info = DataInfo(sources=sources,
                          targets=targets,
@@ -1225,6 +1317,32 @@ class SequenceReader:
             yield sequence
 
 
+class WeightsReader:
+    """
+    Reads weights or weight sequences (space delimited values) from path and
+    yields floats or lists of floats. Streams from disk, instead of loading all
+    samples into memory.
+
+    :param path: Path to read label weights lines from.
+    :param limit: Read limit.
+    """
+
+    def __init__(self, path: str, multiple_weights_per_line: bool = False, limit: Optional[int] = None) -> None:
+        self.path = path
+        self.limit = limit
+        self.multiple_weights_per_line = multiple_weights_per_line
+
+    def __iter__(self):
+        with smart_open(self.path) as indata:
+            for i, line in enumerate(indata):
+                if self.limit is not None and i == self.limit:
+                    break
+                if self.multiple_weights_per_line:
+                    yield [float(weight) for weight in line.split()]
+                else:
+                    yield float(line)
+
+
 def create_sequence_readers(sources: List[str], targets: List[str],
                             vocab_sources: List[vocab.Vocab],
                             vocab_targets: List[vocab.Vocab]) -> Tuple[List[SequenceReader], List[SequenceReader]]:
@@ -1246,6 +1364,8 @@ def create_sequence_readers(sources: List[str], targets: List[str],
 
 def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
                   target_iterables: Sequence[Iterable[Optional[Any]]],
+                  instance_weights_iterable: Optional[Iterable[Optional[Any]]] = None,
+                  label_weights_iterable: Optional[Iterable[Optional[Any]]] = None,
                   skip_blanks: bool = True,
                   check_token_parallel: bool = True):
     """
@@ -1254,18 +1374,25 @@ def parallel_iter(source_iterables: Sequence[Iterable[Optional[Any]]],
     the caller to save iterator state between calls, if desired.
 
     :param source_iterables: A list of source iterables.
-    :param target_iterables: A target iterable.
+    :param target_iterables: A list of target iterable.
+    :param instance_weights_iterable: An optional instance weight iterable.
+    :param label_weights_iterable: An optional label weight iterable.
     :param skip_blanks: Whether to skip empty target lines.
     :param check_token_parallel: Whether to check if the tokens are parallel or not.
     :return: Iterators over sources and target.
     """
     source_iterators = [iter(s) for s in source_iterables]
     target_iterators = [iter(t) for t in target_iterables]
-    return parallel_iterate(source_iterators, target_iterators, skip_blanks, check_token_parallel)
+    instance_weights_iterator = iter(instance_weights_iterable) if instance_weights_iterable is not None else None
+    label_weights_iterator = iter(label_weights_iterable) if label_weights_iterable is not None else None
+    return parallel_iterate(source_iterators, target_iterators, instance_weights_iterator, label_weights_iterator,
+                            skip_blanks, check_token_parallel)
 
 
 def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
                      target_iterators: Sequence[Iterator[Optional[Any]]],
+                     instance_weights_iterator: Optional[Iterator[Optional[Any]]] = None,
+                     label_weights_iterator: Optional[Iterator[Optional[Any]]] = None,
                      skip_blanks: bool = True,
                      check_token_parallel: bool = True):
     """
@@ -1277,6 +1404,8 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
 
     :param source_iterators: A list of source iterators.
     :param target_iterators: A list of source iterators.
+    :param instance_weights_iterator: An optional instance weight iterator.
+    :pram label_weights_iterator: An optional label weight iterator.
     :param skip_blanks: Whether to skip empty target lines.
     :param check_token_parallel: Whether to check if the tokens are parallel or not.
     :return: Iterators over sources and target.
@@ -1286,6 +1415,8 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
         try:
             sources = [next(source_iter) for source_iter in source_iterators]
             targets = [next(target_iter) for target_iter in target_iterators]
+            instance_weight = next(instance_weights_iterator) if instance_weights_iterator is not None else None
+            label_weights = next(label_weights_iterator) if label_weights_iterator is not None else None
         except StopIteration:
             break
         if skip_blanks and (any((s is None for s in sources)) or any((t is None for t in targets))):
@@ -1296,15 +1427,18 @@ def parallel_iterate(source_iterators: Sequence[Iterator[Optional[Any]]],
                             "Source sequences are not token-parallel: %s" % (str(sources)))
             check_condition(are_none(targets) or are_token_parallel(targets),
                             "Target sequences are not token-parallel: %s" % (str(targets)))
-        yield sources, targets
+        yield sources, targets, instance_weight, label_weights
 
     if num_skipped > 0:
         logger.warning("Parallel reading of sequences skipped %d elements", num_skipped)
 
     check_condition(
         all(next(cast(Iterator, s), None) is None for s in source_iterators) and \
-        all(next(cast(Iterator, t), None) is None for t in target_iterators),
-        "Different number of lines in source(s) and target(s) iterables.")
+        all(next(cast(Iterator, t), None) is None for t in target_iterators) and \
+        (instance_weights_iterator is None or next(cast(Iterator, instance_weights_iterator), None) is None) and \
+        (label_weights_iterator is None or next(cast(Iterator, label_weights_iterator), None) is None),
+        "Different number of lines in source(s), target(s), (if specified) instance weight, and (if specified) label "
+        "weight iterables.")
 
 
 def get_parallel_bucket(buckets: List[Tuple[int, int]],
@@ -1345,6 +1479,21 @@ def get_target_bucket(buckets: List[Tuple[int, int]],
     return bucket_idx, bucket
 
 
+def compute_slice_indices_from_sequence_lengths(seq_lens: torch.Tensor) -> torch.Tensor:
+    """
+    Compute indices for slicing sequences of specified lengths if they were to
+    be concatenated into a single (packed) sequence.
+
+    :param seq_lens: 1-D tensor of sequence lengths
+    :returns: Tensor of shape (seq_lens, 2) specifying the start and end indices
+              to slice each sequence from a single concatenated sequence.
+    """
+    check_condition(seq_lens.ndim == 1, 'Sequence lengths should be specified as a 1-D tensor')
+    slice_ends = torch.cumsum(seq_lens, dim=0, dtype=torch.int64)
+    slice_starts = slice_ends - seq_lens
+    return torch.stack((slice_starts, slice_ends), dim=1)
+
+
 class ParallelDataSet:
     """
     Bucketed parallel data set
@@ -1352,11 +1501,15 @@ class ParallelDataSet:
 
     def __init__(self,
                  source: List[torch.Tensor],
-                 target: List[torch.Tensor]) -> None:
+                 target: List[torch.Tensor],
+                 instance_weights: Optional[List[torch.Tensor]] = None,
+                 label_weights: Optional[List[torch.Tensor]] = None) -> None:
         check_condition(len(source) == len(target),
                         "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
         self.source = source
         self.target = target
+        self.instance_weights = instance_weights
+        self.label_weights = label_weights
 
     def __len__(self) -> int:
         return len(self.source)
@@ -1364,11 +1517,23 @@ class ParallelDataSet:
     def get_bucket_counts(self):
         return [len(self.source[buck_idx]) for buck_idx in range(len(self))]
 
-    def save(self, fname: str):
+    def save(self, fname: str, use_legacy_format: bool = False):
         """
-        Saves the dataset to a binary .npy file.
+        Saves the dataset to disk using PyTorch's pickle/zip format. The option
+        to use the legacy data format is included for testing backward
+        compatibility and is not recommended for general use.
         """
-        torch.save(self.source + self.target, fname)
+        if use_legacy_format:
+            check_condition(self.instance_weights is None, 'Cannot save data in legacy format when using instance weights')
+            check_condition(self.label_weights is None, 'Cannot save data in legacy format when using label weights')
+            torch.save(self.source + self.target, fname)
+        else:
+            data_dict = {C.DATA_KEY_SOURCE: self.source, C.DATA_KEY_TARGET: self.target}  # type: Dict[str, Any]
+            if self.instance_weights is not None:
+                data_dict[C.DATA_KEY_INSTANCE_WEIGHTS] = self.instance_weights
+            if self.label_weights is not None:
+                data_dict[C.DATA_KEY_LABEL_WEIGHTS] = self.label_weights
+            torch.save(data_dict, fname)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1378,9 +1543,22 @@ class ParallelDataSet:
         on its rank. Specifically, each of N workers loads 1/N of each bucket.
         """
         data = torch.load(fname)
-        n = len(data) // 2
-        source = data[:n]
-        target = data[n:2 * n]
+        if isinstance(data, list):
+            # Legacy format (data version 6)
+            n = len(data) // 2
+            source = data[:n]
+            target = data[n:2 * n]
+            instance_weights = None
+            label_weights = None
+        else:
+            # Current format (data version 7)
+            check_condition(isinstance(data, dict) and C.DATA_KEY_SOURCE in data and C.DATA_KEY_TARGET in data,
+                            f'Unknown data format for file {fname}. '
+                            'Please rerun data preparation with this version of Sockeye.')
+            source = data[C.DATA_KEY_SOURCE]
+            target = data[C.DATA_KEY_TARGET]
+            instance_weights = data.get(C.DATA_KEY_INSTANCE_WEIGHTS, None)
+            label_weights = data.get(C.DATA_KEY_LABEL_WEIGHTS, None)
         if utils.is_distributed():
             split_index = torch.distributed.get_rank()
             total_splits = torch.distributed.get_world_size()
@@ -1398,8 +1576,12 @@ class ParallelDataSet:
                     if num_copies > 1:
                         logger.info('Replicating bucket of %d sentence(s) %d times to cover %d splits.',
                                     num_sentences, num_copies, total_splits)
-                        source[k] = torch.repeat_interleave(source[k], repeats=num_copies, dim=0)
-                        target[k] = torch.repeat_interleave(target[k], repeats=num_copies, dim=0)
+                        source[k] = source[k].repeat(num_copies, 1, 1)
+                        target[k] = target[k].repeat(num_copies, 1, 1)
+                        if instance_weights is not None:
+                            instance_weights[k] = instance_weights[k].repeat(num_copies)
+                        if label_weights is not None:
+                            label_weights[k] = label_weights[k].repeat(num_copies, 1)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
@@ -1407,10 +1589,27 @@ class ParallelDataSet:
                       if s.shape[0] > 0
                       else s for s in source]
             target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])]
-                      if t.shape[0] > 0
-                      else t for t in target]
+                      if t.shape[0] > 0 else t
+                      for t in target]
+            if instance_weights is not None:
+                instance_weights = [w[math.floor(i * w.shape[0]):math.floor(j * w.shape[0])]
+                                    if w.shape[0] > 0 else w
+                                    for w in instance_weights]
+            if label_weights is not None:
+                label_weights = [w[math.floor(i * w.shape[0]):math.floor(j * w.shape[0])]
+                                 if w.shape[0] > 0 else w
+                                 for w in label_weights]
+        # Sanity checks
         assert len(source) == len(target)
-        return ParallelDataSet(source, target)
+        for s, t in zip(source, target):
+            assert s.shape[0] == t.shape[0]
+        if instance_weights is not None:
+            for t, w in zip(target, instance_weights):
+                assert t.shape[0] == w.shape[0]
+        if label_weights is not None:
+            for t, w in zip(target, label_weights):
+                assert t.shape[0] == w.shape[0]
+        return ParallelDataSet(source, target, instance_weights, label_weights)
 
     def fill_up(self,
                 bucket_batch_sizes: List[BucketBatchSize],
@@ -1424,6 +1623,8 @@ class ParallelDataSet:
         """
         source = list(self.source)
         target = list(self.target)
+        instance_weights = list(self.instance_weights) if self.instance_weights is not None else None
+        label_weights = list(self.label_weights) if self.label_weights is not None else None
 
         rs = np.random.RandomState(seed)
 
@@ -1431,6 +1632,9 @@ class ParallelDataSet:
             bucket_batch_size = bucket_batch_sizes[bucket_idx].batch_size
             bucket_source = self.source[bucket_idx]
             bucket_target = self.target[bucket_idx]
+            bucket_instance_weights = self.instance_weights[bucket_idx] if self.instance_weights is not None else None
+            bucket_label_weights = self.label_weights[bucket_idx] if self.label_weights is not None else None
+
             num_samples = bucket_source.shape[0]
 
             # Determine the target number of samples (current value or minimally
@@ -1455,8 +1659,18 @@ class ParallelDataSet:
                                                 torch.index_select(bucket_source, 0, desired_indices)), dim=0)
                 target[bucket_idx] = torch.cat((bucket_target,
                                                 torch.index_select(bucket_target, 0, desired_indices)), dim=0)
+                if instance_weights is not None:
+                    assert bucket_instance_weights is not None
+                    instance_weights[bucket_idx] = torch.cat((bucket_instance_weights,
+                                                              torch.index_select(bucket_instance_weights,
+                                                                                 0, desired_indices)), dim=0)
+                if label_weights is not None:
+                    assert bucket_label_weights is not None
+                    label_weights[bucket_idx] = torch.cat((bucket_label_weights,
+                                                           torch.index_select(bucket_label_weights,
+                                                                              0, desired_indices)), dim=0)
 
-        return ParallelDataSet(source, target)
+        return ParallelDataSet(source, target, instance_weights, label_weights)
 
     def permute(self, permutations: List[torch.Tensor]) -> 'ParallelDataSet':
         """
@@ -1469,17 +1683,31 @@ class ParallelDataSet:
         assert len(self) == len(permutations)
         source = []  # type: List[torch.Tensor]
         target = []  # type: List[torch.Tensor]
+        instance_weights = [] if self.instance_weights is not None else None  # type: Optional[List[torch.Tensor]]
+        label_weights = [] if self.label_weights is not None else None  # type: Optional[List[torch.Tensor]]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not an empty bucket
                 permutation = permutations[buck_idx]
                 source.append(torch.index_select(self.source[buck_idx], 0, permutation))
                 target.append(torch.index_select(self.target[buck_idx], 0, permutation))
+                if self.instance_weights is not None:
+                    assert instance_weights is not None
+                    instance_weights.append(torch.index_select(self.instance_weights[buck_idx], 0, permutation))
+                if self.label_weights is not None:
+                    assert label_weights is not None
+                    label_weights.append(torch.index_select(self.label_weights[buck_idx], 0, permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
+                if self.instance_weights is not None:
+                    assert instance_weights is not None
+                    instance_weights.append(self.instance_weights[buck_idx])
+                if self.label_weights is not None:
+                    assert label_weights is not None
+                    label_weights.append(self.label_weights[buck_idx])
 
-        return ParallelDataSet(source, target)
+        return ParallelDataSet(source, target, instance_weights, label_weights)
 
 
 def get_permutations(bucket_counts: List[int]) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
@@ -1632,8 +1860,8 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
         sources_sentences = [[] for _ in self.sources_sentences]  # type: List[List[str]]
         targets_sentences = [[] for _ in self.targets_sentences]  # type: List[List[str]]
         num_read = 0
-        for num_read, (sources, targets) in enumerate(
-                parallel_iterate(self.sources_iters, self.targets_iters, skip_blanks=False), 1):
+        for num_read, (sources, targets, _, _) in enumerate(parallel_iterate(self.sources_iters, self.targets_iters,
+                                                                             skip_blanks=False), 1):
             source_len = 0 if sources[0] is None else len(sources[0])
             target_len = 0 if targets[0] is None else len(targets[0])
             if source_len > self.max_len_source:
@@ -1797,7 +2025,10 @@ class ParallelSampleIter(BaseParallelSampleIter):
                          permute=permute, dtype=dtype)
 
         # create independent lists to be shuffled
-        self.data = ParallelDataSet(list(data.source), list(data.target))
+        self.data = ParallelDataSet(list(data.source),
+                                    list(data.target),
+                                    list(data.instance_weights) if data.instance_weights is not None else None,
+                                    list(data.label_weights) if data.label_weights is not None else None)
 
         # create index tuples (buck_idx, batch_start_pos) into buckets.
         # This is the list of all batches across all buckets in the dataset. These will be shuffled.
@@ -1851,7 +2082,10 @@ class ParallelSampleIter(BaseParallelSampleIter):
         batch_size = self.bucket_batch_sizes[i].batch_size
         source = self.data.source[i][j:j + batch_size]
         target, label = create_target_and_shifted_label_sequences(self.data.target[i][j:j + batch_size])
-        return create_batch_from_parallel_sample(source, target, label)
+        instance_weights = self.data.instance_weights[i][j:j + batch_size] \
+            if self.data.instance_weights is not None else None
+        label_weights = self.data.label_weights[i][j:j + batch_size] if self.data.label_weights is not None else None
+        return create_batch_from_parallel_sample(source, target, label, instance_weights, label_weights)
 
     def save_state(self, fname: str):
         """
@@ -1908,6 +2142,8 @@ class Batch:
     labels: Dict[str, torch.Tensor]
     samples: int
     tokens: int
+    instance_weights: Optional[Dict[str, torch.Tensor]] = None
+    label_weights: Optional[Dict[str, torch.Tensor]] = None
 
     def load(self, device: torch.device) -> 'Batch':
         source = self.source.to(device)
@@ -1915,7 +2151,12 @@ class Batch:
         target = self.target.to(device)
         target_length = self.target_length.to(device)
         labels = {name: label.to(device) for name, label in self.labels.items()}
-        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens)
+        instance_weights = {name: weight.to(device) for name, weight in self.instance_weights.items()} \
+            if self.instance_weights is not None else None
+        label_weights = {name: weight.to(device) for name, weight in self.label_weights.items()} \
+            if self.label_weights is not None else None
+        return Batch(source, source_length, target, target_length, labels, self.samples, self.tokens,
+                     instance_weights, label_weights)
 
 
 def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -1930,13 +2171,20 @@ def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) ->
     return target, label
 
 
-def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor, label: torch.Tensor) -> Batch:
+def create_batch_from_parallel_sample(source: torch.Tensor,
+                                      target: torch.Tensor,
+                                      label: torch.Tensor,
+                                      instance_weights: Optional[torch.Tensor] = None,
+                                      label_weights: Optional[torch.Tensor] = None) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
     :param source: Source tensor. Shape: (batch, source_length, num_source_factors).
     :param target: Target tensor. Shape: (batch, target_length, num_target_factors).
     :param label: Time-shifted label tensor. Shape: (batch, target_length, num_target_factors).
+    :param instance_weights: Optional instance weight tensor. Shape: (batch, 1).
+    :param label_weights: Optional label weight tensor.
+                          Shape (batch, target_length).
     """
     source_words = source[:, :, 0]
     source_length = (source_words != C.PAD_ID).sum(dim=1)
@@ -1956,4 +2204,13 @@ def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor
         labels[C.TARGET_LABEL_NAME] = primary_label
         labels.update({C.TARGET_FACTOR_LABEL_NAME % i: label for i, label in enumerate(factor_labels, 1)})
 
-    return Batch(source, source_length, target, target_length, labels, samples, tokens)
+    if instance_weights is not None:
+        assert instance_weights.shape[0] == labels[C.TARGET_LABEL_NAME].shape[0]
+    _instance_weights = {C.TARGET_LABEL_NAME: instance_weights} if instance_weights is not None else None
+
+    if label_weights is not None:
+        assert label_weights.shape == labels[C.TARGET_LABEL_NAME].shape
+    _label_weights = {C.TARGET_LABEL_NAME: label_weights} if label_weights is not None else None
+
+    return Batch(source, source_length, target, target_length, labels, samples, tokens,
+                 instance_weights=_instance_weights, label_weights=_label_weights)

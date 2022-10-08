@@ -142,6 +142,46 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
             assert read_sequences == expected_sequences
 
 
+def test_weights_reader():
+
+    # Single value per line
+
+    inputs = ['1', '0.5', '']
+    expected_data_before_error = [1., 0.5]
+
+    with TemporaryDirectory() as work_dir:
+        path = os.path.join(work_dir, 'input')
+        with open(path, 'w') as f:
+            for inp in inputs:
+                print(inp, file=f)
+
+        reader = iter(data_io.WeightsReader(path, multiple_weights_per_line=False))
+        assert [next(reader), next(reader)] == expected_data_before_error
+        try:
+            next(reader)
+            raise RuntimeError('Expected ValueError not raised for empty input')
+        except ValueError:
+            pass
+
+    # Multiple values per line
+
+    inputs = ['1', '1 0.5', '']
+    expected_data = [[1.], [1., 0.5], []]
+
+    with TemporaryDirectory() as work_dir:
+        path = os.path.join(work_dir, 'input')
+        with open(path, 'w') as f:
+            for inp in inputs:
+                print(inp, file=f)
+
+        reader = data_io.WeightsReader(path, multiple_weights_per_line=True)
+        read_data = [d for d in reader]
+
+        assert len(read_data) == len(inputs)
+        for data, expected_output in zip(read_data, expected_data):
+            assert data == expected_output
+
+
 @pytest.mark.parametrize("source_iterables, target_iterables",
                          [
                              (
@@ -160,7 +200,7 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
 def test_nonparallel_iter(source_iterables, target_iterables):
     with pytest.raises(SockeyeError) as e:
         list(data_io.parallel_iter(source_iterables, target_iterables))
-    assert str(e.value) == "Different number of lines in source(s) and target(s) iterables."
+    assert str(e.value).startswith("Different number of lines in")
 
 
 @pytest.mark.parametrize("source_iterables, target_iterables",
@@ -189,41 +229,65 @@ def test_not_target_token_parallel_iter(source_iterables, target_iterables):
     assert str(e.value).startswith("Target sequences are not token-parallel")
 
 
-@pytest.mark.parametrize("source_iterables, target_iterables, expected",
+@pytest.mark.parametrize("source_iterables, target_iterables, "
+                         "instance_weights_iterable, label_weights_iterable, expected",
                          [
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[[0], [1]]],
-                                     [([[0], [0]], [[0]]), ([[1, 1], [1, 1]], [[1]])]
+                                     None,
+                                     None,
+                                     [([[0], [0]], [[0]], None, None),
+                                      ([[1, 1], [1, 1]], [[1]], None, None)]
                              ),
                              (
                                      [[[0], None], [[0], None]],
                                      [[[0], [1]]],
-                                     [([[0], [0]], [[0]])]
+                                     None,
+                                     None,
+                                     [([[0], [0]], [[0]], None, None)]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[[0], None]],
-                                     [([[0], [0]], [[0]])]
+                                     None,
+                                     None,
+                                     [([[0], [0]], [[0]], None, None)]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
                                      [[None, [1]]],
-                                     [([[1, 1], [1, 1]], [[1]])]
+                                     None,
+                                     None,
+                                     [([[1, 1], [1, 1]], [[1]], None, None)]
                              ),
                              (
                                      [[None, [1]]],
                                      [[None, [1, 1]], [None, [1, 1]]],
-                                     [([[1]], [[1, 1], [1, 1]])]
+                                     None,
+                                     None,
+                                     [([[1]], [[1, 1], [1, 1]], None, None)]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
                                      [[None, None]],
+                                     None,
+                                     None,
                                      []
-                             )
+                             ),
+                             # With instance and label weights
+                             (
+                                     [[[0], [1, 1]], [[0], [1, 1]]],
+                                     [[[0], [1]]],
+                                     [1., 0.5],
+                                     [[1.], [1., 0.5]],
+                                     [([[0], [0]], [[0]], 1., [1.]),
+                                      ([[1, 1], [1, 1]], [[1]], 0.5, [1., 0.5])]
+                             ),
                          ])
-def test_parallel_iter(source_iterables, target_iterables, expected):
-    assert list(data_io.parallel_iter(source_iterables, target_iterables)) == expected
+def test_parallel_iter(source_iterables, target_iterables, instance_weights_iterable, label_weights_iterable, expected):
+    assert list(data_io.parallel_iter(source_iterables, target_iterables,
+                                      instance_weights_iterable, label_weights_iterable)) == expected
 
 
 def test_sample_based_define_bucket_batch_sizes():
@@ -282,11 +346,21 @@ def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_
         assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
 
 
-def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
-                              min_count: int,
-                              max_count: int,
-                              bucket_counts: Optional[List[Optional[int]]] = None) -> Tuple[List[torch.Tensor],
-                                                                                            List[torch.Tensor]]:
+def test_compute_slice_indices_from_sequence_lengths():
+    seq_lens = torch.tensor([0, 1, 2, 0, 0, 3, 4, 5, 0])
+    slice_indices = torch.tensor([[0, 0], [0, 1], [1, 3], [3, 3], [3, 3], [3, 6], [6, 10], [10, 15], [15, 15]])
+    assert torch.equal(data_io.compute_slice_indices_from_sequence_lengths(seq_lens), slice_indices)
+
+
+def _get_random_bucketed_data(
+    buckets: List[Tuple[int, int]],
+    min_count: int,
+    max_count: int,
+    bucket_counts: Optional[List[Optional[int]]] = None,
+    include_weights: bool = False) -> Tuple[List[torch.Tensor],
+                                            List[torch.Tensor],
+                                            Optional[List[torch.Tensor]],
+                                            Optional[List[torch.Tensor]]]:
     """
     Get random bucket data.
 
@@ -294,8 +368,10 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
     :param min_count: The minimum number of samples that will be sampled if no exact count is given.
     :param max_count: The maximum number of samples that will be sampled if no exact count is given.
     :param bucket_counts: For each bucket an optional exact example count can be given. If it is not given it will be
-                         sampled.
-    :return: The random source and target tensors.
+                          sampled.
+    :param include_weights: Also generate random instance and label weights (otherwise return None for instance and
+                             label weights).
+    :return: The random source and target tensors and optional instance and label weights.
     """
     if bucket_counts is None:
         bucket_counts = [None for _ in buckets]
@@ -305,12 +381,16 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
               for count, bucket in zip(bucket_counts, buckets)]
     target = [torch.randint(0, 10, (count, random.randint(2, bucket[1]), 1))
               for count, bucket in zip(bucket_counts, buckets)]
-    return source, target
+    instance_weights = [torch.rand((t.shape[0], 1)) for t in target] if include_weights else None
+    label_weights = [torch.rand(t.shape) for t in target] if include_weights else None
+    return source, target, instance_weights, label_weights
 
 
-def test_parallel_data_set():
+@pytest.mark.parametrize("include_weights", [False, True])
+def test_parallel_data_set(include_weights):
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
-    source, target = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
+    source, target, instance_weights, label_weights = _get_random_bucketed_data(
+        buckets, min_count=0, max_count=5, include_weights=include_weights)
 
     def check_equal(tensors1, tensors2):
         assert len(tensors1) == len(tensors2)
@@ -318,30 +398,49 @@ def test_parallel_data_set():
             assert torch.equal(a1, a2)
 
     with TemporaryDirectory() as work_dir:
-        dataset = data_io.ParallelDataSet(source, target)
+        dataset = data_io.ParallelDataSet(source, target, instance_weights, label_weights)
         fname = os.path.join(work_dir, 'dataset')
         dataset.save(fname)
         dataset_loaded = data_io.ParallelDataSet.load(fname)
         check_equal(dataset.source, dataset_loaded.source)
         check_equal(dataset.target, dataset_loaded.target)
+        if include_weights:
+            check_equal(dataset.instance_weights, dataset_loaded.instance_weights)
+            check_equal(dataset.label_weights, dataset_loaded.label_weights)
+        else:
+            # Test backward compatibility: with the legacy format (source/target
+            # only)
+            dataset.save(fname, use_legacy_format=True)
+            dataset_loaded = data_io.ParallelDataSet.load(fname)
+            check_equal(dataset.source, dataset_loaded.source)
+            check_equal(dataset.target, dataset_loaded.target)
 
 
-def test_parallel_data_set_fill_up():
+@pytest.mark.parametrize("include_weights", [False, True])
+def test_parallel_data_set_fill_up(include_weights):
     batch_size = 32
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
                                                            data_target_average_len=[None] * len(buckets))
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5,
+                                                                 include_weights=include_weights))
 
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
     assert len(dataset_filled_up.target) == len(dataset.target)
+    if include_weights:
+        assert len(dataset_filled_up.instance_weights) == len(dataset.instance_weights)
+        assert len(dataset_filled_up.label_weights) == len(dataset.label_weights)
+
     for bidx in range(len(dataset)):
         bucket_batch_size = bucket_batch_sizes[bidx].batch_size
         assert dataset_filled_up.source[bidx].shape[0] == bucket_batch_size
         assert dataset_filled_up.target[bidx].shape[0] == bucket_batch_size
+        if include_weights:
+            assert dataset_filled_up.instance_weights[bidx].shape[0] == bucket_batch_size
+            assert dataset_filled_up.label_weights[bidx].shape[0] == bucket_batch_size
 
 
 def test_get_permutations():
@@ -364,14 +463,16 @@ def test_get_permutations():
             assert len(p_set) == 1
 
 
-def test_parallel_data_set_permute():
+@pytest.mark.parametrize("include_weights", [False, True])
+def test_parallel_data_set_permute(include_weights):
     batch_size = 5
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
                                                            data_target_average_len=[None] * len(buckets))
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
+    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                                                 include_weights=include_weights)).fill_up(
         bucket_batch_sizes)
 
     permutations, inverse_permutations = data_io.get_permutations(dataset.get_bucket_counts())
@@ -384,9 +485,15 @@ def test_parallel_data_set_permute():
         if num_samples:
             assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).all()
             assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).all()
+            if include_weights:
+                assert (dataset.instance_weights[buck_idx] == dataset_restored.instance_weights[buck_idx]).all()
+                assert (dataset.label_weights[buck_idx] == dataset_restored.label_weights[buck_idx]).all()
         else:
             assert not dataset_restored.source[buck_idx].shape[0]
             assert not dataset_restored.target[buck_idx].shape[0]
+            if include_weights:
+                assert not dataset_restored.instance_weights[buck_idx].shape[0]
+                assert not dataset_restored.label_weights[buck_idx].shape[0]
 
 
 def test_get_batch_indices():

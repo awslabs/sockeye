@@ -25,7 +25,7 @@ import sockeye.utils
 
 # Dummy loss for testing
 class DummyLoss(sockeye.loss.Loss):
-    def forward(self, outputs, labels):
+    def forward(self, outputs, labels, instance_weights, label_weights):
         return (outputs + labels) * self.weight
 
     def create_metric(self):
@@ -70,7 +70,6 @@ def test_cross_entropy_loss():
     assert b.ignore_label == C.PAD_ID
     assert b.name == C.CROSS_ENTROPY
     assert b.weight == 1.0
-    assert b._dtype == C.DTYPE_FP32
     assert b.output_name == C.LOGITS_NAME
     assert b.label_name == C.TARGET_LABEL_NAME
     assert b._alpha == 0.0
@@ -96,6 +95,18 @@ def test_cross_entropy_loss():
 
     pt.testing.assert_allclose(loss_value, expected_loss_value)
     pt.testing.assert_allclose(logits.grad, expected_logits_grad)
+
+    # Instance and label weights don't change the result in our uniform test
+    # case
+    instance_weights = pt.tensor([0, 0.1, 0.5, 0.9])
+    label_weights = pt.tensor([[0, 0.1, 0.5, 0.9],
+                               [0, 0.1, 0.5, 0.9],
+                               [0, 0.1, 0.5, 0.9],
+                               [0, 0.1, 0.5, 0.9]])
+    loss_value, _ = b({C.LOGITS_NAME: logits}, {C.TARGET_LABEL_NAME: labels},
+                      instance_weights={C.TARGET_LABEL_NAME: instance_weights},
+                      label_weights={C.TARGET_LABEL_NAME: label_weights})
+    pt.testing.assert_allclose(loss_value, expected_loss_value)
 
 
 def test_label_to_bow():
@@ -148,7 +159,7 @@ def test_binary_cross_entropy_loss():
     assert loss_samples.item() == 1  # this loss returns always 1
     expected_loss = -pt.log(pt.sigmoid(pt.tensor(1))) / vocab_size / batch_size
     pt.testing.assert_allclose(loss_value, expected_loss)
-    expected_grad = - 1/ (pt.exp(pt.tensor(1)) + 1)  / vocab_size / batch_size 
+    expected_grad = - 1/ (pt.exp(pt.tensor(1)) + 1)  / vocab_size / batch_size
     pt.testing.assert_allclose(logits.grad,
         pt.tensor([[0.0000, 0.0000, 0.0000, expected_grad],
                    [0.0000, 0.0000, 0.0000, 0.0000]])

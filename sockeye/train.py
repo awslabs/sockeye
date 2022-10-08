@@ -408,6 +408,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             targets=targets,
             validation_sources=validation_sources,
             validation_targets=validation_targets,
+            instance_weights=args.instance_weights,
+            label_weights=args.label_weights,
             source_vocabs=source_vocabs,
             target_vocabs=target_vocabs,
             source_vocab_paths=source_vocab_paths,
@@ -730,11 +732,9 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
         losses.append(loss.CrossEntropyLoss(name=name,
                                             weight=weight,
                                             label_smoothing=label_smoothing,
-                                            dtype=C.DTYPE_FP32,
                                             output_name=output_name,
                                             label_name=label_name,
-                                            metric_prefix=metric_prefix,
-                                            label_smoothing_impl=args.label_smoothing_impl))
+                                            metric_prefix=metric_prefix))
 
     if args.length_task is not None:
         weight = args.length_task_weight

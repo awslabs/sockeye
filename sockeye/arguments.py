@@ -441,6 +441,14 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Target side of parallel training data.')
+    params.add_argument('--instance-weights',
+                        required=False,
+                        type=regular_file(),
+                        help='Training instance weights (line-parallel with target file). One value per line.')
+    params.add_argument('--label-weights',
+                        required=False,
+                        type=regular_file(),
+                        help='Training label weights (token-parallel with target file). One value per token.')
 
 
 def add_validation_data_params(params):
@@ -852,11 +860,6 @@ def add_training_args(params):
                               default=0.1,
                               type=float,
                               help='Smoothing constant for label smoothing. Default: %(default)s.')
-    train_params.add_argument('--label-smoothing-impl',
-                              default='mxnet',
-                              choices=['mxnet', 'fairseq', 'torch'],
-                              help='Choose label smoothing implementation. Default: %(default)s. '
-                                   '`torch` requires PyTorch 1.10.')
 
     train_params.add_argument('--length-task',
                               type=str,

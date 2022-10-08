@@ -72,15 +72,18 @@ class ModelWithLoss(torch.nn.Module):
                 source_length: torch.Tensor,
                 target: torch.Tensor,
                 target_length: torch.Tensor,
-                labels: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor,
-                                                          List[torch.Tensor],
-                                                          List[torch.Tensor]]:
+                labels: Dict[str, torch.Tensor],
+                instance_weights: Optional[Dict[str, torch.Tensor]] = None,
+                label_weights: Optional[Dict[str, torch.Tensor]] = None) -> Tuple[torch.Tensor,
+                                                                                  List[torch.Tensor],
+                                                                                  List[torch.Tensor]]:
         model_outputs = self.model(source, source_length, target, target_length)
         if utils.using_deepspeed():
             # Guarantee model outputs are float32 before computing losses.
             # Computing losses in DeepSpeed float16 mode can lead to overflow.
             model_outputs = {output_name: output.to(torch.float32) for (output_name, output) in model_outputs.items()}
-        loss_outputs = [loss_function(model_outputs, labels) for loss_function in self.losses]
+        loss_outputs = [loss_function(model_outputs, labels, instance_weights, label_weights)
+                        for loss_function in self.losses]
         loss_values, num_samples = zip(*loss_outputs)
         sum_losses = sum(loss_values) if len(loss_values) > 1 else loss_values[0]
         return sum_losses, loss_values, num_samples  # type: ignore
@@ -359,7 +362,8 @@ class EarlyStoppingTrainer:
         with torch.cuda.amp.autocast(cache_enabled=False) if self.using_amp else utils.no_context():  # type: ignore
             # Forward + loss
             sum_losses, loss_values, num_samples = self.model_object(batch.source, batch.source_length,
-                                                                     batch.target, batch.target_length, batch.labels)
+                                                                     batch.target, batch.target_length, batch.labels,
+                                                                     batch.instance_weights, batch.label_weights)
         # Backward
         if utils.using_deepspeed():
             # DeepSpeed backward. DeepSpeed handles all loss scaling.
