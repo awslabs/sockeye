@@ -17,7 +17,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 - Sockeye training now supports instance (sequence level) and label (token level) loss weights.
   - Use `sockeye-train` and `sockeye-prepare-data` option `--instance-weights` to specify a file with one weight per line (line-parallel with `--target`).
-  - Use `sockeye-train` and `sockeye-prepare-data` option `--label-weights` to specify a file with space-delimited weights (token-parallel with `--target`). Each sequence's EOS weight is set to the average of the specified weights.
+  - Use `sockeye-train` and `sockeye-prepare-data` option `--label-weights` to specify a file with space-delimited weights (token-parallel with `--target`). Each sequence's EOS weight is set to the average of the specified token weights for that sequence.
   - Both instance and label weights scale token-level negative log-likelihood and token counts when computing cross-entropy loss for the primary target factor. Because both the numerator (negative log-likelihood) and denominator (token count) are scaled, the final loss scale for each batch remains the same.
 
 ### Changed
