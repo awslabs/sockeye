@@ -11,6 +11,23 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.9999]
+
+### Added
+
+- Sockeye training now supports instance (sequence level) and label (token level) loss weights.
+  - Use `sockeye-train` and `sockeye-prepare-data` option `--instance-weights` to specify a file with one weight per line (line-parallel with `--target`).
+  - Use `sockeye-train` and `sockeye-prepare-data` option `--label-weights` to specify a file with space-delimited weights (token-parallel with `--target`). Each sequence's EOS weight is set to the average of the specified weights.
+  - Both instance and label weights scale token-level negative log-likelihood and token counts when computing cross-entropy loss for the primary target factor. Because both the numerator (negative log-likelihood) and denominator (token count) are scaled, the final loss scale for each batch remains the same.
+
+### Changed
+
+- Sockeye uses a new dictionary-based prepared data format that supports instance and label weights (version 7). The previous format (version 6) is still supported.
+
+### Fixed
+
+- For distributed training, replicating examples so that each worker has at least one per bucket now correctly uses `repeat` instead of `repeat_interleave`.
+
 ## [3.1.24]
 
 ### Fixed
