@@ -24,6 +24,10 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 - Sockeye uses a new dictionary-based prepared data format that supports instance and label weights (version 7). The previous format (version 6) is still supported.
 
+### Removed
+
+- Removed `sockeye-train` option `--label-smoothing-impl`. Sockeye now uses the default label-smoothed cross-entropy implementation in all cases (previously called `mxnet`).
+
 ### Fixed
 
 - For distributed training, replicating examples so that each worker has at least one per bucket now correctly uses `repeat` instead of `repeat_interleave`.
