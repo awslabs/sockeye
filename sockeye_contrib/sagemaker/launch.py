@@ -25,7 +25,10 @@ import sagemaker
 from sagemaker.pytorch import PyTorch
 
 from sockeye.log import setup_main_logger
+from code.sagemaker_train import INPUT_ARGS_SINGLE_VAL, INPUT_ARGS_MULTIPLE_VALS, OUTPUT_ARG, CONFIG_ARG, CONFIG_FNAME
 
+
+INPUT_ARGS = INPUT_ARGS_SINGLE_VAL + INPUT_ARGS_MULTIPLE_VALS
 
 CODE_DIRNAME = 'code'
 SOCKEYE_DIRNAME = 'sockeye'
@@ -34,13 +37,6 @@ SOCKEYE_CONTRIB_FNAMES = ['rouge.py']
 REQUIREMENTS_DIRNAME = 'requirements'
 REQUIREMENTS_FNAME = 'requirements.txt'
 SOURCE_DIR_ARCHIVE_FNAME = 'sourcedir.tar.gz'
-
-INPUT_ARGS = ['prepared_data', 'source', 'source_factors', 'target', 'target_factors',
-              'validation_source', 'validation_source_factors', 'validation_target', 'validation_target_factors']
-OUTPUT_ARG = 'output'
-
-CONFIG_ARG = 'config'
-CONFIG_FNAME = 'args.yaml'
 
 S3_PREFIX = 's3://'
 

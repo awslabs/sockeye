@@ -24,7 +24,8 @@ from sockeye.log import setup_main_logger
 
 
 INPUT_ARG_PREPARED_DATA = 'prepared_data'
-INPUT_ARGS_SINGLE_VAL = [INPUT_ARG_PREPARED_DATA, 'source',  'target', 'validation_source', 'validation_target']
+INPUT_ARGS_SINGLE_VAL = ['params', INPUT_ARG_PREPARED_DATA, 'source',  'target',
+                         'validation_source', 'validation_target']
 INPUT_ARGS_MULTIPLE_VALS = ['source_factors', 'target_factors',
                             'validation_source_factors', 'validation_target_factors']
 OUTPUT_ARG = 'output'
