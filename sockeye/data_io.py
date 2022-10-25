@@ -408,7 +408,11 @@ def create_shards(source_fnames: List[str],
         for ((sources, targets, instance_weight, label_weights),
              random_shard_index) in zip(parallel_iter(source_readers, target_readers,
                                                       instance_weights_reader, label_weights_reader,
-                                                      skip_blanks=True, check_token_parallel=True),
+                                                      # We do not check for token parallelism here
+                                                      # because sources and targets are strings that
+                                                      # are not yet converted into sequences of
+                                                      # vocabulary IDs.
+                                                      skip_blanks=True, check_token_parallel=False),
                                         random_shard_iter):
             random_shard_index = cast(int, random_shard_index)
             for i, line in enumerate(sources):
