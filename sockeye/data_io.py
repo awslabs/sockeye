@@ -1583,7 +1583,7 @@ class ParallelDataSet:
                         source[k] = source[k].repeat(num_copies, 1, 1)
                         target[k] = target[k].repeat(num_copies, 1, 1)
                         if instance_weights is not None:
-                            instance_weights[k] = instance_weights[k].repeat(num_copies)
+                            instance_weights[k] = instance_weights[k].repeat(num_copies, 1)
                         if label_weights is not None:
                             label_weights[k] = label_weights[k].repeat(num_copies, 1)
             # Load this worker's slice of each bucket.  If the bucket is empty,
