@@ -24,6 +24,7 @@ from typing import Dict, Generator, List, Optional, Union
 
 import torch as pt
 
+from .device import init_device
 from sockeye.lexicon import load_restrict_lexicon, RestrictLexicon
 from sockeye.log import setup_main_logger
 from sockeye.model import load_models
@@ -66,11 +67,7 @@ def run_translate(args: argparse.Namespace):
     output_handler = get_output_handler(args.output_type,
                                         args.output)
 
-    use_cpu = args.use_cpu
-    if not pt.cuda.is_available():
-        logger.info("CUDA not available, using cpu")
-        use_cpu = True
-    device = pt.device('cpu') if use_cpu else pt.device('cuda', args.device_id)
+    device = init_device(args, logger)
     logger.info(f"Translate Device: {device}")
     models, source_vocabs, target_vocabs = load_models(device=device,
                                                        model_folders=args.models,
