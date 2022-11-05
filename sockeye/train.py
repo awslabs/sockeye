@@ -40,6 +40,7 @@ try:
 except ImportError:
     pass
 
+
 from . import arguments
 from . import checkpoint_decoder
 from . import constants as C
@@ -56,6 +57,7 @@ from . import transformer
 from . import utils
 from . import vocab
 from .config import Config
+from .device import init_device
 from .log import setup_main_logger
 from .utils import check_condition
 
@@ -996,12 +998,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-    device = torch.device('cpu') if args.use_cpu \
-        else torch.device('cuda', utils.get_local_rank()) if utils.is_distributed() \
-        else torch.device('cuda', args.device_id)
-    if not args.use_cpu:
-        # Ensure that GPU operations use the correct device by default
-        torch.cuda.set_device(device)
+    device = init_device(args, logger, utils.get_local_rank() if utils.is_distributed() else None)
     logger.info(f'Training Device: {device}')
     utils.seed_rngs(args.seed)
 
