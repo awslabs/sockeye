@@ -92,7 +92,7 @@ def test_output_layer():
     output_restricted = b(data, vocab_slice_ids)
     assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
 
-    pt.testing.assert_close(output_restricted, reduced_output)
+    pt.testing.assert_close(output_restricted, reduced_output, equal_nan=True)
 
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
