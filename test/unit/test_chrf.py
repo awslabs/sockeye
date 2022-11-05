@@ -40,11 +40,12 @@ test_cases_keep_whitespace = [
 
 @pytest.mark.parametrize("hypotheses, references, expected_score", test_cases)
 def test_chrf(hypotheses, references, expected_score):
-    score = sacrebleu.corpus_chrf(hypotheses, [references], 6, 3).score
+    score = sacrebleu.corpus_chrf(hypotheses, [references], char_order=6, beta=3).score / 100.0
+    print(score, expected_score)
     assert abs(score - expected_score) < EPSILON
 
 
 @pytest.mark.parametrize("hypotheses, references, expected_score", test_cases_keep_whitespace)
 def test_chrf_keep_whitespace(hypotheses, references, expected_score):
-    score = sacrebleu.corpus_chrf(hypotheses, [references], 6, 3, remove_whitespace=False).score
+    score = sacrebleu.corpus_chrf(hypotheses, [references], char_order=6, beta=3, remove_whitespace=False).score / 100.0
     assert abs(score - expected_score) < EPSILON
