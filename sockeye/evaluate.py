@@ -34,9 +34,13 @@ from .log import setup_main_logger, log_sockeye_version
 logger = logging.getLogger(__name__)
 
 
-def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset: Optional[float] = 0.01) -> float:
+DEFAULT_OFFSET = sacrebleu.BLEU.SMOOTH_DEFAULTS['floor']  # 0.1
+
+
+def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str],
+                    offset: Optional[float] = DEFAULT_OFFSET) -> float:
     """
-    Simple wrapper around sacreBLEU's BLEU without tokenization and smoothing.
+    Simple wrapper around sacreBLEU's BLEU without tokenization and floor smoothing.
 
     :param hypotheses: Hypotheses stream.
     :param references: Reference stream.
