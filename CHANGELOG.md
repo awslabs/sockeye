@@ -11,14 +11,14 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [3.1.23]
+## [3.1.26]
 
 ### Added
 
-- --tf32 0|1 bool device (torch.backends.cuda.matmul.allow_tf32)
+- `--tf32 0|1` bool device (`torch.backends.cuda.matmul.allow_tf32`)
  enabling 10-bit precision (19 bit total) transparent float32
  acceleration. default true for backward compat with torch < 1.12.
- allow different --tf32 training continuation
+ allow different `--tf32` training continuation
 
 ### Changed
 
@@ -26,7 +26,22 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 - allow torch 1.12 in requirements.txt
 
-- requirements.dev.txt pytest<3 https://github.com/pytest-dev/pytest/issues/2183
+## [3.1.25]
+
+## Changed
+- Updated to sacrebleu==2.3.1. Changed default BLEU floor smoothing offset from 0.01 to 0.1.
+
+## [3.1.24]
+
+### Fixed
+
+- Updated DeepSpeed checkpoint conversion to support newer versions of DeepSpeed.
+
+## [3.1.23]
+
+### Changed
+
+- Change decoder softmax size logging level from info to debug.
 
 ## [3.1.22]
 
