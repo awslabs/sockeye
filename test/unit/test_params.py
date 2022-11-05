@@ -77,7 +77,7 @@ def test_set_parameters():
     name = 'output_layer.weight'
     model.set_parameters({name: param})
 
-    pt.testing.assert_allclose(model_params['output_layer.weight'].data, param.data)
+    pt.testing.assert_close(model_params['output_layer.weight'].data, param.data)
 
 
 def test_set_parameters_allow_missing():
