@@ -30,7 +30,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 ### Changed
 
 - `device.init_device()` called by train, translate, and score
-
+- allow torch 1.12 in requirements.txt
 
 ## [3.1.25]
 
