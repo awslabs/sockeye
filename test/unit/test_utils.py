@@ -166,7 +166,7 @@ def test_average_tensors():
         expected_average += array
     expected_average /= 4
 
-    pt.testing.assert_allclose(utils.average_tensors(arrays), expected_average)
+    pt.testing.assert_close(utils.average_tensors(arrays), expected_average)
 
     with pytest.raises(utils.SockeyeError) as e:
         other_shape = (12, 13)

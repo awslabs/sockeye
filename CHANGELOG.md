@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.27]
+
+### Changed
+
+- allow torch 1.13 in requirements.txt
+- Replaced deprecated `torch.testing.assert_allclose` with `torch.testing.close` for PyTorch 1.14 compatibility.
+
 ## [3.1.26]
 
 ### Added
@@ -22,8 +29,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Changed
 
-- device.init_device called by train, translate, and score
-
+- `device.init_device()` called by train, translate, and score
 - allow torch 1.12 in requirements.txt
 
 ## [3.1.25]
