@@ -93,8 +93,8 @@ def test_cross_entropy_loss():
     expected_loss_value = pt.tensor(
         -(math.log(1 / 4) * 3) / num_valid)  # 3 valid rows, all uniform, divided by num_valid
 
-    pt.testing.assert_allclose(loss_value, expected_loss_value)
-    pt.testing.assert_allclose(logits.grad, expected_logits_grad)
+    pt.testing.assert_close(loss_value, expected_loss_value)
+    pt.testing.assert_close(logits.grad, expected_logits_grad)
 
     # Instance and label weights don't change the result in our uniform test
     # case
@@ -106,7 +106,7 @@ def test_cross_entropy_loss():
     loss_value, _ = b({C.LOGITS_NAME: logits}, {C.TARGET_LABEL_NAME: labels},
                       instance_weights={C.TARGET_LABEL_NAME: instance_weights},
                       label_weights={C.TARGET_LABEL_NAME: label_weights})
-    pt.testing.assert_allclose(loss_value, expected_loss_value)
+    pt.testing.assert_close(loss_value, expected_loss_value)
 
 
 def test_label_to_bow():
@@ -120,8 +120,8 @@ def test_label_to_bow():
     expected_bow = pt.tensor([
         [0, 1, 0, 1],
         [1, 0, 0, 0],
-    ])
-    pt.testing.assert_allclose(bow, expected_bow)
+    ], dtype=pt.float32)
+    pt.testing.assert_close(bow, expected_bow)
 
 
 def test_binary_cross_entropy_loss():
@@ -158,9 +158,9 @@ def test_binary_cross_entropy_loss():
     loss_value.backward()
     assert loss_samples.item() == 1  # this loss returns always 1
     expected_loss = -pt.log(pt.sigmoid(pt.tensor(1))) / vocab_size / batch_size
-    pt.testing.assert_allclose(loss_value, expected_loss)
-    expected_grad = - 1/ (pt.exp(pt.tensor(1)) + 1)  / vocab_size / batch_size
-    pt.testing.assert_allclose(logits.grad,
+    pt.testing.assert_close(loss_value, expected_loss)
+    expected_grad = - 1 / (pt.exp(pt.tensor(1)) + 1) / vocab_size / batch_size
+    pt.testing.assert_close(logits.grad,
         pt.tensor([[0.0000, 0.0000, 0.0000, expected_grad],
                    [0.0000, 0.0000, 0.0000, 0.0000]])
     )

@@ -147,7 +147,7 @@ class ScoreOutputHandler(OutputHandler):
         :param t_walltime: Total walltime for translation.
         """
         result = "{:.6f}".format(t_output.score)
-        if hasattr(t_output, 'factor_scores') and t_output.factor_scores:
+        if hasattr(t_output, 'factor_scores') and t_output.factor_scores is not None:
             factor_scores = "\t".join("{:.6f}".format(fs) for fs in t_output.factor_scores)
             result = f"{result}\t{factor_scores}"
         print(result, file=self.stream, flush=True)

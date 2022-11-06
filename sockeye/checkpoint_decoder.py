@@ -184,7 +184,7 @@ class CheckpointDecoder:
 
         metrics = {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations[0],
                                                     references=self.targets_sentences[0],
-                                                    offset=0.01),
+                                                    offset=evaluate.DEFAULT_OFFSET),
                    C.CHRF: evaluate.raw_corpus_chrf(hypotheses=translations[0],
                                                     references=self.targets_sentences[0]),
                    C.ROUGE1: evaluate.raw_corpus_rouge1(hypotheses=translations[0],
@@ -206,7 +206,7 @@ class CheckpointDecoder:
                 metrics.update(
                     {'f%d-%s' % (i, C.BLEU): evaluate.raw_corpus_bleu(hypotheses=translations[i],
                                                                       references=self.targets_sentences[i],
-                                                                      offset=0.01)}
+                                                                      offset=evaluate.DEFAULT_OFFSET)}
                 )
         return metrics
 
