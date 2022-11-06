@@ -29,14 +29,14 @@ def test_length_penalty_default():
     lengths = pt.tensor([[1], [2], [3]])
     length_penalty = sockeye.beam_search.LengthPenalty(1.0, 0.0)
     expected_lp = pt.tensor([[1.0], [2.], [3.]])
-    pt.testing.assert_allclose(length_penalty(lengths), expected_lp)
+    pt.testing.assert_close(length_penalty(lengths), expected_lp)
 
 
 def test_length_penalty():
     lengths = pt.tensor([[1], [2], [3]])
     length_penalty = sockeye.beam_search.LengthPenalty(.2, 5.0)
     expected_lp = pt.tensor([[6 ** 0.2 / 6 ** 0.2], [7 ** 0.2 / 6 ** 0.2], [8 ** 0.2 / 6 ** 0.2]])
-    pt.testing.assert_allclose(length_penalty(lengths), expected_lp)
+    pt.testing.assert_close(length_penalty(lengths), expected_lp)
 
 
 def test_length_penalty_int_input():
@@ -51,7 +51,7 @@ def test_brevity_penalty_default():
     ref_lengths = pt.tensor([[2], [3], [2]])
     brevity_penalty = sockeye.beam_search.BrevityPenalty(0.0)
     expected_bp = pt.tensor([[0], [0], [0]], dtype=pt.long)
-    pt.testing.assert_allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
+    pt.testing.assert_close(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
 
 
 def test_brevity_penalty():
@@ -59,7 +59,7 @@ def test_brevity_penalty():
     ref_lengths = pt.tensor([[7], [2], [91]])
     brevity_penalty = sockeye.beam_search.BrevityPenalty(3.5)
     expected_bp = pt.tensor([[3.5 * (1 - 7 / 1)], [0.0], [3.5 * (1 - 91 / 3)]])
-    pt.testing.assert_allclose(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
+    pt.testing.assert_close(brevity_penalty(hyp_lengths, ref_lengths), expected_bp)
 
 
 def test_brevity_penalty_int_input():
@@ -82,7 +82,7 @@ def test_candidate_scorer():
 
     scores = scorer(raw_scores, lengths, reference_lengths)
     unnormalized_scores = scorer.unnormalize(scores, lengths, reference_lengths)
-    pt.testing.assert_allclose(unnormalized_scores, raw_scores)
+    pt.testing.assert_close(unnormalized_scores, raw_scores)
 
     # int/float input
     raw_scores = 5.6
@@ -228,7 +228,7 @@ def test_update_scores(use_unk_dist):
                          pt.tensor(pad_dist), pt.tensor(eos_dist))
     scores = scores.detach().numpy()
     lengths = lengths
-    pt.testing.assert_allclose(lengths, pt.tensor([1, 1, 1]))  # all lengths but finished updated + 1
+    pt.testing.assert_close(lengths, pt.tensor([1, 1, 1], dtype=pt.int32))  # all lengths but finished updated + 1
     assert (scores[0] == (1. + target_dists[0] + eos_dist)).all()  # 1 reached max length, force eos
     assert (scores[1] == (1. + pad_dist[0]).tolist()).all()  # 2 finished, force pad, keep score
     if use_unk_dist:
@@ -343,7 +343,7 @@ def test_beam_search():
 
     print('beam search lengths', r.lengths)
     print('internal lengths', inference.states[0])
-    pt.testing.assert_allclose(r.lengths, inference.states[0].squeeze(1))
+    pt.testing.assert_close(r.lengths, inference.states[0].squeeze(1))
     assert inference.states[1] == max_length
 
 
@@ -357,7 +357,7 @@ def test_get_nvs_vocab_slice_ids():
     bow, output_vocab_size = sockeye.beam_search._get_nvs_vocab_slice_ids(nvs_thresh=0.5,
                                                                           nvs_prediction=nvs_prediction)
     assert output_vocab_size == expected_bow.shape[0]
-    pt.testing.assert_allclose(bow, expected_bow)
+    pt.testing.assert_close(bow, expected_bow)
 
     # Batch size 1
     #                             0    1    2    3    4     5    6     7     8    9
@@ -366,7 +366,7 @@ def test_get_nvs_vocab_slice_ids():
     bow, output_vocab_size = sockeye.beam_search._get_nvs_vocab_slice_ids(nvs_thresh=0.5,
                                                                           nvs_prediction=nvs_prediction)
     assert output_vocab_size == expected_bow.shape[0]
-    pt.testing.assert_allclose(bow, expected_bow)
+    pt.testing.assert_close(bow, expected_bow)
 
     # Batch size 1 + higher thresh
     #                             0    1    2    3    4     5    6     7     8    9
@@ -375,7 +375,7 @@ def test_get_nvs_vocab_slice_ids():
     bow, output_vocab_size = sockeye.beam_search._get_nvs_vocab_slice_ids(nvs_thresh=0.9,
                                                                           nvs_prediction=nvs_prediction)
     assert output_vocab_size == expected_bow.shape[0]
-    pt.testing.assert_allclose(bow, expected_bow)
+    pt.testing.assert_close(bow, expected_bow)
 
     # Batch size 2 + target prefix
     # Note: the first 4 tokens are special tokens (PAD, UNK etc.)
@@ -388,7 +388,7 @@ def test_get_nvs_vocab_slice_ids():
                                                                           nvs_prediction=nvs_prediction,
                                                                           target_prefix=target_prefix)
     assert output_vocab_size == expected_bow.shape[0]
-    pt.testing.assert_allclose(bow, expected_bow)
+    pt.testing.assert_close(bow, expected_bow)
 
     # Batch size 2 + blocking lexicon
     # Note: the first 4 tokens are special tokens (PAD, UNK etc.)
@@ -403,7 +403,7 @@ def test_get_nvs_vocab_slice_ids():
                                                                           nvs_prediction=nvs_prediction,
                                                                           restrict_lexicon=restrict_lexicon)
     assert output_vocab_size == expected_bow.shape[0]
-    pt.testing.assert_allclose(bow, expected_bow)
+    pt.testing.assert_close(bow, expected_bow)
 
 
 def test_get_vocab_slice_ids_blocking():
@@ -421,4 +421,4 @@ def test_get_vocab_slice_ids_blocking():
         output_vocab_size=6
     )
     expected_vocab_slice_ids = pt.tensor([0, 1, 2, 4, 5, C.EOS_ID, C.EOS_ID, C.EOS_ID])
-    pt.testing.assert_allclose(vocab_slice_ids, expected_vocab_slice_ids)
+    pt.testing.assert_close(vocab_slice_ids, expected_vocab_slice_ids)

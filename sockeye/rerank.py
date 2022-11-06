@@ -80,14 +80,15 @@ class Reranker:
                       hypothesis in hypotheses['translations']]
             # BLEU, CHRF - the higher, the better
             ranking = self.ranking_indices(scores)
-
-        if self.metric.startswith(C.RERANK_ISOMETRIC):
+        elif self.metric.startswith(C.RERANK_ISOMETRIC):
             source = hypotheses['text']
             # pylint: disable=redundant-keyword-arg
-            scores = [self.scoring_function(hypothesis, hypothesis_score[0], source) for
+            scores = [self.scoring_function(hypothesis, hypothesis_score[0], source) for  # type: ignore
                       hypothesis, hypothesis_score in zip(hypotheses['translations'], hypotheses['scores'])]
             # isometric-lc - the smaller, the better
             ranking = self.ranking_indices(scores)
+        else:
+            raise utils.SockeyeError("Scoring metric '%s' unknown. Choices are: %s" % (self.metric, C.RERANK_METRICS))
 
         reranked_hypotheses = self._sort_by_ranking(hypotheses, ranking)
         if self.return_score:

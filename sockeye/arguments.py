@@ -576,6 +576,10 @@ def add_device_args(params):
     device_params.add_argument('--env',
                                help='List of environment variables to be set before importing PyTorch. Separated by '
                                     '",", e.g. --env=OMP_NUM_THREADS=1,PYTORCH_JIT=0 etc.')
+    device_params.add_argument('--tf32',
+                               type=bool_str(),
+                               default=True,
+                               help='Globally enable transparent tf32 acceleration of float32 at the cost of reducing precision to 10 bits')
 
 
 def add_vocab_args(params):

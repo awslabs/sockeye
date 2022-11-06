@@ -25,6 +25,7 @@ from . import constants as C
 from . import data_io
 from . import utils
 from .beam_search import CandidateScorer
+from .device import init_device
 from .log import setup_main_logger
 from .model import load_model
 from .output_handler import get_output_handler
@@ -50,11 +51,7 @@ def score(args: argparse.Namespace):
 
     utils.log_basic_info(args)
 
-    use_cpu = args.use_cpu
-    if not pt.cuda.is_available():
-        logger.info("CUDA not available, using cpu")
-        use_cpu = True
-    device = pt.device('cpu') if use_cpu else pt.device('cuda', args.device_id)
+    device = init_device(args, logger)
     logger.info(f"Scoring device: {device}")
 
     model, source_vocabs, target_vocabs, metadata_vocab = load_model(args.model, device=device, dtype=args.dtype)

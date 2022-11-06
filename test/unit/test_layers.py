@@ -26,12 +26,12 @@ def test_lhuc():
     lhuc = sockeye.layers.LHUC(num_hidden=num_hidden)
     pt.nn.init.zeros_(lhuc.weight)
     out = lhuc(inp)
-    pt.testing.assert_allclose(inp, out)
+    pt.testing.assert_close(inp, out)
 
     lhuc = sockeye.layers.LHUC(num_hidden=num_hidden)
     pt.nn.init.constant_(lhuc.weight, 20.0)
     out = lhuc(inp)
-    pt.testing.assert_allclose(2 * inp, out)
+    pt.testing.assert_close(2 * inp, out)
 
 
 def test_positional_embeddings():
@@ -51,18 +51,18 @@ def test_positional_embeddings():
                                             scale_down_positions=scale_down_positions)
     # no steps
     out = b(data, None)
-    pt.testing.assert_allclose(out[0], expected_fixed_embedding)
-    pt.testing.assert_allclose(out[1], expected_fixed_embedding)
+    pt.testing.assert_close(out[0], expected_fixed_embedding)
+    pt.testing.assert_close(out[1], expected_fixed_embedding)
 
     # steps
     steps = pt.tensor([2, 3, 1, 1, 1]).unsqueeze(0)
     out = b(data, steps)
-    pt.testing.assert_allclose(out[0, 0], expected_fixed_embedding[2])
-    pt.testing.assert_allclose(out[1, 0], expected_fixed_embedding[2])
-    pt.testing.assert_allclose(out[0, 1], expected_fixed_embedding[3])
-    pt.testing.assert_allclose(out[1, 1], expected_fixed_embedding[3])
-    pt.testing.assert_allclose(out[0, 2], expected_fixed_embedding[1])
-    pt.testing.assert_allclose(out[1, 2], expected_fixed_embedding[1])
+    pt.testing.assert_close(out[0, 0], expected_fixed_embedding[2])
+    pt.testing.assert_close(out[1, 0], expected_fixed_embedding[2])
+    pt.testing.assert_close(out[0, 1], expected_fixed_embedding[3])
+    pt.testing.assert_close(out[1, 1], expected_fixed_embedding[3])
+    pt.testing.assert_close(out[0, 2], expected_fixed_embedding[1])
+    pt.testing.assert_close(out[1, 2], expected_fixed_embedding[1])
 
     # learned embeddings
     b = sockeye.layers.PositionalEmbeddings(weight_type='learned',
@@ -73,7 +73,7 @@ def test_positional_embeddings():
     pt.nn.init.constant_(b.weight, val=1.0)
     expected_learned_embeddings = pt.ones(data_len, num_embed)
     out = b(data, None)
-    pt.testing.assert_allclose(out[0], expected_learned_embeddings)
+    pt.testing.assert_close(out[0], expected_learned_embeddings)
 
 
 def test_output_layer():
@@ -92,7 +92,7 @@ def test_output_layer():
     output_restricted = b(data, vocab_slice_ids)
     assert output_restricted.shape == (2, 10, len(vocab_slice_ids))
 
-    pt.testing.assert_allclose(output_restricted, reduced_output)
+    pt.testing.assert_close(output_restricted, reduced_output, equal_nan=True)
 
 
 @pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',

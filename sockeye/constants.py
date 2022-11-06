@@ -197,7 +197,7 @@ ARGS_STATE_NAME = "args.yaml"
 # Arguments that may differ and still resume training
 ARGS_MAY_DIFFER = ["device_id", "device_ids", "overwrite_output", "use_tensorboard", "quiet", "align_plot_prefix",
                    "sure_align_threshold", "keep_last_params", "seed", "max_updates", "min_updates", "max_num_epochs",
-                   "min_num_epochs", "max_samples", "min_samples", "max_checkpoints", "max_seconds", "local_rank"]
+                   "min_num_epochs", "max_samples", "min_samples", "max_checkpoints", "max_seconds", "local_rank", "tf32"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
@@ -303,6 +303,7 @@ DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 DTYPE_BF16 = 'bfloat16'
 DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
+DTYPE_TF32 = 'tf32'
 DTYPE_INT8 = 'int8'
 DTYPE_INT32 = 'int32'
 LARGE_POSITIVE_VALUE = 99999999.
@@ -323,6 +324,7 @@ LARGE_VALUES = {
     DTYPE_FP32: LARGE_POSITIVE_VALUE,
     np.float32: LARGE_POSITIVE_VALUE,
     pt.float32: LARGE_POSITIVE_VALUE,
+    # with --tf32, rounds to 0b1011111011 * 1024 * 128 (10 bits precision) = 1.00007e8
 
     # Rounds to 1.0014e+08
     DTYPE_BF16: LARGE_POSITIVE_VALUE,

@@ -109,10 +109,12 @@ def test_quantize_args(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('', dict(device_id=0,
               use_cpu=False,
+              tf32=True,
               env=None)),
     ('--device-id 1 --use-cpu ',
      dict(device_id=1,
           use_cpu=True,
+          tf32=True,
           env=None))
 ])
 def test_device_args(test_params, expected_params):

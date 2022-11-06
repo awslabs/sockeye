@@ -20,7 +20,7 @@ EPSILON = 1e-8
 
 Statistics = namedtuple('Statistics', ['common', 'total'])
 
-test_cases = [(["this is a test", "another test"], ["ref1", "ref2"], 0.003799178428257963),
+test_cases = [(["this is a test", "another test"], ["ref1", "ref2"], 0.0),
               (["this is a test"], ["this is a test"], 1.0),
               (["this is a fest"], ["this is a test"], 0.223606797749979)]
 
@@ -50,53 +50,44 @@ test_case_degenerate_stats = [((Statistics([0, 0, 0, 0], [4, 4, 2, 1]), 0, 1), 0
                               ((Statistics([0, 0, 0, 0], [0, 0, 0, 0]), 0, 0), 0.1, 0.0),
                               ((Statistics([0, 0, 0, 0], [0, 0, 0, 0]), 1, 5), 0.01, 0.0)]
 
-test_cases_uneven = [(["I am one sentence"], ["But I", "am two"]),
-                     (["And I", "am a number of sentences", "three actually"], ["Compared to just one reference"])]
-
 
 @pytest.mark.parametrize("hypotheses, references, expected_bleu", test_cases)
 def test_bleu(hypotheses, references, expected_bleu):
-    bleu = sacrebleu.raw_corpus_bleu(hypotheses, [references], .01).score / 100
+    bleu = sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=.01).score / 100
     assert abs(bleu - expected_bleu) < EPSILON
 
 
 @pytest.mark.parametrize("hypotheses, references, expected_bleu", test_case_effective_order)
 def test_effective_order(hypotheses, references, expected_bleu):
-    bleu = sacrebleu.raw_corpus_bleu(hypotheses, [references], .01).score / 100
+    bleu = sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=.01).score / 100
     assert abs(bleu - expected_bleu) < EPSILON
 
 
 @pytest.mark.parametrize("hypothesis, reference, expected_stat", test_case_statistics)
 def test_statistics(hypothesis, reference, expected_stat):
-    result = sacrebleu.raw_corpus_bleu(hypothesis, reference, .01)
+    result = sacrebleu.raw_corpus_bleu([hypothesis], [[reference]], .01)
     stat = Statistics(result.counts, result.totals)
     assert stat == expected_stat
 
 
 @pytest.mark.parametrize("statistics, expected_score", test_case_scoring)
 def test_scoring(statistics, expected_score):
-    score = sacrebleu.compute_bleu(statistics[0].common, statistics[0].total, statistics[1], statistics[2]).score / 100
+    score = sacrebleu.metrics.BLEU.compute_bleu(statistics[0].common, statistics[0].total, statistics[1], statistics[2]).score / 100
     assert abs(score - expected_score) < EPSILON
 
 
 @pytest.mark.parametrize("hypothesis, reference, expected_with_offset, expected_without_offset",
                          test_case_offset)
 def test_offset(hypothesis, reference, expected_with_offset, expected_without_offset):
-    score_without_offset = sacrebleu.raw_corpus_bleu(hypothesis, reference, 0.0).score / 100
+    score_without_offset = sacrebleu.raw_corpus_bleu([hypothesis], [[reference]], 0.0).score / 100
     assert abs(expected_without_offset - score_without_offset) < EPSILON
 
-    score_with_offset = sacrebleu.raw_corpus_bleu(hypothesis, reference, 0.1).score / 100
+    score_with_offset = sacrebleu.raw_corpus_bleu([hypothesis], [[reference]], 0.1).score / 100
     assert abs(expected_with_offset - score_with_offset) < EPSILON
 
 
 @pytest.mark.parametrize("statistics, offset, expected_score", test_case_degenerate_stats)
 def test_degenerate_statistics(statistics, offset, expected_score):
-    score = sacrebleu.compute_bleu(statistics[0].common, statistics[0].total, statistics[1], statistics[2],
+    score = sacrebleu.metrics.BLEU.compute_bleu(statistics[0].common, statistics[0].total, statistics[1], statistics[2],
                                    smooth_method='floor', smooth_value=offset).score / 100
     assert score == expected_score
-
-
-@pytest.mark.parametrize("hypotheses, references", test_cases_uneven)
-def test_degenerate_uneven(hypotheses, references):
-    with pytest.raises(EOFError, match=r'.*stream.*'):
-        sacrebleu.raw_corpus_bleu(hypotheses, references)
