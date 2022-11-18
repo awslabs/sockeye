@@ -48,7 +48,7 @@ def plot_weights(args):
 
     # Save figure
     fig.tight_layout()
-    fig.savefig(args.output)
+    fig.savefig(args.output, dpi=args.dpi)
 
 
 def main():
@@ -58,6 +58,7 @@ def main():
     params.add_argument('-t', '--title', type=str, default='Instance Weights', help='Title for plot.')
     params.add_argument('-b', '--bins', type=int, default=20, help='Number of bins for plotting weights.')
     params.add_argument('--base', type=float, default=0.001, help='Base for rounding when counting weights.')
+    params.add_argument('--dpi', type=int, default=300, help='DPI for output file.')
     args = params.parse_args()
     plot_weights(args)
 
