@@ -763,7 +763,7 @@ class Translator:
                  sample: Optional[int] = None,
                  output_scores: bool = False,
                  constant_length_ratio: float = 0.0,
-                 knn_lambda: float = 0.8,
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None,

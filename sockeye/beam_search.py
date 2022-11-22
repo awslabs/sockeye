@@ -66,7 +66,7 @@ class _SingleModelInference(_Inference):
                  model: SockeyeModel,
                  skip_softmax: bool = False,
                  constant_length_ratio: float = 0.0,
-                 knn_lambda: float = 0.8) -> None:
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
@@ -130,7 +130,7 @@ class _EnsembleInference(_Inference):
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
                  constant_length_ratio: float = 0.0,
-                 knn_lambda: float = 0.8) -> None:
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -1100,7 +1100,7 @@ def get_search_algorithm(models: List[SockeyeModel],
                          ensemble_mode: str = 'linear',
                          beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                          constant_length_ratio: float = 0.0,
-                         knn_lambda: float = 0.8,
+                         knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
                          sample: Optional[int] = None,
                          prevent_unk: bool = False,
                          greedy: bool = False,

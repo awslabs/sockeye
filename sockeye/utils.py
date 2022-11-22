@@ -541,19 +541,19 @@ _STRING_TO_NUMPY_DTYPE = {
 }
 
 
-def get_numpy_dtype(dtype: Union[np.dtype, str]):
-    if isinstance(dtype, np.dtype):
-        return dtype
-    if dtype in _STRING_TO_NUMPY_DTYPE:
-        return _STRING_TO_NUMPY_DTYPE[dtype]
-    raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
-
-
 def get_torch_dtype(dtype: Union[pt.dtype, str]) -> pt.dtype:
     if isinstance(dtype, pt.dtype):
         return dtype
     if dtype in _STRING_TO_TORCH_DTYPE:
         return _STRING_TO_TORCH_DTYPE[dtype]
+    raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
+
+
+def get_numpy_dtype(dtype: Union[np.dtype, str]):
+    if isinstance(dtype, np.dtype):
+        return dtype
+    if dtype in _STRING_TO_NUMPY_DTYPE:
+        return _STRING_TO_NUMPY_DTYPE[dtype]
     raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
 
 
@@ -717,28 +717,21 @@ def using_deepspeed() -> bool:
     return _using_deepspeed
 
 
-# Track whether faiss has been initialized
-_using_faiss = False
+# Track whether Faiss has been confirmed importable
+_faiss_checked = False
 
-def init_faiss():
+def check_import_faiss():
     """
-    Make sure the faiss module can be imported, initialize faiss,
-    and set the global variable that tracks initialization.
-
+    Make sure the faiss module can be imported.
     """
-    global _using_faiss
-    if not _using_faiss:
+    global _faiss_checked
+    if not _faiss_checked:
         try:
             import faiss  # pylint: disable=E0401
-            _using_faiss = True
+            _faiss_checked = True
         except:
-            raise RuntimeError('To run kNN-MT models, you need to install faiss by following '
+            raise RuntimeError('To run kNN-MT models, please install faiss by following '
                                'https://github.com/facebookresearch/faiss/blob/main/INSTALL.md')
-
-
-def using_faiss() -> bool:
-    """Check whether faiss has been initialized via this module"""
-    return _using_faiss
 
 
 def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optional[List] = None) -> int:

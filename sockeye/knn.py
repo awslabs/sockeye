@@ -11,16 +11,12 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import argparse
-from abc import abstractmethod
 from dataclasses import dataclass
 import logging
-import math
 import numpy as np
 import os
-import random
 import shutil
-from typing import Dict, Iterable, List, Optional, Tuple, Callable
+from typing import Optional
 
 from . import arguments
 from sockeye import config, utils, constants as C
@@ -58,23 +54,25 @@ class KNNConfig(config.Config):
 class FaissIndexBuilder:
     """
     Builds a faiss index from a data store containing stored keys (i.e., decoder hidden states for k-NN-based MT).
+
     :param config: a KNNConfig object containing the index configuration information
     :param use_gpu: build index on a gpu
     :param device_id: device id if building index on gpu
     """
 
     def __init__(self, config: KNNConfig, use_gpu: bool = False, device_id: int = 0):
-        utils.init_faiss()  # faiss will definitely be used for this class, so check here
+        utils.check_import_faiss()  # faiss will definitely be used for this class, so check here
         self.config = config
         self.use_gpu = use_gpu
         self.device_id = device_id
 
     def init_faiss_index(self, train_sample: Optional[np.memmap] = None):
         index = faiss.index_factory(self.config.dimension, self.config.index_type)
+        # pylint is disabled for members that only exists in faiss-gpu
         if self.use_gpu:
-            res = faiss.StandardGpuResources()
-            co = faiss.GpuClonerOptions()
-            index = faiss.index_cpu_to_gpu(res, self.device_id, index, co)
+            res = faiss.StandardGpuResources()  # pylint: disable=no-member
+            co = faiss.GpuClonerOptions()  # pylint: disable=no-member
+            index = faiss.index_cpu_to_gpu(res, self.device_id, index, co)  # pylint: disable=no-member
 
         if not index.is_trained and train_sample is not None:
             index.train(train_sample.astype(np.float32))  # unfortunately, faiss index only supports float32
@@ -146,7 +144,7 @@ def build_knn_index_package(args):
     utils.check_condition(os.path.exists(state_store_filename), f"Input file {state_store_filename} not found!")
     utils.check_condition(os.path.exists(word_store_filename), f"Input file {word_store_filename} not found!")
     utils.check_condition(os.path.exists(config_filename), f"Config file {config_filename} not found!")
-    utils.init_faiss()
+    utils.check_import_faiss()
 
     setup_main_logger(file_logging=False,
                       console=not args.quiet,
@@ -167,7 +165,7 @@ def build_knn_index_package(args):
     index = builder.build_faiss_index(keys, train_sample)
 
     if not args.use_cpu:
-        index_cpu = faiss.index_gpu_to_cpu(index)
+        index_cpu = faiss.index_gpu_to_cpu(index)  # pylint: disable=no-member
     else:
         index_cpu = index
 

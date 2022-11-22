@@ -37,6 +37,13 @@ from .layers import LengthRatioConfig
 from . import nvs
 from sockeye.knn import KNNConfig
 
+try:
+    import faiss  # pylint: disable=E0401
+    # The following import will allow us to pass pytorch arrays directly to faiss
+    import faiss.contrib.torch_utils  # pylint: disable=E0401
+except:
+    pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -483,11 +490,7 @@ class SockeyeModel(pt.nn.Module):
                 model_params[name].data[:] = new_params[name].data
 
     def load_knn_index(self, knn_index_folder: str) -> None:
-        utils.init_faiss()
-        import faiss  # pylint: disable=E0401
-        # The following import will allow us to pass pytorch arrays directly to faiss
-        import faiss.contrib.torch_utils  # pylint: disable=E0401
-
+        utils.check_import_faiss()
         knn_config = KNNConfig.load(os.path.join(knn_index_folder, "config.yaml"))
         knn_config = cast(KNNConfig, knn_config)  # load returns a Config class, need to cast to subclass KNNConfig
         keys_index = faiss.read_index(os.path.join(knn_index_folder, "key_index"))

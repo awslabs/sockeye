@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 class NumpyMemmapStorage:
     """
     Wraps a numpy memmap as a datastore for decoder state vectors.
+
     :param file_name: disk file path to store the memory-mapped file
     :param num_dim: number of dimensions of the vectors in the data store
     :param dtype: data type of the vectors in the data store
@@ -85,6 +86,7 @@ class NumpyMemmapStorage:
 class DecoderStateGenerator:
     """
     Generate decoder states by using a translation model to force-decode a parallel dataset.
+
     :param model: Sockeye translation model used to generate the states.
     :param source_vocabs: source vocabs for the translation model.
     :param target_vocabs: target vocabs for the translation model.
@@ -127,7 +129,7 @@ class DecoderStateGenerator:
     @staticmethod
     def probe_token_count(target: str, max_seq_len: int) -> int:
         token_count = 0
-        with open(target, 'r', 'utf-8') as f:
+        with open(target, 'r') as f:
             for line in f:
                 token_count += min(len(line.strip().split(' ')) + 1, max_seq_len)  # +1 for EOS
         return token_count
@@ -216,6 +218,11 @@ def store(args: argparse.Namespace):
     # if state data type is None, use inferred data type
     if args.state_dtype is None:
         args.state_dtype = utils.dtype_to_str(model.dtype)
+
+    if not os.path.exists(args.output_dir):
+        os.mkdir(args.output_dir)
+    elif os.path.isfile(args.output_dir):
+        logging.error(f"{args.output_dir} already exists as a file")
 
     generator = DecoderStateGenerator(model, source_vocabs, target_vocabs, args.output_dir, max_seq_len_source, max_seq_len_target,
                          args.state_dtype, C.KNN_WORD_DATA_STORE_DTYPE, device)

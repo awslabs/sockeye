@@ -1470,7 +1470,7 @@ def add_knn_mt_args(params):
     knn_params.add_argument('--knn-lambda',
                             type=float,
                             help="Interpolation parameter when using KNN index.",
-                            default=0.8)
+                            default=C.DEFAULT_KNN_LAMBDA)
 
 
 def add_build_knn_index_args(params):

@@ -122,6 +122,7 @@ class KNN(pt.nn.Module):
     """
     An alternative output layer that can produce a output distribution over the vocabulary by using the decoder hidden state to query into an index.
     For more details, see: https://arxiv.org/abs/2010.00710.
+
     :param keys_index: faiss index used for k-NN query.
     :param vals: a list of word indexes that maps key ids to their corresponding vocabulary ids.
     :param vocab_size: the size of the output vocabulary.
