@@ -20,7 +20,7 @@ import torch as pt
 import sockeye
 import sockeye.constants as C
 from sockeye.generate_decoder_states import NumpyMemmapStorage, DecoderStateGenerator
-from sockeye.knn import KNNConfig, FaissIndexBuilder
+from sockeye.knn import KNNConfig, FaissIndexBuilder, get_config_path, get_state_store_path, get_word_store_path
 from sockeye.vocab import build_vocab
 
 # Only run certain tests in this file if faiss is installed
@@ -59,22 +59,25 @@ def test_numpy_memmap_storage():
 
 
 def test_decoder_state_generator():
-    # utils.is_gzip_file expects byte-like object, hence supplying a byte string
     data = 'One Ring to rule them all, One Ring to find them'
     max_seq_len_source = 30
     max_seq_len_target = 30
 
     vocabs = [build_vocab([data])]
     config_embed = sockeye.encoder.EmbeddingConfig(vocab_size=len(vocabs[0]), num_embed=16, dropout=0.0)
-    config_encoder = sockeye.encoder.EncoderConfig(model_size=16, attention_heads=2, feed_forward_num_hidden=16, depth_key_value=16,
+    config_encoder = sockeye.encoder.EncoderConfig(model_size=16, attention_heads=2,
+                                                   feed_forward_num_hidden=16, depth_key_value=16,
                                                    act_type='relu', num_layers=2, dropout_attention=0.0,
                                                    dropout_act=0.0, dropout_prepost=0.0,
                                                    positional_embedding_type='fixed', preprocess_sequence='n',
                                                    postprocess_sequence='n', max_seq_len_source=max_seq_len_source,
                                                    max_seq_len_target=max_seq_len_target)
-    config_data = sockeye.data_io.DataConfig(data_statistics=None, max_seq_len_source=max_seq_len_source, max_seq_len_target=max_seq_len_target,
+    config_data = sockeye.data_io.DataConfig(data_statistics=None,
+                                             max_seq_len_source=max_seq_len_source,
+                                             max_seq_len_target=max_seq_len_target,
                                              num_source_factors=0, num_target_factors=0)
-    config = sockeye.model.ModelConfig(config_data=config_data, vocab_source_size=len(vocabs[0]), vocab_target_size=len(vocabs[0]),
+    config = sockeye.model.ModelConfig(config_data=config_data,
+                                       vocab_source_size=len(vocabs[0]), vocab_target_size=len(vocabs[0]),
                                        config_embed_source=config_embed, config_embed_target=config_embed,
                                        config_encoder=config_encoder, config_decoder=config_encoder)
 
@@ -111,8 +114,21 @@ def test_decoder_state_generator():
         data_paths = [data_path]
         generator.generate_states_and_store(data_paths, data_paths, 1)
 
+        # check if state and word store files are there
+        assert os.path.isfile(get_state_store_path(data_dir))
+        assert os.path.isfile(get_word_store_path(data_dir))
+
         # test save_config
         generator.save_config()
+
+        # check if the config content makes sense
+        config = KNNConfig.load(get_config_path(data_dir))
+        assert config.index_size == DecoderStateGenerator.probe_token_count(data_path, max_seq_len_target)
+        assert config.dimension == 16
+        assert config.state_data_type == 'float32'
+        assert config.word_data_type == 'int32'
+        assert config.index_type == ''
+        assert config.train_data_size == -1
 
 
 @pytest.mark.skipif(not faiss_installed, reason='Faiss is not installed')

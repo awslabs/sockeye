@@ -532,6 +532,14 @@ _STRING_TO_TORCH_DTYPE = {
 }
 
 
+def get_torch_dtype(dtype: Union[pt.dtype, str]) -> pt.dtype:
+    if isinstance(dtype, pt.dtype):
+        return dtype
+    if dtype in _STRING_TO_TORCH_DTYPE:
+        return _STRING_TO_TORCH_DTYPE[dtype]
+    raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
+
+
 _STRING_TO_NUMPY_DTYPE = {
     C.DTYPE_FP16: np.float16,
     C.DTYPE_FP32: np.float32,
@@ -541,20 +549,12 @@ _STRING_TO_NUMPY_DTYPE = {
 }
 
 
-def get_torch_dtype(dtype: Union[pt.dtype, str]) -> pt.dtype:
-    if isinstance(dtype, pt.dtype):
-        return dtype
-    if dtype in _STRING_TO_TORCH_DTYPE:
-        return _STRING_TO_TORCH_DTYPE[dtype]
-    raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
-
-
 def get_numpy_dtype(dtype: Union[np.dtype, str]):
     if isinstance(dtype, np.dtype):
         return dtype
     if dtype in _STRING_TO_NUMPY_DTYPE:
         return _STRING_TO_NUMPY_DTYPE[dtype]
-    raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
+    raise ValueError(f'Cannot convert to NumPy dtype: {dtype}')
 
 
 def log_parameters(model: pt.nn.Module):

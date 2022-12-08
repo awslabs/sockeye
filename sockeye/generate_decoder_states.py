@@ -55,6 +55,7 @@ class NumpyMemmapStorage:
         self.size = 0  # size of storage already assigned
 
     def open(self, initial_size: int, block_size: int) -> None:
+        """Create a memmap handle and initialize its sizes."""
         self.mmap = np.memmap(self.file_name, dtype=self.dtype, mode='w+', shape=(initial_size, self.num_dim))
         self.size = initial_size
         self.block_size = block_size
@@ -64,6 +65,8 @@ class NumpyMemmapStorage:
         It turns out that numpy memmap actually cannot be re-sized.
         So we have to pre-estimate how many entries we need and put it down as initial_size.
         If we end up adding more entries to the memmap than initially claimed, we'll have to bail out.
+
+        :param array: the array of states to be added.
         """
         assert self.mmap is not None
         num_entries, num_dim = array.shape
@@ -72,8 +75,8 @@ class NumpyMemmapStorage:
         if self.tail_idx + num_entries > self.size:
             # bail out
             logger.warning(
-                "Trying to write {0} entries into a numpy memmap that has size {1} and already has {2} entries. Nothing is written."
-                .format(num_entries, self.size, self.tail_idx)
+                f"Trying to write {num_entries} entries into a numpy memmap that " + \
+                f"has size {self.size} and already has {self.tail_idx} entries. Nothing is written."
             )
         else:
             start = self.tail_idx
@@ -90,7 +93,7 @@ class DecoderStateGenerator:
     :param model: Sockeye translation model used to generate the states.
     :param source_vocabs: source vocabs for the translation model.
     :param target_vocabs: target vocabs for the translation model.
-    :param output_dir: path to the memmap storing decoder states.
+    :param output_dir: path to the memmap (directory) storing decoder states.
     :param max_seq_len_source: maximum source length for decoding.
     :param max_seq_len_target: maximum source length for decoding.
     :param state_data_type: data type for storing decoder states.
@@ -127,14 +130,16 @@ class DecoderStateGenerator:
         self.word_data_type = utils.get_numpy_dtype(word_data_type)
 
     @staticmethod
-    def probe_token_count(target: str, max_seq_len: int) -> int:
+    def probe_token_count(target_path: str, max_seq_len: int) -> int:
+        """Count the number of tokens in the file at `target_path`, with each line truncated at `max_seq_len`."""
         token_count = 0
-        with open(target, 'r') as f:
+        with open(target_path, 'r') as f:
             for line in f:
-                token_count += min(len(line.strip().split(' ')) + 1, max_seq_len)  # +1 for EOS
+                token_count += min(len(line.split(' ')) + 1, max_seq_len)  # +1 for EOS
         return token_count
 
     def init_store_file(self, initial_size: int) -> None:
+        """Initialize the memory map files."""
         self.dimension = self.model.config.config_decoder.model_size
 
         self.state_store_file = NumpyMemmapStorage(get_state_store_path(self.output_dir),
@@ -148,6 +153,13 @@ class DecoderStateGenerator:
                                   sources: List[str],
                                   targets: List[str],
                                   batch_size: int) -> None:
+        """
+        Generate decoder states by force-decoding the sentence pairs in `sources` and `targets` with a NMT model.
+
+        :param sources: list of source segments.
+        :param targets: list of target segments.
+        :param batch_size: number of sentence pairs to decode at once.
+        """
         assert self.state_store_file != None, \
                "You should call probe_token_count first to initialize the store files."
 
@@ -166,30 +178,42 @@ class DecoderStateGenerator:
             for batch_no, batch in enumerate(data_iter, 1):
                 if (batch_no + 1) % 1000 == 0:
                     logger.debug("At batch number {0}".format(batch_no + 1))
-    
+
                 # get decoder states
                 batch = batch.load(self.device)
                 model_inputs = (batch.source, batch.source_length, batch.target, batch.target_length)
                 if self.traced_model is None:
                     trace_inputs = {'get_decoder_states': model_inputs}
                     self.traced_model = pt.jit.trace_module(self.model, trace_inputs, strict=False)
-                decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # shape: (batch, sent_len, hidden_dim)
-    
-                # flatten batch and sent_len dimensions, remove pads on the target
-                pad_mask = (batch.target != C.PAD_ID)[:, :, 0]  # shape: (batch, seq_length)
+                decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # shape: (batch, seq_len, hidden_dim)
+
+                # flatten batch and seq_len dimensions, remove pads on the target
+                pad_mask = (batch.target != C.PAD_ID)[:, :, 0]  # shape: (batch, seq_len)
                 flat_target = batch.target[pad_mask].cpu().detach().numpy()
                 flat_states = decoder_states[pad_mask].cpu().detach().numpy()
-    
+
                 # store
                 self.state_store_file.add(flat_states)
                 self.words_store_file.add(flat_target)
 
     def save_config(self):
-        config = KNNConfig(self.num_states, self.dimension, utils.dtype_to_str(self.state_data_type), utils.dtype_to_str(self.word_data_type), "", -1)
+        """
+        Save a config file with information of the data store.
+        """
+        config = KNNConfig(
+            index_size=self.num_states,
+            dimension=self.dimension,
+            state_data_type=utils.dtype_to_str(self.state_data_type),
+            word_data_type=utils.dtype_to_str(self.word_data_type),
+            # the remaining two values are only placeholders -- they are left for the faiss index builder to fill
+            index_type="",
+            train_data_size=-1,
+        )
         config.save(get_config_path(self.output_dir))
 
 
 def store(args: argparse.Namespace):
+    """Build a data store with an existing model and a parallel corpus."""
     use_cpu = args.use_cpu
     if not pt.cuda.is_available():
         logger.info("CUDA not available, using cpu")
@@ -224,8 +248,9 @@ def store(args: argparse.Namespace):
     elif os.path.isfile(args.output_dir):
         logging.error(f"{args.output_dir} already exists as a file")
 
-    generator = DecoderStateGenerator(model, source_vocabs, target_vocabs, args.output_dir, max_seq_len_source, max_seq_len_target,
-                         args.state_dtype, C.KNN_WORD_DATA_STORE_DTYPE, device)
+    generator = DecoderStateGenerator(model, source_vocabs, target_vocabs, args.output_dir,
+                                      max_seq_len_source, max_seq_len_target,
+                                      args.state_dtype, C.KNN_WORD_DATA_STORE_DTYPE, device)
     generator.num_states = DecoderStateGenerator.probe_token_count(targets[0], max_seq_len_target)
     generator.init_store_file(generator.num_states)
     generator.generate_states_and_store(sources, targets, args.batch_size)
@@ -233,7 +258,10 @@ def store(args: argparse.Namespace):
 
 
 def main():
-    params = arguments.ConfigArgumentParser(description='CLI to generate decoder states from parallel data with a trained model, and build a data store from it.')
+    params = arguments.ConfigArgumentParser(
+        description='CLI to generate decoder states from parallel data with a trained model, '
+                    'and build a data store from it.'
+    )
     arguments.add_state_generation_args(params)
     args = params.parse_args()
     check_condition(args.batch_type == C.BATCH_TYPE_SENTENCE, "Batching by number of words is not supported")

@@ -315,12 +315,12 @@ class SockeyeModel(pt.nn.Module):
         # the traced module returns a flat list of tensors
         decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
         # +1 for the decoder output, which will be used to generate kNN output
-        step_output, decoder_out, *target_factor_outputs = decode_step_outputs[:self.num_target_factors+1]
+        step_output, decoder_out, *target_factor_outputs = decode_step_outputs[:self.num_target_factors + 1]
 
         # do the query here because it cannot be traced (jit.ignore does not play well with tracing)
         knn_output = self.knn(decoder_out) if self.knn is not None else None
 
-        new_states = decode_step_outputs[self.num_target_factors+1:]
+        new_states = decode_step_outputs[self.num_target_factors + 1:]
         return step_output, knn_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
@@ -352,6 +352,7 @@ class SockeyeModel(pt.nn.Module):
         return forward_output
 
     def get_decoder_states(self, source, source_length, target, target_length):
+        """Same as `forward`, but skip the output layer and return the decoder states."""
         with pt.no_grad() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
             source_encoded, source_encoded_length, target_embed, states, nvs_prediction = self.embed_and_encode(
                 source,
@@ -490,17 +491,23 @@ class SockeyeModel(pt.nn.Module):
                 model_params[name].data[:] = new_params[name].data
 
     def load_knn_index(self, knn_index_folder: str) -> None:
+        """
+        Load kNN index from a directory.
+
+        :param knn_index_folder: same as `output_dir` from the `sockeye-knn` command,
+                                 containing the index and a config file.
+        """
         utils.check_import_faiss()
-        knn_config = KNNConfig.load(os.path.join(knn_index_folder, "config.yaml"))
+        knn_config = KNNConfig.load(os.path.join(knn_index_folder, C.KNN_CONFIG_NAME))
         knn_config = cast(KNNConfig, knn_config)  # load returns a Config class, need to cast to subclass KNNConfig
-        keys_index = faiss.read_index(os.path.join(knn_index_folder, "key_index"))
-        vals = np.memmap(os.path.join(knn_index_folder, "vals.npy"),
+        keys_index = faiss.read_index(os.path.join(knn_index_folder, C.KNN_INDEX_NAME))
+        vals = np.memmap(os.path.join(knn_index_folder, C.KNN_WORD_DATA_STORE_NAME),
                          dtype=utils.get_numpy_dtype(knn_config.word_data_type),
                          mode='r',
                          shape=(knn_config.index_size, 1))  # type: np.memmap
         state_store = None  # type: Optional[np.memmap]
-        if os.path.isfile(os.path.join(knn_index_folder, "keys.npy")):
-            state_store = np.memmap(os.path.join(knn_index_folder, "keys.npy"),
+        if os.path.isfile(os.path.join(knn_index_folder, C.KNN_STATE_DATA_STORE_NAME)):
+            state_store = np.memmap(os.path.join(knn_index_folder, C.KNN_STATE_DATA_STORE_NAME),
                                    dtype=utils.get_numpy_dtype(knn_config.state_data_type),
                                    mode='r',
                                    shape=(knn_config.index_size, knn_config.dimension))
@@ -774,7 +781,8 @@ def load_models(device: pt.device,
                 set_grad_req_null: bool = True,
                 forward_pass_cache_size: int = 0,
                 knn_index: Optional[str] = None) -> Tuple[List[SockeyeModel],
-                                                    List[vocab.Vocab], List[vocab.Vocab]]:
+                                                          List[vocab.Vocab],
+                                                          List[vocab.Vocab]]:
     """
     Loads a list of models for inference.
 

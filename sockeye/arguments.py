@@ -1174,7 +1174,7 @@ def add_score_cli_args(params):
                              'peaked predictions, values > 1.0 produce smoothed distributions.')
 
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
-                        help="Data type. Default: %(default)s infers from saved model.")
+                        help="Data type. Default: infers from saved model.")
 
     add_logging_args(params)
 
@@ -1188,7 +1188,7 @@ def add_state_generation_args(params):
     decode_params = params.add_argument_group("Decoder state generation parameters")
 
     params.add_argument('--state-dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16],
-                        help="Data type of the decoder state store. Default: %(default)s infers from saved model.")
+                        help="Data type of the decoder state store. Default: infers from saved model.")
 
     params.add_argument("--model", "-m", required=True,
                         help="Model directory containing trained model.")
@@ -1207,7 +1207,7 @@ def add_state_generation_args(params):
                         help="The path to the directory that stores the decoder states.")
 
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
-                        help="Data type. Default: %(default)s infers from saved model.")
+                        help="Data type. Default: infers from saved model.")
 
     add_logging_args(params)
 
@@ -1377,7 +1377,7 @@ def add_inference_args(params):
     add_brevity_penalty_args(decode_params)
 
     decode_params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
-                               help="Data type. Default: %(default)s infers from saved model.")
+                               help="Data type. Default: infers from saved model.")
     add_clamp_to_dtype_arg(decode_params)
 
 
@@ -1413,6 +1413,7 @@ def add_brevity_penalty_args(params):
                         help='Has effect if --brevity-penalty-type is set to \'constant\'. If positive, overrides the length '
                              'ratio, used for brevity penalty calculation, for all inputs. If zero, uses the average of length '
                              'ratios from the training data over all models. Default: %(default)s.')
+
 
 def add_clamp_to_dtype_arg(params):
     params.add_argument('--clamp-to-dtype',
@@ -1469,7 +1470,7 @@ def add_knn_mt_args(params):
                             default=None)
     knn_params.add_argument('--knn-lambda',
                             type=float,
-                            help="Interpolation parameter when using KNN index.",
+                            help="Interpolation parameter when using KNN index. Default: %(default)s.",
                             default=C.DEFAULT_KNN_LAMBDA)
 
 

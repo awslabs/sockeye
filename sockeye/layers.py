@@ -120,7 +120,8 @@ class OutputLayer(pt.nn.Module):
 
 class KNN(pt.nn.Module):
     """
-    An alternative output layer that can produce a output distribution over the vocabulary by using the decoder hidden state to query into an index.
+    An alternative output layer that can produce a output distribution over the vocabulary
+    by using the decoder hidden state to query into an index.
     For more details, see: https://arxiv.org/abs/2010.00710.
 
     :param keys_index: faiss index used for k-NN query.
@@ -128,10 +129,17 @@ class KNN(pt.nn.Module):
     :param vocab_size: the size of the output vocabulary.
     :param k: number of candidates to be retrieved by k-nearest neighbors query.
     :param temperature: temperature that controls the smoothness of the output distribution.
-    :param state_store: an optional state store object that is used to compute the exact distance between the query and the index.
+    :param state_store: an optional state store object that is used to compute the exact distance
+                        between the query and the index.
     """
 
-    def __init__(self, keys_index: "faiss.Index", vals: np.memmap, vocab_size: int, k=64, temperature=10, state_store: Optional[np.memmap] = None) -> None:  # type: ignore  # suppress mypy error becaues faiss is an optional import
+    def __init__(self,
+                 keys_index: "faiss.Index",  # type: ignore  # suppress mypy error becaues faiss is an optional import
+                 vals: np.memmap,
+                 vocab_size: int,
+                 k=64,
+                 temperature=10,
+                 state_store: Optional[np.memmap] = None) -> None:
         super().__init__()
         self.keys_index = keys_index
         self.vals = vals
@@ -144,13 +152,14 @@ class KNN(pt.nn.Module):
         # faiss only supports float32
         distances, indices = self.keys_index.search(data.cpu().numpy().astype(np.float32), self.k)
         # Map indices to tokens
-        y = self.vals[(indices+1) % len(self.vals)]
-        y[y == C.BOS_ID] = C.EOS_ID  # no EOS is inserted in generated data store, so we need to use the BOS of the next sentence as EOS
+        y = self.vals[(indices + 1) % len(self.vals)]
+        # no EOS is inserted in generated data store, so we need to use the BOS of the next sentence as EOS
+        y[y == C.BOS_ID] = C.EOS_ID
 
         # use exact distance when state_store is available
         if self.state_store is not None:
             raw_keys = pt.from_numpy(self.state_store[indices]).to(device=data.device)  # (data.shape[0], k, dim)
-            distances = pt.norm(data.unsqueeze(1) - raw_keys, p=2, dim=-1)  # data lacks the k axis, so need to expand to create one
+            distances = pt.norm(data.unsqueeze(1) - raw_keys, p=2, dim=-1)  # data lacks k axis, so need to create one
         else:
             distances = np.sqrt(distances)  # unlike pytorch, faiss doesn't do sqrt for us
             distances = pt.from_numpy(distances).to(device=data.device)
@@ -159,7 +168,6 @@ class KNN(pt.nn.Module):
         y = pt.from_numpy(y).to(device=data.device).long()
 
         probs = pt.exp(-distances / self.temperature)
-        # full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device).half()
         full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device)
         full_probs.scatter_add_(src=probs, index=y.squeeze(2), dim=-1)
         z = pt.sum(full_probs, dim=-1).unsqueeze(-1)
@@ -571,7 +579,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         self.kv_interleaved = False
 
     def separate_kv(self):
-        """ Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
+        """Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
         assert self.kv_interleaved
         with pt.no_grad():
             k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self._depth_key_value).split(
@@ -582,7 +590,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         self.kv_interleaved = False
 
     def interleave_kv(self):
-        """ Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
+        """Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
         assert not self.kv_interleaved
         with pt.no_grad():
             k, v = self.ff_kv.weight.data.split(self.depth, dim=0)

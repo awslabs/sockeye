@@ -67,6 +67,7 @@ class FaissIndexBuilder:
         self.device_id = device_id
 
     def init_faiss_index(self, train_sample: Optional[np.memmap] = None):
+        """Initialize the Faiss index to be built and conduct training if needed."""
         index = faiss.index_factory(self.config.dimension, self.config.index_type)
         # pylint is disabled for members that only exists in faiss-gpu
         if self.use_gpu:
@@ -82,12 +83,14 @@ class FaissIndexBuilder:
         return index
 
     def add_items(self, index, keys: np.array):
+        """Add items to the index (must call `init_faiss_index` first)."""
         item_count, key_dim = keys.shape
         assert key_dim == self.config.dimension
 
         index.add(keys.astype(np.float32))  # unfortunately, faiss index only supports float32
 
     def block_add_items(self, index, keys: np.array, block_size: int = C.DEFAULT_DATA_STORE_BLOCK_SIZE):
+        """Add items to the index in blocks -- used for a large number of items (must call `init_faiss_index` first)."""
         item_count, key_dim = keys.shape
         assert key_dim == self.config.dimension
 
@@ -104,6 +107,7 @@ class FaissIndexBuilder:
 
     @staticmethod
     def build_train_sample(keys: np.array, sample_size: int):
+        """Randomly sample `sample_size` keys as training sample."""
         item_count, _ = keys.shape
         assert 0 < sample_size <= item_count
 
@@ -116,9 +120,13 @@ class FaissIndexBuilder:
         return train_sample
 
     def build_faiss_index(self, keys: np.array, train_sample: Optional[np.memmap] = None):
+        """
+        Top-level function of the class to build faiss index for a set of keys, optionally with samples for training.
+        """
+        item_count, _ = keys.shape
         if train_sample is None and self.config.train_data_size > 0:
             train_sample = FaissIndexBuilder.build_train_sample(keys, self.config.train_data_size)
-        
+
         index = self.init_faiss_index(train_sample)
         self.block_add_items(index, keys)
 
@@ -126,18 +134,22 @@ class FaissIndexBuilder:
 
 
 def get_state_store_path(dir):
+    """Get the path to the state store file given a kNN export directory."""
     return os.path.join(dir, C.KNN_STATE_DATA_STORE_NAME)
 
 
 def get_word_store_path(dir):
+    """Get the path to the word store file given a kNN export directory."""
     return os.path.join(dir, C.KNN_WORD_DATA_STORE_NAME)
 
 
 def get_config_path(dir):
+    """Get the path to the kNN config file given a kNN export directory."""
     return os.path.join(dir, C.KNN_CONFIG_NAME)
 
 
 def build_knn_index_package(args):
+    """Top-level function that builds a kNN index package (kNN index and config file) from an existing state and word store."""
     state_store_filename = get_state_store_path(args.input_dir)
     word_store_filename = get_word_store_path(args.input_dir)
     config_filename = get_config_path(args.input_dir)
@@ -157,11 +169,13 @@ def build_knn_index_package(args):
     if args.train_data_size is not None:
         config.train_data_size = args.train_data_size
 
-    keys = np.memmap(state_store_filename, dtype=config.state_data_type, mode='r', shape=(config.index_size, config.dimension))
+    keys = np.memmap(state_store_filename, dtype=config.state_data_type,
+                     mode='r', shape=(config.index_size, config.dimension))
     builder = FaissIndexBuilder(config, not args.use_cpu, args.device_id)
     train_sample = None
     if args.train_data_input_file is not None:
-        train_sample = np.memmap(args.train_data_input_file, dtype=config.state_data_type, mode='r', shape=(config.index_size, config.dimension))
+        train_sample = np.memmap(args.train_data_input_file, dtype=config.state_data_type,
+                                 mode='r', shape=(config.index_size, config.dimension))
     index = builder.build_faiss_index(keys, train_sample)
 
     if not args.use_cpu:
@@ -173,7 +187,7 @@ def build_knn_index_package(args):
         args.output_dir = args.input_dir
     elif args.output_dir != args.input_dir:
         shutil.copy(word_store_filename, os.path.join(args.output_dir, C.KNN_WORD_DATA_STORE_NAME))
-        
+
     if not os.path.exists(args.output_dir):
         os.mkdir(args.output_dir)
 

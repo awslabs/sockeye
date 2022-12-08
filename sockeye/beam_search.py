@@ -90,7 +90,7 @@ class _SingleModelInference(_Inference):
             if knn_probs is None:  # no knn used
                 probs = pt.log_softmax(logits, dim=-1)
             else:
-                probs = pt.log(self.knn_lambda * pt.softmax(logits, dim=-1) + (1-self.knn_lambda) * knn_probs)
+                probs = pt.log(self.knn_lambda * pt.softmax(logits, dim=-1) + (1 - self.knn_lambda) * knn_probs)
         else:
             assert knn_probs is None, "Can't skip softmax with KNN."
             probs = logits

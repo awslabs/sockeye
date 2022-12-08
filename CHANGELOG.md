@@ -16,12 +16,12 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 ### Added
 
 - Added kNN-MT model from [Khandelwal et al., 2021](https://arxiv.org/abs/2010.00710).
-  - Installation: see [faiss document](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md)
+  - Installation: see [faiss document](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md) -- installation via conda is recommended.
   - Building a faiss index from a sockeye model takes two steps:
-    - Generate decoder states: `sockeye-generate_decoder_states -m [model] --source [src] --target [tgt] --output-prefix [output prefix]`
-    - Build index: `sockeye-knn -i [input prefix, same as the output above] -c [config yaml from the output above] -o [output dir for index] -t [faiss index signature]`
+    - Generate decoder states: `sockeye-generate-decoder-states -m [model] --source [src] --target [tgt] --output-prefix [output prefix]`
+    - Build index: `sockeye-knn -i [input_dir] -o [output_dir] -t [faiss_index_signature]` where `input_dir` is the same as `output_dir` from the `sockeye-generate-decoder-states` command.
     - Faiss index signature reference: [see here](https://github.com/facebookresearch/faiss/wiki/The-index-factory)
-  - Running inference using the built index: `sockeye-translate ... --knn-index [output dir for index] --knn-lambda [interpolation weight, default=0.8]`
+  - Running inference using the built index: `sockeye-translate ... --knn-index [index_dir] --knn-lambda [interpolation_weight]` where `index_dir` is the same as `output_dir` from the `sockeye-knn` command.
 
 ## [3.1.27]
 
