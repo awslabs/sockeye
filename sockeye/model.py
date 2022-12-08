@@ -22,6 +22,11 @@ from typing import cast, Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch as pt
 
+try:
+    import torch_xla.core.xla_model as xm
+except ImportError:
+    xm = None
+
 from sockeye import __version__
 from . import constants as C
 from . import data_io
@@ -409,7 +414,9 @@ class SockeyeModel(pt.nn.Module):
 
         :param fname: Path to save parameters to.
         """
-        self.apply(layers.interleave_kv)
+        # In XLA compatibility mode, kv parameters are always interleaved.
+        if not utils.using_xla_compat():
+            self.apply(layers.interleave_kv)
         # Sockeye follows the convention of using the "traced" prefix for
         # modules that are created at runtime by tracing other modules.
         # Ex: traced_encoder = trace(encoder, ...)
@@ -418,8 +425,14 @@ class SockeyeModel(pt.nn.Module):
         # copies of their parameters. Copies can also cause errors at loadtime
         # if the traced modules do not yet exist.
         filtered_state_dict = {name: param for (name, param) in self.state_dict().items() if 'traced' not in name}
-        pt.save(filtered_state_dict, fname)
-        self.apply(layers.separate_kv)
+        if utils.using_xla_device():
+            assert xm is not None
+            xm.save(filtered_state_dict, fname)
+        else:
+            pt.save(filtered_state_dict, fname)
+        # In XLA compatibility mode, kv parameters are always interleaved.
+        if not utils.using_xla_compat():
+            self.apply(layers.separate_kv)
         logging.info('Saved params/state_dict to "%s"', fname)
 
     def load_parameters(self,
@@ -461,7 +474,7 @@ class SockeyeModel(pt.nn.Module):
                 module.kv_interleaved = True  # type: ignore
         # If the current model is in training mode, separate the loaded params
         # to match the format used during training.
-        if self.training:
+        if self.training and not utils.using_xla_compat():
             self.apply(layers.separate_kv)
         logger.info('Loaded params from "%s" to "%s"', filename, device)
 

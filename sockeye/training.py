@@ -36,6 +36,10 @@ try:
     import apex.amp
 except ImportError:
     pass
+try:
+    import torch_xla.core.xla_model as xm
+except ImportError:
+    xm = None
 
 from . import average
 from . import checkpoint_decoder
@@ -402,9 +406,13 @@ class EarlyStoppingTrainer:
         with (self.model_object.model.no_sync() if utils.is_distributed() and not is_update_batch  # type: ignore
         and not utils.using_deepspeed() else utils.no_context()):
             loss_values, num_samples = self._forward_backward(batch, is_update_batch)
+        # Completed forward/backward with one batch
+        if utils.using_xla_device():
+            assert xm is not None
+            xm.mark_step()
 
         for loss_func, loss_value, num_samples in zip(self.loss_functions, loss_values, num_samples):
-            loss_func.metric.update(loss_value.item(), num_samples.item())
+            loss_func.metric.update(loss_value.detach().cpu().item(), num_samples.detach().cpu().item())
 
         if utils.using_deepspeed():
             self.model_object.step()  # type: ignore
@@ -440,6 +448,11 @@ class EarlyStoppingTrainer:
         :param data_iter: Validation data iterator.
         :return: List of validation metrics, same order as self.loss_functions.
         """
+
+        if utils.using_xla_device():
+            assert xm is not None
+            xm.mark_step()
+
         # Switch model to eval mode (disable dropout, etc.) to score validation
         # set and run checkpoint decoder.
         self.sockeye_model.eval()
@@ -448,7 +461,7 @@ class EarlyStoppingTrainer:
         val_metrics = [lf.create_metric() for lf in self.loss_functions]
         for batch in data_iter:
             batch = batch.load(device=self.device)
-            with torch.inference_mode():
+            with torch.inference_mode() if not utils.using_xla_compat() else torch.no_grad():  # type: ignore
                 # Forward: run SockeyeModel directly. The traced model may not
                 # fully support switching between train and eval modes depending
                 # how much Python logic is used in the various submodules.
@@ -458,8 +471,11 @@ class EarlyStoppingTrainer:
                 # Loss
                 loss_outputs = [loss_function(outputs, batch.labels) for loss_function in self.loss_functions]
                 # Update validation metrics for batch
+            if utils.using_xla_device():
+                assert xm is not None
+                xm.mark_step()
             for loss_metric, (loss_value, num_samples) in zip(val_metrics, loss_outputs):
-                loss_metric.update(loss_value.item(), num_samples.item())
+                loss_metric.update(loss_value.detach().cpu().item(), num_samples.detach().cpu().item())
 
         if utils.is_primary_worker():
             # Primary worker runs checkpoint decoder
@@ -482,6 +498,11 @@ class EarlyStoppingTrainer:
 
         # Switch model back to train mode to continue training
         self.sockeye_model.train()
+
+        if utils.using_xla_device():
+            assert xm is not None
+            xm.mark_step()
+
         return val_metrics
 
     def _determine_improvement(self, val_metrics: List[loss.LossMetric]) -> bool:
@@ -668,7 +689,11 @@ class EarlyStoppingTrainer:
                                  self.config.cache_strategy)
 
     def _save_optimizer_state(self, fname):
-        torch.save(self.optimizer.state_dict(), fname)
+        if utils.using_xla_device():
+            assert xm is not None
+            xm.save(self.optimizer.state_dict(), fname)
+        else:
+            torch.save(self.optimizer.state_dict(), fname)
         logger.info('Saved optimizer state to "%s"', fname)
 
     def _load_optimizer_state(self, fname):
@@ -677,7 +702,11 @@ class EarlyStoppingTrainer:
 
     def _save_lr_scheduler(self, fname):
         if self.lr_scheduler is not None:
-            torch.save(self.lr_scheduler.state_dict(), fname)
+            if utils.using_xla_device():
+                assert xm is not None
+                xm.save(self.lr_scheduler.state_dict(), fname)
+            else:
+                torch.save(self.lr_scheduler.state_dict(), fname)
             logger.info("Saved '%s' to '%s'", self.lr_scheduler, fname)
 
     def _load_lr_scheduler(self, fname):
@@ -739,9 +768,17 @@ class EarlyStoppingTrainer:
 
         # (7) AMP grad scaler state
         if self.using_amp:
-            torch.save(self._scaler.state_dict(), os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME))
+            if utils.using_xla_device():
+                assert xm is not None
+                xm.save(self._scaler.state_dict(), os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME))
+            else:
+                torch.save(self._scaler.state_dict(), os.path.join(training_state_dirname, C.GRAD_SCALER_STATE_NAME))
         if self.using_apex_amp:
-            torch.save(apex.amp.state_dict(), os.path.join(training_state_dirname, C.APEX_AMP_STATE_NAME))
+            if utils.using_xla_device():
+                assert xm is not None
+                xm.save(apex.amp.state_dict(), os.path.join(training_state_dirname, C.APEX_AMP_STATE_NAME))
+            else:
+                torch.save(apex.amp.state_dict(), os.path.join(training_state_dirname, C.APEX_AMP_STATE_NAME))
 
         # First we rename the existing directory to minimize the risk of state
         # loss if the process is aborted during deletion (which will be slower

@@ -227,7 +227,8 @@ class LengthRatio(pt.nn.Module):
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
-@pt.jit.script
+# XLA does not support scripting this function. When not using XLA, we can use:
+# self.interleaved_matmul_encdec_qk = pt.jit.script(interleaved_matmul_encdec_qk)
 def interleaved_matmul_encdec_qk(q: pt.Tensor,
                                  kv: pt.Tensor,
                                  heads: int) -> pt.Tensor:
@@ -289,6 +290,9 @@ class DotAttentionCell(pt.nn.Module):
         super().__init__()
         self.dropout = pt.nn.Dropout(p=dropout) if dropout > 0.0 else None
         self.heads = heads
+        # XLA does not support scripting this function
+        self.interleaved_matmul_encdec_qk = pt.jit.script(interleaved_matmul_encdec_qk) \
+            if not utils.using_xla_compat() else interleaved_matmul_encdec_qk
 
     def forward(self,
                 queries: pt.Tensor,
@@ -305,7 +309,7 @@ class DotAttentionCell(pt.nn.Module):
                      False for valid positions.
         """
         # (batch * heads, qlen, klen)
-        logits = interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
+        logits = self.interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
 
         if mask is not None:
             logits = logits.masked_fill(mask, -C.LARGE_VALUES[logits.dtype])
@@ -478,12 +482,14 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         Overrides super().train() to ensure key-value parameters are stored in non-interleaved format during training
         and interleaved format during inference (mod.eval()).
         """
-        if mode and self.kv_interleaved:
-            # training operates with non-interleaved format
-            self.separate_kv()
-        elif not mode and not self.kv_interleaved:
-            # eval/inference operates in interleaved format
-            self.interleave_kv()
+        # In XLA compatibility mode, kv parameters are always interleaved.
+        if not utils.using_xla_compat():
+            if mode and self.kv_interleaved:
+                # training operates with non-interleaved format
+                self.separate_kv()
+            elif not mode and not self.kv_interleaved:
+                # eval/inference operates in interleaved format
+                self.interleave_kv()
         return super().train(mode)
 
     @property
@@ -518,7 +524,7 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :return: tensor of shape (max_length, batch, output_depth).
         """
-        if self.training:  # use fused multi-head attention op during training
+        if self.training and not utils.using_xla_compat():  # use fused multi-head attention op during training
             assert not self.kv_interleaved
             contexts, _ = F.multi_head_attention_forward(query=inputs, key=inputs, value=inputs,
                                                          embed_dim_to_check=self.depth, num_heads=self.heads,
@@ -604,12 +610,14 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         Overrides super().train() to ensure key-value parameters are stored in non-interleaved format during training
         and interleaved format during inference (mod.eval()).
         """
-        if mode and self.kv_interleaved:
-            # training operates with non-interleaved format
-            self.separate_kv()
-        elif not mode and not self.kv_interleaved:
-            # eval/inference operates in interleaved format
-            self.interleave_kv()
+        # In XLA compatibility mode, kv parameters are always interleaved.
+        if not utils.using_xla_compat():
+            if mode and self.kv_interleaved:
+                # training operates with non-interleaved format
+                self.separate_kv()
+            elif not mode and not self.kv_interleaved:
+                # eval/inference operates in interleaved format
+                self.interleave_kv()
         return super().train(mode)
 
     def forward(self,
@@ -629,7 +637,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :param projected_memory_kv: Optional previously projected memory keys and values.
         :return: tensor of shape (query_seq_len, batch, output_depth).
         """
-        if self.training:  # use fused multi-head attention op during training
+        if self.training and not utils.using_xla_compat():  # use fused multi-head attention op during training
             assert not self.kv_interleaved
             assert projected_memory_kv is None, "caching not supported in training"
             contexts, _ = F.multi_head_attention_forward(query=queries, key=key_values, value=key_values,

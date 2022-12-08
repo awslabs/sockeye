@@ -736,6 +736,30 @@ def check_import_faiss():
                                'https://github.com/facebookresearch/faiss/blob/main/INSTALL.md')
 
 
+_using_xla_compat = False
+
+
+def set_using_xla_compat():
+    global _using_xla_compat
+    _using_xla_compat = True
+
+
+def using_xla_compat() -> bool:
+    return _using_xla_compat
+
+
+_using_xla_device = False
+
+
+def set_using_xla_device():
+    global _using_xla_device
+    _using_xla_device = True
+
+
+def using_xla_device() -> bool:
+    return _using_xla_device
+
+
 def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optional[List] = None) -> int:
     """
     Count sequence length, after replacing (optional) token/s.
@@ -801,6 +825,13 @@ def init_device(args: argparse.Namespace) -> pt.device:
 
     :return: Torch device.
     """
+
+    if args.use_xla:
+        try:
+            import torch_xla.core.xla_model as xm
+            return xm.xla_device()
+        except ImportError:
+            raise RuntimeError('Please install torch_xla to use the XLA device.')
 
     use_cpu = args.use_cpu
     if not use_cpu and not pt.cuda.is_available():

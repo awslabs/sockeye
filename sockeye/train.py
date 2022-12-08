@@ -39,6 +39,10 @@ try:
     import deepspeed
 except ImportError:
     pass
+try:
+    import torch_xla.core.xla_model as xm
+except ImportError:
+    xm = None
 
 
 from . import arguments
@@ -150,6 +154,14 @@ def check_arg_compatibility(args: argparse.Namespace):
                         'DeepSpeed mode does not support learning rate schedulers that reload checkpoints. Use a '
                         'different --learning-rate-scheduler-type or specify --no-reload-on-learning-rate-reduce.')
 
+    if args.xla_compat:
+        check_condition(args.weight_tying_type == C.WEIGHT_TYING_NONE,
+                        f'XLA does not support weight tying. Use: --weight-tying-type {C.WEIGHT_TYING_NONE}')
+        check_condition(not (args.learning_rate_scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE
+                             and not args.no_reload_on_learning_rate_reduce),
+                        'XLA does not support learning rate schedulers that reload checkpoints. Use a different '
+                        '--learning-rate-scheduler-type or specify --no-reload-on-learning-rate-reduce.')
+
 
 def check_resume(args: argparse.Namespace, output_folder: str) -> bool:
     """
@@ -227,6 +239,10 @@ def create_checkpoint_decoder(
 
     if utils.using_deepspeed():
         logger.info('Turning off checkpoint decoder when using DeepSpeed')
+        return None
+
+    if utils.using_xla_compat():
+        logger.info('Turning off checkpoint decoder for XLA compatibility')
         return None
 
     cpd = checkpoint_decoder.CheckpointDecoder(
@@ -938,6 +954,10 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                                 each time a checkpoint has been reached
     """
 
+    # If specified, globally enable XLA compatibility before doing anything else
+    if args.xla_compat:
+        utils.set_using_xla_compat()
+
     # When running distributed training, initializing the process group is a
     # prerequisite for all inter-process communication.
 
@@ -998,6 +1018,9 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
                 max_seq_len_source, max_seq_len_target)
 
     device = utils.init_device(args)
+    if xm is not None and device == xm.xla_device():
+        utils.set_using_xla_device()
+
     logger.info(f'Training Device: {device}')
     utils.seed_rngs(args.seed)
 
@@ -1126,6 +1149,8 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
 
     if utils.using_deepspeed():
         logger.info('Skipping SockeyeModel trace when using DeepSpeed')
+    elif utils.using_xla_compat():
+        logger.info('Skipping SockeyeModel trace for XLA compatibility')
     else:
         logger.info('Tracing SockeyeModel on a validation batch')
         batch = eval_iter.next().load(device=device)  # pylint: disable=not-callable
