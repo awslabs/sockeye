@@ -149,7 +149,8 @@ def get_config_path(dir):
 
 
 def build_knn_index_package(args):
-    """Top-level function that builds a kNN index package (kNN index and config file) from an existing state and word store."""
+    """Top-level function that builds a kNN index package (kNN index and config file)
+    from an existing state and word store."""
     state_store_filename = get_state_store_path(args.input_dir)
     word_store_filename = get_word_store_path(args.input_dir)
     config_filename = get_config_path(args.input_dir)

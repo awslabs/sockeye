@@ -1487,7 +1487,8 @@ def add_build_knn_index_args(params):
     params.add_argument('-t', '--index-type',
                         default=None,
                         type=str,
-                        help='An optional field to specify the type of the index. Will override settings in the config. '
+                        help='An optional field to specify the type of the index. '
+                             'Will override settings in the config. '
                              'The type is specified with a faiss index factory signature, see here: '
                              'https://github.com/facebookresearch/faiss/wiki/The-index-factory')
     params.add_argument('--train-data-input-file',
@@ -1498,4 +1499,5 @@ def add_build_knn_index_args(params):
     params.add_argument('--train-data-size',
                         default=None,
                         type=int,
-                        help='An optional field to specify the size of the training sample. Will override settings in the config.')
+                        help='An optional field to specify the size of the training sample. '
+                             'Will override settings in the config.')

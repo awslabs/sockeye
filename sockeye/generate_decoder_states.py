@@ -41,7 +41,7 @@ class NumpyMemmapStorage:
     :param num_dim: number of dimensions of the vectors in the data store
     :param dtype: data type of the vectors in the data store
     """
-    
+
     def __init__(self,
                  file_name: str,
                  num_dim: int,
@@ -135,7 +135,7 @@ class DecoderStateGenerator:
         token_count = 0
         with open(target_path, 'r') as f:
             for line in f:
-                token_count += min(len(line.split(' ')) + 1, max_seq_len)  # +1 for EOS
+                token_count += min(len(line.split()) + 1, max_seq_len)  # +1 for EOS
         return token_count
 
     def init_store_file(self, initial_size: int) -> None:
@@ -185,7 +185,8 @@ class DecoderStateGenerator:
                 if self.traced_model is None:
                     trace_inputs = {'get_decoder_states': model_inputs}
                     self.traced_model = pt.jit.trace_module(self.model, trace_inputs, strict=False)
-                decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # shape: (batch, seq_len, hidden_dim)
+                # shape: (batch, seq_len, hidden_dim)
+                decoder_states = self.traced_model.get_decoder_states(*model_inputs)
 
                 # flatten batch and seq_len dimensions, remove pads on the target
                 pad_mask = (batch.target != C.PAD_ID)[:, :, 0]  # shape: (batch, seq_len)

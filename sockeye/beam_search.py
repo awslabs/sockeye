@@ -178,7 +178,7 @@ class _EnsembleInference(_Inference):
             if knn_probs is None:
                 probs = logits.softmax(dim=-1)
             else:
-                probs = self.knn_lambda * pt.softmax(logits, dim=-1) + (1-self.knn_lambda) * knn_probs
+                probs = self.knn_lambda * pt.softmax(logits, dim=-1) + (1 - self.knn_lambda) * knn_probs
             outputs.append(probs)
             if target_factor_outputs:
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]

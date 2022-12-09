@@ -289,7 +289,8 @@ class SockeyeModel(pt.nn.Module):
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List[pt.Tensor],
-                    vocab_slice_ids: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor, List[pt.Tensor], List[pt.Tensor]]:
+                    vocab_slice_ids: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor,pt.Tensor, List[pt.Tensor],
+                                                                          List[pt.Tensor]]:
         """
         One step decoding of the translation model.
 
