@@ -18,14 +18,11 @@ import argparse
 import logging
 import os
 
-import torch as pt
-
 from . import arguments
 from . import constants as C
 from . import data_io
 from . import utils
 from .beam_search import CandidateScorer
-from .device import init_device
 from .log import setup_main_logger
 from .model import load_model
 from .output_handler import get_output_handler
@@ -51,7 +48,7 @@ def score(args: argparse.Namespace):
 
     utils.log_basic_info(args)
 
-    device = init_device(args, logger)
+    device = utils.init_device(args)
     logger.info(f"Scoring device: {device}")
 
     model, source_vocabs, target_vocabs = load_model(args.model, device=device, dtype=args.dtype)

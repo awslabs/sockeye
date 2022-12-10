@@ -138,7 +138,6 @@ JSON_KEEP_TARGET_PREFIX_KEY = "keep_target_prefix"
 JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
-JSON_ENCODING = "utf-8"
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
@@ -285,7 +284,6 @@ DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 DTYPE_BF16 = 'bfloat16'
 DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
-DTYPE_TF32 = 'tf32'
 DTYPE_INT8 = 'int8'
 DTYPE_INT16 = 'int16'
 DTYPE_INT32 = 'int32'
@@ -364,7 +362,6 @@ TOKEN_SEGMENTATION_MARKERS = [TOKEN_SEGMENTATION_SW, TOKEN_SEGMENTATION_SP]
 # sequence length count types
 SEQ_LEN_IN_CHARACTERS = "char"
 SEQ_LEN_IN_TOKENS = "token"
-SEQ_LEN_IN_WORDS = "word"  # use case: merge sub-words to original word before counting
 
 # scoring
 SCORING_TYPE_NEGLOGPROB = 'neglogprob'
@@ -383,7 +380,7 @@ BREVITY_PENALTY_CONSTANT = 'constant'
 BREVITY_PENALTY_LEARNED = 'learned'
 BREVITY_PENALTY_NONE = 'none'
 
-# k-nn 
+# k-nn
 KNN_STATE_DATA_STORE_NAME = "keys.npy"
 KNN_WORD_DATA_STORE_NAME = "vals.npy"
 KNN_WORD_DATA_STORE_DTYPE = DTYPE_INT32

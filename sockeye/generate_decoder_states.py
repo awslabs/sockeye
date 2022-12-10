@@ -14,7 +14,7 @@
 import argparse
 import logging
 import os
-from typing import Dict, List
+from typing import List, Optional
 
 import numpy as np
 import torch as pt
@@ -50,7 +50,7 @@ class NumpyMemmapStorage:
         self.num_dim = num_dim  # dimension of a single entry
         self.dtype = dtype
         self.block_size = -1
-        self.mmap = None
+        self.mmap = None  # type: Optional[np.memmap]
         self.tail_idx = 0  # where the next entry should be inserted
         self.size = 0  # size of storage already assigned
 
@@ -120,12 +120,12 @@ class DecoderStateGenerator:
         self.max_seq_len_target = max_seq_len_target
 
         self.output_dir = output_dir
-        self.state_store_file = None
-        self.words_store_file = None
+        self.state_store_file = None  # type: Optional[NumpyMemmapStorage]
+        self.words_store_file = None  # type: Optional[NumpyMemmapStorage]
 
         # info for KNNConfig
         self.num_states = 0
-        self.dimension = None
+        self.dimension = None  # type: Optional[int]
         self.state_data_type = utils.get_numpy_dtype(state_data_type)
         self.word_data_type = utils.get_numpy_dtype(word_data_type)
 
@@ -186,7 +186,7 @@ class DecoderStateGenerator:
                     trace_inputs = {'get_decoder_states': model_inputs}
                     self.traced_model = pt.jit.trace_module(self.model, trace_inputs, strict=False)
                 # shape: (batch, seq_len, hidden_dim)
-                decoder_states = self.traced_model.get_decoder_states(*model_inputs)
+                decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # type: ignore
 
                 # flatten batch and seq_len dimensions, remove pads on the target
                 pad_mask = (batch.target != C.PAD_ID)[:, :, 0]  # shape: (batch, seq_len)

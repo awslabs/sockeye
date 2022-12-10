@@ -678,7 +678,6 @@ class GreedySearch(Search):
         self.output_vocab_size = inference.model_output_vocab_size
         self.output_factor_vocab_size = inference.model_output_factor_vocab_size
         self._inference = inference
-        self.global_avoid_trie = None
         assert inference._skip_softmax, "skipping softmax must be enabled for GreedySearch"
         self.work_block = GreedyTop1()
 

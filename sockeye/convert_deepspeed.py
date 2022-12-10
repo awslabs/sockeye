@@ -67,7 +67,7 @@ def convert_checkpoint_to_params(model_config_fname: str, checkpoint_dirname: st
     model_config = model.SockeyeModel.load_config(model_config_fname)
     sockeye_model = model.SockeyeModel(model_config)
     # Gather the float32 params on CPU
-    state_dict = get_fp32_state_dict_from_zero1_checkpoint(checkpoint_dirname)
+    state_dict = dict(get_fp32_state_dict_from_zero1_checkpoint(checkpoint_dirname))
     # Strip the first prefix from each param name to match the SockeyeModel
     # Ex: 'model.encoder.layers...' -> 'encoder.layers...'
     state_dict = {name[name.find('.') + 1:]: param for (name, param) in state_dict.items()}

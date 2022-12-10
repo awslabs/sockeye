@@ -11,6 +11,14 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.29]
+
+### Changed
+
+- Running `sockeye-evaluate` no longer applies text tokenization for TER (same behavior as other metrics).
+- Turned on type checking for all `sockeye` modules except `test_utils` and addressed resulting type issues.
+- Refactored code in various modules without changing user-level behavior.
+
 ## [3.1.28]
 
 ### Added

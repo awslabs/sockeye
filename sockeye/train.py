@@ -57,7 +57,6 @@ from . import transformer
 from . import utils
 from . import vocab
 from .config import Config
-from .device import init_device
 from .log import setup_main_logger
 from .utils import check_condition
 
@@ -998,7 +997,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-    device = init_device(args, logger, utils.get_local_rank() if utils.is_distributed() else None)
+    device = utils.init_device(args)
     logger.info(f'Training Device: {device}')
     utils.seed_rngs(args.seed)
 

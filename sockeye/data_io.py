@@ -363,8 +363,8 @@ def create_shards(source_fnames: List[str],
     :param target_fnames: The path to the target text (and optional token-parallel factor files).
     :param num_shards: The total number of shards.
     :param output_prefix: The prefix under which the shard files will be created.
-    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each shard
-             and a flag of whether the returned file names are temporary and can be deleted.
+    :return: List of tuples of source (and source factor) file names and target (and target factor) file names for each
+             shard and a flag of whether the returned file names are temporary and can be deleted.
     """
     if num_shards == 1:
         return [(tuple(source_fnames), tuple(target_fnames))], True
@@ -595,7 +595,8 @@ def prepare_data(source_fnames: List[str],
                  pool: multiprocessing.pool.Pool = None,
                  shards: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None):
     """
-    :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.
+    :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard
+                   data factor file paths.
     """
     logger.info("Preparing data.")
     # write vocabularies to data folder
