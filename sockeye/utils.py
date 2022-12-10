@@ -540,6 +540,23 @@ def get_torch_dtype(dtype: Union[pt.dtype, str]) -> pt.dtype:
     raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
 
 
+_STRING_TO_NUMPY_DTYPE = {
+    C.DTYPE_FP16: np.float16,
+    C.DTYPE_FP32: np.float32,
+    C.DTYPE_INT8: np.int8,
+    C.DTYPE_INT16: np.int16,
+    C.DTYPE_INT32: np.int32,
+}
+
+
+def get_numpy_dtype(dtype: Union[np.dtype, str]):
+    if isinstance(dtype, np.dtype):
+        return dtype
+    if dtype in _STRING_TO_NUMPY_DTYPE:
+        return _STRING_TO_NUMPY_DTYPE[dtype]
+    raise ValueError(f'Cannot convert to NumPy dtype: {dtype}')
+
+
 def log_parameters(model: pt.nn.Module):
     """
     Logs information about model parameters.
@@ -698,6 +715,23 @@ def init_deepspeed():
 def using_deepspeed() -> bool:
     """Check whether DeepSpeed has been initialized via this module"""
     return _using_deepspeed
+
+
+# Track whether Faiss has been confirmed importable
+_faiss_checked = False
+
+def check_import_faiss():
+    """
+    Make sure the faiss module can be imported.
+    """
+    global _faiss_checked
+    if not _faiss_checked:
+        try:
+            import faiss  # pylint: disable=E0401
+            _faiss_checked = True
+        except:
+            raise RuntimeError('To run kNN-MT models, please install faiss by following '
+                               'https://github.com/facebookresearch/faiss/blob/main/INSTALL.md')
 
 
 def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optional[List] = None) -> int:

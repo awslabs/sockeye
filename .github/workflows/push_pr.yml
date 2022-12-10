@@ -32,6 +32,12 @@ jobs:
       run: pip install -r requirements/requirements.txt
     - name: DeepSpeed requirements
       run: pip install -r requirements/requirements.deepspeed.txt
+    - name: Faiss requirements
+      run: |
+        if [ "$RUNNER_OS" == "Linux" ]; then
+          pip install -r requirements/requirements.faiss-cpu.txt
+        fi
+      shell: bash
     - name: Development requirements
       run: pip install -r requirements/requirements.dev.txt
     - name: Unit tests

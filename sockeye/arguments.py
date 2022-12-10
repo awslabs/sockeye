@@ -1131,6 +1131,7 @@ def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_knn_mt_args(params)  # for kNN MT
 
 
 def add_score_cli_args(params):
@@ -1173,7 +1174,40 @@ def add_score_cli_args(params):
                              'peaked predictions, values > 1.0 produce smoothed distributions.')
 
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
-                        help="Data type. Default: %(default)s infers from saved model.")
+                        help="Data type. Default: infers from saved model.")
+
+    add_logging_args(params)
+
+
+def add_state_generation_args(params):
+    add_training_data_args(params, required=True)
+    add_vocab_args(params)
+    add_device_args(params)
+    add_batch_args(params, default_batch_size=56, default_batch_type=C.BATCH_TYPE_SENTENCE)
+
+    decode_params = params.add_argument_group("Decoder state generation parameters")
+
+    params.add_argument('--state-dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16],
+                        help="Data type of the decoder state store. Default: infers from saved model.")
+
+    params.add_argument("--model", "-m", required=True,
+                        help="Model directory containing trained model.")
+
+    params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
+                        type=multiple_values(num_values=2, greater_or_equal=1),
+                        default=None,
+                        help='Maximum sequence length in tokens.'
+                             'Use "x:x" to specify separate values for src&tgt. Default: Read from model.')
+
+    # common params with translate CLI
+    add_length_penalty_args(params)
+    add_brevity_penalty_args(params)
+
+    params.add_argument("--output-dir", "-o", default=None,
+                        help="The path to the directory that stores the decoder states.")
+
+    params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
+                        help="Data type. Default: infers from saved model.")
 
     add_logging_args(params)
 
@@ -1343,7 +1377,7 @@ def add_inference_args(params):
     add_brevity_penalty_args(decode_params)
 
     decode_params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
-                               help="Data type. Default: %(default)s infers from saved model.")
+                               help="Data type. Default: infers from saved model.")
     add_clamp_to_dtype_arg(decode_params)
 
 
@@ -1379,6 +1413,7 @@ def add_brevity_penalty_args(params):
                         help='Has effect if --brevity-penalty-type is set to \'constant\'. If positive, overrides the length '
                              'ratio, used for brevity penalty calculation, for all inputs. If zero, uses the average of length '
                              'ratios from the training data over all models. Default: %(default)s.')
+
 
 def add_clamp_to_dtype_arg(params):
     params.add_argument('--clamp-to-dtype',
@@ -1423,3 +1458,46 @@ def add_build_vocab_args(params):
     params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
     add_vocab_args(params)
     add_process_pool_args(params)
+
+
+def add_knn_mt_args(params):
+    knn_params = params.add_argument_group("kNN MT parameters")
+
+    knn_params.add_argument('--knn-index',
+                            type=str,
+                            help='Optionally use a KNN index during inference to '
+                                 'retrieve similar hidden states and corresponding target tokens.',
+                            default=None)
+    knn_params.add_argument('--knn-lambda',
+                            type=float,
+                            help="Interpolation parameter when using KNN index. Default: %(default)s.",
+                            default=C.DEFAULT_KNN_LAMBDA)
+
+
+def add_build_knn_index_args(params):
+    params.add_argument('-i', '--input-dir',
+                        required=True,
+                        type=str,
+                        help='The directory that contains the stored decoder states and values '
+                             f'({C.KNN_STATE_DATA_STORE_NAME} and {C.KNN_WORD_DATA_STORE_NAME}).')
+    params.add_argument('-o', '--output-dir',
+                        default=None,
+                        type=str,
+                        help='The path to the output directory. Will reuse input directory if not specified.')
+    params.add_argument('-t', '--index-type',
+                        default=None,
+                        type=str,
+                        help='An optional field to specify the type of the index. '
+                             'Will override settings in the config. '
+                             'The type is specified with a faiss index factory signature, see here: '
+                             'https://github.com/facebookresearch/faiss/wiki/The-index-factory')
+    params.add_argument('--train-data-input-file',
+                        default=None,
+                        type=str,
+                        help='An optional field to reuse an already-built training data sample for the index. '
+                             'Otherwise, a (slow) sampling step might need to be run.')
+    params.add_argument('--train-data-size',
+                        default=None,
+                        type=int,
+                        help='An optional field to specify the size of the training sample. '
+                             'Will override settings in the config.')

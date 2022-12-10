@@ -11,6 +11,18 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.28]
+
+### Added
+
+- Added kNN-MT model from [Khandelwal et al., 2021](https://arxiv.org/abs/2010.00710).
+  - Installation: see [faiss document](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md) -- installation via conda is recommended.
+  - Building a faiss index from a sockeye model takes two steps:
+    - Generate decoder states: `sockeye-generate-decoder-states -m [model] --source [src] --target [tgt] --output-dir [output dir]`
+    - Build index: `sockeye-knn -i [input_dir] -o [output_dir] -t [faiss_index_signature]` where `input_dir` is the same as `output_dir` from the `sockeye-generate-decoder-states` command.
+    - Faiss index signature reference: [see here](https://github.com/facebookresearch/faiss/wiki/The-index-factory)
+  - Running inference using the built index: `sockeye-translate ... --knn-index [index_dir] --knn-lambda [interpolation_weight]` where `index_dir` is the same as `output_dir` from the `sockeye-knn` command.
+
 ## [3.1.27]
 
 ### Changed
