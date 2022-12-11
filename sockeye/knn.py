@@ -82,14 +82,14 @@ class FaissIndexBuilder:
 
         return index
 
-    def add_items(self, index, keys: np.array):
+    def add_items(self, index, keys: np.ndarray):
         """Add items to the index (must call `init_faiss_index` first)."""
         item_count, key_dim = keys.shape
         assert key_dim == self.config.dimension
 
         index.add(keys.astype(np.float32))  # unfortunately, faiss index only supports float32
 
-    def block_add_items(self, index, keys: np.array, block_size: int = C.DEFAULT_DATA_STORE_BLOCK_SIZE):
+    def block_add_items(self, index, keys: np.ndarray, block_size: int = C.DEFAULT_DATA_STORE_BLOCK_SIZE):
         """Add items to the index in blocks -- used for a large number of items (must call `init_faiss_index` first)."""
         item_count, key_dim = keys.shape
         assert key_dim == self.config.dimension
@@ -106,7 +106,7 @@ class FaissIndexBuilder:
             index.add(keys[start:item_count].astype(np.float32))  # unfortunately, faiss index only supports float32
 
     @staticmethod
-    def build_train_sample(keys: np.array, sample_size: int):
+    def build_train_sample(keys: np.ndarray, sample_size: int):
         """Randomly sample `sample_size` keys as training sample."""
         item_count, _ = keys.shape
         assert 0 < sample_size <= item_count
@@ -119,7 +119,7 @@ class FaissIndexBuilder:
 
         return train_sample
 
-    def build_faiss_index(self, keys: np.array, train_sample: Optional[np.memmap] = None):
+    def build_faiss_index(self, keys: np.ndarray, train_sample: Optional[np.memmap] = None):
         """
         Top-level function of the class to build faiss index for a set of keys, optionally with samples for training.
         """
@@ -149,8 +149,10 @@ def get_config_path(dir):
 
 
 def build_knn_index_package(args):
-    """Top-level function that builds a kNN index package (kNN index and config file)
-    from an existing state and word store."""
+    """
+    Top-level function that builds a kNN index package (kNN index and config file) from an existing state and word
+    store.
+    """
     state_store_filename = get_state_store_path(args.input_dir)
     word_store_filename = get_word_store_path(args.input_dir)
     config_filename = get_config_path(args.input_dir)

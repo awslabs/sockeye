@@ -22,9 +22,6 @@ import time
 from contextlib import ExitStack
 from typing import Dict, Generator, List, Optional, Union
 
-import torch as pt
-
-from .device import init_device
 from sockeye.lexicon import load_restrict_lexicon, RestrictLexicon
 from sockeye.log import setup_main_logger
 from sockeye.model import load_models
@@ -33,6 +30,7 @@ from sockeye.utils import log_basic_info, check_condition, grouper, smart_open, 
 from . import arguments
 from . import constants as C
 from . import inference
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +65,7 @@ def run_translate(args: argparse.Namespace):
     output_handler = get_output_handler(args.output_type,
                                         args.output)
 
-    device = init_device(args, logger)
+    device = utils.init_device(args)
     logger.info(f"Translate Device: {device}")
 
     models, source_vocabs, target_vocabs = load_models(device=device,

@@ -47,7 +47,7 @@ def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str],
     :param offset: Smoothing constant.
     :return: BLEU score as float between 0 and 1.
     """
-    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=offset).score / 100.0
+    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=offset).score / 100.0  # type: ignore
 
 
 def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -58,7 +58,7 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     :param references: Reference stream.
     :return: chrF score as float between 0 and 1.
     """
-    return sacrebleu.corpus_chrf(hypotheses, [references]).score
+    return sacrebleu.corpus_chrf(hypotheses, [references]).score  # type: ignore
 
 
 def raw_corpus_ter(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -69,8 +69,8 @@ def raw_corpus_ter(hypotheses: Iterable[str], references: Iterable[str]) -> floa
     :param references: Reference stream.
     :return: TER score as float between 0 and 1.
     """
-    ter = sacrebleu.metrics.TER(argparse.Namespace())
-    return ter.corpus_score(hypotheses, [references]).score
+    ter = sacrebleu.metrics.TER()
+    return ter.corpus_score(hypotheses, [references]).score  # type: ignore
 
 
 def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -186,8 +186,8 @@ def _print_mean_std_score(metrics: List[Tuple[str, Callable]], scores: Dict[str,
     scores_mean_std = []  # type: List[str]
     for name, _ in metrics:
         if len(scores[name]) > 1:
-            score_mean = np.item(np.mean(scores[name]))
-            score_std = np.item(np.std(scores[name], ddof=1))
+            score_mean = np.mean(scores[name]).item()
+            score_std = np.std(scores[name], ddof=1).item()
             scores_mean_std.append("%.3f\t%.3f" % (score_mean, score_std))
         else:
             score = scores[name][0]

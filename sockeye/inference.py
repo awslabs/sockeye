@@ -110,7 +110,6 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
     return max_input_len, get_max_output_length
 
 
-BeamHistory = Dict[str, List]
 Tokens = List[str]
 TokenIds = List[List[int]]  # each token id may contain multiple factors
 SentenceId = Union[int, str]

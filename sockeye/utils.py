@@ -14,6 +14,7 @@
 """
 A set of utility methods.
 """
+import argparse
 import binascii
 import gzip
 import itertools
@@ -324,7 +325,8 @@ def shift_prefix_factors(prefix_factors: pt.Tensor) -> pt.Tensor:
     :return new prefix_factors_shift (batch size, length + 1, num of factors)
     """
     prefix_factors_sizes = prefix_factors.size()
-    prefix_factors_shift = pt.zeros(prefix_factors_sizes[0], prefix_factors_sizes[1] + 1, prefix_factors_sizes[2], dtype=prefix_factors.dtype, device=prefix_factors.device)
+    prefix_factors_shift = pt.zeros(prefix_factors_sizes[0], prefix_factors_sizes[1] + 1, prefix_factors_sizes[2],
+                                    dtype=prefix_factors.dtype, device=prefix_factors.device)
     prefix_factors_shift[:, 1:] = prefix_factors
     return prefix_factors_shift
 
@@ -785,3 +787,33 @@ def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: st
         isometric_score = pred_sub_score + synchrony_sub_score
 
         return isometric_score
+
+
+def init_device(args: argparse.Namespace) -> pt.device:
+    """
+    Select Torch device based on CLI args:
+    - When CUDA is not available, the device defaults to CPU.
+    - When using CUDA, tf32 is enabled if specified.
+    - When running distributed training, the CUDA device is determined by local
+      rank instead of CLI args.
+
+    :param args: Parsed CLI args including device parameters.
+
+    :return: Torch device.
+    """
+
+    use_cpu = args.use_cpu
+    if not use_cpu and not pt.cuda.is_available():
+        logger.info('CUDA not available, defaulting to CPU device')
+        use_cpu = True
+    if use_cpu:
+        return pt.device('cpu')
+
+    device = pt.device('cuda', get_local_rank() if is_distributed() else args.device_id)
+    # Ensure that GPU operations use the correct device by default
+    pt.cuda.set_device(device)
+    if args.tf32:
+        pt.backends.cuda.matmul.allow_tf32 = True
+        logger.info('CUDA: allow tf32 (float32 but with 10 bits precision)')
+
+    return device
