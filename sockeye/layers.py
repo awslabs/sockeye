@@ -756,6 +756,36 @@ class PositionalEmbeddings(pt.nn.Module):
         return data + pos_embedding
 
 
+class NumericFactorEmbeddings(PositionalEmbeddings):
+    """
+    Takes a target factor input sequence and applies sinusoidal positional embeddings to it.
+
+    :param num_embed: Embedding size.
+    :param max_val: Maximum value of the target factor.
+    :param dtype: Torch data type for parameters.
+    """
+    def __init__(self,
+                 num_embed: int,
+                 max_val: int,
+                 dtype: Optional[pt.dtype] = None) -> None:
+        super().__init__(weight_type=C.FIXED_POSITIONAL_EMBEDDING,
+                         num_embed=num_embed,
+                         max_seq_len=max_val,
+                         scale_up_input=False,
+                         scale_down_positions=False,
+                         dtype=dtype)
+
+    def forward(self, data: pt.Tensor) -> pt.Tensor:
+        """
+        Applies "positional" embeddings to numeric factor data.
+
+        :param data: Input data. Shape: (batch, length or 1, num_embed)
+
+        :return: Factor data embedded with "positional" embeddings
+        """
+        return F.embedding(data, self.weight).detach()
+
+
 class SSRU(AutoregressiveLayer):
     """
     Simpler Simple Recurrent Unit

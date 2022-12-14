@@ -738,6 +738,12 @@ def add_model_parameters(params):
                               help='Embedding size for additional target factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) target factor files. Default: %(default)s.')
+    model_params.add_argument('--target-factors-pos-embed',
+                              choices=[C.NO_POSITIONAL_EMBEDDING, C.FIXED_POSITIONAL_EMBEDDING],
+                              default=[C.NO_POSITIONAL_EMBEDDING],
+                              nargs='+',
+                              help='Use random or fixed "positional" embeddings for target factors. '
+                                   '"none" means random embeddings. Default: %(default)s.')
     model_params.add_argument('--source-factors-combine', '-sfc',
                               choices=C.FACTORS_COMBINE_CHOICES,
                               default=[C.FACTORS_COMBINE_SUM],

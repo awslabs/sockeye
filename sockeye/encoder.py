@@ -65,6 +65,7 @@ class FactorConfig(config.Config):
     num_embed: int
     combine: str  # From C.FACTORS_COMBINE_CHOICES
     share_embedding: bool
+    pos_embed: str  # C.NO_POSITIONAL_EMBEDDING or C.FIXED_POSITIONAL_EMBEDDING
 
 
 @dataclass
@@ -111,8 +112,15 @@ class Embedding(Encoder):
                 if fc.share_embedding:
                     factor_embed = self.embedding
                 else:
-                    factor_embed = pt.nn.Embedding(fc.vocab_size, fc.num_embed,
-                                                   sparse=self.config.allow_sparse_grad, dtype=dtype)
+                    if fc.pos_embed == C.NO_POSITIONAL_EMBEDDING:
+                        # Remains default behavior
+                        factor_embed = pt.nn.Embedding(fc.vocab_size, fc.num_embed,
+                                                       sparse=self.config.allow_sparse_grad, dtype=dtype)
+                    else:
+                        # Fixed "positional" embeddings for numeric target factors
+                        factor_embed = layers.NumericFactorEmbeddings(num_embed=fc.num_embed,
+                                                                      max_val=C.NUMERIC_TARGET_FACTOR_EMBEDDING_MAX,
+                                                                      dtype=dtype)
                 self.factor_embeds.append(factor_embed)
                 self.factor_combinations.append(fc.combine)
 
