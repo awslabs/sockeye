@@ -404,7 +404,7 @@ def add_quantize_args(params):
                              f'"{C.PARAMS_BEST_NAME}.{C.DTYPE_FP32}" and "{C.CONFIG_NAME}.{C.DTYPE_FP32}").')
     params.add_argument('--dtype',
                         default=C.DTYPE_FP16,
-                        choices=[C.DTYPE_BF16, C.DTYPE_FP16, C.DTYPE_FP32],
+                        choices=[C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_BF16],
                         help='Target data type for quantization. Default: %(default)s.')
 
 
@@ -771,7 +771,9 @@ def add_model_parameters(params):
                               help='The type of weight tying. source embeddings=src, target embeddings=trg, '
                                    'target softmax weight matrix=softmax. Default: %(default)s.')
 
-    model_params.add_argument('--dtype', default=C.DTYPE_FP32, choices=[C.DTYPE_FP32, C.DTYPE_FP16],
+    model_params.add_argument('--dtype',
+                              default=C.DTYPE_FP32,
+                              choices=[C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_BF16],
                               help="Data type.")
     add_clamp_to_dtype_arg(model_params)
 
@@ -1177,7 +1179,9 @@ def add_score_cli_args(params):
                         help='Controls peakiness of model predictions. Values < 1.0 produce '
                              'peaked predictions, values > 1.0 produce smoothed distributions.')
 
-    params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
+    params.add_argument('--dtype',
+                        default=None,
+                        choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_BF16, C.DTYPE_INT8],
                         help="Data type. Default: infers from saved model.")
 
     add_logging_args(params)
@@ -1210,7 +1214,9 @@ def add_state_generation_args(params):
     params.add_argument("--output-dir", "-o", default=None,
                         help="The path to the directory that stores the decoder states.")
 
-    params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
+    params.add_argument('--dtype',
+                        default=None,
+                        choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_BF16, C.DTYPE_INT8],
                         help="Data type. Default: infers from saved model.")
 
     add_logging_args(params)
@@ -1381,7 +1387,9 @@ def add_inference_args(params):
     add_length_penalty_args(decode_params)
     add_brevity_penalty_args(decode_params)
 
-    decode_params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
+    decode_params.add_argument('--dtype',
+                               default=None,
+                               choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_BF16, C.DTYPE_INT8],
                                help="Data type. Default: infers from saved model.")
     add_clamp_to_dtype_arg(decode_params)
 
