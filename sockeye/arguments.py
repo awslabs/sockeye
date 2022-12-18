@@ -138,7 +138,8 @@ def regular_folder() -> Callable:
 
 def int_greater_or_equal(threshold: int) -> Callable:
     """
-    Returns a method that can be used in argument parsing to check that the int argument is greater or equal to `threshold`.
+    Returns a method that can be used in argument parsing to check that the int argument is greater or equal to
+    `threshold`.
 
     :param threshold: The threshold that we assume the cli argument value is greater or equal to.
     :return: A method that can be used as a type in argparse.
@@ -155,7 +156,8 @@ def int_greater_or_equal(threshold: int) -> Callable:
 
 def float_greater_or_equal(threshold: float) -> Callable:
     """
-    Returns a method that can be used in argument parsing to check that the float argument is greater or equal to `threshold`.
+    Returns a method that can be used in argument parsing to check that the float argument is greater or equal to
+    `threshold`.
 
     :param threshold: The threshold that we assume the cli argument value is greater or equal to.
     :return: A method that can be used as a type in argparse.
@@ -579,7 +581,8 @@ def add_device_args(params):
     device_params.add_argument('--tf32',
                                type=bool_str(),
                                default=True,
-                               help='Globally enable transparent tf32 acceleration of float32 at the cost of reducing precision to 10 bits')
+                               help='Globally enable transparent tf32 acceleration of float32 at the cost of reducing '
+                                    'precision to 10 bits. Default: %(default)s.')
 
 
 def add_vocab_args(params):
@@ -837,22 +840,20 @@ def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_T
 
 
 def add_nvs_train_parameters(params):
-    params.add_argument(
-        '--bow-task-weight',
-        type=float_greater_or_equal(0.0),
-        default=1.0,
-        help=
-        'The weight of the auxiliary Bag-of-word (BOW) loss when --neural-vocab-selection is enabled. Default %(default)s.'
-    )
+    params.add_argument('--bow-task-weight',
+                        type=float_greater_or_equal(0.0),
+                        default=1.0,
+                        help='The weight of the auxiliary Bag-of-word (BOW) loss when --neural-vocab-selection is '
+                             'enabled. Default %(default)s.')
 
-    params.add_argument(
-        '--bow-task-pos-weight',
-        type=float_greater_or_equal(0.0),
-        default=10,
-        help='The weight of the positive class (the set of words present on the target side) for the BOW loss '
-             'when --neural-vocab-selection is set as x * num_negative_class / num_positive_class where x is the '
-             '--bow-task-pos-weight. Higher values will bias more towards recall, resulting in larger vocabularies '
-             'at test time trading off larger vocabularies for higher translation quality. Default %(default)s.')
+    params.add_argument('--bow-task-pos-weight',
+                        type=float_greater_or_equal(0.0),
+                        default=10,
+                        help='The weight of the positive class (the set of words present on the target side) for the '
+                             'BOW loss when --neural-vocab-selection is set as x * num_negative_class / '
+                             'num_positive_class where x is the --bow-task-pos-weight. Higher values will bias more '
+                             'towards recall, resulting in larger vocabularies at test time trading off larger '
+                             'vocabularies for higher translation quality. Default %(default)s.')
 
 
 def add_training_args(params):
@@ -869,8 +870,9 @@ def add_training_args(params):
                               type=str,
                               default=None,
                               choices=[C.LENGTH_TASK_RATIO, C.LENGTH_TASK_LENGTH],
-                              help='If specified, adds an auxiliary task during training to predict source/target length ratios '
-                                    '(mean squared error loss), or absolute lengths (Poisson) loss. Default %(default)s.')
+                              help='If specified, adds an auxiliary task during training to predict source/target '
+                                   'length ratios (mean squared error loss), or absolute lengths (Poisson) loss. '
+                                   'Default %(default)s.')
     train_params.add_argument('--length-task-weight',
                               type=float_greater_or_equal(0.0),
                               default=1.0,
@@ -878,7 +880,8 @@ def add_training_args(params):
     train_params.add_argument('--length-task-layers',
                               type=int_greater_or_equal(1),
                               default=1,
-                              help='Number of fully-connected layers for predicting the length ratio. Default %(default)s.')
+                              help='Number of fully-connected layers for predicting the length ratio. '
+                                   'Default %(default)s.')
 
     add_nvs_train_parameters(train_params)
 
@@ -1091,7 +1094,8 @@ def add_training_args(params):
 
     train_params.add_argument('--keep-initializations',
                               action="store_true",
-                              help='In addition to keeping the last n params files, also keep params from checkpoint 0.')
+                              help='In addition to keeping the last n params files, also keep params from checkpoint '
+                                   '0.')
 
     train_params.add_argument('--cache-last-best-params',
                               required=False,
@@ -1134,6 +1138,7 @@ def add_translate_cli_args(params):
     add_inference_args(params)
     add_device_args(params)
     add_logging_args(params)
+    add_knn_mt_args(params)  # for kNN MT
 
 
 def add_score_cli_args(params):
@@ -1176,7 +1181,40 @@ def add_score_cli_args(params):
                              'peaked predictions, values > 1.0 produce smoothed distributions.')
 
     params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
-                        help="Data type. Default: %(default)s infers from saved model.")
+                        help="Data type. Default: infers from saved model.")
+
+    add_logging_args(params)
+
+
+def add_state_generation_args(params):
+    add_training_data_args(params, required=True)
+    add_vocab_args(params)
+    add_device_args(params)
+    add_batch_args(params, default_batch_size=56, default_batch_type=C.BATCH_TYPE_SENTENCE)
+
+    decode_params = params.add_argument_group("Decoder state generation parameters")
+
+    params.add_argument('--state-dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16],
+                        help="Data type of the decoder state store. Default: infers from saved model.")
+
+    params.add_argument("--model", "-m", required=True,
+                        help="Model directory containing trained model.")
+
+    params.add_argument(C.TRAINING_ARG_MAX_SEQ_LEN,
+                        type=multiple_values(num_values=2, greater_or_equal=1),
+                        default=None,
+                        help='Maximum sequence length in tokens.'
+                             'Use "x:x" to specify separate values for src&tgt. Default: Read from model.')
+
+    # common params with translate CLI
+    add_length_penalty_args(params)
+    add_brevity_penalty_args(params)
+
+    params.add_argument("--output-dir", "-o", default=None,
+                        help="The path to the directory that stores the decoder states.")
+
+    params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
+                        help="Data type. Default: infers from saved model.")
 
     add_logging_args(params)
 
@@ -1318,7 +1356,8 @@ def add_inference_args(params):
 
     decode_params.add_argument('--skip-nvs',
                                action='store_true',
-                               help='Manually turn off Neural Vocabulary Selection (NVS) to do a softmax over the full target vocabulary.',
+                               help='Manually turn off Neural Vocabulary Selection (NVS) to do a softmax over the full '
+                                    'target vocabulary.',
                                default=False)
 
     decode_params.add_argument('--nvs-thresh',
@@ -1346,7 +1385,7 @@ def add_inference_args(params):
     add_brevity_penalty_args(decode_params)
 
     decode_params.add_argument('--dtype', default=None, choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
-                               help="Data type. Default: %(default)s infers from saved model.")
+                               help="Data type. Default: infers from saved model.")
     add_clamp_to_dtype_arg(decode_params)
 
 
@@ -1375,13 +1414,15 @@ def add_brevity_penalty_args(params):
     params.add_argument('--brevity-penalty-weight',
                         default=1.0,
                         type=float_greater_or_equal(0.0),
-                        help='Scaler for the brevity penalty in beam search: weight * log(BP) + score. Default: %(default)s')
+                        help='Scaler for the brevity penalty in beam search: weight * log(BP) + score. '
+                             'Default: %(default)s')
     params.add_argument('--brevity-penalty-constant-length-ratio',
                         default=0.0,
                         type=float_greater_or_equal(0.0),
-                        help='Has effect if --brevity-penalty-type is set to \'constant\'. If positive, overrides the length '
-                             'ratio, used for brevity penalty calculation, for all inputs. If zero, uses the average of length '
-                             'ratios from the training data over all models. Default: %(default)s.')
+                        help='Has effect if --brevity-penalty-type is set to \'constant\'. If positive, overrides the '
+                             'length ratio, used for brevity penalty calculation, for all inputs. If zero, uses the '
+                             'average of length ratios from the training data over all models. Default: %(default)s.')
+
 
 def add_clamp_to_dtype_arg(params):
     params.add_argument('--clamp-to-dtype',
@@ -1426,3 +1467,46 @@ def add_build_vocab_args(params):
     params.add_argument('-o', '--output', required=True, type=str, help="Output filename to write vocabulary to.")
     add_vocab_args(params)
     add_process_pool_args(params)
+
+
+def add_knn_mt_args(params):
+    knn_params = params.add_argument_group("kNN MT parameters")
+
+    knn_params.add_argument('--knn-index',
+                            type=str,
+                            help='Optionally use a KNN index during inference to '
+                                 'retrieve similar hidden states and corresponding target tokens.',
+                            default=None)
+    knn_params.add_argument('--knn-lambda',
+                            type=float,
+                            help="Interpolation parameter when using KNN index. Default: %(default)s.",
+                            default=C.DEFAULT_KNN_LAMBDA)
+
+
+def add_build_knn_index_args(params):
+    params.add_argument('-i', '--input-dir',
+                        required=True,
+                        type=str,
+                        help='The directory that contains the stored decoder states and values '
+                             f'({C.KNN_STATE_DATA_STORE_NAME} and {C.KNN_WORD_DATA_STORE_NAME}).')
+    params.add_argument('-o', '--output-dir',
+                        default=None,
+                        type=str,
+                        help='The path to the output directory. Will reuse input directory if not specified.')
+    params.add_argument('-t', '--index-type',
+                        default=None,
+                        type=str,
+                        help='An optional field to specify the type of the index. '
+                             'Will override settings in the config. '
+                             'The type is specified with a faiss index factory signature, see here: '
+                             'https://github.com/facebookresearch/faiss/wiki/The-index-factory')
+    params.add_argument('--train-data-input-file',
+                        default=None,
+                        type=str,
+                        help='An optional field to reuse an already-built training data sample for the index. '
+                             'Otherwise, a (slow) sampling step might need to be run.')
+    params.add_argument('--train-data-size',
+                        default=None,
+                        type=int,
+                        help='An optional field to specify the size of the training sample. '
+                             'Will override settings in the config.')

@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import cast, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch as pt
 
 from sockeye import __version__
@@ -34,6 +35,14 @@ from .config import Config
 from .encoder import FactorConfig
 from .layers import LengthRatioConfig
 from . import nvs
+from sockeye.knn import KNNConfig
+
+try:
+    import faiss  # pylint: disable=E0401
+    # The following import will allow us to pass pytorch arrays directly to faiss
+    import faiss.contrib.torch_utils  # pylint: disable=E0401
+except:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +187,8 @@ class SockeyeModel(pt.nn.Module):
             for name, dtype in mismatched_dtype_params:
                 logger.warn(f'{name}: {dtype} -> {self.dtype}')
 
+        self.knn : Optional[layers.KNN] = None
+
 
     def cast(self, dtype: Union[pt.dtype, str]):
         dtype = utils.get_torch_dtype(dtype)
@@ -278,7 +289,8 @@ class SockeyeModel(pt.nn.Module):
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List[pt.Tensor],
-                    vocab_slice_ids: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, List[pt.Tensor], List[pt.Tensor]]:
+                    vocab_slice_ids: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor,pt.Tensor, List[pt.Tensor],
+                                                                          List[pt.Tensor]]:
         """
         One step decoding of the translation model.
 
@@ -288,7 +300,7 @@ class SockeyeModel(pt.nn.Module):
         :param vocab_slice_ids: Optional list of vocabulary ids to use
                                 for reduced matrix multiplication at the output layer.
 
-        :return: logits, list of new model states, other target factor logits.
+        :return: logits, KNN output if present otherwise None, list of new model states, other target factor logits.
         """
         decode_step_inputs = [step_input, states]
         if vocab_slice_ids is not None:
@@ -298,13 +310,19 @@ class SockeyeModel(pt.nn.Module):
             decode_step_module = _DecodeStep(self.embedding_target,
                                                 self.decoder,
                                                 self.output_layer,
-                                                self.factor_output_layers)
+                                                self.factor_output_layers,
+                                                self.knn)
             self.traced_decode_step = pt.jit.trace(decode_step_module, decode_step_inputs)
         # the traced module returns a flat list of tensors
         decode_step_outputs = self.traced_decode_step(*decode_step_inputs)
-        step_output, *target_factor_outputs = decode_step_outputs[:self.num_target_factors]
-        new_states = decode_step_outputs[self.num_target_factors:]
-        return step_output, new_states, target_factor_outputs
+        # +1 for the decoder output, which will be used to generate kNN output
+        step_output, decoder_out, *target_factor_outputs = decode_step_outputs[:self.num_target_factors + 1]
+
+        # do the query here because it cannot be traced (jit.ignore does not play well with tracing)
+        knn_output = self.knn(decoder_out) if self.knn is not None else None
+
+        new_states = decode_step_outputs[self.num_target_factors + 1:]
+        return step_output, knn_output, new_states, target_factor_outputs
 
     def forward(self, source, source_length, target, target_length):  # pylint: disable=arguments-differ
         # When updating only the decoder (specified directly or implied by
@@ -333,6 +351,17 @@ class SockeyeModel(pt.nn.Module):
             forward_output[C.NVS_PRED_NAME] = nvs_prediction
 
         return forward_output
+
+    def get_decoder_states(self, source, source_length, target, target_length):
+        """Same as `forward`, but skip the output layer and return the decoder states."""
+        with pt.no_grad() if self.train_decoder_only or self.forward_pass_cache_size > 0 else utils.no_context():
+            source_encoded, source_encoded_length, target_embed, states, nvs_prediction = self.embed_and_encode(
+                source,
+                source_length,
+                target)
+
+        decoder_states = self.decoder.decode_seq(target_embed, states=states)
+        return decoder_states
 
     def predict_output_length(self,
                               source_encoded: pt.Tensor,
@@ -462,6 +491,29 @@ class SockeyeModel(pt.nn.Module):
                     (name, model_params[name].size(), new_params[name].size())
                 model_params[name].data[:] = new_params[name].data
 
+    def load_knn_index(self, knn_index_folder: str) -> None:
+        """
+        Load kNN index from a directory.
+
+        :param knn_index_folder: same as `output_dir` from the `sockeye-knn` command,
+                                 containing the index and a config file.
+        """
+        utils.check_import_faiss()
+        knn_config = KNNConfig.load(os.path.join(knn_index_folder, C.KNN_CONFIG_NAME))
+        knn_config = cast(KNNConfig, knn_config)  # load returns a Config class, need to cast to subclass KNNConfig
+        keys_index = faiss.read_index(os.path.join(knn_index_folder, C.KNN_INDEX_NAME))
+        vals = np.memmap(os.path.join(knn_index_folder, C.KNN_WORD_DATA_STORE_NAME),
+                         dtype=utils.get_numpy_dtype(knn_config.word_data_type),
+                         mode='r',
+                         shape=(knn_config.index_size, 1))  # type: np.memmap
+        state_store = None  # type: Optional[np.memmap]
+        if os.path.isfile(os.path.join(knn_index_folder, C.KNN_STATE_DATA_STORE_NAME)):
+            state_store = np.memmap(os.path.join(knn_index_folder, C.KNN_STATE_DATA_STORE_NAME),
+                                   dtype=utils.get_numpy_dtype(knn_config.state_data_type),
+                                   mode='r',
+                                   shape=(knn_config.index_size, knn_config.dimension))
+        self.knn = layers.KNN(keys_index, vals, vocab_size=self.config.vocab_target_size, state_store=state_store)
+
     @staticmethod
     def save_version(folder: str):
         """
@@ -573,13 +625,15 @@ class _DecodeStep(pt.nn.Module):
                  embedding_target: encoder.Embedding,
                  decoder: decoder.Decoder,
                  output_layer: layers.OutputLayer,
-                 factor_output_layers: pt.nn.ModuleList):
+                 factor_output_layers: pt.nn.ModuleList,
+                 knn : Optional[layers.KNN] = None):
         super().__init__()
         self.embedding_target = embedding_target
         self.decoder = decoder
         self.output_layer = pt.jit.script(output_layer)
         self.factor_output_layers = factor_output_layers
         self.has_target_factors = bool(factor_output_layers)
+        self.knn = knn
 
     def forward(self,
                 step_input,
@@ -594,7 +648,7 @@ class _DecodeStep(pt.nn.Module):
 
         # return values are collected in a flat list due to constraints in mixed return types in traced modules
         # (can only by tensors, or lists of tensors or dicts of tensors, but no mix of them).
-        outputs = [step_output]
+        outputs = [step_output, decoder_out]
         if self.has_target_factors:
             outputs += [fol(decoder_out) for fol in self.factor_output_layers]
         outputs += new_states
@@ -649,7 +703,8 @@ def load_model(model_folder: str,
                train_decoder_only: bool = False,
                allow_missing: bool = False,
                set_grad_req_null: bool = True,
-               forward_pass_cache_size: int = 0) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
+               forward_pass_cache_size: int = 0,
+               knn_index: Optional[str] = None) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Load a model from model_folder.
 
@@ -664,6 +719,7 @@ def load_model(model_folder: str,
     :param allow_missing: Allow missing parameters in the loaded model.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
+    :param knn_index: Optional path to a folder containing a KNN model index.
     :return: List of models, source vocabularies, target vocabularies.
     """
     source_vocabs = vocab.load_source_vocabs(model_folder)
@@ -689,6 +745,9 @@ def load_model(model_folder: str,
                           device=device,
                           allow_missing=allow_missing,
                           ignore_extra=False)
+
+    if knn_index is not None:
+        model.load_knn_index(knn_index)
 
     model.to(device)
 
@@ -721,8 +780,10 @@ def load_models(device: pt.device,
                 train_decoder_only: bool = False,
                 allow_missing: bool = False,
                 set_grad_req_null: bool = True,
-                forward_pass_cache_size: int = 0) -> Tuple[List[SockeyeModel],
-                                                           List[vocab.Vocab], List[vocab.Vocab]]:
+                forward_pass_cache_size: int = 0,
+                knn_index: Optional[str] = None) -> Tuple[List[SockeyeModel],
+                                                          List[vocab.Vocab],
+                                                          List[vocab.Vocab]]:
     """
     Loads a list of models for inference.
 
@@ -737,6 +798,7 @@ def load_models(device: pt.device,
     :param allow_missing: Allow missing parameters in the loaded models.
     :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
+    :param knn_index: Optional path to a folder containing a KNN model index.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
     """
     logger.info("Loading %d model(s) from %s ...", len(model_folders), model_folders)
@@ -760,7 +822,8 @@ def load_models(device: pt.device,
                                                train_decoder_only=train_decoder_only,
                                                allow_missing=allow_missing,
                                                set_grad_req_null=set_grad_req_null,
-                                               forward_pass_cache_size=forward_pass_cache_size)
+                                               forward_pass_cache_size=forward_pass_cache_size,
+                                               knn_index=knn_index)
         models.append(model)
         source_vocabs.append(src_vcbs)
         target_vocabs.append(trg_vcbs)

@@ -678,7 +678,8 @@ def prepare_data(source_fnames: List[str],
                                     Optional[str],
                                     Optional[str]]] = None):
     """
-    :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard data factor file paths.
+    :param shards: List of num_shards shards of parallel source and target tuples which in turn contain tuples to shard
+                   data factor file paths.
     """
     logger.info("Preparing data.")
     # write vocabularies to data folder

@@ -11,11 +11,22 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+from math import pow, sqrt
+import numpy as np
 import pytest
 import torch as pt
 
+import sockeye.constants as C
 import sockeye.layers
 import sockeye.transformer
+from sockeye.knn import KNNConfig, FaissIndexBuilder
+
+# Only run certain tests in this file if faiss is installed
+try:
+    import faiss  # pylint: disable=E0401
+    faiss_installed = True
+except:
+    faiss_installed = False
 
 
 def test_lhuc():
@@ -166,3 +177,67 @@ def test_interleaved_multihead_self_attention(seq_len, batch_size, hidden, heads
         r_test, _ = mha(inputs, previous_states=None,
                         mask=mask)  # Note: can also handle the mask repated on the qlen axis
         assert pt.allclose(r_train, r_test, atol=1e-06)
+
+
+@pytest.mark.skipif(not faiss_installed, reason='Faiss is not installed')
+def test_knn_layer():
+    num_data_points = 16
+    num_dimensions = 16
+    assert num_dimensions > 4  # there are at least 4 items in a vocabulary
+
+    config = KNNConfig(num_data_points, num_dimensions, 'float32', 'int32', "Flat", -1)
+    builder = FaissIndexBuilder(config)
+    index = builder.init_faiss_index()
+
+    # build data
+    states = np.outer(np.arange(num_data_points, dtype=np.float32), np.ones(num_dimensions, dtype=np.float32))
+    words = np.arange(num_data_points + 1, dtype=np.int32) - 1  # need to prepend a <s> at the beginning
+    words[0] = 0
+    words = np.expand_dims(words, axis=1)
+    builder.add_items(index, states)
+
+    # in case BOS and/or EOS ID are changed, the test should be revisited to make sure no overflow/underflow occurs
+    assert C.BOS_ID + 2 < num_data_points - 1
+    assert C.EOS_ID < C.BOS_ID + 2 or C.EOS_ID > num_data_points
+
+    def build_gld_probs(offset):
+        gld_dists = pt.sqrt(pt.FloatTensor([pow(1 + offset, 2) * num_dimensions,
+                                            pow(offset, 2) * num_dimensions,
+                                            pow(1 - offset, 2) * num_dimensions]))
+        gld_logits = pt.exp(-gld_dists)
+        gld_probs = gld_logits.div_(pt.sum(gld_logits))
+        return gld_probs
+
+    def query_test(knn_layer, offset):
+        for i in range(C.BOS_ID + 2, num_data_points - 1):
+            query = np.expand_dims(states[i], axis=0) + offset
+            query = pt.from_numpy(query)
+            probs = knn_layer(query)
+
+            logits_idxs = pt.LongTensor(list(range(i-1, i+2)))
+            gld_probs = pt.zeros(1, num_dimensions)
+            gld_probs[0, logits_idxs] = build_gld_probs(offset)
+            assert pt.allclose(probs, gld_probs)
+
+    # test when inexact distances are used
+    knn_layer = sockeye.layers.KNN(index, words, 16, 3, 1)
+    query_test(knn_layer, 0.1)
+
+    # test when exact distances are used
+    knn_layer = sockeye.layers.KNN(index, words, 16, 3, 1, states)
+    query_test(knn_layer, 0.1)
+
+    # test BOS case & scatter_add
+    assert C.BOS_ID == 2
+    assert C.EOS_ID == 3
+    offset = 0.1
+    query = np.expand_dims(states[C.BOS_ID], axis=0) + offset
+    query = pt.from_numpy(query)
+    probs = knn_layer(query)
+    gld_probs_unscattered = build_gld_probs(offset)
+    gld_probs = pt.zeros(1, num_dimensions)
+    gld_probs[0, 1] = gld_probs_unscattered[0]
+    gld_probs[0, 3] = gld_probs_unscattered[1] + gld_probs_unscattered[2]
+    gld_probs = gld_probs.div_(pt.sum(gld_probs))
+
+    assert pt.allclose(probs, gld_probs)

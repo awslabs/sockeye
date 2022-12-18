@@ -65,10 +65,12 @@ class _SingleModelInference(_Inference):
     def __init__(self,
                  model: SockeyeModel,
                  skip_softmax: bool = False,
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
+        self.knn_lambda = knn_lambda
 
     def state_structure(self) -> List:
         return [self._model.state_structure()]
@@ -83,10 +85,17 @@ class _SingleModelInference(_Inference):
                     vocab_slice_ids: Optional[pt.Tensor] = None,
                     target_prefix_factor_mask: Optional[pt.Tensor] = None,
                     factor_vocab_size: Optional[int] = None):
-        logits, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
+        logits, knn_probs, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
-            logits = pt.log_softmax(logits, dim=-1)
-        scores = -logits  # shape: (batch*beam, output_vocab_size/len(vocab_slice_ids))
+            if knn_probs is None:  # no knn used
+                probs = pt.log_softmax(logits, dim=-1)
+            else:
+                probs = pt.log(self.knn_lambda * pt.softmax(logits, dim=-1) + (1 - self.knn_lambda) * knn_probs)
+        else:
+            assert knn_probs is None, "Can't skip softmax with KNN."
+            probs = logits
+
+        scores = -probs  # shape: (batch*beam, output_vocab_size/len(vocab_slice_ids))
 
         target_factors = None  # type: Optional[pt.Tensor]
         if target_factor_outputs:
@@ -120,7 +129,8 @@ class _EnsembleInference(_Inference):
     def __init__(self,
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
-                 constant_length_ratio: float = 0.0) -> None:
+                 constant_length_ratio: float = 0.0,
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -129,6 +139,7 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
+        self.knn_lambda = knn_lambda
 
     def state_structure(self) -> List:
         return [model.state_structure() for model in self._models]
@@ -163,8 +174,11 @@ class _EnsembleInference(_Inference):
         for model, model_state_structure in zip(self._models, self.state_structure()):
             model_states = states[state_index:state_index+len(model_state_structure)]
             state_index += len(model_state_structure)
-            logits, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
-            probs = logits.softmax(dim=-1)
+            logits, knn_probs, model_states, target_factor_outputs = model.decode_step(step_input, model_states, vocab_slice_ids)
+            if knn_probs is None:
+                probs = logits.softmax(dim=-1)
+            else:
+                probs = self.knn_lambda * pt.softmax(logits, dim=-1) + (1 - self.knn_lambda) * knn_probs
             outputs.append(probs)
             if target_factor_outputs:
                 target_factor_probs = [tfo.softmax(dim=-1) for tfo in target_factor_outputs]
@@ -664,7 +678,6 @@ class GreedySearch(Search):
         self.output_vocab_size = inference.model_output_vocab_size
         self.output_factor_vocab_size = inference.model_output_factor_vocab_size
         self._inference = inference
-        self.global_avoid_trie = None
         assert inference._skip_softmax, "skipping softmax must be enabled for GreedySearch"
         self.work_block = GreedyTop1()
 
@@ -1086,6 +1099,7 @@ def get_search_algorithm(models: List[SockeyeModel],
                          ensemble_mode: str = 'linear',
                          beam_search_stop: str = C.BEAM_SEARCH_STOP_ALL,
                          constant_length_ratio: float = 0.0,
+                         knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
                          sample: Optional[int] = None,
                          prevent_unk: bool = False,
                          greedy: bool = False,
@@ -1114,7 +1128,8 @@ def get_search_algorithm(models: List[SockeyeModel],
             num_target_factors=models[0].num_target_factors,
             inference=_SingleModelInference(model=models[0],
                                             skip_softmax=True,
-                                            constant_length_ratio=0.0),
+                                            constant_length_ratio=0.0,
+                                            knn_lambda=knn_lambda),
             skip_nvs=skip_nvs,
             nvs_thresh=nvs_thresh)
     else:
@@ -1125,7 +1140,8 @@ def get_search_algorithm(models: List[SockeyeModel],
                 logger.info("Enabled skipping softmax for a single model and greedy decoding.")
             inference = _SingleModelInference(model=models[0],
                                               skip_softmax=skip_softmax,
-                                              constant_length_ratio=constant_length_ratio)
+                                              constant_length_ratio=constant_length_ratio,
+                                              knn_lambda=knn_lambda)
         else:
             inference = _EnsembleInference(models=models,
                                            ensemble_mode=ensemble_mode,

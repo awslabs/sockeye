@@ -208,7 +208,8 @@ class TransformerEncoder(Encoder):
 
         _, max_len, __ = data.size()
         # length_mask for source attention masking. Shape: (batch_size, max_len)
-        single_head_att_mask = layers.prepare_source_length_mask(valid_length, self.config.attention_heads, max_length=max_len, expand=False)
+        single_head_att_mask = layers.prepare_source_length_mask(valid_length, self.config.attention_heads,
+                                                                 max_length=max_len, expand=False)
         # Shape: (batch_size, max_len) -> (batch_size * heads, 1, max_len)
         att_mask = single_head_att_mask.unsqueeze(1).expand(-1, self.config.attention_heads, -1).reshape((-1, max_len)).unsqueeze(1)
         att_mask = att_mask.expand(-1, max_len, -1)

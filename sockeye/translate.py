@@ -22,9 +22,6 @@ import time
 from contextlib import ExitStack
 from typing import Dict, Generator, List, Optional, Union
 
-import torch as pt
-
-from .device import init_device
 from sockeye.lexicon import load_restrict_lexicon, RestrictLexicon
 from sockeye.log import setup_main_logger
 from sockeye.model import load_models
@@ -33,6 +30,7 @@ from sockeye.utils import log_basic_info, check_condition, grouper, smart_open, 
 from . import arguments
 from . import constants as C
 from . import inference
+from . import utils
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +65,16 @@ def run_translate(args: argparse.Namespace):
     output_handler = get_output_handler(args.output_type,
                                         args.output)
 
-    device = init_device(args, logger)
+    device = utils.init_device(args)
     logger.info(f"Translate Device: {device}")
+
     models, source_vocabs, target_vocabs = load_models(device=device,
                                                        model_folders=args.models,
                                                        checkpoints=args.checkpoints,
                                                        dtype=args.dtype,
                                                        clamp_to_dtype=args.clamp_to_dtype,
-                                                       inference_only=True)
+                                                       inference_only=True,
+                                                       knn_index=args.knn_index)
 
     restrict_lexicon = None  # type: Optional[Union[RestrictLexicon, Dict[str, RestrictLexicon]]]
     if args.restrict_lexicon is not None:
@@ -134,6 +134,7 @@ def run_translate(args: argparse.Namespace):
                                       sample=args.sample,
                                       output_scores=output_handler.reports_score(),
                                       constant_length_ratio=constant_length_ratio,
+                                      knn_lambda=args.knn_lambda,
                                       max_output_length_num_stds=args.max_output_length_num_stds,
                                       max_input_length=args.max_input_length,
                                       max_output_length=args.max_output_length,

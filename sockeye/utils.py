@@ -14,6 +14,7 @@
 """
 A set of utility methods.
 """
+import argparse
 import binascii
 import gzip
 import itertools
@@ -324,7 +325,8 @@ def shift_prefix_factors(prefix_factors: pt.Tensor) -> pt.Tensor:
     :return new prefix_factors_shift (batch size, length + 1, num of factors)
     """
     prefix_factors_sizes = prefix_factors.size()
-    prefix_factors_shift = pt.zeros(prefix_factors_sizes[0], prefix_factors_sizes[1] + 1, prefix_factors_sizes[2], dtype=prefix_factors.dtype, device=prefix_factors.device)
+    prefix_factors_shift = pt.zeros(prefix_factors_sizes[0], prefix_factors_sizes[1] + 1, prefix_factors_sizes[2],
+                                    dtype=prefix_factors.dtype, device=prefix_factors.device)
     prefix_factors_shift[:, 1:] = prefix_factors
     return prefix_factors_shift
 
@@ -540,6 +542,23 @@ def get_torch_dtype(dtype: Union[pt.dtype, str]) -> pt.dtype:
     raise ValueError(f'Cannot convert to Torch dtype: {dtype}')
 
 
+_STRING_TO_NUMPY_DTYPE = {
+    C.DTYPE_FP16: np.float16,
+    C.DTYPE_FP32: np.float32,
+    C.DTYPE_INT8: np.int8,
+    C.DTYPE_INT16: np.int16,
+    C.DTYPE_INT32: np.int32,
+}
+
+
+def get_numpy_dtype(dtype: Union[np.dtype, str]):
+    if isinstance(dtype, np.dtype):
+        return dtype
+    if dtype in _STRING_TO_NUMPY_DTYPE:
+        return _STRING_TO_NUMPY_DTYPE[dtype]
+    raise ValueError(f'Cannot convert to NumPy dtype: {dtype}')
+
+
 def log_parameters(model: pt.nn.Module):
     """
     Logs information about model parameters.
@@ -700,6 +719,23 @@ def using_deepspeed() -> bool:
     return _using_deepspeed
 
 
+# Track whether Faiss has been confirmed importable
+_faiss_checked = False
+
+def check_import_faiss():
+    """
+    Make sure the faiss module can be imported.
+    """
+    global _faiss_checked
+    if not _faiss_checked:
+        try:
+            import faiss  # pylint: disable=E0401
+            _faiss_checked = True
+        except:
+            raise RuntimeError('To run kNN-MT models, please install faiss by following '
+                               'https://github.com/facebookresearch/faiss/blob/main/INSTALL.md')
+
+
 def count_seq_len(sample: str, count_type: str = 'char', replace_tokens: Optional[List] = None) -> int:
     """
     Count sequence length, after replacing (optional) token/s.
@@ -751,3 +787,33 @@ def compute_isometric_score(hypothesis: str, hypothesis_score: float, source: st
         isometric_score = pred_sub_score + synchrony_sub_score
 
         return isometric_score
+
+
+def init_device(args: argparse.Namespace) -> pt.device:
+    """
+    Select Torch device based on CLI args:
+    - When CUDA is not available, the device defaults to CPU.
+    - When using CUDA, tf32 is enabled if specified.
+    - When running distributed training, the CUDA device is determined by local
+      rank instead of CLI args.
+
+    :param args: Parsed CLI args including device parameters.
+
+    :return: Torch device.
+    """
+
+    use_cpu = args.use_cpu
+    if not use_cpu and not pt.cuda.is_available():
+        logger.info('CUDA not available, defaulting to CPU device')
+        use_cpu = True
+    if use_cpu:
+        return pt.device('cpu')
+
+    device = pt.device('cuda', get_local_rank() if is_distributed() else args.device_id)
+    # Ensure that GPU operations use the correct device by default
+    pt.cuda.set_device(device)
+    if args.tf32:
+        pt.backends.cuda.matmul.allow_tf32 = True
+        logger.info('CUDA: allow tf32 (float32 but with 10 bits precision)')
+
+    return device

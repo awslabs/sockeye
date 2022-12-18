@@ -110,7 +110,6 @@ def get_max_input_output_length(supported_max_seq_len_source: int,
     return max_input_len, get_max_output_length
 
 
-BeamHistory = Dict[str, List]
 Tokens = List[str]
 TokenIds = List[List[int]]  # each token id may contain multiple factors
 SentenceId = Union[int, str]
@@ -763,6 +762,7 @@ class Translator:
                  sample: Optional[int] = None,
                  output_scores: bool = False,
                  constant_length_ratio: float = 0.0,
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
                  max_output_length_num_stds: int = C.DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH,
                  max_input_length: Optional[int] = None,
                  max_output_length: Optional[int] = None,
@@ -812,6 +812,7 @@ class Translator:
             beam_search_stop=beam_search_stop,
             scorer=self._scorer,
             constant_length_ratio=constant_length_ratio,
+            knn_lambda=knn_lambda,
             prevent_unk=prevent_unk,
             greedy=greedy,
             skip_nvs=skip_nvs,
