@@ -144,8 +144,11 @@ class Scorer:
             logger.debug("Tracing batch_scorer")
             self.traced_batch_scorer = pt.jit.trace(self.batch_scorer, scorer_inputs, strict=False)
         scores = self.traced_batch_scorer(*scorer_inputs)  # (batch, num_target_factors)
-
-        return scores.cpu().numpy()
+        scores_cpu = scores.cpu()
+        if self.model.dtype == pt.bfloat16:
+            # NumPy does not currently support bfloat16. Use float32 instead.
+            scores_cpu = scores_cpu.to(dtype=pt.float32)
+        return scores_cpu.numpy()
 
     @pt.inference_mode(True)
     def score(self, score_iter: data_io.BaseParallelSampleIter, output_handler: OutputHandler):
