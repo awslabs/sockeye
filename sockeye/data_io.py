@@ -2103,8 +2103,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "wb") as fp:
             pickle.dump(self.batch_indices, fp)
             pickle.dump(self.curr_batch_index, fp)
-            np.save(fp, [a.numpy() for a in self.inverse_data_permutations], allow_pickle=True)
-            np.save(fp, [a.numpy() for a in self.data_permutations], allow_pickle=True)
+            pickle.dump(self.inverse_data_permutations, fp)
+            pickle.dump(self.data_permutations, fp)
 
     def load_state(self, fname: str):
         """
@@ -2119,10 +2119,8 @@ class ParallelSampleIter(BaseParallelSampleIter):
         with open(fname, "rb") as fp:
             self.batch_indices = pickle.load(fp)
             self.curr_batch_index = pickle.load(fp)
-            inverse_data_permutations = [torch.from_numpy(a).long() for a in
-                                         np.load(fp, allow_pickle=True)]  # pylint: disable=unexpected-keyword-arg
-            data_permutations = [torch.from_numpy(a).long() for a in
-                                 np.load(fp, allow_pickle=True)]  # pylint: disable=unexpected-keyword-arg
+            inverse_data_permutations = pickle.load(fp)
+            data_permutations = pickle.load(fp)
 
         # Right after loading the iterator state, next() should be called
         self.curr_batch_index -= 1

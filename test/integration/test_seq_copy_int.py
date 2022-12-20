@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 import logging
 import os
+import platform
 import sys
 from tempfile import TemporaryDirectory
 from typing import List
@@ -143,7 +144,8 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --clamp-to-dtype",
      "--beam-size 2 --clamp-to-dtype",
      False, 0, 0, 0.),
-    # Basic transformer, training only the decoder
+    # Basic transformer, training only the decoder with bfloat16 inference when
+    # running on Linux
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
@@ -152,7 +154,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --fixed-param-strategy " + C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
-     "--beam-size 2",
+     "--beam-size 2" + (" --dtype bfloat16" if platform.system() == "Linux" else ""),
      False, 0, 0, 0.),
 ]
 

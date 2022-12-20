@@ -139,8 +139,8 @@ def check_arg_compatibility(args: argparse.Namespace):
     check_condition(not (args.amp and args.apex_amp), 'Use either --amp (safer) or --apex-amp (faster).')
 
     if args.dtype != C.DTYPE_FP32:
-        logger.warning('Specifying a non-float32 dtype to sockeye.train has no effect. Use --amp or --apex-amp for '
-                       'mixed precision training.')
+        logger.warning('Specifying a non-float32 dtype to sockeye.train has no effect. For 16-bit or mixed precision '
+                       'training, use one of the following: --amp --apex-amp --deepspeed-fp16 --deepspeed-bf16')
 
     if args.local_rank is not None:
         check_condition(not args.amp and not args.apex_amp, 'DeepSpeed mode does not support --amp or --apex-amp. '

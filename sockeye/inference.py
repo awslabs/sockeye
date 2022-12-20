@@ -1197,7 +1197,11 @@ class Translator:
         """
         best_hyp_indices = result.best_hyp_indices.cpu().numpy()
         best_word_indices = result.best_word_indices.cpu().numpy()
-        accumulated_scores = result.accumulated_scores.cpu().numpy()
+        result_accumulated_scores_cpu = result.accumulated_scores.cpu()
+        if self.dtype == pt.bfloat16:
+            # NumPy does not currently support bfloat16. Use float32 instead.
+            result_accumulated_scores_cpu = result_accumulated_scores_cpu.to(dtype=pt.float32)
+        accumulated_scores = result_accumulated_scores_cpu.numpy()
         lengths = result.lengths.cpu().numpy()
         estimated_reference_lengths = None
         if result.estimated_reference_lengths is not None:

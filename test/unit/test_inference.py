@@ -35,7 +35,8 @@ _EOS = -1
 def mock_translator(batch_size: int = 1,
                     beam_size: int = 5,
                     nbest_size: int = 1,
-                    num_source_factors: int = 1):
+                    num_source_factors: int = 1,
+                    dtype: pt.dtype = pt.float32):
     """
     Creates a fake translator object but with real values for things that we need.
     This lets us avoid a messy call to the constructor.
@@ -58,12 +59,14 @@ def mock_translator(batch_size: int = 1,
         def mock_model():
             t_mock = Mock(sockeye.model.SockeyeModel)
             t_mock.num_source_factors = num_source_factors
+            t_mock.dtype = dtype
             return t_mock
 
         translator.batch_size = batch_size
         translator.beam_size = beam_size
         translator.nbest_size = nbest_size
         translator.models = [mock_model()]
+        translator.dtype = translator.models[0].dtype
         translator.zeros_array = pt.zeros(beam_size, dtype=pt.int)
         translator.inf_array = pt.full((batch_size * beam_size,), fill_value=np.inf, dtype=pt.float32)
         translator.inf_array = translator.inf_array[:beam_size]
