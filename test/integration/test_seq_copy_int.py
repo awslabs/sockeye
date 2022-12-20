@@ -143,7 +143,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --fixed-param-strategy " + C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
-     "--beam-size 2" + " --dtype bfloat16" if platform.system() == "Linux" else "",
+     "--beam-size 2" + (" --dtype bfloat16" if platform.system() == "Linux" else ""),
      False, 0, 0),
 ]
 
