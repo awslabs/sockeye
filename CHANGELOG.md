@@ -11,6 +11,16 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.30]
+
+### Added
+
+- Added support for `--dtype bfloat16` to `sockeye-translate`, `sockeye-score`, and `sockeye-quantize`.
+
+### Fixed
+
+- Fixed compatibility issue with `numpy==1.24.0` by using `pickle` instead of `numpy` to save/load `ParallelSampleIter` data permutations.
+
 ## [3.1.29]
 
 ### Changed
