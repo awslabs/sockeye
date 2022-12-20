@@ -1216,7 +1216,7 @@ def add_state_generation_args(params):
 
     params.add_argument('--dtype',
                         default=None,
-                        choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_BF16, C.DTYPE_INT8],
+                        choices=[None, C.DTYPE_FP32, C.DTYPE_FP16, C.DTYPE_INT8],
                         help="Data type. Default: infers from saved model.")
 
     add_logging_args(params)
