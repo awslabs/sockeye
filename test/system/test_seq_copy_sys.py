@@ -195,7 +195,7 @@ SORT_CASES = [
      0.97,
      True),
     ("Sort:transformer:batch_word:bfloat16",
-     "--encoder transformer --decoder ssru_transformer"
+     "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
      " --max-updates 6000"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
