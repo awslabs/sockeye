@@ -11,7 +11,7 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [3.1.31]
+## [3.1.32]
 
 ### Added
 
@@ -31,6 +31,13 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 ### Fixed
 
 - For distributed training, replicating examples so that each worker has at least one per bucket now correctly uses `repeat` instead of `repeat_interleave`.
+
+## [3.1.31]
+
+### Fixed
+
+- Fixed sequence copying integration tests to correctly specify that scoring/translation outputs should not be checked.
+- Enabled `bfloat16` integration and system testing on all platforms.
 
 ## [3.1.30]
 

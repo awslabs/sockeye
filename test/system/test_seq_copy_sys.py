@@ -166,7 +166,8 @@ SORT_CASES = [
      "--beam-size 1 --prevent-unk",
      True, 0, 0, 0.,
      1.03,
-     0.97),
+     0.97,
+     True),
     ("Sort:transformer:transformer:batch_word:instance_and_label_weights",
      "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
@@ -180,7 +181,8 @@ SORT_CASES = [
      # successfully down-weighting the noise. Without down-weighting, perplexity
      # is 1.65+.
      1.10,
-     0.97),
+     0.97,
+     True),
     ("Sort:transformer:transformer:source_factors:target_factors:batch_max_word",
      "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 70 --update-interval 2 --batch-type max-word --batch-sentences-multiple-of 1"
@@ -193,7 +195,8 @@ SORT_CASES = [
      "--beam-size 1",
      True, 3, 1, 0.,
      1.03,
-     0.96),
+     0.96,
+     True),
     ("Sort:transformer:ssru_transformer:batch_word",
      "--encoder transformer --decoder ssru_transformer"
      " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
@@ -204,14 +207,27 @@ SORT_CASES = [
      "--beam-size 1",
      True, 0, 0, 0.,
      1.03,
-     0.97)
+     0.97,
+     True),
+    ("Sort:transformer:batch_word:bfloat16",
+     "--encoder transformer --decoder transformer"
+     " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
+     " --max-updates 6000"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
+     " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
+     " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1 --dtype bfloat16",
+     True, 0, 0, 0.,
+     1.03,
+     0.97,
+     False)
 ]
 
 
-@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, n_source_factors, "
-                         "n_target_factors, p_noise_with_weights, perplexity_thresh, bleu_thresh", SORT_CASES)
-def test_seq_sort(name, train_params, translate_params, use_prepared_data,
-                  n_source_factors, n_target_factors, p_noise_with_weights, perplexity_thresh, bleu_thresh):
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors, "
+                         "p_noise_with_weights, perplexity_thresh, bleu_thresh, compare_output", SORT_CASES)
+def test_seq_sort(name, train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors,
+                  p_noise_with_weights, perplexity_thresh, bleu_thresh, compare_output):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.",
                             _TRAIN_LINE_COUNT, _TRAIN_LINE_COUNT_EMPTY, _LINE_MAX_LENGTH,
@@ -226,7 +242,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                      data=data,
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH,
-                                     compare_output=True,
+                                     compare_output=compare_output,
                                      seed=seed)
 
         # get best validation perplexity
