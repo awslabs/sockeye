@@ -489,7 +489,7 @@ class SampleK(pt.nn.Module):
         # (batch, 1)
         values = scores.gather(dim=1, index=best_word_indices.long().unsqueeze(1))
         # (batch,)
-        best_hyp_indices = pt.arange(0, best_word_indices.size()[0])
+        best_hyp_indices = pt.arange(0, best_word_indices.size()[0], device=best_word_indices.device)
 
         return best_hyp_indices, best_word_indices, values
 
