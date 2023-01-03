@@ -53,13 +53,13 @@ def check_train_translate(train_params: str,
     # may differ.
     if 'greedy' not in translate_params and 'neural-vocab-selection' not in train_params:
         translate_params_batch = translate_params + " --batch-size 2"
-        test_translate_equivalence(data, translate_params_batch, compare_output=True)
+        test_translate_equivalence(data, translate_params_batch, compare_output=compare_output)
 
     # Run translate with restrict-lexicon
     if 'neural-vocab-selection ' not in train_params:
         data = run_translate_restrict(data, translate_params)
 
-    test_translate_equivalence(data, translate_params, compare_output=True)
+    test_translate_equivalence(data, translate_params, compare_output=compare_output)
 
     # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
     # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
