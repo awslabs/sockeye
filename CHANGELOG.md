@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.31]
+
+### Fixed
+
+- Fixed sequence copying integration tests to correctly specify that scoring/translation outputs should not be checked.
+- The above fix enables `bfloat32` testing on all platforms.
+
 ## [3.1.30]
 
 ### Added
