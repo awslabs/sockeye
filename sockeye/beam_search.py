@@ -66,10 +66,15 @@ class _SingleModelInference(_Inference):
                  model: SockeyeModel,
                  skip_softmax: bool = False,
                  constant_length_ratio: float = 0.0,
+                 force_factors_stepwise: bool = False,
                  knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
+        self._force_factors_stepwise = force_factors_stepwise
+        if self._force_factors_stepwise:
+            logger.warning("Forcing factors stepwise has some hardcoded vocab items that need to match."
+                           "Make sure you check PAUSE_ID, EOW_ID, FACTOR_ZERO in constants.py")
         self.knn_lambda = knn_lambda
 
     def state_structure(self) -> List:
@@ -79,12 +84,49 @@ class _SingleModelInference(_Inference):
         states, predicted_output_length, nvs_prediction = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
         return states, predicted_output_length, nvs_prediction
 
+    def _compute_next_factors(self, prev_step: pt.Tensor, target_factors: pt.Tensor, target_segment_durations: List[List[int]]) -> pt.Tensor:
+        """
+        :param prev_step: Previous step outputs. Shape: (beam*batch, num_factors+1)
+        :param target_factors: target_factors from current decode step. Shape: (beam*batch, num_factors, 2).
+            Currently assumes factors are: durations, total duration remaining, segment duration remaining, pauses remaining.
+
+        :return: target_factors with the other factors correctly calculated from the current duration and previous output.
+        """
+        corrected_target_factors = target_factors.clone()
+
+        # Factor 1: Enforce 0 duration for pause and eow (remember factors are one step behind output tokens)
+        corrected_target_factors[prev_step[:, 0].eq(C.EOW_ID), 0, 1] = C.FACTOR_ZERO
+        corrected_target_factors[prev_step[:, 0].eq(C.PAUSE_ID), 0, 1] = C.FACTOR_ZERO
+        # Factor 1: Make duration 0 if it predicts a non-numeric token (like <s>; it happens sometimes)
+        corrected_target_factors[target_factors[:, 0, 1].lt(C.FACTOR_ZERO), 0, 1] = C.FACTOR_ZERO
+
+        # Factor 2: Correct total duration remaining = previous total - current duration, but floor at zero
+        corrected_target_factors[:, 1, 1] = pt.maximum(pt.tensor([C.FACTOR_ZERO], device=corrected_target_factors.device), prev_step[:, 2] - (corrected_target_factors[:, 0, 1] - C.FACTOR_ZERO))
+
+        # Factor 4: Correct pauses remaining
+        # Decrement if previous token was [pause]
+        corrected_target_factors[prev_step[:, 0].eq(C.PAUSE_ID), 3, 1] = pt.maximum(pt.tensor([C.FACTOR_ZERO], device=corrected_target_factors.device), prev_step[prev_step[:, 0].eq(C.PAUSE_ID), 4] - 1).float()
+        # Unchanged otherwise
+        corrected_target_factors[prev_step[:, 0].ne(C.PAUSE_ID), 3, 1] = prev_step[prev_step[:, 0].ne(C.PAUSE_ID), 4].float()
+
+        # Factor 3: Correct segment duration remaining. Calculated after pauses remaining since we use that to calculate this.
+        # Subtract duration if last token was not a pause
+        corrected_target_factors[prev_step[:, 0].ne(C.PAUSE_ID), 2, 1] = pt.maximum(pt.tensor([C.FACTOR_ZERO], device=corrected_target_factors.device), (prev_step[:, 3] - (corrected_target_factors[:, 0, 1] - C.FACTOR_ZERO))[prev_step[:, 0].ne(C.PAUSE_ID)])
+        # If last token was a pause, get segment duration based on pauses remaining.
+        next_segments = pt.tensor([durs[-(corrected_target_factors[:, 3, 1].int()[i].item() - C.FACTOR_ZERO + 1)] + C.FACTOR_ZERO for i, durs in enumerate(target_segment_durations)],
+                                  device=corrected_target_factors.device, dtype=corrected_target_factors.dtype)
+        corrected_target_factors[prev_step[:, 0].eq(C.PAUSE_ID), 2, 1] = next_segments[prev_step[:, 0].eq(C.PAUSE_ID)]
+
+        return corrected_target_factors
+
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List,
                     vocab_slice_ids: Optional[pt.Tensor] = None,
                     target_prefix_factor_mask: Optional[pt.Tensor] = None,
-                    factor_vocab_size: Optional[int] = None):
+                    factor_vocab_size: Optional[int] = None,
+                    step: Optional[int] = None,
+                    target_segment_durations: Optional[List[List[int]]] = None):
         logits, knn_probs, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             if knn_probs is None:  # no knn used
@@ -112,6 +154,10 @@ class _SingleModelInference(_Inference):
                 predictions.append(tf_prediction)
             # Shape: (batch*beam, num_secondary_factors, 2)
             target_factors = pt.cat(predictions, dim=1) if len(predictions) > 1 else predictions[0]
+            if self._force_factors_stepwise and step > 2:
+                target_factors = self._compute_next_factors(prev_step=step_input,
+                                                            target_factors=target_factors,
+                                                            target_segment_durations=target_segment_durations)
 
         return scores, states, target_factors
 
@@ -130,6 +176,7 @@ class _EnsembleInference(_Inference):
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
                  constant_length_ratio: float = 0.0,
+                 force_factors_stepwise: bool = False,
                  knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
         self._models = models
         if ensemble_mode == 'linear':
@@ -139,6 +186,11 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
+        self._force_factors_stepwise = force_factors_stepwise
+        # PPTODO
+        if self._force_factors_stepwise:
+            logging.error("Forcing factors not implemented for ensemble decoding")
+            raise NotImplementedError
         self.knn_lambda = knn_lambda
 
     def state_structure(self) -> List:
@@ -870,7 +922,8 @@ class BeamSearch(Search):
                 restrict_lexicon: Optional[lexicon.RestrictLexicon],
                 max_output_lengths: pt.Tensor,
                 target_prefix: Optional[pt.Tensor] = None,
-                target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
+                target_prefix_factors: Optional[pt.Tensor] = None,
+                target_segment_durations: Optional[List[List[int]]] = None) -> SearchResult:
         """
         Translates multiple sentences using beam search.
 
@@ -882,6 +935,7 @@ class BeamSearch(Search):
         :param target_prefix: Target prefix ids. Shape: (batch_size, max prefix length).
         :param target_prefix_factors: Target prefix factors ids.
                 Shape: (batch_size, max prefix factors length, num_target_factors).
+        :param target_segment_durations: List of segment durations for target factor forcing
         :return SearchResult.
         """
         batch_size = source.size()[0]
@@ -983,6 +1037,8 @@ class BeamSearch(Search):
                 target_prefix_factors, self.output_factor_vocab_size, self.dtype)
             target_prefix_factor_masks = target_prefix_factor_masks.unsqueeze(2).expand(-1, -1, self.beam_size, -1, -1)
 
+        target_segment_durations = [d for d in target_segment_durations for _ in range(self.beam_size)]
+
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
@@ -996,7 +1052,9 @@ class BeamSearch(Search):
                                                                                      model_states,
                                                                                      vocab_slice_ids,
                                                                                      target_prefix_factor_mask,
-                                                                                     self.output_factor_vocab_size)
+                                                                                     self.output_factor_vocab_size,
+                                                                                     step=t,
+                                                                                     target_segment_durations=target_segment_durations)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished rows.
@@ -1104,7 +1162,8 @@ def get_search_algorithm(models: List[SockeyeModel],
                          prevent_unk: bool = False,
                          greedy: bool = False,
                          skip_nvs: bool = False,
-                         nvs_thresh: Optional[float] = None) -> Union[BeamSearch, GreedySearch]:
+                         nvs_thresh: Optional[float] = None,
+                         force_factors_stepwise: bool = False) -> Union[BeamSearch, GreedySearch]:
     """
     Returns an instance of BeamSearch or GreedySearch depending.
 
@@ -1119,6 +1178,7 @@ def get_search_algorithm(models: List[SockeyeModel],
         assert constant_length_ratio == -1.0, "Greedy search does not support brevity penalty"
         assert sample is None, "Greedy search does not support sampling"
         assert not prevent_unk, "Greedy Search does not support prevention of unknown tokens"  # TODO: add support
+        assert not force_factors_stepwise, "Greedy Search does not support re-computing and forcing factors at each step"
         search = GreedySearch(
             dtype=models[0].dtype,
             bos_id=C.BOS_ID,
@@ -1141,11 +1201,13 @@ def get_search_algorithm(models: List[SockeyeModel],
             inference = _SingleModelInference(model=models[0],
                                               skip_softmax=skip_softmax,
                                               constant_length_ratio=constant_length_ratio,
+                                              force_factors_stepwise=force_factors_stepwise,
                                               knn_lambda=knn_lambda)
         else:
             inference = _EnsembleInference(models=models,
                                            ensemble_mode=ensemble_mode,
-                                           constant_length_ratio=constant_length_ratio)
+                                           constant_length_ratio=constant_length_ratio,
+                                           force_factors_stepwise=force_factors_stepwise)
 
         search = BeamSearch(
             beam_size=beam_size,

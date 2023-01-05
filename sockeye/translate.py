@@ -141,7 +141,8 @@ def run_translate(args: argparse.Namespace):
                                       prevent_unk=args.prevent_unk,
                                       greedy=args.greedy,
                                       skip_nvs=args.skip_nvs,
-                                      nvs_thresh=args.nvs_thresh)
+                                      nvs_thresh=args.nvs_thresh,
+                                      force_factors_stepwise=args.force_factors_stepwise)
 
     read_and_translate(translator=translator,
                        output_handler=output_handler,

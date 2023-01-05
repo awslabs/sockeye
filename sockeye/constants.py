@@ -31,6 +31,11 @@ EOS_ID = VOCAB_SYMBOLS.index(EOS_SYMBOL)
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
 SPACE_FOR_XOS = 1
 
+# Hardcoded vocab IDs for factor math. Not generally applicable
+PAUSE_ID = 47
+EOW_ID = 4
+FACTOR_ZERO = 4
+
 ARG_SEPARATOR = ":"
 
 # If true, target factors are shifted to the right by 1 at training time, and unshifted in inference.
@@ -139,6 +144,7 @@ JSON_KEEP_TARGET_PREFIX_KEY = "keep_target_prefix"
 JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
+JSON_SEGMENT_DURATIONS_KEY = "target_segment_durations"
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
