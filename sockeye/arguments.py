@@ -573,8 +573,8 @@ def add_device_args(params):
     device_params.add_argument('--xla-compat',
                                action='store_true',
                                help='Globally enable various settings for XLA compatibility: disable Pytorch '
-                                    'multi-head attention, disable checkpoint decoder, disable scripting/tracing, '
-                                    'avoid inference mode.')
+                                    'multi-head attention, disable checkpoint decoder, disable tracing, avoid '
+                                    'inference mode.')
     device_params.add_argument('--env',
                                help='List of environment variables to be set before importing PyTorch. Separated by '
                                     '",", e.g. --env=OMP_NUM_THREADS=1,PYTORCH_JIT=0 etc.')

@@ -227,8 +227,7 @@ class LengthRatio(pt.nn.Module):
 
 
 # TODO: port NVIDIAs implementation to PT C++ custom op
-# XLA does not support scripting this function. When not using XLA, we can use:
-# self.interleaved_matmul_encdec_qk = pt.jit.script(interleaved_matmul_encdec_qk)
+@pt.jit.script
 def interleaved_matmul_encdec_qk(q: pt.Tensor,
                                  kv: pt.Tensor,
                                  heads: int) -> pt.Tensor:
@@ -290,9 +289,6 @@ class DotAttentionCell(pt.nn.Module):
         super().__init__()
         self.dropout = pt.nn.Dropout(p=dropout) if dropout > 0.0 else None
         self.heads = heads
-        # XLA does not support scripting this function
-        self.interleaved_matmul_encdec_qk = pt.jit.script(interleaved_matmul_encdec_qk) \
-            if not utils.using_xla_compat() else interleaved_matmul_encdec_qk
 
     def forward(self,
                 queries: pt.Tensor,
@@ -309,7 +305,7 @@ class DotAttentionCell(pt.nn.Module):
                      False for valid positions.
         """
         # (batch * heads, qlen, klen)
-        logits = self.interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
+        logits = interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
 
         if mask is not None:
             logits = logits.masked_fill(mask, -C.LARGE_VALUES[logits.dtype])
