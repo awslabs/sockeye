@@ -1389,13 +1389,10 @@ def add_inference_args(params):
                                choices=C.OUTPUT_HANDLERS,
                                help='Output type. Default: %(default)s.')
 
-    decode_params.add_argument('--force-factors-stepwise',
-                               action='store_true',
-                               help='[APPLICATION-SPECIFIC] Compute the right factors based on previous steps at each step. Default: %(default)s')
-
     # common params with score CLI
     add_length_penalty_args(decode_params)
     add_brevity_penalty_args(decode_params)
+    add_factor_forcing_args(decode_params)
 
     decode_params.add_argument('--dtype',
                                default=None,
@@ -1437,6 +1434,22 @@ def add_brevity_penalty_args(params):
                         help='Has effect if --brevity-penalty-type is set to \'constant\'. If positive, overrides the '
                              'length ratio, used for brevity penalty calculation, for all inputs. If zero, uses the '
                              'average of length ratios from the training data over all models. Default: %(default)s.')
+
+
+
+def add_factor_forcing_args(params):
+    params.add_argument('--force-factors-stepwise',
+                        nargs='+',
+                        choices=C.FACTOR_FORCE_CHOICES,
+                        default=[],
+                        help='Compute the right factors based on previous steps at each step. '
+                             'One per target factor if specified. Default: %(default)s')
+    params.add_argument('--pause-symbol',
+                        default='[pause]',
+                        help='Pause token that marks the end of segments. Default: %(default)s.')
+    params.add_argument('--eow-symbol',
+                        default='<eow>',
+                        help='Symbol that marks the end of words. Default: %(default)s.')
 
 
 def add_clamp_to_dtype_arg(params):

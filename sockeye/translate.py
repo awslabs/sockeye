@@ -110,6 +110,22 @@ def run_translate(args: argparse.Namespace):
     else:
         raise ValueError("Unknown brevity penalty type %s" % args.brevity_penalty_type)
 
+    num_target_factors = models[0].num_target_factors - 1
+    if args.force_factors_stepwise == []:
+        args.force_factors_stepwise = [C.FORCE_NONE] * num_target_factors
+    check_condition(len(args.force_factors_stepwise) == num_target_factors,
+                    'Number of factor forcing type arguments should match the number of target factors')
+    check_condition(len([f for f in args.force_factors_stepwise if f != C.FORCE_NONE]) == len(set(args.force_factors_stepwise) - set([C.FORCE_NONE])),
+                    'Factors being forced should be unique')
+    if C.FORCE_FRAMES not in args.force_factors_stepwise:
+        check_condition(C.FORCE_TOTAL_REMAINING not in args.force_factors_stepwise,
+                        "%s is needed to force %s" % (C.FORCE_FRAMES, C.FORCE_TOTAL_REMAINING))
+        check_condition(C.FORCE_SEGMENT_REMAINING not in args.force_factors_stepwise,
+                        "%s is needed to force %s" % (C.FORCE_FRAMES, C.FORCE_SEGMENT_REMAINING))
+    if C.FORCE_SEGMENT_REMAINING in args.force_factors_stepwise:
+        check_condition(C.FORCE_PAUSES_REMAINING in args.force_factors_stepwise,
+                        '%s is needed to force %s' % (C.FORCE_PAUSES_REMAINING, C.FORCE_SEGMENT_REMAINING))
+
     for model in models:
         model.eval()
 
@@ -142,7 +158,9 @@ def run_translate(args: argparse.Namespace):
                                       greedy=args.greedy,
                                       skip_nvs=args.skip_nvs,
                                       nvs_thresh=args.nvs_thresh,
-                                      force_factors_stepwise=args.force_factors_stepwise)
+                                      force_factors_stepwise=args.force_factors_stepwise,
+                                      pause_symbol=args.pause_symbol,
+                                      eow_symbol=args.eow_symbol)
 
     read_and_translate(translator=translator,
                        output_handler=output_handler,

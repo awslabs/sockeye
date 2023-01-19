@@ -19,6 +19,7 @@ import copy
 import itertools
 import json
 import logging
+import re
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
@@ -369,9 +370,12 @@ def make_input_from_dict(sentence_id: SentenceId,
                 return _bad_input(sentence_id, reason=str(input_dict))
 
         target_segment_durations = input_dict.get(C.JSON_SEGMENT_DURATIONS_KEY)
-        if len(target_segment_durations) != tokens.count('[pause]') + 1:
-            logger.error("Source text has %d [pause]s but there are %d segment durations",
-                         tokens.count('[pause]'), len(target_segment_durations))
+        # Check the number of segments in the source and target match
+        n_src_segments = len(re.findall(C.SRC_SEG_REGEX, ' '.join(tokens)))
+        if len(target_segment_durations) != n_src_segments:
+            logger.warning("Source text has %d segments but there are %d target segment durations. "
+                           "Ignore this warning if you are not specifying input segment bins with %s.",
+                           n_src_segments, len(target_segment_durations), C.SRC_SEG_REGEX)
 
         use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
         keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)
@@ -753,8 +757,7 @@ class Translator:
            If model(s) do not support given input length it will fall back to what the model(s) support.
     :param skip_nvs: Manually turn off Neural Vocabulary Selection (NVS) to do a softmax over the full target vocabulary.
     :param nvs_thresh: The probability threshold for a word to be added to the set of target words. Default: 0.5.
-    :param force_factors_stepwise: The factors will be re-computed and forced at each step to make sure the math is right.
-           Default: False
+    :param force_factors_stepwise: Factors to be re-computed and forced at each step to make sure the math is right. Default: []
     """
 
     def __init__(self,
@@ -781,7 +784,9 @@ class Translator:
                  greedy: bool = False,
                  skip_nvs: bool = False,
                  nvs_thresh: float = 0.5,
-                 force_factors_stepwise: bool = False) -> None:
+                 force_factors_stepwise: Optional[List[str]] = [],
+                 pause_symbol: str = '[pause]',
+                 eow_symbol: str = '<eow>') -> None:
         self.device = device
         self.dtype = models[0].dtype
         self._scorer = scorer
@@ -814,6 +819,27 @@ class Translator:
             utils.check_condition(self.beam_search_stop == C.BEAM_SEARCH_STOP_ALL,
                                   "nbest_size > 1 requires beam_search_stop to be set to 'all'")
 
+        if not all([f == C.FORCE_NONE for f in force_factors_stepwise]):
+            # Get vocab IDs used for factor forcing
+            if pause_symbol in target_vocabs[0].keys():
+                pause_id = target_vocabs[0][pause_symbol]
+            else:
+                pause_id = -1
+            if eow_symbol in target_vocabs[0].keys():
+                eow_id = target_vocabs[0][eow_symbol]
+            else:
+                eow_id = -1
+
+            if C.FORCE_FRAMES in force_factors_stepwise:
+                common_vocab = target_vocabs[force_factors_stepwise.index(C.FORCE_FRAMES) + 1]
+            elif C.FORCE_PAUSES_REMAINING in force_factors_stepwise:
+                common_vocab = target_vocabs[force_factors_stepwise.index(C.FORCE_FRAMES) + 1]
+            else:
+                logger.error("Couldn't determine vocab to get vocab IDs for factor forcing.")
+            zero_id = common_vocab['0']
+        else:
+            pause_id, eow_id, zero_id = -1, -1, -1
+
         self._search = get_search_algorithm(
             models=self.models,
             beam_size=self.beam_size,
@@ -829,7 +855,10 @@ class Translator:
             greedy=greedy,
             skip_nvs=skip_nvs,
             nvs_thresh=nvs_thresh,
-            force_factors_stepwise=force_factors_stepwise)
+            force_factors_stepwise=force_factors_stepwise,
+            pause_id=pause_id,
+            eow_id=eow_id,
+            zero_id=zero_id)
 
         self._concat_translations = partial(_concat_nbest_translations if self.nbest_size > 1 else _concat_translations,
                                             stop_ids=self.stop_ids,

@@ -31,11 +31,6 @@ EOS_ID = VOCAB_SYMBOLS.index(EOS_SYMBOL)
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
 SPACE_FOR_XOS = 1
 
-# Hardcoded vocab IDs for factor math. Not generally applicable
-PAUSE_ID = 47
-EOW_ID = 4
-FACTOR_ZERO = 4
-
 ARG_SEPARATOR = ":"
 
 # If true, target factors are shifted to the right by 1 at training time, and unshifted in inference.
@@ -396,3 +391,14 @@ KNN_INDEX_NAME = "key_index"
 KNN_EPSILON = 1e-6
 DEFAULT_DATA_STORE_BLOCK_SIZE = 1024 * 1024
 DEFAULT_KNN_LAMBDA = 0.8
+
+# Types of factors for factor forcing at inference time
+FORCE_NONE = 'none'  # No forcing
+FORCE_FRAMES = 'frames'
+FORCE_TOTAL_REMAINING = 'total_remaining'
+FORCE_SEGMENT_REMAINING = 'segment_remaining'
+FORCE_PAUSES_REMAINING = 'pauses_remaining'
+FACTOR_FORCE_CHOICES = [FORCE_NONE, FORCE_FRAMES, FORCE_TOTAL_REMAINING, FORCE_SEGMENT_REMAINING, FORCE_PAUSES_REMAINING]
+
+# Regex to match source segments when target segment durations are provided at inference
+SRC_SEG_REGEX = r'<bin\d+>'

@@ -66,15 +66,32 @@ class _SingleModelInference(_Inference):
                  model: SockeyeModel,
                  skip_softmax: bool = False,
                  constant_length_ratio: float = 0.0,
-                 force_factors_stepwise: bool = False,
-                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
+                 force_factors_stepwise: Optional[List[str]] = [],
+                 pause_id: int = -1,
+                 eow_id: int = -1,
+                 zero_id: int = -1) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
         self._force_factors_stepwise = force_factors_stepwise
-        if self._force_factors_stepwise:
-            logger.warning("Forcing factors stepwise has some hardcoded vocab items that need to match."
-                           "Make sure you check PAUSE_ID, EOW_ID, FACTOR_ZERO in constants.py")
+        if not all([f == C.FORCE_NONE for f in self._force_factors_stepwise]):
+            utils.check_condition(zero_id != -1,
+                                  "zero_id should not be -1 when forcing numeric factors.")
+            utils.check_condition(pause_id != -1 or C.FORCE_PAUSES_REMAINING not in self._force_factors_stepwise,
+                                  "pause_id should not be -1 when {} is being forced".format(C.FORCE_PAUSES_REMAINING))
+            if C.FORCE_FRAMES in self._force_factors_stepwise:
+                self.frames_idx = self._force_factors_stepwise.index(C.FORCE_FRAMES)
+            if C.FORCE_TOTAL_REMAINING in self._force_factors_stepwise:
+                self.total_remaining_idx = self._force_factors_stepwise.index(C.FORCE_TOTAL_REMAINING)
+            if C.FORCE_PAUSES_REMAINING in self._force_factors_stepwise:
+                self.pauses_remaining_idx = self._force_factors_stepwise.index(C.FORCE_PAUSES_REMAINING)
+            if C.FORCE_SEGMENT_REMAINING in self._force_factors_stepwise:
+                self.segment_remaining_idx = self._force_factors_stepwise.index(C.FORCE_SEGMENT_REMAINING)
+            self.pause_id = pause_id
+            self.eow_id = eow_id
+            self.zero_id = zero_id
+            self.factor_min_id = len(C.VOCAB_SYMBOLS)
         self.knn_lambda = knn_lambda
 
     def state_structure(self) -> List:
@@ -88,34 +105,38 @@ class _SingleModelInference(_Inference):
         """
         :param prev_step: Previous step outputs. Shape: (beam*batch, num_factors+1)
         :param target_factors: target_factors from current decode step. Shape: (beam*batch, num_factors, 2).
-            Currently assumes factors are: durations, total duration remaining, segment duration remaining, pauses remaining.
+        :param target_segment_durations: List of segment durations, required for forcing the next segment duration when a [pause] is generated.
 
-        :return: target_factors with the other factors correctly calculated from the current duration and previous output.
+        :return: target_factors with auxiliary factors correctly calculated from the current frames and previous output.
         """
         corrected_target_factors = target_factors.clone()
 
-        # Factor 1: Enforce 0 duration for pause and eow (remember factors are one step behind output tokens)
-        corrected_target_factors[prev_step[:, 0].eq(C.EOW_ID), 0, 1] = C.FACTOR_ZERO
-        corrected_target_factors[prev_step[:, 0].eq(C.PAUSE_ID), 0, 1] = C.FACTOR_ZERO
-        # Factor 1: Make duration 0 if it predicts a non-numeric token (like <s>; it happens sometimes)
-        corrected_target_factors[target_factors[:, 0, 1].lt(C.FACTOR_ZERO), 0, 1] = C.FACTOR_ZERO
+        if C.FORCE_FRAMES in self._force_factors_stepwise:
+            # Enforce 0 duration for pause and eow (remember factors are one step behind output tokens)
+            corrected_target_factors[prev_step[:, 0].eq(self.eow_id), self.frames_idx, 1] = self.zero_id
+            corrected_target_factors[prev_step[:, 0].eq(self.pause_id), self.frames_idx, 1] = self.zero_id
+            # Make duration 0 if it predicts a negative or non-numeric duration (like <s>; it happens sometimes)
+            corrected_target_factors[target_factors[:, self.frames_idx, 1].lt(self.zero_id), self.frames_idx, 1] = self.zero_id
 
-        # Factor 2: Correct total duration remaining = previous total - current duration, but floor at zero
-        corrected_target_factors[:, 1, 1] = pt.maximum(pt.tensor([C.FACTOR_ZERO], device=corrected_target_factors.device), prev_step[:, 2] - (corrected_target_factors[:, 0, 1] - C.FACTOR_ZERO))
+        if C.FORCE_TOTAL_REMAINING in self._force_factors_stepwise:
+            # Correct total duration remaining = previous total - current duration, but floor at FACTOR_MIN (lower IDs are special tokens)
+            corrected_target_factors[:, self.total_remaining_idx, 1] = pt.maximum(pt.tensor([self.factor_min_id], device=corrected_target_factors.device), prev_step[:, self.total_remaining_idx + 1] - (corrected_target_factors[:, self.frames_idx, 1] - self.zero_id))
 
-        # Factor 4: Correct pauses remaining
-        # Decrement if previous token was [pause]
-        corrected_target_factors[prev_step[:, 0].eq(C.PAUSE_ID), 3, 1] = pt.maximum(pt.tensor([C.FACTOR_ZERO], device=corrected_target_factors.device), prev_step[prev_step[:, 0].eq(C.PAUSE_ID), 4] - 1).float()
-        # Unchanged otherwise
-        corrected_target_factors[prev_step[:, 0].ne(C.PAUSE_ID), 3, 1] = prev_step[prev_step[:, 0].ne(C.PAUSE_ID), 4].float()
+        if C.FORCE_PAUSES_REMAINING in self._force_factors_stepwise:
+            # Correct pauses remaining
+            # Decrement if previous token was [pause]. Cannot be negative.
+            corrected_target_factors[prev_step[:, 0].eq(self.pause_id), self.pauses_remaining_idx, 1] = pt.maximum(pt.tensor([self.zero_id], device=corrected_target_factors.device), prev_step[prev_step[:, 0].eq(self.pause_id), self.pauses_remaining_idx + 1] - 1).float()
+            # Unchanged otherwise
+            corrected_target_factors[prev_step[:, 0].ne(self.pause_id), self.pauses_remaining_idx, 1] = prev_step[prev_step[:, 0].ne(self.pause_id), self.pauses_remaining_idx + 1].float()
 
-        # Factor 3: Correct segment duration remaining. Calculated after pauses remaining since we use that to calculate this.
-        # Subtract duration if last token was not a pause
-        corrected_target_factors[prev_step[:, 0].ne(C.PAUSE_ID), 2, 1] = pt.maximum(pt.tensor([C.FACTOR_ZERO], device=corrected_target_factors.device), (prev_step[:, 3] - (corrected_target_factors[:, 0, 1] - C.FACTOR_ZERO))[prev_step[:, 0].ne(C.PAUSE_ID)])
-        # If last token was a pause, get segment duration based on pauses remaining.
-        next_segments = pt.tensor([durs[-(corrected_target_factors[:, 3, 1].int()[i].item() - C.FACTOR_ZERO + 1)] + C.FACTOR_ZERO for i, durs in enumerate(target_segment_durations)],
-                                  device=corrected_target_factors.device, dtype=corrected_target_factors.dtype)
-        corrected_target_factors[prev_step[:, 0].eq(C.PAUSE_ID), 2, 1] = next_segments[prev_step[:, 0].eq(C.PAUSE_ID)]
+        if C.FORCE_SEGMENT_REMAINING in self._force_factors_stepwise:
+            # Correct segment duration remaining
+            # Subtract duration if last token was not a pause.
+            corrected_target_factors[prev_step[:, 0].ne(self.pause_id), self.segment_remaining_idx, 1] = pt.maximum(pt.tensor([self.factor_min_id], device=corrected_target_factors.device), (prev_step[:, self.segment_remaining_idx + 1] - (corrected_target_factors[:, self.frames_idx, 1] - self.zero_id))[prev_step[:, 0].ne(self.pause_id)])
+            # If last token was a pause, get segment duration based on pauses remaining.
+            next_segments = pt.tensor([durs[-(corrected_target_factors[:, self.pauses_remaining_idx, 1].int()[i].item() - self.zero_id + 1)] + self.zero_id for i, durs in enumerate(target_segment_durations)],
+                                    device=corrected_target_factors.device, dtype=corrected_target_factors.dtype)
+            corrected_target_factors[prev_step[:, 0].eq(self.pause_id), self.segment_remaining_idx, 1] = next_segments[prev_step[:, 0].eq(self.pause_id)]
 
         return corrected_target_factors
 
@@ -154,7 +175,7 @@ class _SingleModelInference(_Inference):
                 predictions.append(tf_prediction)
             # Shape: (batch*beam, num_secondary_factors, 2)
             target_factors = pt.cat(predictions, dim=1) if len(predictions) > 1 else predictions[0]
-            if self._force_factors_stepwise and step > 2:
+            if not all(f == C.FORCE_NONE for f in self._force_factors_stepwise) and step > 2:
                 target_factors = self._compute_next_factors(prev_step=step_input,
                                                             target_factors=target_factors,
                                                             target_segment_durations=target_segment_durations)
@@ -176,8 +197,8 @@ class _EnsembleInference(_Inference):
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
                  constant_length_ratio: float = 0.0,
-                 force_factors_stepwise: bool = False,
-                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
+                 force_factors_stepwise: List[str] = []) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -186,12 +207,10 @@ class _EnsembleInference(_Inference):
         else:
             raise ValueError()
         self._const_lr = constant_length_ratio
-        self._force_factors_stepwise = force_factors_stepwise
-        # PPTODO
-        if self._force_factors_stepwise:
-            logging.error("Forcing factors not implemented for ensemble decoding")
-            raise NotImplementedError
         self.knn_lambda = knn_lambda
+        self._force_factors_stepwise = force_factors_stepwise
+        utils.check_condition(all(f == C.FORCE_NONE for f in force_factors_stepwise),
+                              "Forcing factors not implemented for ensemble decoding")
 
     def state_structure(self) -> List:
         return [model.state_structure() for model in self._models]
@@ -1163,7 +1182,10 @@ def get_search_algorithm(models: List[SockeyeModel],
                          greedy: bool = False,
                          skip_nvs: bool = False,
                          nvs_thresh: Optional[float] = None,
-                         force_factors_stepwise: bool = False) -> Union[BeamSearch, GreedySearch]:
+                         force_factors_stepwise: Optional[List[str]] = [],
+                         pause_id: int = -1,
+                         eow_id: int = -1,
+                         zero_id: int = -1) -> Union[BeamSearch, GreedySearch]:
     """
     Returns an instance of BeamSearch or GreedySearch depending.
 
@@ -1178,7 +1200,7 @@ def get_search_algorithm(models: List[SockeyeModel],
         assert constant_length_ratio == -1.0, "Greedy search does not support brevity penalty"
         assert sample is None, "Greedy search does not support sampling"
         assert not prevent_unk, "Greedy Search does not support prevention of unknown tokens"  # TODO: add support
-        assert not force_factors_stepwise, "Greedy Search does not support re-computing and forcing factors at each step"
+        assert all(f == C.FORCE_NONE for f in force_factors_stepwise), "Greedy Search does not support re-computing and forcing factors at each step"
         search = GreedySearch(
             dtype=models[0].dtype,
             bos_id=C.BOS_ID,
@@ -1202,6 +1224,7 @@ def get_search_algorithm(models: List[SockeyeModel],
                                               skip_softmax=skip_softmax,
                                               constant_length_ratio=constant_length_ratio,
                                               force_factors_stepwise=force_factors_stepwise,
+                                              pause_id=pause_id, eow_id=eow_id, zero_id=zero_id,
                                               knn_lambda=knn_lambda)
         else:
             inference = _EnsembleInference(models=models,
