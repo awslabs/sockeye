@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -16,15 +16,14 @@ import json
 from math import ceil
 from unittest.mock import patch, Mock
 
-import mxnet as mx
 import numpy as np
 import pytest
+import torch as pt
 
 import sockeye.beam_search
 import sockeye.constants as C
 import sockeye.data_io
 import sockeye.inference
-import sockeye.lexical_constraints
 import sockeye.lexicon
 import sockeye.model
 import sockeye.utils
@@ -36,13 +35,14 @@ _EOS = -1
 def mock_translator(batch_size: int = 1,
                     beam_size: int = 5,
                     nbest_size: int = 1,
-                    num_source_factors: int = 1):
+                    num_source_factors: int = 1,
+                    dtype: pt.dtype = pt.float32):
     """
     Creates a fake translator object but with real values for things that we need.
     This lets us avoid a messy call to the constructor.
     """
     with patch.object(sockeye.inference.Translator, '__init__', lambda self, **kwargs: None):
-        translator = sockeye.inference.Translator(context=None,
+        translator = sockeye.inference.Translator(device=None,
                                                   batch_size=None,
                                                   beam_size=None,
                                                   ensemble_mode=None,
@@ -59,15 +59,17 @@ def mock_translator(batch_size: int = 1,
         def mock_model():
             t_mock = Mock(sockeye.model.SockeyeModel)
             t_mock.num_source_factors = num_source_factors
+            t_mock.dtype = dtype
             return t_mock
 
         translator.batch_size = batch_size
         translator.beam_size = beam_size
         translator.nbest_size = nbest_size
         translator.models = [mock_model()]
-        translator.zeros_array = mx.nd.zeros((beam_size,), dtype='int32')
-        translator.inf_array = mx.nd.full((batch_size * beam_size,), val=np.inf, dtype='float32')
-        translator.inf_array = mx.nd.slice(translator.inf_array, begin=(0,), end=(beam_size,))
+        translator.dtype = translator.models[0].dtype
+        translator.zeros_array = pt.zeros(beam_size, dtype=pt.int)
+        translator.inf_array = pt.full((batch_size * beam_size,), fill_value=np.inf, dtype=pt.float32)
+        translator.inf_array = translator.inf_array[:beam_size]
         translator.restrict_lexicon = None
         return translator
 
@@ -76,12 +78,8 @@ def mock_translator(batch_size: int = 1,
                          [(1.0, 0.0, 0.0),  # no LP and no BP (default)
                           (1.0, 2.0, 0.0),  # LP and no BP
                           (1.0, 2.0, 4.0),  # LP and BP
-                          (1.0, 0.0, 5.0)]) # no LP and BP
+                          (1.0, 0.0, 5.0)])  # no LP and BP
 def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
-    beam_history1 = {"id": [1]}
-    beam_history2 = {"id": [2]}
-    beam_history3 = {"id": [3]}
-    expected_beam_histories = [beam_history1, beam_history2, beam_history3]
     expected_target_ids = [[0], [1], [2], [0], [8], [9], [0], [3], [4], [5], [-1]]
 
     scorer = sockeye.beam_search.CandidateScorer(lp_alpha, lp_beta, bp_weight)
@@ -89,30 +87,26 @@ def test_concat_translations(lp_alpha: float, lp_beta: float, bp_weight: float):
     raw_score = (1 + 2 + 3)
     length = len(expected_target_ids)
     reference_length = (10 + 11 + 12)
-    expected_score = scorer(raw_score, length, reference_length)
+    expected_score = [scorer(raw_score, length, reference_length)]
     # expected_score = (1 + 2 + 3) / length_penalty.get(len(expected_target_ids)) - \
     #                  brevity_penalty.get(len(expected_target_ids), 10 + 11 + 12)
     translations = [sockeye.inference.Translation([[0], [1], [2], [-1]],
-                                                  scorer(1.0, 4, 10),
-                                                  [beam_history1],
+                                                  [scorer(1.0, 4, 10)],
                                                   None,
                                                   10),
                     # Translation without EOS
                     sockeye.inference.Translation([[0], [8], [9]],
-                                                  scorer(2.0, 3, 11),
-                                                  [beam_history2],
+                                                  [scorer(2.0, 3, 11)],
                                                   None,
                                                   11),
                     sockeye.inference.Translation([[0], [3], [4], [5], [-1]],
-                                                  scorer(3.0, 5, 12),
-                                                  [beam_history3],
+                                                  [scorer(3.0, 5, 12)],
                                                   None,
                                                   12)]
     combined = sockeye.inference._concat_translations(translations, stop_ids={_EOS}, scorer=scorer)
 
     assert combined.target_ids == expected_target_ids
-    assert np.isclose(combined.score, expected_score)
-    assert combined.beam_histories == expected_beam_histories
+    assert np.isclose(combined.scores, expected_score)
 
 
 @pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size",
@@ -144,6 +138,44 @@ def test_translator_input(sentence_id, sentence, factors, chunk_size):
             for factor, expected_factor in zip(chunk_input.factors, factors):
                 assert len(factor) == len(chunk_input.tokens)
                 assert factor == expected_factor[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
+
+
+@pytest.mark.parametrize("sentence_id, sentence, factors, chunk_size, source_prefix, source_prefix_factors",
+                         [(1, "a test", None, 4, "prefix test", None),
+                          (1, "a test", None, 2, "prefix test", None),
+                          (1, "a test", None, 1, "prefix test", None),
+                          (0, "", None, 1, "", None),
+                          (1, "a test", [['h', 'l']], 4, "prefix test", [['h', 'l']]),
+                          (1, "a test", [['h', 'h'], ['x', 'y']], 1, "prefix test", [['h', 'h'], ['x', 'y']])])
+def test_translator_input_with_source_prefix(sentence_id, sentence, factors, chunk_size, source_prefix, source_prefix_factors):
+    tokens = sentence.split()
+    source_prefix_tokens = source_prefix.split()
+    trans_input = sockeye.inference.TranslatorInput(sentence_id=sentence_id, tokens=tokens, factors=factors, \
+        source_prefix_tokens=source_prefix_tokens, source_prefix_factors=source_prefix_factors)
+
+    assert trans_input.sentence_id == sentence_id
+    assert trans_input.tokens == tokens
+    assert len(trans_input) == len(tokens) + len(source_prefix_tokens)
+    assert trans_input.factors == factors
+    assert trans_input.source_prefix_tokens == source_prefix_tokens
+    assert trans_input.source_prefix_factors == source_prefix_factors
+    if factors is not None:
+        for factor in trans_input.factors:
+            assert len(factor) == len(tokens)
+        if trans_input.source_prefix_factors is not None:
+            assert len(factors) == len(trans_input.source_prefix_factors)
+
+    chunked_inputs = list(trans_input.chunks(chunk_size))
+    assert len(chunked_inputs) == ceil(len(tokens) / chunk_size)
+    for chunk_id, chunk_input in enumerate(chunked_inputs):
+        assert chunk_input.sentence_id == sentence_id
+        assert chunk_input.tokens == trans_input.tokens[chunk_id * chunk_size: (chunk_id + 1) * chunk_size]
+        assert chunk_input.source_prefix_tokens == trans_input.source_prefix_tokens
+        assert chunk_input.num_source_prefix_tokens == trans_input.num_source_prefix_tokens
+        if source_prefix_factors is not None:
+            assert len(chunk_input.source_prefix_factors) == len(source_prefix_factors)
+            for chunk_input_source_prefix_factor, source_prefix_factor in zip(chunk_input.source_prefix_factors, trans_input.source_prefix_factors):
+                assert len(chunk_input_source_prefix_factor) == len(source_prefix_factor)
 
 
 @pytest.mark.parametrize("supported_max_seq_len_source, supported_max_seq_len_target, "
@@ -285,8 +317,8 @@ def test_make_input_from_valid_json_string_restrict_lexicon():
     text = 'this is a test'
     translator = mock_translator()
 
-    lexicon1 = Mock(sockeye.lexicon.TopKLexicon)
-    lexicon2 = Mock(sockeye.lexicon.TopKLexicon)
+    lexicon1 = Mock(sockeye.lexicon.RestrictLexicon)
+    lexicon2 = Mock(sockeye.lexicon.RestrictLexicon)
     translator.restrict_lexicon = {'lexicon1': lexicon1, 'lexicon2': lexicon2}
     assert translator.restrict_lexicon['lexicon1'] is not translator.restrict_lexicon['lexicon2']
 
@@ -388,60 +420,54 @@ def test_get_best_word_indices_for_kth_hypotheses():
     assert (result == expected_indices).all()
 
 
-@pytest.mark.parametrize("raw_constraints, beam_histories, expected_best_ids, expected_best_indices",
-                         [([[], [], [], []], [None, None], np.array([0, 2], dtype='int32'), np.array([[1, 1, 1], [3, 3, 3]], dtype='int32')),
-                          ([[[1]], [], [[3]], []], [None, None], np.array([1, 3], dtype='int32'), np.array([[1, 0, 0], [3, 2, 2]], dtype='int32'))
+@pytest.mark.parametrize("expected_best_ids, expected_best_indices",
+                         [(np.array([0, 2], dtype='int32'),
+                           np.array([[1, 1, 1], [3, 3, 3]], dtype='int32'))
                           ])
-def test_get_best_from_beam(raw_constraints, beam_histories, expected_best_ids, expected_best_indices):
-    best_hyp_indices = np.array([[0, 1, 0, 1],
-                                 [0, 1, 1, 0],
-                                 [2, 3, 2, 3],
-                                 [2, 3, 3, 2]],
-                                dtype='int32')
-    best_word_indices = np.array([[[3, 3, 0]],
-                                  [[4, 4, 3]],
-                                  [[3, 3, 0]],
-                                  [[4, 5, 3]]],
-                                 dtype='int32')
-    seq_scores = np.array([[3.8197377],
-                           [5.081118 ],
-                           [3.8068485],
-                           [5.0746527]],
-                          dtype='float32')
-    lengths = np.array([[3], [2], [3], [2]], dtype='int32')
+def test_get_best_translations(expected_best_ids, expected_best_indices):
+    best_hyp_indices = pt.tensor([[0, 1, 0, 1],
+                                  [0, 1, 1, 0],
+                                  [2, 3, 2, 3],
+                                  [2, 3, 3, 2]],
+                                 dtype=pt.int32)
+    best_word_indices = pt.tensor([[[3, 3, 0]],
+                                   [[4, 4, 3]],
+                                   [[3, 3, 0]],
+                                   [[4, 5, 3]]],
+                                  dtype=pt.int32)
+    seq_scores = pt.tensor([[3.8197377],
+                            [5.081118],
+                            [3.8068485],
+                            [5.0746527]],
+                           dtype=pt.float32)
+    lengths = pt.tensor([[3], [2], [3], [2]], dtype=pt.int32)
 
     translator = mock_translator(beam_size=2, batch_size=2)
 
     expected_result = [sockeye.inference.Translator._assemble_translation(*x) for x in zip(
-                            best_word_indices[expected_best_indices, :, np.arange(expected_best_indices.shape[1])],
-                            lengths[expected_best_ids],
-                            seq_scores[expected_best_ids],
-                            beam_histories,
-                            itertools.repeat(None))]
+        best_word_indices[expected_best_indices, :, np.arange(expected_best_indices.shape[1])],
+        lengths[expected_best_ids],
+        seq_scores[expected_best_ids],
+        itertools.repeat(None))]
 
-    constraints = [sockeye.lexical_constraints.ConstrainedHypothesis(rc, _EOS) for rc in raw_constraints]
-
-    actual_result = sockeye.inference.Translator._get_best_from_beam(translator,
-                                                                     best_hyp_indices,
-                                                                     best_word_indices,
-                                                                     seq_scores,
-                                                                     lengths,
-                                                                     None,
-                                                                     constraints,
-                                                                     beam_histories)
+    search_result = sockeye.beam_search.SearchResult(best_hyp_indices=best_hyp_indices,
+                                                     best_word_indices=best_word_indices,
+                                                     accumulated_scores=seq_scores,
+                                                     lengths=lengths,
+                                                     estimated_reference_lengths=None)
+    actual_result = sockeye.inference.Translator._get_best_translations(translator, search_result)
 
     for expected_translation, actual_translation in zip(expected_result, actual_result):
         assert expected_translation.target_ids == actual_translation.target_ids
-        assert expected_translation.score == actual_translation.score
-        assert expected_translation.beam_histories == actual_translation.beam_histories
+        assert expected_translation.scores == actual_translation.scores
 
 
 @pytest.mark.parametrize("sequence, fill_with, expected_sequence",
                          [
-                          (np.array([1, 2, 3]), C.EOS_ID, [1, 2, 3]),
-                          (np.array([[1], [2], [3]]), C.EOS_ID, [[1], [2], [3]]),
-                          (np.array([[1, 0], [2, 1], [3, 2]]), C.EOS_ID, [(1, 1), (2, 2), (3, C.EOS_ID)]),
-                          (np.array([[1, 0], [2, 1], [3, 2]]), C.PAD_ID, [(1, 1), (2, 2), (3, C.PAD_ID)]),
+                             (np.array([1, 2, 3]), C.EOS_ID, [1, 2, 3]),
+                             (np.array([[1], [2], [3]]), C.EOS_ID, [[1], [2], [3]]),
+                             (np.array([[1, 0], [2, 1], [3, 2]]), C.EOS_ID, [(1, 1), (2, 2), (3, C.EOS_ID)]),
+                             (np.array([[1, 0], [2, 1], [3, 2]]), C.PAD_ID, [(1, 1), (2, 2), (3, C.PAD_ID)]),
                          ])
 def test_unshift_target_factors(sequence, fill_with, expected_sequence):
     sequence = sockeye.inference._unshift_target_factors(sequence, fill_last_with=fill_with)

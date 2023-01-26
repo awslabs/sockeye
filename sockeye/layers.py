@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -13,42 +13,28 @@
 
 import logging
 from abc import abstractmethod
-from typing import Optional, Union, Tuple
-from functools import lru_cache
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
-import mxnet as mx
 import numpy as np
+import torch as pt
+import torch.nn.functional as F
 
+from sockeye import constants as C, utils
 from . import config
-from . import constants as C
-from . import quantization
-from . import utils
 
 logger = logging.getLogger(__name__)
 
 
-def get_activation(act_type: str) -> mx.gluon.Block:
-    """
-    Returns Gluon Block for given activation type.
-
-    Custom activation types include:
-     - Swish-1, also called Sigmoid-Weighted Linear Unit (SiLU): Ramachandran et
-       al. (https://arxiv.org/pdf/1710.05941.pdf), Elfwing et al.
-       (https://arxiv.org/pdf/1702.03118.pdf)
-     - Gaussian Error Linear Unit (GELU): Hendrycks and Gimpel
-       (https://arxiv.org/pdf/1606.08415.pdf)
-
-    :param act_type: Type of activation.
-    :return: output Symbol with same shape as input.
-    """
+def get_activation(act_type: str, inplace: bool = False) -> pt.nn.Module:
     if act_type == C.SWISH1:
-        return mx.gluon.nn.Swish()
+        return pt.nn.SiLU(inplace=inplace)
     if act_type == C.GELU:
-        return mx.gluon.nn.GELU()
-    return mx.gluon.nn.Activation(activation=act_type)
+        return pt.nn.GELU()
+    return pt.nn.ReLU(inplace=inplace)
 
 
-class LHUC(mx.gluon.HybridBlock):
+class LHUC(pt.nn.Module):
     """
     Learning Hidden Unit Contribution
 
@@ -56,187 +42,173 @@ class LHUC(mx.gluon.HybridBlock):
     Machine Translation Models" NAACL 2018
 
     :param num_hidden: Number of hidden units of the layer to be modified.
-    :param prefix: Optional prefix for created parameters (if not given as weight).
     """
-    def __init__(self,
-                 num_hidden: int,
-                 prefix: str = C.LHUC_PREFIX,
-                 weight_init: Union[str, mx.init.Initializer] = mx.init.Uniform(0.1)) -> None:
-        super().__init__(prefix=prefix)
-        with self.name_scope():
-            self.weight = self.params.get('weight', shape=(num_hidden,), init=weight_init)
 
-    def hybrid_forward(self, F, data, weight) -> mx.sym.Symbol:
+    def __init__(self, num_hidden: int, dtype: Optional[pt.dtype] = None) -> None:
+        super().__init__()
+        self.weight = pt.nn.Parameter(pt.empty(num_hidden, dtype=dtype))
+
+    def forward(self, data: pt.Tensor) -> pt.Tensor:
         # We use a sigmoid with amplitude 2 for weighting the hidden units. The
         # activation is dampened when the value of the sigmoid is close to 0, and
         # strengthened when it's close to 2 (see also original paper)
-        weight = 2 * F.Activation(weight, act_type="sigmoid")
-        return F.broadcast_mul(weight, data)
+        weight = 2 * pt.sigmoid(self.weight)
+        return weight * data
 
 
-class WeightNormalization(mx.gluon.HybridBlock):
+class OutputLayer(pt.nn.Module):
     """
-    Implements Weight Normalization, see Salimans & Kingma 2016 (https://arxiv.org/abs/1602.07868).
-    For a given tensor the normalization is done per hidden dimension.
-
-    :param num_hidden: Size of the first dimension.
-    :param ndim: The total number of dimensions of the weight tensor.
-    :param prefix: The prefix used for naming.
-    """
-
-    def __init__(self,
-                 num_hidden: int,
-                 ndim: int = 2,
-                 prefix: str = 'wn_') -> None:
-        super().__init__(prefix=prefix)
-        with self.name_scope():
-            self.scale = self.params.get("scale",
-                                         shape=tuple([num_hidden] + [1] * (ndim - 1)),
-                                         init=mx.init.Constant(value=1.0))
-
-    def hybrid_forward(self, F, weight, scale):
-        return F.broadcast_mul(lhs=F.L2Normalization(weight, mode='instance'), rhs=scale)
-
-
-class OutputLayer(mx.gluon.HybridBlock):
-    """
-    Defines the output layer of Sockeye decoders. Supports weight tying and weight normalization.
+    Final output layer of seq2seq models. Supports vocabulary selection that caches reduced weight/bias
+    across multiple invocations if selected vocabulary ids do not change.
 
     :param hidden_size: Input hidden size.
     :param vocab_size: Target vocabulary size.
     :param weight: Optional shared weight Parameter.
-    :param weight_initializer: Initializer for weight.
-    :param bias_initializer: Initializer for bias.
-    :param dtype: Data type.
-    :param prefix: Prefix used for naming.
-    :params params: Optional parameter dict for shared parameters.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
                  hidden_size: int,
                  vocab_size: int,
-                 weight: Optional[mx.gluon.Parameter] = None,
-                 weight_initializer: Optional[str] = None,
-                 bias_initializer: str = 'zeros',
-                 dtype: str = C.DTYPE_FP32,
-                 prefix: str = C.DEFAULT_OUTPUT_LAYER_PREFIX) -> None:
-        super().__init__(prefix=prefix)
+                 weight: Optional[pt.nn.Parameter] = None,
+                 dtype: Optional[pt.dtype] = None) -> None:
+        super().__init__()
         self.vocab_size = vocab_size
+        self.in_features = hidden_size
+        self.out_features = vocab_size
 
-        with self.name_scope():
-            if dtype == C.DTYPE_INT8:
-                self.scaling = self.params.get('scaling',
-                                               shape=(1,), init=mx.initializer.Constant(-1.0),
-                                               dtype=C.DTYPE_FP32, allow_deferred_init=False)
-                # This is only for inference but MXNet tries to create an
-                # initializer anyway, then fails because most random
-                # generators don't support int8 output.
-                weight_initializer = 'zeros'
-            if weight is None:
-                self.weight = self.params.get("weight",
-                                              shape=(vocab_size, hidden_size),
-                                              init=weight_initializer,
-                                              dtype=dtype,
-                                              allow_deferred_init=False)
-            else:
-                self.weight = weight  # adds to self._reg_params
-                self.params.update({weight.name: weight})  # adds to self.params
-
-            self.bias = self.params.get("bias",
-                                        shape=(vocab_size,),
-                                        init=bias_initializer,
-                                        # Bias stays fp32 even with int8 weights.
-                                        dtype=dtype if dtype != C.DTYPE_INT8 else C.DTYPE_FP32,
-                                        allow_deferred_init=False)
-
-    @lru_cache(maxsize=1)
-    def _take_slice(self, vocab_slice_ids: mx.nd.NDArray) -> Tuple[mx.nd.NDArray, mx.nd.NDArray]:
-        if self.weight.dtype == C.DTYPE_INT8:
-            weight = mx.nd.contrib.intgemm_take_weight(self.weight.data(), vocab_slice_ids)
+        if weight is None:
+            self.weight = pt.nn.Parameter(pt.empty(vocab_size, hidden_size, dtype=dtype))
         else:
-            weight = self.weight.data().take(vocab_slice_ids)
-        bias = self.bias.data().take(vocab_slice_ids)
+            self.weight = weight
+        self.bias = pt.nn.Parameter(pt.empty(vocab_size, dtype=dtype))
+
+        self.previous_slice_ids = pt.empty(0)
+        self.reduced_weight = pt.empty(0)
+        self.reduced_bias = pt.empty(0)
+
+    def extra_repr(self) -> str:
+        return 'in_features={}, out_features={}, bias={} dtype={}'.format(
+            self.in_features, self.out_features, self.bias is not None, self.weight.dtype)
+
+    def _is_new_slice(self, x: pt.Tensor) -> bool:
+        if x.size() != self.previous_slice_ids.size() or pt.any(x != self.previous_slice_ids):
+            return True
+        return False
+
+    def _take_slice(self, vocab_slice_ids: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+        weight = self.weight[vocab_slice_ids]  # Shape: (len(vocab_slice_ids), hidden)
+        bias = self.bias[vocab_slice_ids]
         return weight, bias
 
-    def forward(self, data, vocab_slice_ids):
+    def forward(self, data: pt.Tensor, vocab_slice_ids: Optional[pt.Tensor] = None) -> pt.Tensor:
         if vocab_slice_ids is not None:
-            # imperative, reduced matrix multiplication for vocabulary selection
-            weight, bias = self._take_slice(vocab_slice_ids)
-            if self.weight.dtype == C.DTYPE_INT8:
-                return mx.nd.contrib.intgemm_fully_connected(data, weight, self.scaling.data(), bias,
-                                                             num_hidden=vocab_slice_ids.shape[0],
-                                                             flatten=False,
-                                                             name=C.LOGITS_NAME)
+            # Imperative, reduced matrix multiplication for vocabulary selection.
+            # vocab_slice_ids is constant across decoder step calls, so we cache the result of _take_slice
+            # across decoder steps. If a new vocab_slice_ids tensor is observed, we re-run _take_slice.
+            # This significantly reduces latency for CPU decoding.
+            if self._is_new_slice(vocab_slice_ids):
+                self.previous_slice_ids = vocab_slice_ids
+                weight, bias = self.reduced_weight, self.reduced_bias = self._take_slice(vocab_slice_ids)
             else:
-                return mx.nd.FullyConnected(data=data,
-                                            num_hidden=vocab_slice_ids.shape[0],
-                                            weight=weight,
-                                            bias=bias,
-                                            flatten=False,
-                                            name=C.LOGITS_NAME)
-        return super().forward(data)
-
-    def hybrid_forward(self, F, data, weight, bias, scaling=None):
-        if self.weight.dtype == C.DTYPE_INT8:
-            return F.contrib.intgemm_fully_connected(data=data,
-                                                     num_hidden=self.vocab_size,
-                                                     weight=weight,
-                                                     scaling=scaling,
-                                                     bias=bias,
-                                                     flatten=False,
-                                                     name=C.LOGITS_NAME)
+                weight, bias = self.reduced_weight, self.reduced_bias
         else:
-            return F.FullyConnected(data=data,
-                                    num_hidden=self.vocab_size,
-                                    weight=weight,
-                                    bias=bias,
-                                    flatten=False,
-                                    name=C.LOGITS_NAME)
+            weight, bias = self.weight, self.bias
+
+        return F.linear(data, weight, bias)
 
 
-class LengthRatioConfig(config.Config):
+class KNN(pt.nn.Module):
     """
-    Configuration of the length ratio predictor.
+    An alternative output layer that can produce a output distribution over the vocabulary
+    by using the decoder hidden state to query into an index.
+    For more details, see: https://arxiv.org/abs/2010.00710.
 
-    :param num_layers: Number of layers.
-    :param weight: Weight of this loss.
+    :param keys_index: faiss index used for k-NN query.
+    :param vals: a list of word indexes that maps key ids to their corresponding vocabulary ids.
+    :param vocab_size: the size of the output vocabulary.
+    :param k: number of candidates to be retrieved by k-nearest neighbors query.
+    :param temperature: temperature that controls the smoothness of the output distribution.
+    :param state_store: an optional state store object that is used to compute the exact distance
+                        between the query and the index.
     """
 
-    def __init__(self, num_layers: int, weight: float) -> None:
+    def __init__(self,
+                 keys_index: "faiss.Index",  # type: ignore  # suppress mypy error becaues faiss is an optional import
+                 vals: np.memmap,
+                 vocab_size: int,
+                 k=64,
+                 temperature=10,
+                 state_store: Optional[np.memmap] = None) -> None:
         super().__init__()
-        self.num_layers = num_layers
-        self.weight = weight
+        self.keys_index = keys_index
+        self.vals = vals
+        self.vocab_size = vocab_size
+        self.k = k
+        self.temperature = temperature
+        self.state_store = state_store
+
+    def forward(self, data: pt.Tensor):
+        # faiss only supports float32
+        distances, indices = self.keys_index.search(data.cpu().numpy().astype(np.float32), self.k)
+        # Map indices to tokens
+        y = self.vals[(indices + 1) % len(self.vals)]
+        # no EOS is inserted in generated data store, so we need to use the BOS of the next sentence as EOS
+        y[y == C.BOS_ID] = C.EOS_ID
+
+        # use exact distance when state_store is available
+        if self.state_store is not None:
+            raw_keys = pt.from_numpy(self.state_store[indices]).to(device=data.device)  # (data.shape[0], k, dim)
+            distances = pt.norm(data.unsqueeze(1) - raw_keys, p=2, dim=-1)  # data lacks k axis, so need to create one
+        else:
+            distances = np.sqrt(distances)  # unlike pytorch, faiss doesn't do sqrt for us
+            distances = pt.from_numpy(distances).to(device=data.device)
+
+        # pytorch expects long for indexes
+        y = pt.from_numpy(y).to(device=data.device).long()
+
+        probs = pt.exp(-distances / self.temperature)
+        full_probs = pt.zeros((data.shape[0], self.vocab_size), device=data.device)
+        full_probs.scatter_add_(src=probs, index=y.squeeze(2), dim=-1)
+        z = pt.sum(full_probs, dim=-1).unsqueeze(-1)
+        z[z < C.KNN_EPSILON] = C.KNN_EPSILON  # avoid div by 0 (which may happen when distances of all items are large)
+        full_probs.div_(z)
+        return full_probs
 
 
-class LengthRatio(mx.gluon.HybridBlock):
+@dataclass
+class LengthRatioConfig(config.Config):
+    num_layers: int  # Number of layers
+    weight: float  # Weight of this loss
+
+
+class LengthRatio(pt.nn.Module):
     """
     Defines the length-ratio prediction layer of Sockeye.
 
     :param hidden_size: Encoder hidden size.
     :param num_layers: Number of layers.
-    :param prefix: Prefix used for naming.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
                  hidden_size: int,
                  num_layers: int,
-                 prefix: str = C.LENRATIOS_OUTPUT_LAYER_PREFIX,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 dtype: Optional[pt.dtype] = None) -> None:
         utils.check_condition(num_layers >= 1, "LengthRatio's num_layers has to be >=1.")
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.num_layers = num_layers
         self.hidden_size = hidden_size
 
-        with self.name_scope():
-            self.layers = mx.gluon.nn.HybridSequential()
-            for l in range(num_layers - 1):
-                self.layers.add(quantization.QuantizableDense(units=hidden_size, activation='tanh',
-                                                  flatten=False, prefix='dense%d_' % l, dtype=dtype))
-            # SoftReLU activation to ensure positiveness of the predicted length ratio
-            self.layers.add(quantization.QuantizableDense(units=1, activation='softrelu',
-                                              flatten=False, prefix='dense%d_' % (num_layers - 1), dtype=dtype))
+        modules = []  # type: List[pt.nn.Module]
+        for _ in range(num_layers - 1):
+            modules.append(pt.nn.Linear(in_features=hidden_size, out_features=hidden_size, dtype=dtype))
+            modules.append(pt.nn.Tanh())
+        modules.append(pt.nn.Linear(in_features=hidden_size, out_features=1, dtype=dtype))
+        modules.append(pt.nn.Softplus())  # SoftReLU activation to ensure positiveness of the predicted length ratio
+        self.layers = pt.nn.Sequential(*modules)
 
-    def hybrid_forward(self, F, source_encoded, source_encoded_length):
+    def forward(self, source_encoded: pt.Tensor, source_encoded_length: pt.Tensor) -> pt.Tensor:
         """
         Transformation to the length ratio. Returns a vector.
 
@@ -244,137 +216,180 @@ class LengthRatio(mx.gluon.HybridBlock):
         :param source_encoded_length: A vector of encoded sequence lengths. Shape: (n,).
         :return: Predictions of the ratio length(hypothesis)/length(reference). Shape(n, 1).
         """
-        # source_masked: (n, source_encoded_length, hidden_size)
-        source_masked = F.SequenceMask(data=source_encoded,
-                                       axis=1,
-                                       sequence_length=source_encoded_length,
-                                       use_sequence_length=True,
-                                       value=0.)
-        # calculate the proper means of encoded sources
+        # True when outside length. Shape: (n, source_encoded_length, 1)
+        mask = pt.arange(source_encoded.size()[1], device=source_encoded_length.device)[None, :, None] >= source_encoded_length[:, None, None]
+        source_masked = source_encoded.masked_fill(mask, 0.)
+
         # data: (n, hidden_size)
-        data = F.broadcast_div(F.sum(source_masked, axis=1, keepdims=False),
-                               F.reshape(source_encoded_length, shape=(-1, 1)))
-        # MLP. Shape: (n, 1)
-        data = self.layers(data)
-        # Shape: (n,)
-        return F.squeeze(data)
+        data = source_masked.sum(dim=1, keepdim=False) / source_encoded_length.unsqueeze(1)
+        data = self.layers(data).squeeze(1)  # (n, 1)
+        return data
 
 
-class DotAttentionCell(mx.gluon.HybridBlock):
+# TODO: port NVIDIAs implementation to PT C++ custom op
+@pt.jit.script
+def interleaved_matmul_encdec_qk(q: pt.Tensor,
+                                 kv: pt.Tensor,
+                                 heads: int) -> pt.Tensor:
+    """
+    Simple port of npx.interleaved_matmul_encdec_qk with PyTorch.
 
-    def __init__(self, dropout: float = 0.0, prefix: str = '') -> None:
-        super().__init__(prefix=prefix)
-        self.dropout = dropout
-        self._dtype = C.DTYPE_FP32
+    :param q: (qlen, batch, hidden)
+    :param kv: (kvlen, batch, hidden * 2) -- interleaved
+    :param heads: number of attention heads
+    :return: (batch * heads, qlen, klen)
+    """
+    qlen, batch, hidden = q.size()
+    head_dim = hidden // heads
 
-    def cast(self, dtype):
-        self._dtype = dtype
-        super().cast(dtype)
+    # batch * heads, qlen, head_dim)
+    q = q.contiguous().view(qlen, batch * heads, head_dim).transpose(0, 1)
+    q = q * head_dim ** -0.5
 
-    def hybrid_forward(self, F, queries, key_values, heads, lengths=None, bias=None):
+    tmp = kv.reshape(-1, batch, heads, 2, head_dim)
+    k = tmp[:, :, :, 0, :]  # pick keys
+    k = k.permute(1, 2, 3, 0)  # (batch, heads, head_dim, kvlen)
+    k = k.reshape(batch * heads, head_dim, -1)  # (batch * heads, head_dim, kvlen)
 
-        # (n*h, lq, lk)
-        logits = F.contrib.interleaved_matmul_encdec_qk(queries, key_values, heads=heads)
+    return pt.bmm(q, k)  # (batch * heads, qlen, klen)
 
-        if bias is not None:
-            logits = F.broadcast_add(logits, bias)
 
-        if lengths is not None:
-            # required shape for lengths: (n*h, lq); required dtype: int32
-            probs = F.softmax(logits, axis=-1, length=lengths, use_length=True)
-        else:
-            probs = F.softmax(logits, axis=-1)
+# TODO: port NVIDIAs implementation to PT C++ custom op
+@pt.jit.script
+def interleaved_matmul_encdec_valatt(kv: pt.Tensor,
+                                     att: pt.Tensor,
+                                     heads: int) -> pt.Tensor:
+    """
+    Simple port of npx.interleaved_matmul_encdec_valatt with PyTorch.
+    There is probably something to be gained by using views more
+    efficiently but this is placeholder code anyway.
 
-        probs = F.Dropout(probs, p=self.dropout) if self.dropout > 0.0 else probs
-        
+    :param kv: (kvlen, batch, hidden * 2)
+    :param att: (batch * heads, qlen, kvlen)
+    :param heads: number of attention heads
+    :return: (qlen, batch, hidden)
+    """
+    kvlen, batch, hidden2 = kv.size()
+    hidden = hidden2 // 2
+    head_dim = hidden // heads
+
+    tmp = kv.reshape(kvlen, batch, heads, 2, -1)
+    v = tmp[:, :, :, 1, :]  # pick values
+    v = v.permute(1, 2, 0, 3)  # bsz, heads, kvlen, head_dim
+    v = v.reshape(-1, kvlen, head_dim)  # bsz * heads, kvlen, head_dim
+
+    output = pt.bmm(att, v)  # bsz * heads, qlen, head_dim
+    output = output.transpose(0, 1).contiguous().view(-1, batch, hidden)
+    return output
+
+
+class DotAttentionCell(pt.nn.Module):
+
+    def __init__(self, dropout: float = 0.0, heads: int = 1) -> None:
+        super().__init__()
+        self.dropout = pt.nn.Dropout(p=dropout) if dropout > 0.0 else None
+        self.heads = heads
+
+    def forward(self,
+                queries: pt.Tensor,
+                key_values: pt.Tensor,
+                mask: Optional[pt.Tensor] = None):
+        """
+        :param queries: Query tensor of shape (query_length, batch_size, hidden)
+        :param key_values: Interleaved Key & value tensor of shape (key/value_length, batch_size, hidden * 2)
+        :param mask: Optional boolean tensor for attention masking of shape (batch * heads, <qlen>, <kvlen>).
+                     If this is cross-attention, <qlen> dimension can be 1 for broadcasting,
+                     i.e. (batch * heads, 1, kvlen). For self-attention on the decoder side an autoregressive mask
+                     should be provided of shape (1, len, len) or (len, len).
+                     Value of this mask is True for positions that should be masked out (padding positions),
+                     False for valid positions.
+        """
+        # (batch * heads, qlen, klen)
+        logits = interleaved_matmul_encdec_qk(queries, key_values, heads=self.heads)
+
+        if mask is not None:
+            logits = logits.masked_fill(mask, -C.LARGE_VALUES[logits.dtype])
+
+        probs = F.softmax(logits, dim=-1)
+
+        probs = self.dropout(probs) if self.dropout is not None else probs
+
         # key_values: (lk, n, dv * 2)
         # probs: (n*h, lq, lk)
         # result: (n, lq, dv)
-        return F.contrib.interleaved_matmul_encdec_valatt(key_values, probs, heads=heads)
+        return interleaved_matmul_encdec_valatt(key_values, probs, heads=self.heads)
 
 
-def prepare_source_valid_lengths(F, valid_length, query_data, num_heads: int):
+def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int, expand=True) -> pt.Tensor:
     """
-    Returns an int32 valid length tensor of shape (batch * num_heads, query_length) to be used in
-    the softmax operation in DotAttentionCell with the length argument.
-    Due to broadcast_like, dtypes of valid_length and query_data must be the same.
-
-    :param valid_length: Valid length information. Shape: (batch,).
-    :param query_data: Tensor from which the query_length dimension is derived.
-                       Expected shape: (X, query_length, ...).
-    :param num_heads: Number of attention heads.
-    :return: int32 tensor of shape (batch * num_heads, query_length).
+        lengths: (batch_size,)
+        expand: Expand to the heads.
     """
-    # (batch * heads,)
-    att_valid_length = F.repeat(valid_length, repeats=num_heads, axis=0)
-    att_valid_length = F.broadcast_like(F.expand_dims(att_valid_length, axis=1),
-                                        query_data,
-                                        lhs_axes=(1,), rhs_axes=(1,))
-    return F.cast(att_valid_length, dtype='int32')
+    # (batch_size, max_len)
+    mask = ~(pt.arange(max_length, device=lengths.device).unsqueeze(0) < lengths.reshape((-1, 1)))
+    if expand:
+        # (batch_size*heads, 1, max_len)
+        mask =  mask.unsqueeze(1).expand(-1, heads, -1).reshape((-1, max_length)).unsqueeze(1)
+    return mask
 
 
-class MultiHeadAttentionBase(mx.gluon.HybridBlock):
+class MultiHeadAttentionBase(pt.nn.Module):
     """
     Base class for Multi-head attention.
 
-    :param prefix: Attention prefix.
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
-    :param dropout: Dropout probability on attention scores
-    :param dtype: Data type for weights
+    :param dropout: Dropout probability on attention scores.
+    :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
     def __init__(self,
-                 prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(prefix=prefix)
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
+        super().__init__()
         utils.check_condition(depth_att % heads == 0,
                               "Number of heads (%d) must divide attention depth (%d)" % (heads, depth_att))
         self.depth = depth_att
         self.heads = heads
         self.depth_out = depth_out
         self.depth_per_head = self.depth // self.heads
+        self.clamp_to_dtype = clamp_to_dtype
 
-        with self.name_scope():
-            self.dot_att = DotAttentionCell(dropout=dropout, prefix='dot_att')
-            self.ff_out = quantization.QuantizableDense(in_units=depth_att, units=depth_out,
-                                                        flatten=False, use_bias=False, prefix='h2o_', dtype=dtype)
+        self.dot_att = DotAttentionCell(dropout=dropout, heads=heads)
+        self.ff_out = pt.nn.Linear(in_features=depth_att, out_features=depth_out, bias=False, dtype=dtype)
 
     def _attend(self,
-                F,
-                queries: mx.sym.Symbol,
-                key_values: mx.sym.Symbol,
-                lengths: Optional[mx.sym.Symbol] = None,
-                bias: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:
+                queries: pt.Tensor,
+                key_values: pt.Tensor,
+                mask: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
         Returns context vectors of multi-head dot attention.
 
-        :param queries: Query tensor. Shape: (query_max_length, batch_size, depth).
-        :param key_values: Keys. Shape: (memory_max_length, batch_size, depth * 2).
-        :param lengths: Optional lengths of keys. Shape: (batch_size*heads,).
-        :param bias: Optional 3d bias.
+        :param queries: Query tensor. Shape: (queries_length, batch_size, depth).
+        :param key_values: Keys/Values. Shape: (keys_values_length, batch_size, depth * 2).
+        :param mask: Optional boolean attention mask. See DotAttentionCell for shape requirements.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
         """
 
         # (query_max_length, batch, depth)
-        contexts = self.dot_att(queries, key_values, self.heads, lengths, bias)
+        contexts = self.dot_att(queries=queries, key_values=key_values, mask=mask)
 
         # (query_max_length, batch, output_depth)
         contexts = self.ff_out(contexts)
 
+        if self.clamp_to_dtype:
+            contexts = clamp_to_dtype_min_max(contexts)
+
         return contexts
 
 
-class AutoregressiveLayer(mx.gluon.HybridBlock):
-    @property
-    @abstractmethod
-    def prefix(self) -> str:
-        raise NotImplementedError
-
+class AutoregressiveLayer(pt.nn.Module):
     @property
     @abstractmethod
     def num_state_tensors(self) -> int:
@@ -396,11 +411,10 @@ class AutoregressiveLayer(mx.gluon.HybridBlock):
         raise NotImplementedError
 
     @abstractmethod
-    def hybrid_forward(self, F, inputs: mx.sym.Symbol, previous_states: mx.sym.Symbol, *args) -> Tuple:
+    def forward(self, inputs: pt.Tensor, previous_states: pt.Tensor, *args) -> Tuple:
         """
-        :param F: ndarray or Symbol
         :param inputs: layer input
-        :param previous_states: Symbol or list of Symbols
+        :param previous_states: Previous states array or list of arrays
         :param args: layer-specific arguments and/or arguments to be ignored
         :return: layer output and new states
         """
@@ -412,30 +426,65 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
     Multi-head self-attention. Independent linear projections of inputs serve as
     queries, keys, and values for the attention.
 
-    :param prefix: Attention prefix.
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
-    :param dropout: Dropout probability on attention scores
-    :param dtype: Data type for weights
+    :param dropout: Dropout probability on attention scores.
+    :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
+
     def __init__(self,
-                 prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
+        super().__init__(depth_att, heads, depth_out, dropout, dtype, clamp_to_dtype)
 
         self.depth_att = depth_att
-        with self.name_scope():
-            self.ff_in = quantization.QuantizableDense(in_units=depth_att, units=depth_att * 3,
-                                                       flatten=False, use_bias=False, prefix='i2h_', dtype=dtype)
+        self.ff_in = pt.nn.Linear(in_features=depth_att, out_features=depth_att * 3, bias=False, dtype=dtype)
+        self._drop_p = dropout
+        # indicates whether self.ff_in.weight of shape (depth_att * 3, depth_key_value) is in interleaved format or not.
+        # Interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
+        self.kv_interleaved = False
 
-    @property
-    def prefix(self) -> str:
-        return "att_self_"
+    def separate_kv(self):
+        """ write kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention) """
+        assert self.kv_interleaved
+        with pt.no_grad():
+            kv = self.ff_in.weight.data[self.depth:, :]
+            k, v = kv.view(self.heads, 2 * self.depth_per_head, self.depth).split(
+                self.depth_per_head, dim=1)
+            k = k.reshape(self.depth, self.depth)
+            v = v.reshape(self.depth, self.depth)
+        self.ff_in.weight.data[self.depth:, :] = pt.cat((k, v), dim=0)
+        self.kv_interleaved = False
+
+    def interleave_kv(self):
+        """ write kv input projection parameters in interleaved format (compatible with interleaved matmul) """
+        assert not self.kv_interleaved
+        with pt.no_grad():
+            _, k, v = self.ff_in.weight.data.split(self.depth, dim=0)
+            k = k.reshape(self.heads, -1, self.depth)
+            v = v.reshape(self.heads, -1, self.depth)
+        self.ff_in.weight.data[self.depth:, :] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self.depth)
+        self.kv_interleaved = True
+
+    def train(self, mode: bool = True):
+        """
+        Overrides super().train() to ensure key-value parameters are stored in non-interleaved format during training
+        and interleaved format during inference (mod.eval()).
+        """
+        if mode and self.kv_interleaved:
+            # training operates with non-interleaved format
+            self.separate_kv()
+        elif not mode and not self.kv_interleaved:
+            # eval/inference operates in interleaved format
+            self.interleave_kv()
+        return super().train(mode)
 
     @property
     def num_state_tensors(self) -> int:
@@ -453,245 +502,258 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         :return: dimensions of each output state (assuming all of them have the same shape)
         """
         # shape: (length, batch, key_depth + value_depth)
-        return 1, batch_size, self.depth_out * 2
+        return 0, batch_size, self.depth_out * 2
 
-    def hybrid_forward(self, F,
-                       inputs: mx.sym.Symbol,
-                       previous_states: Optional[mx.sym.Symbol] = None,
-                       input_lengths: Optional[mx.sym.Symbol] = None,
-                       bias: Optional[mx.sym.Symbol] = None,
-                       *args):  # mypy: ignore
+    def forward(self, inputs: pt.Tensor, previous_states: Optional[pt.Tensor] = None, mask: Optional[pt.Tensor] = None, **args) -> Tuple[pt.Tensor, pt.Tensor]:  # type: ignore
         """
         Computes multi-head attention on a set of inputs, serving as queries, keys, and values.
         If sequence lengths are provided, they will be used to mask the attention scores.
         A bias mask may also be used to mask the attention scores.
         May also use a cache of previously computed inputs.
-        Returns a symbol of shape (batch, max_length, output_depth).
+        Returns a tensor of shape (max_length, batch, output_depth).
 
-        :param inputs: Input Data. Shape: (batch, max_length, input_depth).
-        :param input_lengths: Optional lengths of inputs to mask attention scores. Shape: (batch, 1).
-        :param bias: Optional 3d bias tensor to mask attention scores.
-        :param previous_states: Optional list with two Symbols - previous input's keys and values.
+        :param inputs: Input Data. Shape: (length, batch, input_depth).
+        :param previous_states: Optional list with two tensors - previous input's keys and values.
                                 Shape: 2 * (batch, max_length+1, depth_att).
-        :return: Symbol of shape (batch, max_length, output_depth).
+        :param mask: Optional attention mask. See DotAttentionCell for shape information.
+        :return: tensor of shape (max_length, batch, output_depth).
         """
+        if self.training:  # use fused multi-head attention op during training
+            assert not self.kv_interleaved
+            contexts, _ = F.multi_head_attention_forward(query=inputs, key=inputs, value=inputs,
+                                                         embed_dim_to_check=self.depth, num_heads=self.heads,
+                                                         in_proj_weight=self.ff_in.weight,
+                                                         in_proj_bias=None,
+                                                         bias_k=None, bias_v=None, add_zero_attn=False,
+                                                         dropout_p=self._drop_p,
+                                                         out_proj_weight=self.ff_out.weight,
+                                                         out_proj_bias=self.ff_out.bias,
+                                                         training=self.training,
+                                                         key_padding_mask=None,
+                                                         need_weights=False,
+                                                         attn_mask=mask,
+                                                         use_separate_proj_weight=False,
+                                                         q_proj_weight=None,
+                                                         k_proj_weight=None,
+                                                         v_proj_weight=None)
+            return contexts, contexts  # dummy return
+        else:  # during inference multi-head attention with interleaved key-value parameters is used
+            proj = self.ff_in(inputs)
+            queries, states = proj.split((self.depth_att, 2 * self.depth_att), dim=2)
 
-        proj = self.ff_in(inputs)
-        queries, kv_1, kv_2 = F.split(proj, num_outputs=3, axis=2)
-        states = F.concat(kv_1, kv_2, dim=2)
+            if previous_states is not None:
+                states = pt.cat((previous_states, states), dim=0)
 
-        updated_states = states
-        if previous_states is not None:
-            updated_states = F.concat(previous_states, states, dim=0)
-            states = F.slice(updated_states, begin=(1, None, None), end=(None, None, None))
-
-        return self._attend(F, queries, states, lengths=input_lengths, bias=bias), updated_states
+            return self._attend(queries=queries, key_values=states, mask=mask), states
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
     """
     Multi-head attention layer for queries independent from keys/values.
 
-    :param prefix: Attention prefix.
     :param depth_att: Attention depth / number of hidden units.
     :param heads: Number of attention heads.
     :param depth_out: Output depth / number of output units.
     :param depth_key_value: Dimension of input key and value vectors.
-    :param dropout: Dropout probability on attention scores
-    :param dtype: Data type for weights
+    :param dropout: Dropout probability on attention scores.
+    :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
 
     def __init__(self,
-                 prefix: str,
                  depth_att: int = 512,
                  heads: int = 8,
                  depth_out: int = 512,
                  dropout: float = 0.0,
-                 dtype: str = C.DTYPE_FP32,
-                 depth_key_value: int = 0) -> None:
-        super().__init__(prefix, depth_att, heads, depth_out, dropout, dtype)
+                 depth_key_value: int = 512,
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
+        super().__init__(depth_att, heads, depth_out, dropout, dtype, clamp_to_dtype)
+        self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False, dtype=dtype)
+        self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False, dtype=dtype)
+        self._drop_p = dropout
+        self._depth_key_value = depth_key_value
+        # indicates whether self.ff_kv.weight of shape (depth_att * 2, depth_key_value) is in interleaved format or not.
+        # Interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
+        self.kv_interleaved = False
 
-        with self.name_scope():
-            self.ff_q = quantization.QuantizableDense(in_units=depth_out, units=depth_att,
-                                                      flatten=False, use_bias=False, prefix='q2h_', dtype=dtype)
-            self.ff_kv = quantization.QuantizableDense(in_units=depth_key_value, units=2*depth_att,
-                                                       flatten=False, use_bias=False, prefix='kv2h_', dtype=dtype)
+    def separate_kv(self):
+        """Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
+        assert self.kv_interleaved
+        with pt.no_grad():
+            k, v = self.ff_kv.weight.data.view(self.heads, 2 * self.depth_per_head, self._depth_key_value).split(
+                self.depth_per_head, dim=1)
+            k = k.reshape(self.depth, self._depth_key_value)
+            v = v.reshape(self.depth, self._depth_key_value)
+        self.ff_kv.weight.data[:] = pt.cat((k, v), dim=0)
+        self.kv_interleaved = False
 
-    def hybrid_forward(self, F,
-                       queries: mx.sym.Symbol,
-                       memory: mx.sym.Symbol,
-                       memory_lengths: Optional[mx.sym.Symbol] = None,
-                       bias: Optional[mx.sym.Symbol] = None,
-                       projected_memory_kv: Optional[mx.sym.Symbol] = None) -> mx.sym.Symbol:  # mypy: ignore
+    def interleave_kv(self):
+        """Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
+        assert not self.kv_interleaved
+        with pt.no_grad():
+            k, v = self.ff_kv.weight.data.split(self.depth, dim=0)
+            k = k.reshape(self.heads, -1, self.depth)
+            v = v.reshape(self.heads, -1, self.depth)
+        self.ff_kv.weight.data[:] = pt.cat((k, v), dim=1).reshape(self.depth * 2, self._depth_key_value)
+        self.kv_interleaved = True
+
+    def train(self, mode: bool = True):
+        """
+        Overrides super().train() to ensure key-value parameters are stored in non-interleaved format during training
+        and interleaved format during inference (mod.eval()).
+        """
+        if mode and self.kv_interleaved:
+            # training operates with non-interleaved format
+            self.separate_kv()
+        elif not mode and not self.kv_interleaved:
+            # eval/inference operates in interleaved format
+            self.interleave_kv()
+        return super().train(mode)
+
+    def forward(self,
+                queries: pt.Tensor,
+                key_values: pt.Tensor,
+                mask: Optional[pt.Tensor] = None,
+                projected_memory_kv: Optional[pt.Tensor] = None) -> pt.Tensor:  # mypy: ignore
         """
         Computes multi-head attention for queries given a memory tensor.
         If sequence lengths are provided, they will be used to mask the attention scores.
         A bias mask may also be used to mask the attention scores.
-        Returns a symbol of shape (max_length, batch, output_depth).
+        Returns an tensor of shape (max_length, batch, output_depth).
 
-        :param queries: Query tensor. Shape: (query_max_length, batch, input_depth).
-        :param memory: Memory data to attend to. Shape: (memory_max_length, batch, input_depth).
-        :param memory_lengths: Optional lengths of memory to mask attention scores. Shape: (batch, 1).
-        :param bias: Optional 3d bias tensor to mask attention scores.
+        :param queries: Query tensor. Shape: (queries_length, batch, input_depth).
+        :param key_values: Memory data to attend to. Shape: (key_values_length, batch, input_depth).
+        :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :param projected_memory_kv: Optional previously projected memory keys and values.
-        :return: Symbol of shape (query_seq_len, batch, output_depth).
+        :return: tensor of shape (query_seq_len, batch, output_depth).
         """
-
-        queries = self.ff_q(queries)
-        kv = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(memory)
-
-        return self._attend(F, queries, kv, bias=bias, lengths=memory_lengths)
-
-
-class PlainDotAttention(mx.gluon.HybridBlock):
-    """
-    Dot attention layer for queries independent from keys/values.
-    """
-    def __init__(self, prefix=''):
-        super().__init__(prefix=prefix)
-        with self.name_scope():
-            self.dot_att = DotAttentionCell()
-
-    def hybrid_forward(self, F, queries, memory, memory_lengths):
-        """
-        Returns a symbol of shape (batch, max_length, output_depth).
-
-        :param queries: Symbol of shape (queries_max_length, batch, input_depth).
-        :param memory: Symbol of shape (memory_max_length, batch, input_depth).
-        :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (queries_max_length, batch, output_depth).
-       """
-
-        # (queries_max_length, batch, output_depth)
-        return self.dot_att(queries, memory, 1, memory_lengths, None)
+        if self.training:  # use fused multi-head attention op during training
+            assert not self.kv_interleaved
+            assert projected_memory_kv is None, "caching not supported in training"
+            contexts, _ = F.multi_head_attention_forward(query=queries, key=key_values, value=key_values,
+                                                         embed_dim_to_check=self.depth, num_heads=self.heads,
+                                                         in_proj_weight=None,
+                                                         in_proj_bias=None,
+                                                         bias_k=None, bias_v=None, add_zero_attn=False,
+                                                         dropout_p=self._drop_p,
+                                                         out_proj_weight=self.ff_out.weight,
+                                                         out_proj_bias=self.ff_out.bias,
+                                                         training=self.training,
+                                                         key_padding_mask=None,
+                                                         need_weights=False,
+                                                         attn_mask=mask,
+                                                         use_separate_proj_weight=True,
+                                                         q_proj_weight=self.ff_q.weight,
+                                                         k_proj_weight=self.ff_kv.weight[:self.depth, :],
+                                                         v_proj_weight=self.ff_kv.weight[self.depth:, :])
+            return contexts
+        else:  # during inference multi-head attention with interleaved key-value parameters is used
+            queries = self.ff_q(queries)
+            key_values = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(key_values)
+            return self._attend(queries=queries, key_values=key_values, mask=mask)
 
 
-class ProjectedDotAttention(mx.gluon.HybridBlock):
-    """
-    Dot attention layer for queries independent from keys/values.
-
-    :param prefix: Attention prefix.
-    :param num_hidden: Attention depth / number of hidden units.
-    """
-
-    def __init__(self,
-                 prefix: str,
-                 num_hidden: int,
-                 dtype: str) -> None:
-        super().__init__(prefix=prefix)
-        self.num_hidden = num_hidden
-        with self.name_scope():
-            self.q2h = quantization.QuantizableDense(units=num_hidden, flatten=False, use_bias=True, dtype=dtype)
-            self.kv2h = quantization.QuantizableDense(units=num_hidden * 2, flatten=False, use_bias=True, dtype=dtype)
-            self.dot_att = DotAttentionCell()
-
-    def hybrid_forward(self, F,
-                       queries: mx.sym.Symbol,
-                       memory: mx.sym.Symbol,
-                       memory_lengths: mx.sym.Symbol) -> mx.sym.Symbol:
-        """
-        Apply project, apply dot attention and return new context vectors.
-
-        :param queries: Symbol of shape (queries_max_length, batch, input_num_hidden).
-        :param memory: Symbol of shape (memory_max_length, batch, input_num_hidden).
-        :param memory_lengths: Symbol of shape (batch, 1).
-        :return: Symbol of shape (queries_max_length, batch, num_hidden).
-        """
-        # (memory_max_length, batch, num_hidden * 2)
-        combined = self.kv2h(memory)
-
-        # (queries_max_length, batch, num_hidden)
-        queries = self.q2h(queries)
-
-        # (queries_max_length, batch, num_hidden)
-        contexts = self.dot_att(queries, combined, 1, memory_lengths, None)
-
-        return contexts
+def interleave_kv(module: pt.nn.Module):
+    """ Writes kv input projection parameters in interleaved format (compatible with interleaved matmul). """
+    if isinstance(module, MultiHeadAttention) or isinstance(module, MultiHeadSelfAttention):
+        if not module.kv_interleaved:
+            module.interleave_kv()
 
 
-def get_positional_embeddings(length, depth) -> np.ndarray:
+def separate_kv(module: pt.nn.Module):
+    """ Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
+    if isinstance(module, MultiHeadAttention) or isinstance(module, MultiHeadSelfAttention):
+        if module.kv_interleaved:
+            module.separate_kv()
+
+
+@pt.jit.script
+def get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
     utils.check_condition(depth % 2 == 0, "Positional embeddings require an even embedding size it "
                                           "is however %d." % depth)
     # (1, depth)
-    channels = np.arange(depth // 2).reshape((1, -1))
+    channels = pt.arange(depth // 2).unsqueeze(0)
 
     # (length, 1)
-    positions = np.arange(0, length).reshape((-1, 1))
-    scaled_positions = positions / np.power(10000, (2 * channels) / depth)
+    positions = pt.arange(0, length).unsqueeze(1)
+    scaled_positions = positions / pt.pow(10000, (2 * channels) / depth)
     # sinusoids:
-    sin = np.sin(scaled_positions)
+    sin = pt.sin(scaled_positions)
     # cosines:
-    cos = np.cos(scaled_positions)
+    cos = pt.cos(scaled_positions)
     # interleave: (length, num_embed)
-    encodings = np.hstack([sin, cos])
+    encodings = pt.hstack([sin, cos])
     return encodings
 
 
-class PositionalEmbeddings(mx.gluon.HybridBlock):
+class PositionalEmbeddings(pt.nn.Module):
     """
     Takes an encoded sequence and adds sinusoidal or learned positional embeddings as in Vaswani et al, 2017 to it.
 
     :param weight_type: type of embeddings, fixed or learned.
     :param num_embed: Embedding size.
     :param max_seq_len: Maximum sequence length.
-    :param prefix: Name prefix for symbols of this encoder.
     :param scale_up_input: If True, scales input data up by num_embed ** 0.5.
     :param scale_down_positions: If True, scales positional embeddings down by num_embed ** -0.5.
-    :param weight_init: Optional initializer for learned embeddings.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
                  weight_type: str,
                  num_embed: int,
                  max_seq_len: int,
-                 prefix: str,
                  scale_up_input: bool,
                  scale_down_positions: bool,
-                 weight_init: Optional[Union[str, mx.init.Initializer]] = None) -> None:
+                 dtype: Optional[pt.dtype] = None) -> None:
         utils.check_condition(num_embed % 2 == 0, "Positional embeddings require an even embedding size it "
                                                   "is however %d." % num_embed)
-        super().__init__(prefix=prefix)
+        super().__init__()
         self.weight_type = weight_type
         self.num_embed = num_embed
         self.max_seq_len = max_seq_len
         self.scale_up_input = scale_up_input
         self.scale_down_positions = scale_down_positions
 
-        with self.name_scope():
-            if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
-                pos_weight = get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
-                if self.scale_down_positions:
-                    pos_weight *= self.num_embed ** -0.5
-                self.weight = self.params.get_constant('weight', pos_weight)
-            elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
-                self.weight = self.params.get('weight', shape=(self.max_seq_len, self.num_embed), init=weight_init)
-            else:
-                raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
+        if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
+            weight = get_positional_embeddings(length=self.max_seq_len, depth=self.num_embed)
+            if self.scale_down_positions:
+                weight *= self.num_embed ** -0.5
+            if dtype is not None:
+                weight = weight.to(dtype)
+            self.weight = pt.nn.Parameter(weight, requires_grad=False)
+        elif self.weight_type == C.LEARNED_POSITIONAL_EMBEDDING:
+            self.weight = pt.nn.Parameter(pt.empty(self.max_seq_len, self.num_embed, dtype=dtype))
+        else:
+            raise ValueError("weight_type '%s' is not supported!" % self.weight_type)
 
-    def hybrid_forward(self, F, data, steps, weight):  # pylint: disable=arguments-differ
+    def forward(self, data: pt.Tensor, steps: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
         Applies positional embeddings to input data.
 
         :param data: Input data. Shape: (batch, length or 1, num_embed)
         :param steps: Optional steps input. If given, shape is (batch_size or 1, seq_len,)
-        :param weight: Positional embedding constant.
+
         :return: Data with positional embeddings added
         """
         # (length, num_embed)
         if steps is None:
             # (batch, length, num_embed)
-            pos_embedding = F.slice_like(F.expand_dims(weight, axis=0), data, axes=(1,))
+            pos_embedding = self.weight.unsqueeze(0)[:, :data.size()[1]]
         else:
             # (batch_size or 1, seq_len, num_embed)
-            pos_embedding = F.Embedding(steps, weight, self.max_seq_len, self.num_embed)
+            # NOTE: temporary fix until we decide how to handle output steps > max_supported_seq_len_target
+            steps = pt.clip(steps, max=self.max_seq_len - 1)
+            pos_embedding = F.embedding(steps, self.weight)
 
         if self.weight_type == C.FIXED_POSITIONAL_EMBEDDING:
-            pos_embedding = F.BlockGrad(pos_embedding)
+            pos_embedding = pos_embedding.detach()
 
         if self.scale_up_input:
             data = data * (self.num_embed ** 0.5)
 
-        return F.broadcast_add(data, pos_embedding)
+        return data + pos_embedding
 
 
 class SSRU(AutoregressiveLayer):
@@ -715,41 +777,30 @@ class SSRU(AutoregressiveLayer):
         h is the output of the unit.
 
     :param model_size: number of hidden units
-    :param inference_only: flag used to indicate execution at inference time
-    :param prefix: prefix prepended to the names of internal Symbol instances
-    :param dtype: data type
+    :param inference_only: flag used to indicate execution at inference time.
+    :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
     def __init__(self,
                  model_size: int,
                  inference_only: bool,
-                 prefix: str = C.SSRU_PREFIX,
-                 dtype: str = C.DTYPE_FP32) -> None:
-        super(SSRU, self).__init__(prefix=prefix)
-
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False,) -> None:
+        super().__init__()
         self.model_size = model_size
         self.inference_only = inference_only
+        self.clamp_to_dtype = clamp_to_dtype
 
         self.cell_state_transform = self._inference_cell_state_transform \
                                     if inference_only else self._training_cell_state_transform
 
-        with self.name_scope():
-            self.forget_gate = quantization.QuantizableDense(in_units=model_size,
-                                                             units=model_size,
-                                                             activation="sigmoid",
-                                                             flatten=False,
-                                                             prefix="forget_gate_",
-                                                             dtype=dtype)
+        self.forget_gate = pt.nn.Linear(in_features=model_size, out_features=model_size, bias=True, dtype=dtype)
+        self.forget_gate_act = pt.nn.Sigmoid()
 
-            self.linear = quantization.QuantizableDense(in_units=model_size,
-                                                        units=model_size,
-                                                        use_bias=False,
-                                                        flatten=False,
-                                                        prefix="linear_",
-                                                        dtype=dtype)
+        self.linear = pt.nn.Linear(in_features=model_size, out_features=model_size, bias=False, dtype=dtype)
 
-    @property
-    def prefix(self) -> str:
-        return C.SSRU_PREFIX
+        self.relu = pt.nn.ReLU(inplace=False)  # inplace=False because we need to non-activated data as well
 
     @property
     def num_state_tensors(self) -> int:
@@ -769,44 +820,50 @@ class SSRU(AutoregressiveLayer):
         return 1, batch_size, self.model_size
 
     @staticmethod
-    def _training_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
+    @pt.jit.script_if_tracing
+    def _training_cell_state_transform(previous_cell_state, weighted_inputs, forget_rates) -> Tuple[pt.Tensor,
+                                                                                                    pt.Tensor]:
         """Update SSRU cell at training time"""
-        def _time_step_update(step_input_and_forget_rate, previous_step_state) -> Tuple:
-            """
-            Recurrently update the SSRU cell state for one time step.
+        steps = weighted_inputs.size()[0]
+        cell_state = previous_cell_state.squeeze(0)
+        states = []
+        for t in range(steps):
+            cell_state = forget_rates[t, :, :] * cell_state + weighted_inputs[t, :, :]
+            states.append(cell_state)
 
-            :param step_input_and_forget_rate: List = [step_input, forget_rate]
-            :param previous_step_state: cell state at (t-1)
-            :return: twice the current time step state. NOTE: The first instance will be stacked in the final
-            foreach output and the second will be the input to the next time_step_update iteration.
-            """
-            step_input, forget_rate = step_input_and_forget_rate  # each of shape (batch_size, model_size)
-            current_step_state = forget_rate * previous_step_state + step_input
-            return current_step_state, current_step_state
-
-        # (max_length, batch, input_depth), (batch, input_depth)
-        cell_state, last_step_state = F.contrib.foreach(_time_step_update,
-                                                        [weighted_inputs, forget_rates],
-                                                        F.squeeze(previous_cell_state, axis=0))
-
-        return cell_state, F.expand_dims(last_step_state, axis=0)
+        states = pt.stack(states, dim=0)  # type: ignore
+        return states, cell_state.unsqueeze(0)  # type: ignore
 
     @staticmethod
-    def _inference_cell_state_transform(F, previous_cell_state, weighted_inputs, forget_rates) -> Tuple:
+    def _inference_cell_state_transform(previous_cell_state, weighted_inputs, forget_rates) -> Tuple[pt.Tensor,
+                                                                                                     pt.Tensor]:
         """Update SSRU cell at inference time"""
         new_step_state = forget_rates * previous_cell_state + weighted_inputs  # (1, batch, input_depth)
         return new_step_state, new_step_state
 
-    def hybrid_forward(self, F, inputs: mx.sym.Symbol, previous_states: mx.sym.Symbol, *args) -> Tuple:
+    def forward(self, inputs: pt.Tensor, previous_states: pt.Tensor, **args) -> Tuple[pt.Tensor, pt.Tensor]:  # type: ignore
         """
-        :param F: ndarray or Symbol
         :param inputs: input data. Shape: (max_length, batch, input_depth).
         :param previous_states: previous cell states. Shape: (max_length, batch, input_depth)
         :return: cell output and new cell states.  Both with shape (max_length, batch, input_depth).
         """
-        forget_rates = self.forget_gate(inputs)
+        forget_rates = self.forget_gate_act(self.forget_gate(inputs))
         weighted_inputs = (1 - forget_rates) * self.linear(inputs)
 
-        cell_state, last_step_state = self.cell_state_transform(F, previous_states, weighted_inputs, forget_rates)
+        cell_state, last_step_state = self.cell_state_transform(previous_states, weighted_inputs, forget_rates)
+        cell_state = self.relu(cell_state)
 
-        return F.relu(cell_state), last_step_state
+        if self.clamp_to_dtype:
+            cell_state = clamp_to_dtype_min_max(cell_state)
+
+        return cell_state, last_step_state
+
+
+def clamp_to_dtype_min_max(data: pt.Tensor) -> pt.Tensor:
+    """
+    Clamp a tensor's values to the min and max for its dtype. This effectively
+    pushes overflowed (infinite) values back into the finite range.
+
+    See: https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139
+    """
+    return pt.clamp(data, min=pt.finfo(data.dtype).min, max=pt.finfo(data.dtype).max)

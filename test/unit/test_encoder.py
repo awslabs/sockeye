@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -26,8 +26,9 @@ import sockeye.transformer
                                         share_embedding=False)]),
 ])
 def test_embedding_encoder(dropout, factor_configs):
-    config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout, factor_configs=factor_configs)
-    embedding = sockeye.encoder.Embedding(config, prefix='embedding')
+    config = sockeye.encoder.EmbeddingConfig(vocab_size=20, num_embed=10, dropout=dropout,
+                                             factor_configs=factor_configs)
+    embedding = sockeye.encoder.Embedding(config)
     assert type(embedding) == sockeye.encoder.Embedding
 
 
@@ -36,24 +37,19 @@ def test_embedding_encoder(dropout, factor_configs):
     (True,)
 ])
 def test_get_transformer_encoder(lhuc):
-    prefix = "test_"
     config = sockeye.transformer.TransformerConfig(model_size=20,
                                                    attention_heads=10,
                                                    feed_forward_num_hidden=30,
                                                    act_type='test_act',
                                                    num_layers=40,
                                                    dropout_attention=1.0,
-                                                   dropout_act=2.0,
-                                                   dropout_prepost=3.0,
+                                                   dropout_act=0.5,
+                                                   dropout_prepost=0.2,
                                                    positional_embedding_type=C.LEARNED_POSITIONAL_EMBEDDING,
                                                    preprocess_sequence='test_pre',
                                                    postprocess_sequence='test_post',
                                                    max_seq_len_source=50,
                                                    max_seq_len_target=60,
-                                                   lhuc=lhuc)
-    encoder = sockeye.encoder.get_transformer_encoder(config, prefix=prefix, dtype = C.DTYPE_FP32)
-    encoder.initialize()
-    encoder.hybridize(static_alloc=True)
-
+                                                   use_lhuc=lhuc)
+    encoder = sockeye.encoder.get_transformer_encoder(config)
     assert type(encoder) == sockeye.encoder.TransformerEncoder
-    assert encoder.prefix == prefix + C.TRANSFORMER_ENCODER_PREFIX

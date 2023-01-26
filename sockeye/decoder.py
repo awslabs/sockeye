@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -17,24 +17,27 @@ Decoders for sequence-to-sequence models.
 import logging
 from abc import abstractmethod
 from itertools import islice
-from typing import Dict, List, Optional, Tuple, Union, Type
+from typing import Dict, List, Optional, Tuple, Type, Union
 
-import mxnet as mx
+import torch as pt
 
 from . import constants as C
 from . import layers
 from . import transformer
+from .transformer import TransformerConfig
 
 logger = logging.getLogger(__name__)
-DecoderConfig = Union[transformer.TransformerConfig]
+DecoderConfig = Union[TransformerConfig]  # type: ignore
 
 
-def get_decoder(config: DecoderConfig, inference_only: bool = False,
-                prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Decoder':
-    return Decoder.get_decoder(config, inference_only, prefix, dtype)
+def get_decoder(config: DecoderConfig,
+                inference_only: bool = False,
+                dtype: Optional[pt.dtype] = None,
+                clamp_to_dtype: bool = False) -> 'Decoder':
+    return Decoder.get_decoder(config=config, inference_only=inference_only, dtype=dtype, clamp_to_dtype=clamp_to_dtype)
 
 
-class Decoder(mx.gluon.Block):
+class Decoder(pt.nn.Module):
     """
     Generic decoder interface.
     A decoder needs to implement code to decode a target sequence known in advance (decode_sequence),
@@ -44,42 +47,47 @@ class Decoder(mx.gluon.Block):
     a decoder provides methods to return initial states (init_states), state variables and their shapes.
     """
 
-    __registry = {}  # type: Dict[Type[DecoderConfig], Tuple[Type['Decoder'], str]]
+    __registry = {}  # type: Dict[Type[DecoderConfig], Type['Decoder']]
 
     @classmethod
-    def register(cls, config_type: Type[DecoderConfig], suffix: str):
+    def register(cls, config_type: Type[DecoderConfig]):
         """
         Registers decoder type for configuration. Suffix is appended to decoder prefix.
 
         :param config_type: Configuration type for decoder.
-        :param suffix: String to append to decoder prefix.
 
         :return: Class decorator.
         """
+
         def wrapper(target_cls):
-            cls.__registry[config_type] = (target_cls, suffix)
+            cls.__registry[config_type] = target_cls
             return target_cls
 
         return wrapper
 
     @classmethod
-    def get_decoder(cls, config: DecoderConfig, inference_only: bool, prefix: str, dtype: str) -> 'Decoder':
+    def get_decoder(cls,
+                    config: DecoderConfig,
+                    inference_only: bool,
+                    dtype: Optional[pt.dtype] = None,
+                    clamp_to_dtype: bool = False) -> 'Decoder':
         """
         Creates decoder based on config type.
 
         :param config: Decoder config.
         :param inference_only: Create a decoder that is only used for inference.
-        :param prefix: Prefix to prepend for decoder.
-        :param dtype: Data type for weights.
+        :param dtype: Torch data type for parameters.
+        :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max
+                               finite values for their dtype.
 
         :return: Decoder instance.
         """
         config_type = type(config)
         if config_type not in cls.__registry:
             raise ValueError('Unsupported decoder configuration %s' % config_type.__name__)
-        decoder_cls, suffix = cls.__registry[config_type]
-        # TODO: move final suffix/prefix construction logic into config builder
-        return decoder_cls(config=config, inference_only=inference_only, prefix=prefix + suffix, dtype=dtype)
+        decoder_cls = cls.__registry[config_type]
+        return decoder_cls(config=config, inference_only=inference_only, dtype=dtype,  # type: ignore
+                           clamp_to_dtype=clamp_to_dtype)  # type: ignore
 
     @abstractmethod
     def __init__(self):
@@ -91,12 +99,13 @@ class Decoder(mx.gluon.Block):
 
     @abstractmethod
     def init_state_from_encoder(self,
-                                encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
+                                encoder_outputs: pt.Tensor,
+                                encoder_valid_length: Optional[pt.Tensor] = None,
+                                target_embed: Optional[pt.Tensor] = None) -> List[pt.Tensor]:
         raise NotImplementedError()
 
     @abstractmethod
-    def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
+    def decode_seq(self, inputs: pt.Tensor, states: List[pt.Tensor]) -> pt.Tensor:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -112,8 +121,8 @@ class Decoder(mx.gluon.Block):
         raise NotImplementedError()
 
 
-@Decoder.register(transformer.TransformerConfig, C.TRANSFORMER_DECODER_PREFIX)
-class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
+@Decoder.register(TransformerConfig)
+class TransformerDecoder(Decoder):
     """
     Transformer decoder as in Vaswani et al, 2017: Attention is all you need.
     In training, computation scores for each position of the known target sequence are computed in parallel,
@@ -123,38 +132,44 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
     time-step ensures correct self-attention scores and is updated with every step.
 
     :param config: Transformer configuration.
-    :param prefix: Name prefix for symbols of this decoder.
     :param inference_only: Only use the model for inference enabling some optimizations,
                            such as disabling the auto-regressive mask.
+    :param dtype: Torch data type for parameters.
+    :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
+                           values for their dtype.
     """
 
     def __init__(self,
-                 config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_DECODER_PREFIX,
+                 config: TransformerConfig,
                  inference_only: bool = False,
-                 dtype: str = C.DTYPE_FP32) -> None:
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
         Decoder.__init__(self)
-        mx.gluon.HybridBlock.__init__(self, prefix=prefix)
+        pt.nn.Module.__init__(self)
         self.config = config
         self.inference_only = inference_only
-        with self.name_scope():
-            self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                             num_embed=self.config.model_size,
-                                                             max_seq_len=self.config.max_seq_len_target,
-                                                             prefix=C.TARGET_POSITIONAL_EMBEDDING_PREFIX,
-                                                             scale_up_input=True,
-                                                             scale_down_positions=False)
-            self.autoregressive_bias = transformer.AutoRegressiveBias(prefix="autoregressive_bias_")
+        self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                         num_embed=self.config.model_size,
+                                                         max_seq_len=self.config.max_seq_len_target,
+                                                         scale_up_input=True,
+                                                         scale_down_positions=False,
+                                                         dtype=dtype)
+        self.autoregressive_mask = transformer.AutoRegressiveMask()
 
-            self.layers = mx.gluon.nn.HybridSequential()
-            for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerDecoderBlock(config, prefix="%d_" % i, dtype=dtype,
-                                                                    inference_only=self.inference_only))
+        self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
+            transformer.TransformerDecoderBlock(config,
+                                                inference_only=self.inference_only,
+                                                dtype=dtype,
+                                                clamp_to_dtype=clamp_to_dtype)
+            for _ in range(config.num_layers))
 
-            self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                     dropout=config.dropout_prepost,
-                                                                     prefix="final_process_",
-                                                                     num_hidden=self.config.model_size)
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=self.config.model_size,
+                                                                 dtype=dtype,
+                                                                 clamp_to_dtype=clamp_to_dtype)
+        if self.config.dropout_prepost > 0.0:
+            self.dropout = pt.nn.Dropout(p=self.config.dropout_prepost, inplace=inference_only)
 
     def state_structure(self) -> str:
         """
@@ -163,9 +178,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         """
         structure = ''
         if self.inference_only:
-            structure += C.STEP_STATE + C.BIAS_STATE + C.ENCODER_STATE * self.config.num_layers
+            structure += C.STEP_STATE + C.MASK_STATE + C.ENCODER_STATE * self.config.num_layers
         else:
-            structure += C.STEP_STATE + C.ENCODER_STATE + C.BIAS_STATE
+            structure += C.STEP_STATE + C.ENCODER_STATE + C.MASK_STATE
 
         total_num_states = sum(layer.num_state_tensors for layer in self.layers)
         structure += C.DECODER_STATE * total_num_states
@@ -173,8 +188,9 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         return structure
 
     def init_state_from_encoder(self,
-                                encoder_outputs: mx.nd.NDArray,
-                                encoder_valid_length: Optional[mx.nd.NDArray] = None) -> List[mx.nd.NDArray]:
+                                encoder_outputs: pt.Tensor,
+                                encoder_valid_length: Optional[pt.Tensor] = None,
+                                target_embed: Optional[pt.Tensor] = None) -> List[pt.Tensor]:
         """
         Returns the initial states given encoder output. States for teacher-forced training are encoder outputs
         and a valid length mask for encoder outputs.
@@ -185,34 +201,50 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
 
         :param encoder_outputs: Encoder outputs. Shape: (batch, source_length, encoder_dim).
         :param encoder_valid_length: Valid lengths of encoder outputs. Shape: (batch,).
+        :param target_embed: Target-side embedding layer output. Shape: (batch, target_length, target_embedding_dim).
         :return: Initial states.
         """
-        # (batch_size, 1)
-        step = mx.nd.zeros_like(encoder_valid_length).expand_dims(axis=1, inplace=True)
+        source_max_len = encoder_outputs.size()[1]
+        if target_embed is None:  # Inference: initial step = 0. Shape: (batch_size, 1)
+            steps = pt.zeros_like(encoder_valid_length).unsqueeze(1)
+            # (batch * heads, 1, source_max_len)
+            source_mask = layers.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
+                                                            source_max_len)
+            # Shape: (batch, heads, 1, src_max_len)
+            source_mask = source_mask.view(-1, self.config.attention_heads, 1, source_max_len)
+        else:  # Training: steps up to target length. Shape: (1, target_length)
+            target_length = target_embed.size()[1]
+            steps = pt.arange(0, target_length, device=target_embed.device).unsqueeze(0)
+            # (batch * heads, 1, source_max_len)
+            source_mask = layers.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
+                                                            source_max_len)
+            source_mask = source_mask.expand(-1, target_length, -1)  # Shape: (batch * heads, trg_max_len, src_max_len)
+
+            # Shape: (batch, heads, trg_max_len, src_max_len)
+            source_mask = source_mask.view(-1, self.config.attention_heads, target_length, source_max_len)
 
         if self.inference_only:
             # Encoder projection caching, therefore we don't pass the encoder_outputs
-            states = [step, encoder_valid_length]
-
+            states = [steps, source_mask]
+            encoder_outputs_t = encoder_outputs.transpose(1, 0)  # time-major layout
             for layer in self.layers:
-                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs)
-                states.append(mx.nd.transpose(enc_att_kv, axes=(1, 0, 2)))
+                enc_att_kv = layer.enc_attention.ff_kv(encoder_outputs_t)
+                states.append(enc_att_kv)
         else:
             # NO encoder projection caching
-            states = [step, mx.nd.transpose(encoder_outputs, axes=(1, 0, 2)), encoder_valid_length]
+            states = [steps, encoder_outputs.transpose(1, 0), source_mask]
 
-        _batch_size = encoder_outputs.shape[0]
-        _ctx = encoder_outputs.context
+        _batch_size = encoder_outputs.size()[0]
+        _device = encoder_outputs.device
         _dtype = encoder_outputs.dtype
-        dummy_autoregr_states = [mx.nd.zeros(layer.get_states_shape(_batch_size), ctx=_ctx, dtype=_dtype)
+        dummy_autoregr_states = [pt.zeros(layer.get_states_shape(_batch_size), device=_device, dtype=_dtype)
                                  for layer in self.layers
                                  for _ in range(layer.num_state_tensors)]
 
         states += dummy_autoregr_states
-
         return states
 
-    def decode_seq(self, inputs: mx.nd.NDArray, states: List[mx.nd.NDArray]):
+    def decode_seq(self, inputs: pt.Tensor, states: List[pt.Tensor]) -> pt.Tensor:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -224,106 +256,60 @@ class TransformerDecoder(Decoder, mx.gluon.HybridBlock):
         outputs, _ = self.forward(inputs, states)
         return outputs
 
-    def forward(self, step_input, states):
-        """
-        Run forward pass of the decoder.
-
-        step_input is either:
-             (batch, num_hidden): single decoder step at inference time
-             (batch, seq_len, num_hidden): full sequence decode during training.
-
-        states is either:
-            if self.inference_only == False: (Training and Checkpoint decoder during training)
-                steps, encoder_outputs, source_bias, layer_caches...
-            else: (during translation outside of training)
-                steps, source_bias, layer_caches..., projected encoder outputs...
-        """
-        input_shape = step_input.shape
-
-        is_inference = len(input_shape) == 2
-
-        if is_inference:
-            # Just add the length dimension:
-            # (batch, num_hidden) -> (batch, 1, num_hidden)
-            step_input = step_input.expand_dims(axis=1, inplace=True)
-        else:
-            assert not self.inference_only, "Decoder created with inference_only=True but used during training."
-            # Replace the single step by multiple steps for training
-            step, *states = states
-            # Create steps (1, trg_seq_len)
-            steps = mx.nd.contrib.arange_like(step_input, axis=1).expand_dims(axis=0, inplace=True)
-            states = [steps] + states
-
-        # run decoder op
-        target, autoregr_states = super().forward(step_input, states)
-
-        if is_inference:
-            # During inference, length dimension of decoder output has size 1, squeeze it
-            # (batch, num_hidden)
-            target = mx.nd.reshape(target, shape=(-1, self.get_num_hidden()))
-
-            # We also increment time step state (1st state in the list) and add new caches
-            step = states[0] + 1
-
-            if self.inference_only:
-                # pass in cached encoder states
-                encoder_attention_keys_values = states[2:2 + self.config.num_layers]
-                new_states = [step, states[1]] + encoder_attention_keys_values + autoregr_states
-            else:
-                encoder_outputs = states[1]
-                encoder_valid_length = states[2]
-                new_states = [step, encoder_outputs, encoder_valid_length] + autoregr_states
-
-            assert len(new_states) == len(states)
-        else:
-            new_states = None  # we don't care about states in training
-        return target, new_states
-
-    def hybrid_forward(self, F, step_input, states):
-        mask = None
+    def forward(self, step_input: pt.Tensor, states: List[pt.Tensor]) -> Tuple[pt.Tensor, List[pt.Tensor]]:
+        target_mask = None
         if self.inference_only:
-            steps, source_valid_length, *other = states
+            steps, source_mask, *other = states
             source_encoded = None  # use constant pre-computed key value projections from the states
             enc_att_kv = other[:self.config.num_layers]
             autoregr_states = other[self.config.num_layers:]
         else:
             if any(layer.needs_mask for layer in self.layers):
-                mask = self.autoregressive_bias(step_input)  # mask: (1, length, length)
-            steps, source_encoded, source_valid_length, *autoregr_states = states
+                target_mask = self.autoregressive_mask(step_input)  # mask: (length, length)
+            steps, source_encoded, source_mask, *autoregr_states = states
             enc_att_kv = [None for _ in range(self.config.num_layers)]
 
         if any(layer.num_state_tensors > 1 for layer in self.layers):
             # separates autoregressive states by layer
             states_iter = iter(autoregr_states)
-            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]
+            autoregr_states = [list(islice(states_iter, 0, layer.num_state_tensors)) for layer in self.layers]  # type: ignore
 
-        # (batch_size * heads, query_length)
-        source_valid_length = layers.prepare_source_valid_lengths(F, source_valid_length, step_input,
-                                                                  num_heads=self.config.attention_heads)
+        batch, heads, target_max_len, source_max_len = source_mask.size()
+        source_mask_view = source_mask.view(batch * heads, target_max_len, source_max_len)
 
         # target: (batch_size, length, model_size)
         target = self.pos_embedding(step_input, steps)
         # (length, batch_size, model_size)
-        target = F.transpose(target, axes=(1, 0, 2))
+        target = target.transpose(1, 0)
 
         if self.config.dropout_prepost > 0.0:
-            target = F.Dropout(data=target, p=self.config.dropout_prepost)
+            target = self.dropout(target)
 
-        new_autoregr_states = []
+        new_autoregr_states = []  # type: List[pt.Tensor]
         for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
-            target, new_layer_autoregr_state = layer(target,
-                                                     mask,
-                                                     source_encoded,
-                                                     source_valid_length,
-                                                     layer_autoregr_state,
-                                                     layer_enc_att_kv)
+            target, new_layer_autoregr_state = layer(target=target,
+                                                     target_mask=target_mask,
+                                                     source=source_encoded,
+                                                     source_mask=source_mask_view,
+                                                     autoregr_states=layer_autoregr_state,
+                                                     enc_att_kv=layer_enc_att_kv)
 
             new_autoregr_states += [*new_layer_autoregr_state]
 
-        target = self.final_process(target, None)
-        target = F.transpose(target, axes=(1, 0, 2))
+        target = self.final_process(target)
+        target = target.transpose(1, 0)
 
-        return target, new_autoregr_states
+        # Inference: increment steps by 1 (discarded in training)
+        steps = steps + 1
+
+        if self.inference_only:
+            # pass in cached encoder states
+            encoder_attention_keys_values = states[2:2 + self.config.num_layers]
+            new_states = [steps, states[1]] + encoder_attention_keys_values + new_autoregr_states
+        else:
+            new_states = [steps, states[1], states[2]] + new_autoregr_states
+
+        return target, new_states
 
     def get_num_hidden(self):
         return self.config.model_size

@@ -13,7 +13,10 @@
 
 import logging
 from math import sqrt
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple, Type
+
+import torch
+
 import sockeye.constants as C
 from sockeye.utils import check_condition
 
@@ -21,27 +24,84 @@ logger = logging.getLogger(__name__)
 
 
 class LearningRateScheduler:
+    """
+    Learning rate scheduler base class. A scheduler operates on a specified
+    optimizer instance using an API that is compatible with PyTorch and
+    DeepSpeed. See https://pytorch.org/docs/stable/optim.html for more
+    information on PyTorch optimizers, learning rate schedulers, and parameter
+    groups.
 
-    def __init__(self, warmup: int = 0, t_scale: float = 1.0) -> None:
-        self.base_lr = None  # Note: will be overwritten by MXNet optimizer
+    :param optimizer: Optimizer. If None, `LearningRateScheduler(optimizer)`
+                      must be called before running `step()`.
+    :param base_lr: Base learning rate.
+    :param warmup: Number of initial updates during which the learning rate
+                   linearly increases.
+    """
+    def __init__(self,
+                 optimizer: Optional[torch.optim.Optimizer] = None,
+                 base_lr: float = 1.0,
+                 warmup: int = 0) -> None:
+        self.optimizer = optimizer
+        self.base_lr = base_lr
         check_condition(warmup >= 0, "warmup needs to be >= 0.")
         self.warmup = warmup
-        self.t_scale = t_scale
-        self.lr = None  # type: Optional[float]
+        self._t = 0
+        self._last_lr = None  # type: Optional[List[float]]
 
-    def __call__(self, t):
-        pass
+    def __call__(self, optimizer: torch.optim.Optimizer) -> 'LearningRateScheduler':
+        """
+        DeepSpeed compatibility method: associate otherwise initialized learning
+        rate scheduler with an optimizer.
+        """
+        assert self.optimizer is None, 'This learning rate scheduler is already associated with an optimizer.'
+        self.optimizer = optimizer
+        return self
 
-    def _warmup(self, scaled_t):
+    def __repr__(self) -> str:
+        return self.__class__.__name__
+
+    def state_dict(self) -> Dict[str, Any]:
+        return {k: v for k, v in self.__dict__.items() if k != 'optimizer'}
+
+    def load_state_dict(self, state_dict: Dict[str, Any]):
+        self.__dict__.update(state_dict)
+
+    def get_lr(self) -> List[float]:
         """
-        Returns linearly increasing fraction of base_lr.  Here t is not scaled
-        by t_scale, as individual schedulers should scale t prior to calling
-        this method.
+        Get the learning rate for the current step for each param group.
         """
-        assert self.base_lr is not None
+        raise NotImplementedError()
+
+    def get_last_lr(self) -> List[float]:
+        """
+        Get the last computed learning rate for each param group.
+        """
+        assert self._last_lr is not None, '`get_last_lr()` cannot be called before `get_lr()`'
+        return self._last_lr
+
+    def step(self, t: Optional[int] = None):
+        """
+        Increment or specify the time step (update number) and recompute the
+        learning rate for each param group by calling `get_lr()`.
+
+        :param t: Manually specify the time step instead of automatically
+                  incrementing the previous value.
+        """
+        assert self.optimizer is not None, 'This learning rate scheduler is not associated with an optimizer.'
+        if t is None:
+            t = self._t + 1
+        self._t = t
+        for group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            group['lr'] = lr
+        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+
+    def _warmup(self, t):
+        """
+        Returns linearly increasing fraction of base_lr.
+        """
         if not self.warmup:
             return self.base_lr
-        return self.base_lr * min(1.0, scaled_t / self.warmup)
+        return self.base_lr * min(1.0, t / self.warmup)
 
 
 class AdaptiveLearningRateScheduler(LearningRateScheduler):
@@ -66,25 +126,16 @@ class LearningRateSchedulerInvSqrtDecay(LearningRateScheduler):
 
     This is the schedule used by Vaswani et al. in the Transformer paper
     (https://arxiv.org/pdf/1706.03762.pdf)
-
-    :param warmup: Number of initial updates during which the learning rate
-                   linearly increases.
     """
 
-    def __call__(self, t: int):
-        # Time scale
-        scaled_t = t * self.t_scale
+    def get_lr(self):
         # Warmup
-        warm_lr = self._warmup(scaled_t)
+        warm_lr = self._warmup(self._t)
         # Avoid square root of zero
         warmup_steps = max(1, self.warmup)
         # Warmup first N steps, then decay
-        lr = warm_lr / sqrt(max(scaled_t, warmup_steps))
-        # For this scheduler, `self.lr` represents the last seen lr and is only
-        # used for logging purposes.
-        self.lr = lr
-
-        return lr
+        lr = warm_lr / sqrt(max(self._t, warmup_steps))
+        return [lr for _ in self.optimizer.param_groups]
 
 
 class LearningRateSchedulerLinearDecay(LearningRateScheduler):
@@ -95,52 +146,68 @@ class LearningRateSchedulerLinearDecay(LearningRateScheduler):
     This is the schedule used by Devlin et al. in the BERT paper
     (https://arxiv.org/pdf/1810.04805.pdf).
 
-    :param max_updates: Number of total training updates.  The learning rate
+    :param optimizer: Optimizer.
+    :param base_lr: Base learning rate.
+    :param total_steps: Number of total training updates.  The learning rate
                         linearly decays to zero over this period.
     :param warmup: Number of initial updates during which the learning rate
                    linearly increases.
     """
 
-    def __init__(self, total_steps: int, warmup: int = 0, t_scale: float = 1.0) -> None:
-        super().__init__(warmup, t_scale)
+    def __init__(self, optimizer: torch.optim.Optimizer, base_lr: float, total_steps: int, warmup: int = 0) -> None:
+        super().__init__(optimizer, base_lr, warmup)
         check_condition(total_steps >= 0, "total_steps need to be >= 0.")
         self.total_steps = total_steps
 
-    def __call__(self, t: int):
-        # Time scale
-        scaled_t = t * self.t_scale
+    def get_lr(self) -> List[float]:
         # Warmup
-        warm_lr = self._warmup(scaled_t)
+        warm_lr = self._warmup(self._t)
         # Linear decay
-        bounded_t = min(max(scaled_t, 1), self.total_steps)
+        bounded_t = min(max(self._t, 1), self.total_steps)
         lr = warm_lr * (1 - bounded_t / self.total_steps)
-        # For this scheduler, `self.lr` represents the last seen lr and is only
-        # used for logging purposes.
-        self.lr = lr
-        return lr
+        return [lr for _ in self.optimizer.param_groups]
 
 
 class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
     """
     Lower the learning rate as soon as the validation score plateaus.
 
+    :param optimizer: Optimizer.
+    :param base_lr: Base learning rate.
     :param reduce_factor: Factor to reduce learning rate with.
-    :param reduce_num_not_improved: Number of checkpoints with no improvement after which learning rate is reduced.
+    :param reduce_num_not_improved: Number of checkpoints with no improvement
+                                    after which learning rate is reduced.
+    :param warmup: Number of initial updates during which the learning rate
+                   linearly increases.
     """
 
-    def __init__(self, reduce_factor: float, reduce_num_not_improved: int, warmup: int = 0) -> None:
-        super().__init__(warmup)
+    def __init__(self,
+                 optimizer: torch.optim.Optimizer,
+                 base_lr: float,
+                 reduce_factor: float,
+                 reduce_num_not_improved: int,
+                 warmup: int = 0) -> None:
+        super().__init__(optimizer, base_lr, warmup)
+        self.lr = base_lr
         check_condition(0.0 < reduce_factor < 1, "reduce_factor should be between (0, 1).")
         self.reduce_factor = reduce_factor
         self.reduce_num_not_improved = reduce_num_not_improved
         self.num_not_improved = 0
 
-        self.lr = None  # type: Optional[float]
-        self.t_last_log = -1
         self.warmed_up = not self.warmup > 0
+
         logger.info("Will reduce the learning rate by a factor of %.2f whenever"
                     " the validation score doesn't improve %d times.",
                     reduce_factor, reduce_num_not_improved)
+
+    def __repr__(self) -> str:
+        return (
+            "LearningRateSchedulerPlateauReduce(reduce_factor=%.2f, reduce_num_not_improved=%d, num_not_improved=%d,"
+            " base_lr=%s, lr=%s, warmup=%d, warmed_up=%s)"
+            %
+            (self.reduce_factor, self.reduce_num_not_improved,
+             self.num_not_improved, self.base_lr, self.lr, self.warmup, self.warmed_up)
+        )
 
     def new_evaluation_result(self, has_improved: bool) -> bool:
         """
@@ -149,9 +216,6 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
         :param has_improved: Whether the model improved on held-out validation data.
         :return: True if parameters should be reset to the ones with best validation score.
         """
-        if self.lr is None:
-            assert self.base_lr is not None
-            self.lr = self.base_lr
         if has_improved:
             self.num_not_improved = 0
         else:
@@ -165,32 +229,25 @@ class LearningRateSchedulerPlateauReduce(AdaptiveLearningRateScheduler):
                 return True
         return False
 
-    def __call__(self, t):
-        if self.lr is None:
-            assert self.base_lr is not None
-            self.lr = self.base_lr
-        lr = self._warmup(t) if self.warmup > 0 and t <= self.warmup else self.lr
-        if t == self.warmup:
+    def get_lr(self) -> List[float]:
+        lr = self._warmup(self._t) if self.warmup > 0 and self._t <= self.warmup else self.lr
+        if self._t == self.warmup:
             self.warmed_up = True
-        return lr
-
-    def __repr__(self):
-        return "LearningRateSchedulerPlateauReduce(reduce_factor=%.2f, " \
-               "reduce_num_not_improved=%d)" % (self.reduce_factor, self.reduce_num_not_improved)
+        return [lr for _ in self.optimizer.param_groups]
 
 
 def get_lr_scheduler(scheduler_type: str,
-                     learning_rate_t_scale: float,
+                     base_learning_rate: float,
                      learning_rate_reduce_factor: float,
                      learning_rate_reduce_num_not_improved: int,
                      learning_rate_warmup: int = 0,
-                     max_updates: Optional[int] = None) -> Optional[LearningRateScheduler]:
+                     max_updates: Optional[int] = None) -> Tuple[Optional[Type[LearningRateScheduler]], Dict[str, Any]]:
     """
-    Returns a learning rate scheduler.
+    Get learning rate scheduler class and kwargs.
 
     :param scheduler_type: Scheduler type.
+    :param base_lr: Base learning rate.
     :param learning_rate_reduce_factor: Factor to reduce learning rate with.
-    :param learning_rate_t_scale: Scaling factor for step number.
     :param learning_rate_reduce_num_not_improved: Number of checkpoints with no
            improvement after which learning rate is reduced.
     :param learning_rate_warmup: Number of initial updates during which the
@@ -199,19 +256,18 @@ def get_lr_scheduler(scheduler_type: str,
 
     :raises: ValueError if unknown scheduler_type
 
-    :return: Learning rate scheduler.
+    :return: Tuple of LearningRateScheduler class and kwargs dictionary.
     """
     if scheduler_type is None or scheduler_type == C.LR_SCHEDULER_NONE:
-        return None
+        return None, {}
     if scheduler_type == C.LR_SCHEDULER_INV_SQRT_DECAY:
-        return LearningRateSchedulerInvSqrtDecay(warmup=learning_rate_warmup, t_scale=learning_rate_t_scale)
+        return LearningRateSchedulerInvSqrtDecay, {'base_lr': base_learning_rate, 'warmup': learning_rate_warmup}
     if scheduler_type == C.LR_SCHEDULER_LINEAR_DECAY:
         check_condition(max_updates is not None,
                         "The total number of training updates (--max-updates) must be specified when using the linear "
                         "decay learning rate scheduler.")
-        return LearningRateSchedulerLinearDecay(total_steps=max_updates,
-                                                warmup=learning_rate_warmup,
-                                                t_scale=learning_rate_t_scale)
+        return LearningRateSchedulerLinearDecay, {'base_lr': base_learning_rate, 'total_steps': max_updates,
+                                                  'warmup': learning_rate_warmup}
     if scheduler_type == C.LR_SCHEDULER_PLATEAU_REDUCE:
         check_condition(learning_rate_reduce_factor is not None,
                         "learning_rate_reduce_factor needed for %s scheduler" % C.LR_SCHEDULER_PLATEAU_REDUCE)
@@ -220,7 +276,9 @@ def get_lr_scheduler(scheduler_type: str,
         if learning_rate_reduce_factor >= 1.0:
             logger.warning("Not using %s learning rate scheduling: learning_rate_reduce_factor == 1.0",
                            C.LR_SCHEDULER_PLATEAU_REDUCE)
-            return None
-        return LearningRateSchedulerPlateauReduce(learning_rate_reduce_factor, learning_rate_reduce_num_not_improved,
-                                                  learning_rate_warmup)
+            return None, {}
+        return LearningRateSchedulerPlateauReduce, {'base_lr': base_learning_rate,
+                                                    'reduce_factor': learning_rate_reduce_factor,
+                                                    'reduce_num_not_improved': learning_rate_reduce_num_not_improved,
+                                                    'warmup': learning_rate_warmup}
     raise ValueError("Unknown learning rate scheduler type %s." % scheduler_type)

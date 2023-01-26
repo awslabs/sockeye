@@ -1,7 +1,3 @@
----
-layout: default
----
-
 # Translation
 
 Decoding (a.k.a. inference or translation) in sockeye is made available through the `sockeye.translate` module.
@@ -41,12 +37,12 @@ The PNG files will be written to files beginning with the prefix given by the `-
 
 ## Source factors
 
-If your [model was trained with source factors](training.html#source-factors), you will need to supply them at test-time, too.
+If your [model was trained with source factors](training.md#source-factors), you will need to supply them at test-time, too.
 Factors can be provided in three formats: (a) separate, token-parallel files (as in training), (b) direct annotations on words, or (c) in a JSON object.
 
 ### Parallel files
 
-You can also provide parallel files, [in the same style as training](training.html#source-factors).
+You can also provide parallel files, [in the same style as training](training.md#source-factors).
 Factor files are token-parallel to the source and are passed in to `sockeye.translate` via the `--input-factors` flag.
 (In this scenario, the source is another file, passed via `--input`).
 
@@ -88,6 +84,53 @@ The output may be:
 { "sentence_id": 1, "sentiment_id": "positive", "text": "The boy ate the waff@@ le .", "translation": "Der Junge aß die Waffel." }
 ```
 
+Sockeye also supports the use of adding source prefixes to the input during inference. For instance let us assume a multilingual translation model is trained with a source prefix (e.g. 2XX where XX is the target language code) as the translation direction signal. During inference this source prefix can be added with JSON format as follows:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "source_prefix": "2XX"}
+```
+
+Similar to source factors, source prefix factors can be also specified with JSON format, e.g.,
+
+```json
+{ "text": "The boy ate the waff@@ le .", "source_prefix": "2XX", "source_prefix_factors": ["O"]}
+```
+
+Finally, Sockeye also supports the use of adding target prefix and target prefix factors to the translation during inference. In the same spirit to the example above, let us assume a multilingual translation model trained with a target prefix 2XX (this time the prefix is added to the target sentence instead of the source sentence). During inference this target prefix can be specified with JSON format as follows:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX"}
+```
+
+This forces the decoder to generate `2XX` as its first target token (i.e. the one right after the `<bos>` token).
+
+If your model was trained with target factors, every target translation token aligns with one or more corresponding target factor tokens (depending of the number of target factors of the model). During inference, you can add target prefix factors to the translation with JSON format, e.g.:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "target_prefix_factors": ["O"]}
+```
+
+Here, the decoder is forced to generate a translation and its corresponding target factors so that the first target token aligns with factor `O` as its target factor.
+
+Note that you can also add both target prefix and target prefix factors with different length, e.g.,:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "target_prefix_factors": ["O O E"]}
+```
+With this example, `2XX` is the force-decoded first target token of the translation. This token also aligns with factor `O` its corresponding target factor. Moreover, the next two target tokens after `2XX` align with `O E` as their corresponding target factors.
+
+Note that if an input is very long, Sockeye chunks the text and translates each chunk separately. By default, target prefix and target prefix factors are added to all chunks in that case. Alternatively, you can set `use_target_prefix_all_chunks` to `false` to add them only to the first chunk, e.g.,:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "target_prefix_factors": ["O"], "use_target_prefix_all_chunks": false}
+```
+
+Note also that the translation output includes the target prefix as its first string by default. Alternatively, you can remove the target prefix from the translation output by setting `keep_target_prefix` to `false`, e.g.,:
+
+```json
+{ "text": "The boy ate the waff@@ le .", "target_prefix": "2XX", "keep_target_prefix": false}
+```
+
 ## N-best translations
 
 Sockeye can return the n best hypotheses per input (*nbest lists*).
@@ -99,67 +142,6 @@ When `--nbest-size > 1`, each line in the output of `translate` will contain the
 ```
 Note that `--nbest-size` must be smaller or equal to `--beam-size` and `--beam-search-stop` must be set to `all`.
 
-## Lexical constraints
-
-Lexical constraints provide a way to force the model to include certain words in the output.
-Given a set of constraints, the decoder will find the best output that includes the constraints.
-This file describes how to use lexical constraints; for more technical information, please see our paper:
-
-> Matt Post and David Vilar. 2018.
-> [Fast Lexically Constrained Decoding with Dynamic Beam Allocation for Neural Machine Translation](http://aclweb.org/anthology/N18-1119).
-> Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long Papers).
-
-### Example
-
-You need a [trained model](tutorials/wmt.html).
-
-You need to be careful to apply the same preprocessing to your test data that you applied at training time, including
-any [subword processing](http://github.com/rsennrich/subword-nmt), since Sockeye itself does not do this.
-
-Constraints must be encoded with a JSON object.
-This JSON object can be produced with the provided script:
-
-    echo -e "This is a test .\tconstraint\tmulti@@ word const@@ raint" \
-      | python3 -m sockeye.lexical_constraints
-
-The script creates a Python object with the constraints encoded as follows:
-
-    { 'text': 'This is a test .', 'constraints': ['constr@@ aint', 'multi@@ word constr@@ aint'] }]
-
-You can pass the output of this to Sockeye.
-Make sure that you (a) the JSON object is on a *single line* and (b) you pass `--json-input` to Sockeye, so that it knows to parse the input (without that flag, it will treat the JSON input as a regular sentence).
-We also recommend that you increase the beam a little bit and enable beam pruning:
-
-    echo -e "This is a test .\tconstraint\tmultiword constraint" \
-      | python3 -m sockeye.lexical_constraints \
-      | python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 20 --beam-prune 20 [other args]
-
-You will get a translation with the required constraints as part of the output.
-
-### Negative constraints
-
-Negative constraints---phrases that must *not* appear in the output---are also supported.
-To use them, use the "avoid" key in the JSON object instead of "constraints".
-An example JSON object:
-
-    { 'text': 'This is a test .', 'avoid': ['Test'] }
-
-Multiple negative constraints and multi-word negative constraints are supported, just like for positive constraints.
-You can also add `<s>` and `</s>` to constraints, to specify that phrases that must not start or end a sentence.
-Don't forget to apply your preprocessing!
-
-### Scoring
-
-Lexical constraints can also be used as a rudimentary scoring mechanism, by providing the entire reference (with `<s>` and `</s>` tokens) as a constraint.
-(However, you'll get significantly faster results with [Sockeye's scoring module](scoring.html)).
-For example:
-
-    echo '{ "text": "This is a test", "constraints": ["<s> Dies ist ein Test </s>"] }' \
-      python3 -m sockeye.translate -m /path/to/model --json-input --beam-size 1 --output-type translation_with_score
-
-This will output tab-delimited pairs of (score, translation).
-As always, don't forget to apply source- and target-side preprocessing to your input and your constraint.
-
 ## Decoding with brevity penalty
 
 To nudge Sockeye towards longer translations, you can enable a penalty for short translations by setting `--brevity-penalty-type` to `learned` or `constant`.
@@ -167,23 +149,6 @@ With the former setting, provided the training was done with `--length-task`, So
 and use it to calculate the (logarithmic) brevity penalty `weight * min(0.0, 1 - |ref|/|hyp|)` that will be subtracted from the scores to reward longer sentences.
 The latter setting, by default, will use a constant length ratio for all sentences that was estimated on the training data.
 The value of the constant can be changed with `--brevity-penalty-constant-length-ratio`.
-
-## CPU process per core translation
-
-On multi-core computers, translation per core separately can speedup translation performance, due to some operation can't be handled parallel in one process.
-Using this method, translation on each core can be parallel.
-
-One [python script example](https://raw.githubusercontent.com/awslabs/sockeye/master/docs/tutorials/cpu_process_per_core_translation.py) is given and you can run it as follows:
-
-```bash
-> python cpu_process_per_core_translation.py -m model -i input_file_name -o output_file_name -bs batch_size -t true
-```
-
-Options:
-
-- `-t true`: each core translate the whole input file.
-
-- `-t false`: each core translate (input file line/core number) lines , then merge the translated file into one complete output file.
 
 ## Sampling
 

@@ -1,4 +1,4 @@
-# Copyright 2017, 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -43,18 +43,39 @@ seed = random.randint(0, 1000)
 
 
 COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial-learning-rate 0.001" \
-                         " --decode-and-evaluate 0 --label-smoothing 0.0" \
-                         " --optimized-metric perplexity --loss cross-entropy --weight-tying-type src_trg_softmax"
+                         " --decode-and-evaluate 2 --label-smoothing 0.0" \
+                         " --optimized-metric perplexity --weight-tying-type src_trg_softmax"
 
 
-@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh", [
+COPY_CASES = [
     ("Copy:transformer:transformer",
      "--encoder transformer --decoder transformer"
      " --max-updates 4000"
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
-     "--beam-size 1",
+     "--beam-size 1 --prevent-unk",
+     False,
+     1.02,
+     0.98),
+    ("Copy:transformer:transformer",
+     "--encoder transformer --decoder transformer"
+     " --max-updates 4000"
+     " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64 --num-embed 32"
+     " --batch-size 16 --batch-type sentence"
+     " --neural-vocab-selection logit_max --bow-task-weight 2" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1 --prevent-unk",
+     False,
+     1.02,
+     0.98),
+    ("greedy",
+     "--encoder transformer --decoder transformer"
+     " --max-updates 4000"
+     " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64 --num-embed 32"
+     " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1 --greedy",
      False,
      1.02,
      0.98),
@@ -63,7 +84,7 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
      " --max-updates 4000"
      " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
-     " --length-task length --length-task-weight 1.5 --length-task-layers 3"
+     " --length-task length --length-task-weight 1.5 --length-task-layers 1"
      " --batch-size 16 --batch-type sentence" + COMMON_TRAINING_PARAMS,
      "--beam-size 5 --batch-size 2 --brevity-penalty-type learned"
      " --brevity-penalty-weight 0.9 --max-input-length %s" % _TEST_MAX_LENGTH,
@@ -82,7 +103,11 @@ COMMON_TRAINING_PARAMS = " --checkpoint-interval 1000 --optimizer adam --initial
      False,
      1.02,
      0.94)
-])
+]
+
+
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, "
+                         "perplexity_thresh, bleu_thresh", COPY_CASES)
 def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
     with tmp_digits_dataset(prefix="test_seq_copy",
@@ -110,23 +135,27 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
 
         # compute metrics
         hypotheses = [json['translation'] for json in data['test_outputs']]
-        hypotheses_restricted = [json['translation'] for json in data['test_outputs_restricted']]
         bleu = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses, references=data['test_targets'])
         chrf = sockeye.evaluate.raw_corpus_chrf(hypotheses=hypotheses, references=data['test_targets'])
-        bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses_restricted,
-                                                         references=data['test_targets'])
+        if 'test_outputs_restricted' in data:
+            hypotheses_restricted = [json['translation'] for json in data['test_outputs_restricted']]
+            bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses_restricted,
+                                                            references=data['test_targets'])
+        else:
+            bleu_restrict = None
 
         logger.info("================")
         logger.info("test results: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
         logger.info("================\n")
+
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
-        assert bleu_restrict >= bleu_thresh
+        if bleu_restrict is not None:
+            assert bleu_restrict >= bleu_thresh
 
 
-@pytest.mark.parametrize(
-    "name, train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors, perplexity_thresh, bleu_thresh", [
+SORT_CASES = [
     ("Sort:transformer:transformer:batch_word",
      "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
@@ -134,10 +163,11 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
      " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
      " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
-     "--beam-size 1",
+     "--beam-size 1 --prevent-unk",
      True, 0, 0,
      1.03,
-     0.97),
+     0.97,
+     True),
     ("Sort:transformer:transformer:source_factors:target_factors:batch_max_word",
      "--encoder transformer --decoder transformer"
      " --max-seq-len 10 --batch-size 70 --update-interval 2 --batch-type max-word --batch-sentences-multiple-of 1"
@@ -150,7 +180,8 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      "--beam-size 1",
      True, 3, 1,
      1.03,
-     0.96),
+     0.96,
+     True),
     ("Sort:transformer:ssru_transformer:batch_word",
      "--encoder transformer --decoder ssru_transformer"
      " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
@@ -161,10 +192,27 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
      "--beam-size 1",
      True, 0, 0,
      1.03,
-     0.97)
-])
+     0.97,
+     True),
+    ("Sort:transformer:batch_word:bfloat16",
+     "--encoder transformer --decoder transformer"
+     " --max-seq-len 10 --batch-size 90 --update-interval 1 --batch-type word --batch-sentences-multiple-of 1"
+     " --max-updates 6000"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 32 --num-embed 32"
+     " --transformer-dropout-attention 0.0 --transformer-dropout-act 0.0 --transformer-dropout-prepost 0.0"
+     " --transformer-feed-forward-num-hidden 64" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1 --dtype bfloat16",
+     True, 0, 0,
+     1.03,
+     0.97,
+     False)
+]
+
+
+@pytest.mark.parametrize("name, train_params, translate_params, use_prepared_data, n_source_factors, "
+                         "n_target_factors, perplexity_thresh, bleu_thresh, compare_output", SORT_CASES)
 def test_seq_sort(name, train_params, translate_params, use_prepared_data,
-                  n_source_factors, n_target_factors, perplexity_thresh, bleu_thresh):
+                  n_source_factors, n_target_factors, perplexity_thresh, bleu_thresh, compare_output):
     """Task: sort short sequences of digits"""
     with tmp_digits_dataset("test_seq_sort.",
                             _TRAIN_LINE_COUNT, _TRAIN_LINE_COUNT_EMPTY, _LINE_MAX_LENGTH,
@@ -178,7 +226,7 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
                                      data=data,
                                      use_prepared_data=use_prepared_data,
                                      max_seq_len=_LINE_MAX_LENGTH,
-                                     compare_output=True,
+                                     compare_output=compare_output,
                                      seed=seed)
 
         # get best validation perplexity
@@ -187,14 +235,20 @@ def test_seq_sort(name, train_params, translate_params, use_prepared_data,
 
         # compute metrics
         hypotheses = [json['translation'] for json in data['test_outputs']]
-        hypotheses_restricted = [json['translation'] for json in data['test_outputs_restricted']]
         bleu = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses, references=data['test_targets'])
         chrf = sockeye.evaluate.raw_corpus_chrf(hypotheses=hypotheses, references=data['test_targets'])
-        bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses_restricted,
-                                                         references=data['test_targets'])
+        if 'test_outputs_restricted' in data:
+            hypotheses_restricted = [json['translation'] for json in data['test_outputs_restricted']]
+            bleu_restrict = sockeye.evaluate.raw_corpus_bleu(hypotheses=hypotheses_restricted,
+                                                             references=data['test_targets'])
+        else:
+            bleu_restrict = None
 
-        logger.info("test: %s", name)
+        logger.info("================")
+        logger.info("test results: %s", name)
         logger.info("perplexity=%f, bleu=%f, bleu_restrict=%f chrf=%f", perplexity, bleu, bleu_restrict, chrf)
+        logger.info("================\n")
         assert perplexity <= perplexity_thresh
         assert bleu >= bleu_thresh
-        assert bleu_restrict >= bleu_thresh
+        if bleu_restrict is not None:
+            assert bleu_restrict >= bleu_thresh

@@ -9,7 +9,508 @@ Any bump in the second digit indicates a backwards-incompatible change,
 e.g. due to changing the architecture or simply modifying model parameter names.
 Note that Sockeye has checks in place to not translate with an old model that was trained with an incompatible version.
 
-Each version section may have have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
+
+## [3.1.31]
+
+### Fixed
+
+- Fixed sequence copying integration tests to correctly specify that scoring/translation outputs should not be checked.
+- Enabled `bfloat16` integration and system testing on all platforms.
+
+## [3.1.30]
+
+### Added
+
+- Added support for `--dtype bfloat16` to `sockeye-translate`, `sockeye-score`, and `sockeye-quantize`.
+
+### Fixed
+
+- Fixed compatibility issue with `numpy==1.24.0` by using `pickle` instead of `numpy` to save/load `ParallelSampleIter` data permutations.
+
+## [3.1.29]
+
+### Changed
+
+- Running `sockeye-evaluate` no longer applies text tokenization for TER (same behavior as other metrics).
+- Turned on type checking for all `sockeye` modules except `test_utils` and addressed resulting type issues.
+- Refactored code in various modules without changing user-level behavior.
+
+## [3.1.28]
+
+### Added
+
+- Added kNN-MT model from [Khandelwal et al., 2021](https://arxiv.org/abs/2010.00710).
+  - Installation: see [faiss document](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md) -- installation via conda is recommended.
+  - Building a faiss index from a sockeye model takes two steps:
+    - Generate decoder states: `sockeye-generate-decoder-states -m [model] --source [src] --target [tgt] --output-dir [output dir]`
+    - Build index: `sockeye-knn -i [input_dir] -o [output_dir] -t [faiss_index_signature]` where `input_dir` is the same as `output_dir` from the `sockeye-generate-decoder-states` command.
+    - Faiss index signature reference: [see here](https://github.com/facebookresearch/faiss/wiki/The-index-factory)
+  - Running inference using the built index: `sockeye-translate ... --knn-index [index_dir] --knn-lambda [interpolation_weight]` where `index_dir` is the same as `output_dir` from the `sockeye-knn` command.
+
+## [3.1.27]
+
+### Changed
+
+- allow torch 1.13 in requirements.txt
+- Replaced deprecated `torch.testing.assert_allclose` with `torch.testing.close` for PyTorch 1.14 compatibility.
+
+## [3.1.26]
+
+### Added
+
+- `--tf32 0|1` bool device (`torch.backends.cuda.matmul.allow_tf32`)
+ enabling 10-bit precision (19 bit total) transparent float32
+ acceleration. default true for backward compat with torch < 1.12.
+ allow different `--tf32` training continuation
+
+### Changed
+
+- `device.init_device()` called by train, translate, and score
+- allow torch 1.12 in requirements.txt
+
+## [3.1.25]
+
+## Changed
+- Updated to sacrebleu==2.3.1. Changed default BLEU floor smoothing offset from 0.01 to 0.1.
+
+## [3.1.24]
+
+### Fixed
+
+- Updated DeepSpeed checkpoint conversion to support newer versions of DeepSpeed.
+
+## [3.1.23]
+
+### Changed
+
+- Change decoder softmax size logging level from info to debug.
+
+## [3.1.22]
+
+### Added
+
+- log beam search avg output vocab size
+
+### Changed
+
+- common base Search for GreedySearch and BeamSearch
+- .pylintrc: suppress warnings about deprecated pylint warning suppressions
+
+## [3.1.21]
+
+### Fixed
+
+- Send skip_nvs and nvs_thresh args now to Translator constructor in sockeye-translate instead of ignoring them.
+
+## [3.1.20]
+
+### Added
+
+- Added training support for [DeepSpeed](https://www.deepspeed.ai/).
+  - Installation: `pip install deepspeed`
+  - Usage: `deepspeed --no_python ... sockeye-train ...`
+  - DeepSpeed mode uses Zero Redundancy Optimizer (ZeRO) stage 1 ([Rajbhandari et al., 2019](https://arxiv.org/abs/1910.02054v3)).
+  - Run in FP16 mode with `--deepspeed-fp16` or BF16 mode with `--deepspeed-bf16`.
+
+## [3.1.19]
+
+### Added
+
+- Clean up GPU and CPU memory used during training initialization before starting the main training loop.
+
+### Changed
+
+- Refactored training code in advance of adding DeepSpeed support:
+  - Moved logic for flagging interleaved key-value parameters from layers.py to model.py.
+  - Refactored LearningRateScheduler API to be compatible with PyTorch/DeepSpeed.
+  - Refactored optimizer and learning rate scheduler creation to be modular.
+  - Migrated to ModelWithLoss API, which wraps a Sockeye model and its losses in a single module.
+  - Refactored primary and secondary worker logic to reduce redundant calculations.
+  - Refactored code for saving/loading training states.
+  - Added utility code for managing model/training configurations.
+
+### Removed
+
+- Removed unused training option `--learning-rate-t-scale`.
+
+## [3.1.18]
+
+### Added
+
+- Added `sockeye-train` and `sockeye-translate` option `--clamp-to-dtype` that clamps outputs of transformer attention, feed-forward networks, and process blocks to the min/max finite values for the current dtype. This can prevent inf/nan values from overflow when running large models in float16 mode. See: https://discuss.huggingface.co/t/t5-fp16-issue-is-fixed/3139
+
+## [3.1.17]
+
+### Added
+
+- Added support for offline model quantization with `sockeye-quantize`.
+  - Pre-quantizing a model avoids the load-time memory spike of runtime quantization. For example, a float16 model loads directly as float16 instead of loading as float32 then casting to float16.
+
+## [3.1.16]
+
+### Added
+- Added nbest list reranking options using isometric translation criteria as proposed in an ICASSP 2021 paper https://arxiv.org/abs/2110.03847.
+To use this feature pass a criterion (`isometric-ratio, isometric-diff, isometric-lc`) when specifying `--metric`.
+- Added `--output-best-non-blank` to output non-blank best hypothesis from the nbest list.
+
+## [3.1.15]
+
+### Fixed
+
+- Fix type of valid_length to be pt.Tensor instead of Optional[pt.Tensor] = None for jit tracing
+
+## [3.1.14]
+
+### Added
+- Added the implementation of Neural vocabulary selection to Sockeye as presented in our NAACL 2022 paper "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation" (Tobias Domhan, Eva Hasler, Ke Tran, Sony Trenous, Bill Byrne and Felix Hieber).
+  - To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`. This will train a model with Neural Vocabulary Selection that is automatically used by `sockeye-translate`. If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
+
+## [3.1.13]
+
+### Added
+
+- Added `sockeye-train` argument `--no-reload-on-learning-rate-reduce` that disables reloading the best training checkpoint when reducing the learning rate. This currently only applies to the `plateau-reduce` learning rate scheduler since other schedulers do not reload checkpoints.
+
+## [3.1.12]
+
+### Fixed
+
+- Fix scoring with batches of size 1 (whic may occur when `|data| % batch_size == 1`.
+
+## [3.1.11]
+
+### Fixed
+
+- When resuming training with a fully trained model, `sockeye-train` will correctly exit without creating a duplicate (but separately numbered) checkpoint.
+
+## [3.1.10]
+
+### Fixed
+
+- When loading parameters, SockeyeModel now ignores false positive missing parameters for traced modules. These modules use the same parameters as their original non-traced versions.
+
+## [3.1.9]
+
+### Changed
+
+- Clarified usage of `batch_size` in Translator code.
+
+## [3.1.8]
+
+### Fixed
+
+- When saving parameters, SockeyeModel now skips parameters for traced modules because these modules are created at runtime and use the same parameters as non-traced versions. When loading parameters, SockeyeModel ignores parameters for traced modules that may have been saved by earlier versions.
+
+## [3.1.7]
+
+### Changed
+
+- SockeyeModel components are now traced regardless of whether `inference_only` is set, including for the CheckpointDecoder during training.
+
+## [3.1.6]
+
+### Changed
+
+- Moved offsetting of topk scores out of the (traced) TopK module. This allows sending requests of variable
+  batch size to the same Translator/Model/BeamSearch instance.
+
+## [3.1.5]
+
+### Changed
+- Allow PyTorch 1.11 in requirements
+
+## [3.1.4]
+
+### Added
+- Added support for the use of adding target prefix and target prefix factors to the input in JSON format during inference.
+
+## [3.1.3]
+
+### Added
+- Added support for the use of adding source prefixes to the input in JSON format during inference.
+
+## [3.1.2]
+
+### Changed
+- Optimized creation of source length mask by using `expand` instead of `repeat_interleave`.
+
+## [3.1.1]
+
+### Changed
+- Updated torch dependency to 1.10.x (`torch>=1.10.0,<1.11.0`)
+
+## [3.1.0]
+Sockeye is now exclusively based on Pytorch.
+
+### Changed
+- Renamed `x_pt` modules to `x`. Updated entry points in `setup.py`.
+
+### Removed
+- Removed MXNet from the codebase
+- Removed device locking / GPU acquisition logic. Removed dependency on `portalocker`.
+- Removed arguments `--softmax-temperature`, `--weight-init-*`, `--mc-dropout`, `--horovod`, `--device-ids
+- Removed all MXNet-related tests
+
+## [3.0.15]
+
+### Fixed
+- Fixed GPU-based scoring by copying to cpu tensor first before converting to numpy.
+
+## [3.0.14]
+
+### Added
+- Added support for Translation Error Rate (TER) metric as implemented in sacrebleu==1.4.14.
+  Checkpoint decoder metrics will now include TER scores and early stopping can be determined
+  via TER improvements (`--optimized-metric ter`)
+
+## [3.0.13]
+
+### Changed
+- use `expand` instead of `repeat` for attention masks to not allocate additional memory
+- avoid repeated `transpose` for initializing cached encoder-attention states in the decoder.
+
+## [3.0.12]
+
+### Removed
+- Removed unused code for Weight Normalization. Minor code cleanups.
+
+## [3.0.11]
+
+### Fixed
+
+- Fixed training with a single, fixed learning rate instead of a rate scheduler (`--learning-rate-scheduler none --initial-learning-rate ...`).
+
+## [3.0.10]
+
+### Changed
+
+- End-to-end trace decode_step of the Sockeye model. Creates less overhead during decoding and a small speedup.
+
+## [3.0.9]
+
+### Fixed
+
+- Fixed not calling the traced target embedding module during inference.
+
+## [3.0.8]
+
+### Changed
+
+- Add support for JIT tracing source/target embeddings and JIT scripting the output layer during inference.
+
+## [3.0.7]
+
+### Changed
+
+- Improve training speed by using`torch.nn.functional.multi_head_attention_forward` for self- and encoder-attention
+  during training. Requires reorganization of the parameter layout of the key-value input projections,
+  as the current Sockeye attention interleaves for faster inference.
+  Attention masks (both for source masking and autoregressive masks need some shape adjustments as requirements
+  for the fused MHA op differ slightly).
+  - Non-interleaved format for joint key-value input projection parameters:
+    `in_features=hidden, out_features=2*hidden -> Shape: (2*hidden, hidden)`
+  - Interleaved format for joint-key-value input projection stores key and value parameters, grouped by heads:
+    `Shape: ((num_heads * 2 * hidden_per_head), hidden)`
+  - Models save and load key-value projection parameters in interleaved format.
+  - When `model.training == True` key-value projection parameters are put into
+    non-interleaved format for `torch.nn.functional.multi_head_attention_forward`
+  - When `model.training == False`, i.e. model.eval() is called, key-value projection
+    parameters are again converted into interleaved format in place.
+
+## [3.0.6]
+
+### Fixed
+
+- Fixed checkpoint decoder issue that prevented using `bleu` as `--optimized-metric` for distributed training ([#995](https://github.com/awslabs/sockeye/issues/995)).
+
+## [3.0.5]
+
+### Fixed
+
+- Fixed data download in multilingual tutorial.
+
+## [3.0.4]
+
+###
+
+- Make sure data permutation indices are in int64 format (doesn't seem to be the case by default on all platforms).
+
+## [3.0.3]
+
+### Fixed
+
+- Fixed ensemble decoding for models without target factors.
+
+## [3.0.2]
+
+### Changed
+
+- `sockeye-translate`: Beam search now computes and returns secondary target factor scores. Secondary target factors
+  do not participate in beam search, but are greedily chosen at every time step. Accumulated scores for secondary factors
+  are not normalized by length. Factor scores are included in JSON output (``--output-type json``).
+- `sockeye-score` now returns tab-separated scores for each target factor. Users can decide how to combine factor scores
+  depending on the downstream application. Score for the first, primary factor (i.e. output words) are normalized,
+  other factors are not.
+
+## [3.0.1]
+
+### Fixed
+
+- Parameter averaging (`sockeye-average`) now always uses the CPU, which enables averaging parameters from GPU-trained models on CPU-only hosts.
+
+## [3.0.0] Sockeye 3: Fast Neural Machine Translation with PyTorch
+
+Sockeye is now based on PyTorch.
+We maintain backwards compatibility with MXNet models in version 2.3.x until 3.1.0.
+If MXNet 2.x is installed, Sockeye can run both with PyTorch or MXNet but MXNet is no longer strictly required.
+
+### Added
+
+- Added model converter CLI `sockeye.mx_to_pt` that converts MXNet models to PyTorch models.
+- Added `--apex-amp` training argument that runs entire model in FP16 mode, replaces `--dtype float16` (requires [Apex](https://github.com/NVIDIA/apex)).
+- Training automatically uses Apex fused optimizers if available (requires [Apex](https://github.com/NVIDIA/apex)).
+- Added training argument `--label-smoothing-impl` to choose label smoothing implementation (default of `mxnet` uses the same logic as MXNet Sockeye 2).
+
+### Changed
+
+- CLI names point to the PyTorch code base (e.g. `sockeye-train` etc.).
+- MXNet-based CLIs are now accessible via `sockeye-<name>-mx`.
+- MXNet code requires MXNet >= 2.0 since we adopted the new numpy interface.
+- `sockeye-train` now uses PyTorch's distributed data-parallel mode for multi-process (multi-GPU) training. Launch with: `torchrun --no_python --nproc_per_node N sockeye-train --dist ...`
+- Updated the [quickstart tutorial](docs/tutorials/wmt_large.md) to cover multi-device training with PyTorch Sockeye.
+- Changed `--device-ids` argument (plural) to `--device-id` (singular). For multi-GPU training, see distributed mode noted above.
+- Updated default value: `--pad-vocab-to-multiple-of 8`
+- Removed `--horovod` argument used with `horovodrun` (use `--dist` with `torchrun`).
+- Removed `--optimizer-params` argument (use `--optimizer-betas`, `--optimizer-eps`).
+- Removed `--no-hybridization` argument (use `PYTORCH_JIT=0`, see [Disable JIT for Debugging](https://pytorch.org/docs/stable/jit.html#disable-jit-for-debugging)).
+- Removed `--omp-num-threads` argument (use `--env=OMP_NUM_THREADS=N`).
+
+### Removed
+
+- Removed support for constrained decoding (both positive and negative lexical constraints)
+- Removed support for beam histories
+- Removed `--amp-scale-interval` argument.
+- Removed `--kvstore` argument.
+- Removed arguments: `--weight-init`, `--weight-init-scale` `--weight-init-xavier-factor-type`, `--weight-init-xavier-rand-type`
+- Removed `--decode-and-evaluate-device-id` argument.
+- Removed arguments: `--monitor-pattern'`, `--monitor-stat-func`
+- Removed CUDA-specific requirements files in `requirements/`
+
+## [2.3.24]
+### Added
+
+- Use of the safe yaml loader for the model configuration files.
+
+## [2.3.23]
+### Changed
+
+- Do not sort BIAS_STATE in beam search. It is constant across decoder steps.
+
+## [2.3.22]
+### Fixed
+
+- The previous commit introduced a regression for vocab creation. The results was that the vocabulary was created on the input characters rather than on tokens.
+
+## [2.3.21]
+### Added
+
+- Extended parallelization of data preparation to vocabulary and statistics creation while minimizing the overhead of sharding.
+
+## [2.3.20]
+### Added
+
+- Added debug logging for restrict_lexicon lookups
+
+## [2.3.19]
+### Changed
+
+- When training only the decoder (`--fixed-param-strategy all_except_decoder`), disable autograd for the encoder and embeddings to save memory.
+
+## [2.3.18]
+### Changed
+
+- Updated Docker builds and documentation.  See [sockeye_contrib/docker](sockeye_contrib/docker).
+
+## [2.3.17]
+### Added
+- Added an alternative, faster implementation of greedy search. The '--greedy' flag to `sockeye.translate` will enable it. This implementation does not support hypothesis scores, batch decoding, or lexical constraints."
+
+## [2.3.16]
+
+### Added
+- Added option `--transformer-feed-forward-use-glu` to use Gated Linear Units in transformer feed forward networks ([Dauphin et al., 2016](https://arxiv.org/abs/1612.08083); [Shazeer, 2020](https://arxiv.org/abs/2002.05202)).
+
+## [2.3.15]
+
+### Changed
+- Optimization: Decoder class is now a complete HybridBlock (no forward method).
+
+## [2.3.14]
+
+### Changed
+- Updated to [MXNet 1.8.0](https://github.com/apache/incubator-mxnet/tree/1.8.0)
+- Removed dependency support for Cuda 9.2 (no longer supported by MXNet 1.8).
+- Added dependency support for Cuda 11.0 and 11.2.
+- Updated Python requirement to 3.7 and later. (Removed backporting `dataclasses` requirement)
+
+## [2.3.13]
+
+### Added
+- Target factors are now also collected for nbest translations (and stored in the JSON output handler).
+
+## [2.3.12]
+
+### Added
+- Added `--config` option to `prepare_data` CLI to allow setting commandline flags via a yaml config.
+- Flags for the `prepare_data` CLI are now stored in the output folder under `args.yaml`
+  (equivalent to the behavior of `sockeye_train`)
+
+## [2.3.11]
+
+### Added
+- Added option `prevent_unk` to avoid generating `<unk>` token in beam search.
+
+## [2.3.10]
+
+### Changed
+
+- Make sure that the top N best params files retained, even if N > --keep-last-params. This ensures that model
+  averaging will not be crippled when keeping only a few params files during training. This can result in a
+  significant savings of disk space during training.
+
+## [2.3.9]
+
+### Added
+
+- Added scripts for processing Sockeye benchmark output (`--output-type benchmark`):
+  - [benchmark_to_output.py](sockeye_contrib/benchmark/benchmark_to_output.py) extracts translations
+  - [benchmark_to_percentiles.py](sockeye_contrib/benchmark/benchmark_to_percentiles.py) computes percentiles
+
+## [2.3.8]
+
+### Fixed
+
+- Fix problem identified in issue #925 that caused learning rate
+  warmup to fail in some instances when doing continued training
+
+## [2.3.7]
+
+### Changed
+
+- Use dataclass module to simplify Config classes. No functional change.
+
+## [2.3.6]
+
+### Fixed
+
+- Fixes the problem identified in issue #890, where the lr_scheduler
+  does not behave as expected when continuing training. The problem is
+  that the lr_scheduler is kept as part of the optimizer, but the
+  optimizer is not saved when saving state. Therefore, every time
+  training is restarted, a new lr_scheduler is created with initial
+  parameter settings. Fix by saving and restoring the lr_scheduling
+  separately.
 
 ## [2.3.5]
 

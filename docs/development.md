@@ -17,7 +17,7 @@ Install them via
 We welcome contributions to sockeye in form of pull requests on Github.
 If you want to develop sockeye, please adhere to the following development guidelines.
 
-- Write Python 3.5, PEP8 compatible code.
+- Write Python 3.7, PEP8 compatible code.
 
 - Functions should be documented with Sphinx-style docstrings and
    should include type hints for static code analyzers.
@@ -30,16 +30,6 @@ def foo(bar: <type of bar>) -> <returnType>:
     :param bar: <Description of bar argument followed by a period>.
     :return: <Description of the return value followed by a period>.
     """
-```
-
-- Sockeye 2 uses the [Gluon API](http://mxnet.incubator.apache.org/versions/master/gluon/index.html).
-- When using MXNet operators, preceding symbolic or hybridizable statements in the code with the resulting, expected shape of the tensor greatly improves readability of the code:
-
-```python
-# (batch_size, num_hidden)
-data = mx.sym.Variable('data')
-# (batch_size * num_hidden,)
-data = mx.sym.reshape(data=data, shape=(-1))
 ```
 
 - The desired line length of Python modules should not exceed 120 characters.
@@ -74,7 +64,8 @@ Integration tests run Sockeye CLI tools on small, synthetic data to test for fun
 ## System Tests
 
 System tests test Sockeye CLI tools on synthetic tasks (digit sequence copying & sorting) for functional correctness and successful learning. They assert on validation metrics (perplexity) and BLEU scores from decoding.
-A subset of the system tests are run on Travis for every commit. The full set of system tests is run as a nightly Travis Cron job. You can manually run the system tests with:
+A subset of the system tests are run as part of Github workflows for every commit/pull request.
+You can manually run the system tests with:
 
 ```bash
 > pytest test/system
@@ -111,6 +102,6 @@ opensource-codeofconduct@amazon.com with any additional questions or comments.
 
 ## Licensing
 
-See the [LICENSE](https://github.com/awslabs/sockeye/blob/master/LICENSE) file for our project's licensing. We will ask you confirm the licensing of your contribution.
+See the [LICENSE](https://github.com/awslabs/sockeye/blob/main/LICENSE) file for our project's licensing. We will ask you confirm the licensing of your contribution.
 
 We may ask you to sign a [Contributor License Agreement (CLA)](http://en.wikipedia.org/wiki/Contributor_License_Agreement) for larger changes.

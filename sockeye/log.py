@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -147,9 +147,13 @@ def log_sockeye_version(logger):
         from sockeye.git_version import git_hash
     except ImportError:
         git_hash = "unknown"
-    logger.info("Sockeye version %s, commit %s, path %s", __version__, git_hash, __file__)
+    logger.info(f"Sockeye: {__version__}, commit {git_hash}, path {__file__}")
 
 
-def log_mxnet_version(logger):
-    from mxnet import __version__, __file__
-    logger.info("MXNet version %s, path %s", __version__, __file__)
+def log_torch_version(logger):
+    try:
+        from torch import __version__, __file__
+        info = f'PyTorch: {__version__} ({__file__})'
+    except ImportError:
+        info = 'PyTorch unavailable'
+    logger.info(info)

@@ -14,41 +14,47 @@
 import pytest
 
 import numpy as np
+import torch
 
 from sockeye import lr_scheduler
 
 
-@pytest.mark.parametrize('learning_rate_warmup,learning_rate_t_scale',
-                         [(1, 1), (3, 2), (10, .5), (20, 1)])
-def test_inv_sqrt_decay_scheduler(learning_rate_warmup, learning_rate_t_scale):
-    scheduler = lr_scheduler.get_lr_scheduler('inv-sqrt-decay',
-                                              learning_rate_t_scale=learning_rate_t_scale,
-                                              learning_rate_reduce_factor=0,
-                                              learning_rate_reduce_num_not_improved=0,
-                                              learning_rate_warmup=learning_rate_warmup,
-                                              max_updates=10)
-    scheduler.base_lr = 1
+@pytest.mark.parametrize('learning_rate_warmup', [1, 20])
+def test_inv_sqrt_decay_scheduler(learning_rate_warmup):
+    # Sockeye implementation
+    scheduler_class, scheduler_kwargs = lr_scheduler.get_lr_scheduler(scheduler_type='inv-sqrt-decay',
+                                                                      base_learning_rate=1,
+                                                                      learning_rate_reduce_factor=0,
+                                                                      learning_rate_reduce_num_not_improved=0,
+                                                                      learning_rate_warmup=learning_rate_warmup,
+                                                                      max_updates=10)
+    assert scheduler_class is not None
+    scheduler = scheduler_class(optimizer=torch.optim.Adam(params=[torch.zeros(0)]), **scheduler_kwargs)
+    assert isinstance(scheduler, lr_scheduler.LearningRateSchedulerInvSqrtDecay)
 
-    # Reference formula from Transformer paper, plus time scaling
-    alternate_implementation = lambda t: min((t * learning_rate_t_scale)**-0.5,
-                                             (t * learning_rate_t_scale) * learning_rate_warmup**-1.5)
+    # Reference formula from Transformer paper
+    alternate_implementation = lambda t: min(t**-0.5, t * learning_rate_warmup**-1.5)
 
     expected_schedule = [alternate_implementation(t) for t in range(1, 11)]
-
-    actual_schedule = [scheduler(t) for t in range(1, 11)]
-
+    actual_schedule = []
+    for t in range(1, 11):
+        # Check manual and automatic step numbers
+        scheduler.step(t if t % 2 else None)
+        actual_schedule.append(scheduler.get_last_lr()[0])
     assert np.isclose(expected_schedule, actual_schedule).all()
 
 
-
 def test_linear_decay_scheduler():
-    scheduler = lr_scheduler.get_lr_scheduler('linear-decay',
-                                              learning_rate_t_scale=1,
-                                              learning_rate_reduce_factor=0,
-                                              learning_rate_reduce_num_not_improved=0,
-                                              learning_rate_warmup=3,
-                                              max_updates=10)
-    scheduler.base_lr = 1
+    # Sockeye implementation
+    scheduler_class, scheduler_kwargs = lr_scheduler.get_lr_scheduler(scheduler_type='linear-decay',
+                                                                      base_learning_rate=1,
+                                                                      learning_rate_reduce_factor=0,
+                                                                      learning_rate_reduce_num_not_improved=0,
+                                                                      learning_rate_warmup=3,
+                                                                      max_updates=10)
+    assert scheduler_class is not None
+    scheduler = scheduler_class(optimizer=torch.optim.Adam(params=[torch.zeros(0)]), **scheduler_kwargs)
+    assert isinstance(scheduler, lr_scheduler.LearningRateSchedulerLinearDecay)
 
     # Warmup term * decay term
     expected_schedule = [
@@ -63,7 +69,12 @@ def test_linear_decay_scheduler():
         (3/3) * (1/10),
         (3/3) * (0/10),
     ]
-    actual_schedule = [scheduler(t) for t in range(1, 11)]
+
+    actual_schedule = []
+    for t in range(1, 11):
+        # Check manual and automatic step numbers
+        scheduler.step(t if t % 2 else None)
+        actual_schedule.append(scheduler.get_last_lr()[0])
     assert np.isclose(expected_schedule, actual_schedule).all()
 
 
@@ -73,21 +84,25 @@ def test_linear_decay_scheduler():
                           ('linear-decay', lr_scheduler.LearningRateSchedulerLinearDecay),
                           ('plateau-reduce', lr_scheduler.LearningRateSchedulerPlateauReduce)])
 def test_get_lr_scheduler(scheduler_type, expected_instance):
-    scheduler = lr_scheduler.get_lr_scheduler(scheduler_type,
-                                              learning_rate_t_scale=1,
-                                              learning_rate_reduce_factor=0.5,
-                                              learning_rate_reduce_num_not_improved=16,
-                                              learning_rate_warmup=1000,
-                                              max_updates=10000)
+    scheduler_class, scheduler_kwargs = lr_scheduler.get_lr_scheduler(scheduler_type=scheduler_type,
+                                                                      base_learning_rate=1,
+                                                                      learning_rate_reduce_factor=0.5,
+                                                                      learning_rate_reduce_num_not_improved=16,
+                                                                      learning_rate_warmup=1000,
+                                                                      max_updates=10000)
     if expected_instance is None:
-        assert scheduler is None
+        assert scheduler_class is None
+        assert scheduler_kwargs == {}
     else:
+        assert scheduler_class is not None
+        scheduler = scheduler_class(optimizer=torch.optim.Adam(params=[torch.zeros(0)]), **scheduler_kwargs)
         assert isinstance(scheduler, expected_instance)
 
 
 def test_get_lr_scheduler_no_reduce():
-    scheduler = lr_scheduler.get_lr_scheduler('plateau-reduce',
-                                              learning_rate_t_scale=1,
-                                              learning_rate_reduce_factor=1.0,
-                                              learning_rate_reduce_num_not_improved=16)
-    assert scheduler is None
+    scheduler_class, scheduler_kwargs = lr_scheduler.get_lr_scheduler(scheduler_type='plateau-reduce',
+                                                                      base_learning_rate=1,
+                                                                      learning_rate_reduce_factor=1.0,
+                                                                      learning_rate_reduce_num_not_improved=16)
+    assert scheduler_class is None
+    assert scheduler_kwargs == {}

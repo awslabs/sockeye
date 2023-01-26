@@ -2,18 +2,18 @@ name: push and pull request testing
 on:
   push:
     branches:
-    - master
+    - main
   pull_request:
     branches:
-    - master
+    - main
 
 jobs:
   build:
     strategy:
-      max-parallel: 4
+      max-parallel: 8
       fail-fast: false
       matrix:
-        python-version: [3.6, 3.7]
+        python-version: [3.7, 3.8]
         platform: [ubuntu-latest, macos-latest]
 
     runs-on: ${{ matrix.platform }}
@@ -30,8 +30,16 @@ jobs:
       run: python -m pip install --upgrade pip
     - name: Sockeye requirements
       run: pip install -r requirements/requirements.txt
+    - name: DeepSpeed requirements
+      run: pip install -r requirements/requirements.deepspeed.txt
+    - name: Faiss requirements
+      run: |
+        if [ "$RUNNER_OS" == "Linux" ]; then
+          pip install -r requirements/requirements.faiss-cpu.txt
+        fi
+      shell: bash
     - name: Development requirements
-      run: pip install -r requirements/requirements.dev.txt --use-deprecated=legacy-resolver
+      run: pip install -r requirements/requirements.dev.txt
     - name: Unit tests
       run: |
         pytest --version
@@ -39,8 +47,8 @@ jobs:
     - name: Pylint
       run: |
         pylint --version
-        pylint --rcfile=pylintrc sockeye -E
-        pylint --rcfile=pylintrc test -E
+        pylint --rcfile=.pylintrc sockeye
+        pylint --rcfile=.pylintrc test --disable=E1102
     - name: MyPy
       run: |
         mypy --version

@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -34,16 +34,20 @@ from .log import setup_main_logger, log_sockeye_version
 logger = logging.getLogger(__name__)
 
 
-def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str], offset: Optional[float] = 0.01) -> float:
+DEFAULT_OFFSET = sacrebleu.BLEU.SMOOTH_DEFAULTS['floor']  # 0.1
+
+
+def raw_corpus_bleu(hypotheses: Iterable[str], references: Iterable[str],
+                    offset: Optional[float] = DEFAULT_OFFSET) -> float:
     """
-    Simple wrapper around sacreBLEU's BLEU without tokenization and smoothing.
+    Simple wrapper around sacreBLEU's BLEU without tokenization and floor smoothing.
 
     :param hypotheses: Hypotheses stream.
     :param references: Reference stream.
     :param offset: Smoothing constant.
     :return: BLEU score as float between 0 and 1.
     """
-    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=offset).score / 100.0
+    return sacrebleu.raw_corpus_bleu(hypotheses, [references], smooth_value=offset).score / 100.0  # type: ignore
 
 
 def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -54,7 +58,19 @@ def raw_corpus_chrf(hypotheses: Iterable[str], references: Iterable[str]) -> flo
     :param references: Reference stream.
     :return: chrF score as float between 0 and 1.
     """
-    return sacrebleu.corpus_chrf(hypotheses, [references]).score
+    return sacrebleu.corpus_chrf(hypotheses, [references]).score  # type: ignore
+
+
+def raw_corpus_ter(hypotheses: Iterable[str], references: Iterable[str]) -> float:
+    """
+    Simple wrapper around sacreBLEU's TER implementation, without tokenization.
+
+    :param hypotheses: Hypotheses stream.
+    :param references: Reference stream.
+    :return: TER score as float between 0 and 1.
+    """
+    ter = sacrebleu.metrics.TER()
+    return ter.corpus_score(hypotheses, [references]).score  # type: ignore
 
 
 def raw_corpus_rouge1(hypotheses: Iterable[str], references: Iterable[str]) -> float:
@@ -104,7 +120,7 @@ def raw_corpus_length_ratio(hypotheses: Iterable[str], references: Iterable[str]
 
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
-                                                 'respect to a reference set. If multiple hypotheses files are given'
+                                                 'respect to a reference set. If multiple hypotheses files are given '
                                                  'the mean and standard deviation of the metrics are reported.')
     arguments.add_evaluate_args(params)
     arguments.add_logging_args(params)
@@ -145,6 +161,8 @@ def main():
             func = raw_corpus_rouge2
         elif name == C.ROUGEL:
             func = raw_corpus_rougel
+        elif name == C.TER:
+            func = raw_corpus_ter
         else:
             raise ValueError("Unknown metric %s." % name)
         metrics.append((name, func))
@@ -168,8 +186,8 @@ def _print_mean_std_score(metrics: List[Tuple[str, Callable]], scores: Dict[str,
     scores_mean_std = []  # type: List[str]
     for name, _ in metrics:
         if len(scores[name]) > 1:
-            score_mean = np.asscalar(np.mean(scores[name]))
-            score_std = np.asscalar(np.std(scores[name], ddof=1))
+            score_mean = np.mean(scores[name]).item()
+            score_std = np.std(scores[name], ddof=1).item()
             scores_mean_std.append("%.3f\t%.3f" % (score_mean, score_std))
         else:
             score = scores[name][0]

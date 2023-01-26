@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -18,7 +18,7 @@ from itertools import chain
 from typing import Optional
 
 import sockeye.constants as C
-from . import data_io
+from sockeye.utils import smart_open
 from . import inference
 
 
@@ -31,7 +31,7 @@ def get_output_handler(output_type: str,
     :raises: ValueError for unknown output_type.
     :return: Output handler.
     """
-    output_stream = sys.stdout if output_fname is None else data_io.smart_open(output_fname, mode='w')
+    output_stream = sys.stdout if output_fname is None else smart_open(output_fname, mode='w')
     if output_type == C.OUTPUT_HANDLER_TRANSLATION:
         return StringOutputHandler(output_stream)
     elif output_type == C.OUTPUT_HANDLER_SCORE:
@@ -146,7 +146,11 @@ class ScoreOutputHandler(OutputHandler):
         :param t_output: Translator output.
         :param t_walltime: Total walltime for translation.
         """
-        print("{:.6f}".format(t_output.score), file=self.stream, flush=True)
+        result = "{:.6f}".format(t_output.score)
+        if hasattr(t_output, 'factor_scores') and t_output.factor_scores is not None:
+            factor_scores = "\t".join("{:.6f}".format(fs) for fs in t_output.factor_scores)
+            result = f"{result}\t{factor_scores}"
+        print(result, file=self.stream, flush=True)
 
     def reports_score(self) -> bool:
         return True
@@ -205,43 +209,12 @@ class BenchmarkOutputHandler(StringOutputHandler):
         return False
 
 
-class BeamStoringHandler(OutputHandler):
-    """
-    Output handler to store beam histories in JSON format.
-
-    :param stream: Stream to write translations to (e.g. sys.stdout).
-    """
-
-    def __init__(self, stream):
-        self.stream = stream
-
-    def handle(self,
-               t_input: inference.TranslatorInput,
-               t_output: inference.TranslatorOutput,
-               t_walltime: float = 0.):
-        """
-        :param t_input: Translator input.
-        :param t_output: Translator output.
-        :param t_walltime: Total wall-clock time for translation.
-        """
-        assert len(t_output.beam_histories) >= 1, "Translator output should contain beam histories."
-        # If the sentence was max_len split, we may have more than one history
-        for h in t_output.beam_histories:
-            # Add the number of steps in each beam
-            h["number_steps"] = len(h["predicted_tokens"])  # type: ignore
-            # Some outputs can have more than one beam, add the id for bookkeeping
-            h["id"] = t_output.sentence_id  # type: ignore
-            print(json.dumps(h, sort_keys=True), file=self.stream, flush=True)
-
-    def reports_score(self) -> bool:
-        return False
-
-
 class JSONOutputHandler(OutputHandler):
     """
     Output single-line JSON objects.
     Carries over extra fields from the input.
     """
+
     def __init__(self, stream) -> None:
         self.stream = stream
 
@@ -264,6 +237,7 @@ class FactoredStringOutputHandler(OutputHandler):
     Returns a factored string if the model produces target factors. If there are no target factors the output
     is equivalent to StringOutputHandler
     """
+
     def __init__(self, stream):
         self.stream = stream
 

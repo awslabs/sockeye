@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -14,17 +14,8 @@
 """
 Defines various constants used throughout the project
 """
-import sys
-
-import mxnet as mx
+import torch as pt
 import numpy as np
-
-# MXNet environment variables
-MXNET_SAFE_ACCUMULATION = 'MXNET_SAFE_ACCUMULATION'
-
-# Horovod environment variables
-HOROVOD_HIERARCHICAL_ALLREDUCE = 'HOROVOD_HIERARCHICAL_ALLREDUCE'
-HOROVOD_HIERARCHICAL_ALLGATHER = 'HOROVOD_HIERARCHICAL_ALLGATHER'
 
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
@@ -46,25 +37,17 @@ ARG_SEPARATOR = ":"
 # TODO: make this configurable in the model, separately per target factor.
 TARGET_FACTOR_SHIFT = True
 
-ENCODER_PREFIX = "encoder_"
-DECODER_PREFIX = "decoder_"
-EMBEDDING_PREFIX = "embed_"
-ATTENTION_PREFIX = "att_"
-COVERAGE_PREFIX = "cov_"
-TRANSFORMER_ENCODER_PREFIX = ENCODER_PREFIX + "transformer_"
-DEFAULT_OUTPUT_LAYER_PREFIX = "target_output_"
-TARGET_FACTOR_OUTPUT_LAYER_PREFIX = "target_output_factor%d_"
-LENRATIOS_OUTPUT_LAYER_PREFIX = "length_ratio_layer_"
+ENCODER_PREFIX = "encoder"
+DECODER_PREFIX = "decoder"
+DEFAULT_OUTPUT_LAYER_PREFIX = "output_layer"
+NVS_LAYER_PREFIX = "nvs"
 
 # SSRU
 SSRU_PREFIX = "ssru_"
 
 # embedding prefixes
-SOURCE_EMBEDDING_PREFIX = "source_" + EMBEDDING_PREFIX
-SOURCE_POSITIONAL_EMBEDDING_PREFIX = "source_pos_" + EMBEDDING_PREFIX
-TARGET_EMBEDDING_PREFIX = "target_" + EMBEDDING_PREFIX
-TARGET_POSITIONAL_EMBEDDING_PREFIX = "target_pos_" + EMBEDDING_PREFIX
-SHARED_EMBEDDING_PREFIX = "source_target_" + EMBEDDING_PREFIX
+SOURCE_EMBEDDING_PREFIX = "embedding_source"
+TARGET_EMBEDDING_PREFIX = "embedding_target"
 
 # source factors
 FACTORS_COMBINE_SUM = 'sum'
@@ -91,26 +74,6 @@ FIXED_POSITIONAL_EMBEDDING = "fixed"
 LEARNED_POSITIONAL_EMBEDDING = "learned"
 POSITIONAL_EMBEDDING_TYPES = [NO_POSITIONAL_EMBEDDING, FIXED_POSITIONAL_EMBEDDING, LEARNED_POSITIONAL_EMBEDDING]
 
-DEFAULT_INIT_PATTERN = ".*"
-
-# init types
-INIT_XAVIER = 'xavier'
-INIT_UNIFORM = 'uniform'
-INIT_TYPES = [INIT_XAVIER, INIT_UNIFORM]
-
-INIT_XAVIER_FACTOR_TYPE_IN = "in"
-INIT_XAVIER_FACTOR_TYPE_OUT = "out"
-INIT_XAVIER_FACTOR_TYPE_AVG = "avg"
-INIT_XAVIER_FACTOR_TYPES = [INIT_XAVIER_FACTOR_TYPE_IN, INIT_XAVIER_FACTOR_TYPE_OUT, INIT_XAVIER_FACTOR_TYPE_AVG]
-
-RAND_TYPE_UNIFORM = 'uniform'
-RAND_TYPE_GAUSSIAN = 'gaussian'
-
-# Embedding init types
-EMBED_INIT_PATTERN = '(%s|%s|%s)weight' % (SOURCE_EMBEDDING_PREFIX, TARGET_EMBEDDING_PREFIX, SHARED_EMBEDDING_PREFIX)
-EMBED_INIT_DEFAULT = 'default'
-EMBED_INIT_NORMAL = 'normal'
-EMBED_INIT_TYPES = [EMBED_INIT_DEFAULT, EMBED_INIT_NORMAL]
 DEFAULT_NUM_EMBED = 512
 
 # weight tying components
@@ -124,9 +87,9 @@ WEIGHT_TYING_SRC_TRG = 'src_trg'
 WEIGHT_TYING_SRC_TRG_SOFTMAX = 'src_trg_softmax'
 WEIGHT_TYING_TYPES = [WEIGHT_TYING_NONE, WEIGHT_TYING_SRC_TRG_SOFTMAX, WEIGHT_TYING_SRC_TRG, WEIGHT_TYING_TRG_SOFTMAX]
 
-# default decoder prefixes
-TRANSFORMER_DECODER_PREFIX = DECODER_PREFIX + "transformer_"
-TRANSFORMER_SSRU_DECODER_PREFIX = DECODER_PREFIX + SSRU_TRANSFORMER
+NVS_TYPE_LOGIT_MAX = "logit_max"
+NVS_TYPE_EOS = "eos"
+NVS_TYPES = [NVS_TYPE_LOGIT_MAX, NVS_TYPE_EOS]
 
 # Activation types
 RELU = "relu"
@@ -137,39 +100,17 @@ GELU = "gelu"
 TRANSFORMER_ACTIVATION_TYPES = [RELU, SWISH1, GELU]
 
 # default I/O variable names
-SOURCE_NAME = "source"
-SOURCE_LENGTH_NAME = "source_length"
-TARGET_NAME = "target"
 TARGET_LABEL_NAME = "target_label"
 TARGET_FACTOR_LABEL_NAME = "target_factor%d_label"
 LENRATIO_LABEL_NAME = "length_ratio_label"
-LENRATIO_LABEL_OUTPUT_NAME = "length_ratio_label" + "_output"
 LENRATIO_NAME = "length_ratio"
-LENRATIO_LOSS_NAME = LENRATIO_NAME + "_loss"
-LENRATIO_OUTPUT_NAME = LENRATIO_NAME + "_output"
-LEXICON_NAME = "lexicon"
 
-SOURCE_ENCODED_NAME = "encoded_source"
-TARGET_PREVIOUS_NAME = "prev_target_word_id"
-HIDDEN_PREVIOUS_NAME = "prev_hidden"
-SOURCE_DYNAMIC_PREVIOUS_NAME = "prev_dynamic_source"
-
-LOGIT_INPUTS_NAME = "logit_inputs"
 LOGITS_NAME = "logits"
 FACTOR_LOGITS_NAME = "factor%d_logits"
-SOFTMAX_NAME = "softmax"
-SOFTMAX_OUTPUT_NAME = SOFTMAX_NAME + "_output"
+
+NVS_PRED_NAME = "nvs_pred"
 
 MEASURE_SPEED_EVERY = 50  # measure speed and metrics every X batches
-
-# Monitor constants
-STAT_FUNC_DEFAULT = "mx_default"  # default MXNet monitor stat func: mx.nd.norm(x)/mx.nd.sqrt(x.size)
-STAT_FUNC_MAX = 'max'
-STAT_FUNC_MIN = 'min'
-STAT_FUNC_MEAN = 'mean'
-MONITOR_STAT_FUNCS = {STAT_FUNC_DEFAULT: None,
-                      STAT_FUNC_MAX: lambda x: mx.nd.max(x),
-                      STAT_FUNC_MEAN: lambda x: mx.nd.mean(x)}
 
 # Inference constants
 DEFAULT_BEAM_SIZE = 5
@@ -181,24 +122,25 @@ BEAM_SEARCH_STOP_ALL = 'all'
 
 # State structure constants
 STEP_STATE = 's'
-BIAS_STATE = 'b'
+MASK_STATE = 'm'
 ENCODER_STATE = 'e'
 DECODER_STATE = 'd'
 
 # Inference Input JSON constants
 JSON_TEXT_KEY = "text"
 JSON_FACTORS_KEY = "factors"
+JSON_SOURCE_PREFIX_KEY = "source_prefix"
+JSON_SOURCE_PREFIX_FACTORS_KEY = "source_prefix_factors"
+JSON_TARGET_PREFIX_KEY = "target_prefix"
+JSON_TARGET_PREFIX_FACTORS_KEY = "target_prefix_factors"
+JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY = "use_target_prefix_all_chunks"
+JSON_KEEP_TARGET_PREFIX_KEY = "keep_target_prefix"
 JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
-JSON_ENCODING = "utf-8"
-
-# Lexical constraints
-BANK_ADJUSTMENT = 'even'
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
-CONFIG_NAME_FLOAT32 = CONFIG_NAME + ".float32"
 LOG_NAME = "log"
 JSON_SUFFIX = ".json"
 VOCAB_SRC_PREFIX = "vocab.src"
@@ -209,36 +151,37 @@ VOCAB_ENCODING = "utf-8"
 PARAMS_PREFIX = "params."
 PARAMS_NAME = PARAMS_PREFIX + "%05d"
 PARAMS_BEST_NAME = "params.best"
-PARAMS_BEST_NAME_FLOAT32 = PARAMS_BEST_NAME + ".float32"
 DECODE_OUT_NAME = "decode.output.{{factor}}.{checkpoint:05d}"
 DECODE_IN_NAME = "decode.source.{factor}"
 DECODE_REF_NAME = "decode.target.{factor}"
-SYMBOL_NAME = "symbol" + JSON_SUFFIX
 METRICS_NAME = "metrics"
 TENSORBOARD_NAME = "tensorboard"
+DEEPSPEED_LATEST_NAME = "latest"
 
 # training resumption constants
 TRAINING_STATE_DIRNAME = "training_state"
 TRAINING_STATE_TEMP_DIRNAME = "tmp.training_state"
 TRAINING_STATE_TEMP_DELETENAME = "delete.training_state"
-OPT_STATES_LAST = "mx_optimizer_last.pkl"
-OPT_STATES_BEST = "mx_optimizer_best.pkl"
-OPT_STATES_INITIAL = "mx_optimizer_initial.pkl"
+TRAINING_STATE_DEEPSPEED = "deepspeed"
+
+OPT_STATE_LAST = "optimizer_last.pkl"
+OPT_STATE_BEST = "optimizer_best.pkl"
+
+LR_SCHEDULER_LAST = "lr_scheduler_last.pkl"
+LR_SCHEDULER_BEST = "lr_scheduler_best.pkl"
+
 BUCKET_ITER_STATE_NAME = "bucket.pkl"
 RNG_STATE_NAME = "rng.pkl"
 TRAINING_STATE_NAME = "training.pkl"
-AMP_LOSS_SCALER_STATE_NAME = "amp_loss_scaler.pkl"
-SCHEDULER_STATE_NAME = "scheduler.pkl"
+GRAD_SCALER_STATE_NAME = "grad_scaler.pkl"
+APEX_AMP_STATE_NAME = "apex_amp_state.pkl"
 TRAINING_STATE_PARAMS_NAME = "params"
 ARGS_STATE_NAME = "args.yaml"
 
 # Arguments that may differ and still resume training
-ARGS_MAY_DIFFER = ["overwrite_output", "use_tensorboard", "quiet",
-                   "align_plot_prefix", "sure_align_threshold",
-                   "keep_last_params", "seed",
-                   "max_updates", "min_updates",
-                   "max_num_epochs", "min_num_epochs",
-                   "max_samples", "min_samples", "max_checkpoints", "max_seconds"]
+ARGS_MAY_DIFFER = ["device_id", "device_ids", "overwrite_output", "use_tensorboard", "quiet", "align_plot_prefix",
+                   "sure_align_threshold", "keep_last_params", "seed", "max_updates", "min_updates", "max_num_epochs",
+                   "min_num_epochs", "max_samples", "min_samples", "max_checkpoints", "max_seconds", "local_rank", "tf32"]
 
 # Other argument constants
 TRAINING_ARG_SOURCE = "--source"
@@ -256,7 +199,6 @@ INFERENCE_ARG_INPUT_FACTORS_LONG = "--input-factors"
 INFERENCE_ARG_INPUT_FACTORS_SHORT = "-if"
 TRAIN_ARGS_MONITOR_BLEU = "--decode-and-evaluate"
 TRAIN_ARGS_CHECKPOINT_INTERVAL = "--checkpoint-interval"
-TRAIN_ARGS_CHECKPOINT_FREQUENCY = "--checkpoint-frequency"
 TRAIN_ARGS_STOP_ON_DECODER_FAILURE = "--stop-training-on-decoder-failure"
 
 # Used to delimit factors on STDIN for inference
@@ -266,16 +208,6 @@ BATCH_TYPE_SENTENCE = "sentence"
 BATCH_TYPE_WORD = "word"
 BATCH_TYPE_MAX_WORD = "max-word"
 BATCH_TYPES = [BATCH_TYPE_SENTENCE, BATCH_TYPE_WORD, BATCH_TYPE_MAX_WORD]
-
-KVSTORE_DEVICE = "device"
-KVSTORE_LOCAL = "local"
-KVSTORE_SYNC = "dist_sync"
-KVSTORE_DIST_DEVICE_SYNC = "dist_device_sync"
-KVSTORE_DIST_ASYNC = "dist_async"
-KVSTORE_NCCL = 'nccl'
-KVSTORE_TYPES = [KVSTORE_DEVICE, KVSTORE_LOCAL, KVSTORE_SYNC,
-                 KVSTORE_DIST_DEVICE_SYNC, KVSTORE_DIST_ASYNC,
-                 KVSTORE_NCCL]
 
 # Training constants
 OPTIMIZER_ADAM = "adam"
@@ -296,11 +228,8 @@ GRADIENT_CLIPPING_TYPE_NORM = 'norm'
 GRADIENT_CLIPPING_TYPE_NONE = 'none'
 GRADIENT_CLIPPING_TYPES = [GRADIENT_CLIPPING_TYPE_ABS, GRADIENT_CLIPPING_TYPE_NORM, GRADIENT_CLIPPING_TYPE_NONE]
 
-GRADIENT_COMPRESSION_NONE = None
-GRADIENT_COMPRESSION_2BIT = "2bit"
-GRADIENT_COMPRESSION_TYPES = [GRADIENT_CLIPPING_TYPE_NONE, GRADIENT_COMPRESSION_2BIT]
-
-HOROVOD_SECONDARY_WORKERS_DIRNAME = 'secondary_workers'
+DIST_ENV_LOCAL_RANK = 'LOCAL_RANK'
+DIST_SECONDARY_WORKERS_LOGDIR = 'secondary_worker_logs'
 
 # output handler
 OUTPUT_HANDLER_TRANSLATION = "translation"
@@ -321,64 +250,68 @@ OUTPUT_HANDLERS_SCORING = [OUTPUT_HANDLER_SCORE,
 
 # metrics
 ACCURACY = 'accuracy'
-ACCURACY_SHORT_NAME = 'acc'
 PERPLEXITY = 'perplexity'
 PERPLEXITY_SHORT_NAME = 'ppl'
 LENRATIO_MSE = 'length-ratio-mse'
 BLEU = 'bleu'
 CHRF = 'chrf'
-ROUGE = 'rouge'
 ROUGE1 = 'rouge1'
 ROUGE2 = 'rouge2'
 ROUGEL = 'rougel'
+BOW_PERPLEXITY = 'bow-perplexity'
+TER = 'ter'
 LENRATIO = 'length-ratio-mse'
 AVG_TIME = "avg-sec-per-sent"
 DECODING_TIME = "decode-walltime"
-METRICS = [PERPLEXITY, ACCURACY, LENRATIO_MSE, BLEU, CHRF, ROUGE1]
-METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, CHRF: True, ROUGE1: True, PERPLEXITY: False}
-METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, CHRF: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf}
-METRICS_REQUIRING_DECODER = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
-EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL]
+METRICS = [PERPLEXITY, ACCURACY, LENRATIO_MSE, BLEU, CHRF, ROUGE1, BOW_PERPLEXITY, TER]
+METRIC_MAXIMIZE = {ACCURACY: True, BLEU: True, CHRF: True, ROUGE1: True, PERPLEXITY: False, LENRATIO_MSE: False,
+                   TER: False, BOW_PERPLEXITY: False}
+METRIC_WORST = {ACCURACY: 0.0, BLEU: 0.0, CHRF: 0.0, ROUGE1: 0.0, PERPLEXITY: np.inf, BOW_PERPLEXITY: np.inf, TER: np.inf}
+METRICS_REQUIRING_DECODER = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL, TER]
+EVALUATE_METRICS = [BLEU, CHRF, ROUGE1, ROUGE2, ROUGEL, TER]
 
 # loss
 CROSS_ENTROPY = 'cross-entropy'
-CROSS_ENTROPY_WITOUT_SOFTMAX_OUTPUT = 'cross-entropy-without-softmax-output'
-LENRATIO_REGRESSION = 'length-ratio-regression'
-
+BINARY_CROSS_ENTROPY = 'binary-cross-entropy'
 LINK_NORMAL = 'normal'
 LINK_POISSON = 'poisson'
 LENGTH_TASK_RATIO = 'ratio'
 LENGTH_TASK_LENGTH = 'length'
 
-LOSS_NORM_BATCH = 'batch'
-LOSS_NORM_VALID = "valid"
-
 TARGET_MAX_LENGTH_FACTOR = 2
 DEFAULT_NUM_STD_MAX_OUTPUT_LENGTH = 2
 
-DTYPE_INT8 = 'int8'
+DTYPE_BF16 = 'bfloat16'
 DTYPE_FP16 = 'float16'
 DTYPE_FP32 = 'float32'
+DTYPE_INT8 = 'int8'
+DTYPE_INT16 = 'int16'
+DTYPE_INT32 = 'int32'
 LARGE_POSITIVE_VALUE = 99999999.
-LARGE_NEGATIVE_VALUE = -LARGE_POSITIVE_VALUE
 LARGE_VALUES = {
+    # Rounds to 1.0014e+08
+    # https://en.wikipedia.org/wiki/Bfloat16_floating-point_format#Range_and_precision
+    DTYPE_BF16: LARGE_POSITIVE_VALUE,
+    pt.bfloat16: LARGE_POSITIVE_VALUE,
+
     # Something at the middle of 32768<x<65519. Will be rounded to a multiple of 32.
     # https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP16: 49152.0,
     np.float16: 49152.0,
+    pt.float16: 49152.0,
 
     # Will be rounded to 1.0e8.
-    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limits_on_integer_values.
+    # https://en.wikipedia.org/wiki/Single-precision_floating-point_format#Precision_limitations_on_integer_values
     DTYPE_FP32: LARGE_POSITIVE_VALUE,
-    np.float32: LARGE_POSITIVE_VALUE
+    np.float32: LARGE_POSITIVE_VALUE,
+    pt.float32: LARGE_POSITIVE_VALUE,
+    # with --tf32, rounds to 0b1011111011 * 1024 * 128 (10 bits precision) = 1.00007e8
+
+    # Rounds to 1.0014e+08
+    DTYPE_BF16: LARGE_POSITIVE_VALUE,
+    pt.bfloat16: LARGE_POSITIVE_VALUE,
 }
-LARGEST_INT = sys.maxsize
 
-# see https://docs.nvidia.com/deeplearning/sdk/mixed-precision-training/index.html
-# TODO: better to use dynamic loss scaling for FP16, but unclear how to do this with SoftmaxOutput loss for CE.
-FIXED_GRAD_SCALE_FP16 = 1024.0
-
-LHUC_PREFIX = "lhuc_"
 # lhuc application points
 LHUC_ENCODER = "encoder"
 LHUC_DECODER = "decoder"
@@ -409,12 +342,26 @@ SHARD_TARGET = SHARD_NAME + ".target"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-PREPARED_DATA_VERSION = 4
+PREPARED_DATA_VERSION = 6
 
-# reranking
+# reranking metric options
 RERANK_BLEU = "bleu"
 RERANK_CHRF = "chrf"
-RERANK_METRICS = [RERANK_BLEU, RERANK_CHRF]
+RERANK_ISOMETRIC = "isometric"
+RERANK_ISOMETRIC_RATIO = RERANK_ISOMETRIC + "-ratio"
+RERANK_ISOMETRIC_DIFF = RERANK_ISOMETRIC + "-diff"
+RERANK_ISOMETRIC_LC = RERANK_ISOMETRIC + "-lc"
+RERANK_METRICS = [RERANK_BLEU, RERANK_CHRF,
+                  RERANK_ISOMETRIC_RATIO, RERANK_ISOMETRIC_DIFF, RERANK_ISOMETRIC_LC]
+
+# token segmentation symbols
+TOKEN_SEGMENTATION_SW = "@@"  # sub-word nmt
+TOKEN_SEGMENTATION_SP = "▁"   # sentence piece
+TOKEN_SEGMENTATION_MARKERS = [TOKEN_SEGMENTATION_SW, TOKEN_SEGMENTATION_SP]
+
+# sequence length count types
+SEQ_LEN_IN_CHARACTERS = "char"
+SEQ_LEN_IN_TOKENS = "token"
 
 # scoring
 SCORING_TYPE_NEGLOGPROB = 'neglogprob'
@@ -432,3 +379,13 @@ AVERAGE_CHOICES = [AVERAGE_BEST, AVERAGE_LAST, AVERAGE_LIFESPAN]
 BREVITY_PENALTY_CONSTANT = 'constant'
 BREVITY_PENALTY_LEARNED = 'learned'
 BREVITY_PENALTY_NONE = 'none'
+
+# k-nn
+KNN_STATE_DATA_STORE_NAME = "keys.npy"
+KNN_WORD_DATA_STORE_NAME = "vals.npy"
+KNN_WORD_DATA_STORE_DTYPE = DTYPE_INT32
+KNN_CONFIG_NAME = "config.yaml"
+KNN_INDEX_NAME = "key_index"
+KNN_EPSILON = 1e-6
+DEFAULT_DATA_STORE_BLOCK_SIZE = 1024 * 1024
+DEFAULT_KNN_LAMBDA = 0.8

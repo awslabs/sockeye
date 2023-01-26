@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -16,6 +16,7 @@ import pytest
 import sockeye.constants as C
 import sockeye.decoder
 import sockeye.transformer
+
 
 @pytest.mark.parametrize('lhuc', [
     (False,),
@@ -36,8 +37,7 @@ def test_get_decoder(lhuc):
         postprocess_sequence='test_post_seq',
         max_seq_len_source=60,
         max_seq_len_target=70,
-        lhuc=lhuc)
-    decoder = sockeye.decoder.get_decoder(config, inference_only=False, prefix='test_')
+        use_lhuc=lhuc)
+    decoder = sockeye.decoder.get_decoder(config, inference_only=False)
 
     assert type(decoder) == sockeye.decoder.TransformerDecoder
-    assert decoder.prefix == 'test_' + C.TRANSFORMER_DECODER_PREFIX

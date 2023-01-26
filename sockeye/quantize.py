@@ -1,4 +1,4 @@
-# Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,48 +11,66 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+"""
+Quantization CLI.
+"""
+
 import argparse
 import logging
 import os
 
-import sockeye.constants as C
-from sockeye.log import setup_main_logger, log_sockeye_version
-import sockeye.model
-from sockeye.utils import check_condition
+import torch as pt
+
+from . import arguments
+from . import constants as C
+from . import utils
+from .log import setup_main_logger
+from .model import load_model
+
 
 logger = logging.getLogger(__name__)
 
 
-def annotate_model_params(model_dir: str):
-    log_sockeye_version(logger)
-
-    params_best = os.path.join(model_dir, C.PARAMS_BEST_NAME)
-    params_best_float32 = os.path.join(model_dir, C.PARAMS_BEST_NAME_FLOAT32)
-    config = os.path.join(model_dir, C.CONFIG_NAME)
-    config_float32 = os.path.join(model_dir, C.CONFIG_NAME_FLOAT32)
-
-    for fname in params_best_float32, config_float32:
-        check_condition(not os.path.exists(fname),
-                        'File "%s" exists, indicating this model has already been quantized.' % fname)
-
-    # Load model and compute scaling factors
-    model, _, __ = sockeye.model.load_model(model_dir, for_disk_saving='float32', dtype='int8')
-    # Move original params and config files
-    os.rename(params_best, params_best_float32)
-    os.rename(config, config_float32)
-    # Write new params and config files with annotated scaling factors
-    model.save_parameters(params_best)
-    model.save_config(model_dir)
-
-
 def main():
-    setup_main_logger(console=True, file_logging=False)
-    params = argparse.ArgumentParser(
-        description='Annotate trained model with scaling factors for fast loading/quantization for int8 inference.')
-    params.add_argument('--model', '-m', required=True, help='Trained Sockeye model directory.')
+    params = arguments.ConfigArgumentParser(description='Quantize an existing model.')
+    arguments.add_quantize_args(params)
+    arguments.add_logging_args(params)
     args = params.parse_args()
+    quantize(args)
 
-    annotate_model_params(args.model)
+
+def quantize(args: argparse.Namespace):
+    setup_main_logger(file_logging=False, console=not args.quiet, level=args.loglevel)
+    utils.log_basic_info(args)
+
+    params_fname = os.path.join(args.model, C.PARAMS_BEST_NAME)
+    config_fname = os.path.join(args.model, C.CONFIG_NAME)
+
+    model, _, _ = load_model(args.model, device=pt.device('cpu'))
+    original_dtype = model.config.dtype
+
+    if original_dtype == args.dtype:
+        logger.info(f'Model already has dtype {args.dtype}. Skipping quantization.')
+        return
+
+    backup_params_fname = f'{params_fname}.{original_dtype}'
+    backup_config_fname = f'{config_fname}.{original_dtype}'
+
+    for fname in (backup_params_fname, backup_config_fname):
+        if os.path.exists(fname):
+            raise FileExistsError(f'File {fname} exists. To quantize this model, make sure that {params_fname} and '
+                                  f'{config_fname} match the original dtype and that {backup_params_fname} and '
+                                  f'{backup_config_fname} do not exist.')
+
+    logger.info(f'Moving {params_fname} -> {backup_params_fname}')
+    os.rename(params_fname, backup_params_fname)
+    logger.info(f'Moving {config_fname} -> {backup_config_fname}')
+    os.rename(config_fname, backup_config_fname)
+
+    model.cast(args.dtype)
+
+    model.save_parameters(params_fname)
+    model.save_config(args.model)
 
 
 if __name__ == '__main__':

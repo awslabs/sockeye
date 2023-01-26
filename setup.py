@@ -72,15 +72,14 @@ if args.requirement is None:
 else:
     install_requires = get_requirements(args.requirement)
 
-entry_points={
+
+entry_points = {
     'console_scripts': [
-        'sockeye-autopilot = sockeye_contrib.autopilot.autopilot:main',
         'sockeye-average = sockeye.average:main',
+        'sockeye-convert-deepspeed = sockeye.convert_deepspeed:main',
         'sockeye-embeddings = sockeye.embeddings:main',
         'sockeye-evaluate = sockeye.evaluate:main',
-        'sockeye-extract-parameters = sockeye.extract_parameters:main',
         'sockeye-lexicon = sockeye.lexicon:main',
-        'sockeye-init-embed = sockeye.init_embedding:main',
         'sockeye-prepare-data = sockeye.prepare_data:main',
         'sockeye-quantize = sockeye.quantize:main',
         'sockeye-score = sockeye.score:main',
@@ -88,9 +87,10 @@ entry_points={
         'sockeye-translate = sockeye.translate:main',
         'sockeye-vocab = sockeye.vocab:main',
         'sockeye-rerank = sockeye.rerank:main',
+        'sockeye-knn = sockeye.knn:main',
+        'sockeye-generate-decoder-states = sockeye.generate_decoder_states:main'
     ],
 }
-
 args = dict(
     name='sockeye',
 
@@ -116,7 +116,7 @@ args = dict(
     tests_require=['pytest', 'pytest-cov', 'pillow'],
 
     extras_require={
-        'optional': ['mxboard', 'matplotlib'],
+        'optional': ['tensorboard', 'matplotlib'],
         'dev': get_requirements(os.path.join('requirements', 'requirements.dev.txt'))
     },
 

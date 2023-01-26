@@ -3,9 +3,9 @@
 In this tutorial we will train a multilingual Sockeye model that can translate between several language pairs,
 including ones that we did not have training data for (this is called _zero-shot translation_).
 
-Please note: this tutorial assumes that you are familiar with the introductory tutorials on [copying
-sequences](https://awslabs.github.io/sockeye/tutorials/seqcopy.html)
-and [training a standard WMT model](https://awslabs.github.io/sockeye/tutorials/wmt.html).
+Please note: this tutorial assumes that you are familiar with the introductory tutorials on
+[copying sequences](seqcopy_tutorial.md)
+and [training a standard WMT model](wmt.md).
 
 ## Approach
 
@@ -42,11 +42,11 @@ virtualenv -p python3 sockeye3
 source sockeye3/bin/activate
 ```
 
-Then [install the correct version of Sockeye](https://awslabs.github.io/sockeye/setup.html).
+Then [install the correct version of Sockeye](../setup.md).
 We also install several libraries for preprocessing, monitoring and evaluation:
 
 ```bash
-pip install matplotlib mxboard
+pip install matplotlib tensorboard
 
 # install BPE library
 
@@ -62,11 +62,15 @@ mkdir -p tools
 
 git clone https://github.com/bricksdont/moses-scripts tools/moses-scripts
 
+# install library to download Google drive files
+
+pip install gdown
+
 # download helper scripts
 
-wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
-wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
-wget https://raw.githubusercontent.com/awslabs/sockeye/sockeye_2/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/main/docs/tutorials/multilingual/prepare-iwslt17-multilingual.sh -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/main/docs/tutorials/multilingual/add_tag_to_lines.py -P tools
+wget https://raw.githubusercontent.com/awslabs/sockeye/main/docs/tutorials/multilingual/remove_tag_from_translations.py -P tools
 ```
 
 

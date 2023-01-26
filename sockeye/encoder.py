@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,65 +11,33 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-"""
-Encoders for sequence-to-sequence models.
-"""
-import inspect
-import logging
-from abc import ABC, abstractmethod
-from typing import List, Optional, Union
+from abc import abstractmethod
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional, Union
 
-import mxnet as mx
+import torch as pt
 
+import sockeye.constants as C
 from . import config
-from . import constants as C
 from . import layers
 from . import transformer
-from . import utils
-
-logger = logging.getLogger(__name__)
 
 
-ImageEncoderConfig = None
+def get_transformer_encoder(config: transformer.TransformerConfig,
+                            inference_only: bool = False,
+                            dtype: Optional[pt.dtype] = None,
+                            clamp_to_dtype: bool = False):
+    return TransformerEncoder(config=config, inference_only=inference_only, dtype=dtype, clamp_to_dtype=clamp_to_dtype)
 
 
-def get_encoder(config: 'EncoderConfig', prefix: str = '', dtype: str = C.DTYPE_FP32) -> 'Encoder':
-    return get_transformer_encoder(config, prefix, dtype)
+get_encoder = get_transformer_encoder
+EncoderConfig = Union[transformer.TransformerConfig]
 
 
-def get_transformer_encoder(config: transformer.TransformerConfig, prefix: str, dtype: str) -> 'Encoder':
-    """
-    Returns a Transformer encoder, consisting of an embedding layer with
-    positional encodings and a TransformerEncoder instance.
-
-    :param config: Configuration for transformer encoder.
-    :param prefix: Prefix for variable names.
-    :return: Encoder instance.
-    """
-    return TransformerEncoder(config=config, prefix=prefix + C.TRANSFORMER_ENCODER_PREFIX, dtype=dtype)
-
-
-class Encoder(ABC, mx.gluon.HybridBlock):
+class Encoder(pt.nn.Module):
     """
     Generic encoder interface.
     """
-
-    @abstractmethod
-    def __init__(self, **kwargs):
-        mx.gluon.HybridBlock.__init__(self, **kwargs)
-
-    def forward(self, inputs, valid_length):  # pylint: disable=arguments-differ
-        return mx.gluon.HybridBlock.forward(self, inputs, valid_length)
-
-    def __call__(self, inputs, valid_length):  #pylint: disable=arguments-differ
-        """
-        Encodes inputs given valid lengths of individual examples.
-
-        :param inputs: Input data.
-        :param valid_length: Length of inputs without padding.
-        :return: Encoded versions of input data (data, data_length).
-        """
-        return mx.gluon.HybridBlock.__call__(self, inputs, valid_length)
 
     @abstractmethod
     def get_num_hidden(self) -> int:
@@ -91,125 +59,98 @@ class Encoder(ABC, mx.gluon.HybridBlock):
         return None
 
 
+@dataclass
 class FactorConfig(config.Config):
-
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 combine: str,  # From C.FACTORS_COMBINE_CHOICES
-                 share_embedding: bool) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.combine = combine
-        self.share_embedding = share_embedding
+    vocab_size: int
+    num_embed: int
+    combine: str  # From C.FACTORS_COMBINE_CHOICES
+    share_embedding: bool
 
 
+@dataclass
 class EmbeddingConfig(config.Config):
+    vocab_size: int
+    num_embed: int
+    dropout: float
+    num_factors: int = field(init=False)
+    factor_configs: Optional[List[FactorConfig]] = None
+    allow_sparse_grad: bool = False
 
-    def __init__(self,
-                 vocab_size: int,
-                 num_embed: int,
-                 dropout: float,
-                 factor_configs: Optional[List[FactorConfig]] = None,
-                 allow_sparse_grad: bool = False) -> None:
-        super().__init__()
-        self.vocab_size = vocab_size
-        self.num_embed = num_embed
-        self.dropout = dropout
-        self.factor_configs = factor_configs
+    def __post_init__(self):
         self.num_factors = 1
         if self.factor_configs is not None:
             self.num_factors += len(self.factor_configs)
-        self.allow_sparse_grad = allow_sparse_grad
 
 
 class Embedding(Encoder):
     """
-    Thin wrapper around MXNet's Embedding symbol. Works with both time- and batch-major data layouts.
+    Thin wrapper around PyTorch's Embedding op.
 
     :param config: Embedding config.
-    :param prefix: Name prefix for symbols of this encoder.
-    :param dtype: Data type. Default: 'float32'.
+    :param embedding: pre-existing embedding Module.
+    :param dtype: Torch data type for parameters.
     """
 
     def __init__(self,
                  config: EmbeddingConfig,
-                 prefix: str,
-                 embed_weight: Optional[mx.gluon.Parameter] = None,
-                 dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(prefix=prefix)
+                 embedding: Optional[pt.nn.Embedding] = None,
+                 dtype: Optional[pt.dtype] = None) -> None:
+        super().__init__()
         self.config = config
-        self._dtype = dtype
-        self._factor_weight_format_string = 'factor%d_weight'
-
-        with self.name_scope():
-            if embed_weight is None:
-                self.embed_weight = self.params.get('weight',
-                                                    shape=(self.config.vocab_size, self.config.num_embed),
-                                                    grad_stype='row_sparse',
-                                                    dtype=dtype)
-                self._use_sparse_grad = self.config.allow_sparse_grad
-            else:
-                self.embed_weight = embed_weight  # adds to self._reg_params
-                self.params.update({embed_weight.name: embed_weight})  # adds to self.params
-                self._use_sparse_grad = embed_weight._grad_stype == 'row_sparse' and self.config.allow_sparse_grad
-
-            if self.config.factor_configs is not None:
-                for i, fc in enumerate(self.config.factor_configs, 1):
-                    factor_weight_name = self._factor_weight_format_string % i
-                    factor_weight = embed_weight if fc.share_embedding else \
-                        self.params.get(factor_weight_name, shape=(fc.vocab_size, fc.num_embed), dtype=dtype)
-                    # We set the attribute of the class to trigger the hybrid_forward parameter creation "magic"
-                    setattr(self, factor_weight_name, factor_weight)
-
-    def hybrid_forward(self, F, data, valid_length, embed_weight, **kwargs):  # pylint: disable=arguments-differ
-        # We will catch the optional factor weights in kwargs
-        average_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
-        concat_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
-        sum_factors_embeds = []  # type: List[Union[mx.sym.Symbol, mx.nd.ndarray]]
-        if self.config.num_factors > 1 and self.config.factor_configs is not None:
-            data, *data_factors = F.split(data=data,
-                                          num_outputs=self.config.num_factors,
-                                          axis=2,
-                                          squeeze_axis=True)
-            for i, (factor_data, factor_config) in enumerate(zip(data_factors,
-                                                                 self.config.factor_configs), 1):
-                factor_weight = kwargs[self._factor_weight_format_string % i]
-                factor_embedding = F.Embedding(data=factor_data,
-                                               input_dim=factor_config.vocab_size,
-                                               weight=factor_weight,
-                                               output_dim=factor_config.num_embed)
-                if factor_config.combine == C.FACTORS_COMBINE_CONCAT:
-                    concat_factors_embeds.append(factor_embedding)
-                elif factor_config.combine == C.FACTORS_COMBINE_SUM:
-                    sum_factors_embeds.append(factor_embedding)
-                elif factor_config.combine == C.FACTORS_COMBINE_AVERAGE:
-                    average_factors_embeds.append(factor_embedding)
-                else:
-                    raise ValueError("Unknown combine value for factors: %s" % factor_config.combine)
+        if embedding is not None:
+            self.embedding = embedding
         else:
-            data = F.squeeze(data, axis=2)
+            self.embedding = pt.nn.Embedding(self.config.vocab_size, self.config.num_embed,
+                                             sparse=self.config.allow_sparse_grad, dtype=dtype)
 
-        embed = F.Embedding(data,
-                            weight=embed_weight,
-                            input_dim=self.config.vocab_size,
-                            output_dim=self.config.num_embed,
-                            dtype=self._dtype,
-                            sparse_grad=self._use_sparse_grad)
+        self.num_factors = self.config.num_factors
+        self.factor_embeds = pt.nn.ModuleList()
+        self.factor_combinations = []  # type: List[str]
+        if self.config.factor_configs is not None:
+            for i, fc in enumerate(self.config.factor_configs, 1):
+                if fc.share_embedding:
+                    factor_embed = self.embedding
+                else:
+                    factor_embed = pt.nn.Embedding(fc.vocab_size, fc.num_embed,
+                                                   sparse=self.config.allow_sparse_grad, dtype=dtype)
+                self.factor_embeds.append(factor_embed)
+                self.factor_combinations.append(fc.combine)
 
-        if self.config.num_factors > 1 and self.config.factor_configs is not None:
+        self.dropout = pt.nn.Dropout(p=self.config.dropout) if self.config.dropout > 0.0 else None
+
+    def forward(self, data: pt.Tensor) -> pt.Tensor:
+        primary_data = data[:, :, 0]
+        embedded = self.embedding(primary_data)
+
+        if self.num_factors > 1:
+            average_factors_embeds = []
+            concat_factors_embeds = []
+            sum_factors_embeds = []
+            for i, (factor_embedding, factor_combination) in enumerate(zip(self.factor_embeds,
+                                                                           self.factor_combinations), 1):
+                factor_data = data[:, :, i]
+                factor_embedded = factor_embedding(factor_data)
+                if factor_combination == C.FACTORS_COMBINE_CONCAT:
+                    concat_factors_embeds.append(factor_embedded)
+                elif factor_combination == C.FACTORS_COMBINE_SUM:
+                    sum_factors_embeds.append(factor_embedded)
+                elif factor_combination == C.FACTORS_COMBINE_AVERAGE:
+                    average_factors_embeds.append(factor_embedded)
+                else:
+                    raise ValueError(f"Unknown combine value for factors: {factor_combination}")
+
             if average_factors_embeds:
-                embed = F.add_n(embed, *average_factors_embeds) / (len(average_factors_embeds) + 1)
+                embedded = pt.mean(pt.stack([embedded] + average_factors_embeds, dim=0), dim=0)
             if sum_factors_embeds:
-                embed = F.add_n(embed, *sum_factors_embeds)
+                for sum_factor_embed in sum_factors_embeds:
+                    embedded = embedded + sum_factor_embed
             if concat_factors_embeds:
-                embed = F.concat(embed, *concat_factors_embeds, dim=2)
+                embedded = pt.cat([embedded] + concat_factors_embeds, dim=2)
 
-        if self.config.dropout > 0:
-            embed = F.Dropout(data=embed, p=self.config.dropout)
+        if self.dropout is not None:
+            embedded = self.dropout(embedded)
 
-        return embed, F.identity(valid_length)  # identity: See https://github.com/apache/incubator-mxnet/issues/14228
+        return embedded
 
     def get_num_hidden(self) -> int:
         """
@@ -218,69 +159,7 @@ class Embedding(Encoder):
         return self.config.num_embed
 
 
-class EncoderSequence(Encoder, mx.gluon.nn.HybridSequential):
-    """
-    A sequence of encoders is itself an encoder.
-    """
-
-    def __init__(self, prefix: str = '') -> None:
-        Encoder.__init__(self)
-        mx.gluon.nn.HybridSequential.__init__(self, prefix=prefix)
-
-    def add(self, *encoders):
-        """Adds block on top of the stack."""
-        for encoder in encoders:
-            utils.check_condition(isinstance(encoder, Encoder), "%s is not of type Encoder" % encoder)
-        mx.gluon.nn.HybridSequential.add(self, *encoders)
-
-    def hybrid_forward(self, F, data, valid_length):  # pylint: disable=arguments-differ
-        for block in self._children.values():
-            data, valid_length = block(data, valid_length)
-        return data, F.identity(valid_length)  # identity: See https://github.com/apache/incubator-mxnet/issues/14228
-
-    def get_num_hidden(self) -> int:
-        """
-        Return the representation size of this encoder.
-        """
-        return next(reversed(self._children.values())).get_num_hidden()
-
-    def get_encoded_seq_len(self, seq_len: int) -> int:
-        """
-        Returns the size of the encoded sequence.
-        """
-        for encoder in self._children.values():
-            seq_len = encoder.get_encoded_seq_len(seq_len)
-        return seq_len
-
-    def get_max_seq_len(self) -> Optional[int]:
-        """
-        :return: The maximum length supported by the encoder if such a restriction exists.
-        """
-        max_seq_len = min((encoder.get_max_seq_len()
-                           for encoder in self._children.values() if encoder.get_max_seq_len() is not None), default=None)
-        return max_seq_len
-
-    def append(self, cls, infer_hidden: bool = False, **kwargs) -> Encoder:
-        """
-        Extends sequence with new Encoder.
-
-        :param cls: Encoder type.
-        :param infer_hidden: If number of hidden should be inferred from previous encoder.
-        :param kwargs: Named arbitrary parameters for Encoder.
-
-        :return: Instance of Encoder.
-        """
-        params = dict(kwargs)
-        if infer_hidden:
-            params['num_hidden'] = self.get_num_hidden()
-
-        sig_params = inspect.signature(cls.__init__).parameters
-        encoder = cls(**params)
-        self.add(encoder)
-        return encoder
-
-
-class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
+class TransformerEncoder(Encoder):
     """
     Non-recurrent encoder based on the transformer architecture in:
 
@@ -288,56 +167,63 @@ class TransformerEncoder(Encoder, mx.gluon.HybridBlock):
     Vaswani et al. (https://arxiv.org/pdf/1706.03762.pdf).
 
     :param config: Configuration for transformer encoder.
-    :param prefix: Name prefix for operations in this encoder.
     """
 
     def __init__(self,
                  config: transformer.TransformerConfig,
-                 prefix: str = C.TRANSFORMER_ENCODER_PREFIX,
-                 dtype: str = C.DTYPE_FP32) -> None:
-        super().__init__(prefix=prefix)
+                 inference_only: bool = False,
+                 dtype: Optional[pt.dtype] = None,
+                 clamp_to_dtype: bool = False) -> None:
+        pt.nn.Module.__init__(self)
         self.config = config
 
-        with self.name_scope():
-            self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
-                                                             num_embed=self.config.model_size,
-                                                             max_seq_len=self.config.max_seq_len_source,
-                                                             prefix=C.SOURCE_POSITIONAL_EMBEDDING_PREFIX,
-                                                             scale_up_input=True,
-                                                             scale_down_positions=False)
+        self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
 
-            self.layers = mx.gluon.nn.HybridSequential()
-            for i in range(config.num_layers):
-                self.layers.add(transformer.TransformerEncoderBlock(config, prefix="%d_" % i, dtype=dtype))
+        self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
+                                                         num_embed=self.config.model_size,
+                                                         max_seq_len=self.config.max_seq_len_source,
+                                                         scale_up_input=True,
+                                                         scale_down_positions=False,
+                                                         dtype=dtype)
 
-            self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
-                                                                     dropout=config.dropout_prepost,
-                                                                     prefix="final_process_",
-                                                                     num_hidden=self.config.model_size)
+        self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
+            transformer.TransformerEncoderBlock(config,
+                                                inference_only=inference_only,
+                                                dtype=dtype,
+                                                clamp_to_dtype=clamp_to_dtype)
+            for _ in range(config.num_layers))
 
-    def hybrid_forward(self, F, data, valid_length):
+        self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
+                                                                 dropout=config.dropout_prepost,
+                                                                 num_hidden=self.config.model_size,
+                                                                 dtype=dtype,
+                                                                 clamp_to_dtype=clamp_to_dtype)
+
+    def forward(self, data: pt.Tensor, valid_length: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         # positional embedding
-        data = self.pos_embedding(data, None)
+        data = self.pos_embedding(data)
 
-        if self.config.dropout_prepost > 0.0:
-            data = F.Dropout(data=data, p=self.config.dropout_prepost)
+        if self.dropout is not None:
+            data = self.dropout(data)
 
-        # (batch_size * heads, seq_len)
-        att_valid_length = layers.prepare_source_valid_lengths(F, valid_length, data,
-                                                               num_heads=self.config.attention_heads)
+        _, max_len, __ = data.size()
+        # length_mask for source attention masking. Shape: (batch_size, max_len)
+        single_head_att_mask = layers.prepare_source_length_mask(valid_length, self.config.attention_heads,
+                                                                 max_length=max_len, expand=False)
+        # Shape: (batch_size, max_len) -> (batch_size * heads, 1, max_len)
+        att_mask = single_head_att_mask.unsqueeze(1).expand(-1, self.config.attention_heads, -1).reshape((-1, max_len)).unsqueeze(1)
+        att_mask = att_mask.expand(-1, max_len, -1)
 
-        data = F.transpose(data, axes=(1, 0, 2))
-        for block in self.layers:
-            data = block(data, att_valid_length)
-        data = self.final_process(data, None)
-        data = F.transpose(data, axes=(1, 0, 2))
-        return data, valid_length
+        data = data.transpose(1, 0)  # batch to time major
+        for layer in self.layers:
+            data = layer(data, att_mask=att_mask)
+
+        data = self.final_process(data)
+        data = data.transpose(1, 0)  # time to batch major
+        return data, valid_length, single_head_att_mask
 
     def get_num_hidden(self) -> int:
         """
         Return the representation size of this encoder.
         """
         return self.config.model_size
-
-
-EncoderConfig = Union[transformer.TransformerConfig]

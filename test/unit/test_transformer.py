@@ -1,4 +1,4 @@
-# Copyright 2018--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2018--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -11,35 +11,30 @@
 # express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import mxnet as mx
-import numpy as np
+import pytest
+import torch as pt
 
-import sockeye.transformer
 import sockeye.constants as C
+import sockeye.transformer
 
 
-def test_auto_regressive_bias_dtype():
-    block = sockeye.transformer.AutoRegressiveBias()
-    block.initialize()
-    length = 10
-    dtype = 'float32'
-    data = mx.nd.ones((2, length, 10), dtype=dtype)
-    bias = block(data)
-    assert bias.dtype == np.float32
+@pytest.mark.parametrize('use_glu', [(False), (True)])
+def test_transformer_feed_forward(use_glu):
+    block = sockeye.transformer.TransformerFeedForward(num_hidden=2,
+                                                       num_model=2,
+                                                       act_type=C.RELU,
+                                                       dropout=0.1,
+                                                       use_glu=use_glu)
 
-    dtype = 'float16'
-    block.cast(dtype)
-    bias = block(data.astype(dtype))
-    assert bias.dtype == np.float16
-    assert bias.min().asscalar() == -C.LARGE_VALUES[dtype]
+    data = pt.ones(1, 10, 2)
+    block(data)
 
 
-def test_auto_regressive_bias_output():
-    block = sockeye.transformer.AutoRegressiveBias()
-    block.initialize()
-    length = 2
-    data = mx.nd.ones((2, length, 10), dtype='float32')
-    bias = block(data)
+@pytest.mark.parametrize('length', [1, 10, 100])
+def test_pt_autoregressive_mask(length):
+    x_pt = pt.zeros(2, length, 32)
+    b_pt = sockeye.transformer.AutoRegressiveMask()
+    result_pt = b_pt(x_pt).detach()
 
-    expected = np.array([[0.0, -1.0e8], [0.0, 0.0]]).reshape((1, 2, 2))
-    np.testing.assert_array_equal(bias.asnumpy(), expected)
+    assert result_pt.dtype == pt.bool
+    assert result_pt.size() == (length, length)

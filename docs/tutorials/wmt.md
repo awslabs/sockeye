@@ -16,17 +16,17 @@ git clone https://github.com/rsennrich/subword-nmt.git
 export PYTHONPATH=$(pwd)/subword-nmt:$PYTHONPATH
 ```
 
-We will visualize training progress using Tensorboard and its MXNet adaptor, `mxboard`.
+We will visualize training progress using Tensorboard.
 Install it using:
 ```bash
-pip install tensorboard mxboard
+pip install tensorboard
 ```
 
 ## GPU
 
 All of the commands below assume you're running on a CPU.
 If you have a GPU available you can simply remove `--use-cpu`.
-With multiple GPUs you can use them via the `--device-ids` command line argument.
+With multiple GPUs you can use `torchrun` to spawn multiple training processes (see [WMT 2014 English-German tutorial](wmt_large.md)).
 
 ## Data
 
@@ -85,7 +85,8 @@ Before we start training we will prepare the training data by splitting it into 
 python -m sockeye.prepare_data \
                         -s corpus.tc.BPE.de \
                         -t corpus.tc.BPE.en \
-                        -o train_data
+                        -o train_data \
+                        --shared-vocab
 ```
 While this is an optional step it has the advantage of considerably lowering the time needed before training starts and also limiting the memory usage as only one shard is loaded into memory at a time.
 
@@ -98,7 +99,9 @@ python -m sockeye.train -d train_data \
                         --max-seq-len 60 \
                         --decode-and-evaluate 500 \
                         --use-cpu \
-                        -o wmt_model
+                        -o wmt_model \
+                        --shared-vocab \
+                        --max-num-epochs 3
 ```
 
 This will train a "base" [Transformer](https://arxiv.org/abs/1706.03762) model.
@@ -125,8 +128,8 @@ In the next section we discuss how you can monitor the training progress.
 There are basically three ways of tracking the training progress: the training log and log file, the metrics file and tensorboard.
 In addition to printing training and validation metrics on stdout Sockeye also keeps track of them in the file `wmt_model/metrics`. Here you find all relevant metrics that were calculated during checkpointing.
 
-[tensorboard](https://github.com/awslabs/mxboard) allows for monitoring training and validation metrics in a browser.
-If you have installed it (`pip install mxboard`), Sockeye will log training events in a Tensorboard file that can be visualized with Tensorboard (`pip install tensorboard`)
+Tensorboard allows for monitoring training and validation metrics in a browser.
+Sockeye will log training events in a Tensorboard file that can be visualized with Tensorboard (`pip install tensorboard`)
 
 ```bash
 tensorboard --logdir .
@@ -192,7 +195,7 @@ After that we can just provide these models to the Sockeye translation CLI:
 echo "er ist so ein toller Kerl und ein Familienvater ." | \
   python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
                                    --vocabulary-threshold 50 | \
-  python -m sockeye.translate -m wmt_model wmt_model_seed2 wmt_model_seed3 2>/dev/null | \
+  python -m sockeye.translate --use-cpu -m wmt_model wmt_model_seed2 wmt_model_seed3 2>/dev/null | \
   sed -r 's/@@( |$)//g'
 
 he is a great guy and a family father .
@@ -203,7 +206,7 @@ As we haven't trained multiple models yet we can simply feed in the same model m
 echo "er ist so ein toller Kerl und ein Familienvater ." | \
   python -m apply_bpe -c bpe.codes --vocabulary bpe.vocab.en \
                                    --vocabulary-threshold 50 | \
-  python -m sockeye.translate -m wmt_model wmt_model wmt_model 2>/dev/null | \
+  python -m sockeye.translate --use-cpu -m wmt_model wmt_model wmt_model 2>/dev/null | \
   sed -r 's/@@( |$)//g'
 
 he is a great guy and a family father .

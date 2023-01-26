@@ -1,4 +1,4 @@
-# Copyright 2017--2019 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -12,8 +12,8 @@
 # permissions and limitations under the License.
 
 import argparse
-import os
 import logging
+import os
 
 from . import arguments
 from . import constants as C
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    params = argparse.ArgumentParser(description='Preprocesses and shards training data.')
+    params = arguments.ConfigArgumentParser(description='Preprocesses and shards training data.')
     arguments.add_prepare_data_cli_args(params)
     args = params.parse_args()
     prepare_data(args)
@@ -39,6 +39,7 @@ def prepare_data(args: argparse.Namespace):
                       file_logging=not args.no_logfile,
                       path=os.path.join(output_folder, C.LOG_NAME))
     utils.log_basic_info(args)
+    arguments.save_args(args, os.path.join(output_folder, C.ARGS_STATE_NAME))
     utils.seed_rngs(args.seed)
 
     minimum_num_shards = args.min_num_shards
@@ -68,36 +69,52 @@ def prepare_data(args: argparse.Namespace):
     logger.info("Adjusting maximum length to reserve space for a BOS/EOS marker. New maximum length: (%d, %d)",
                 max_seq_len_source, max_seq_len_target)
 
-    source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
-        source_paths=source_paths,
-        source_factor_vocab_same_as_source=args.source_factors_use_source_vocab,
-        target_factor_vocab_same_as_target=args.target_factors_use_target_vocab,
-        target_paths=target_paths,
-        source_vocab_paths=source_vocab_paths,
-        target_vocab_paths=target_vocab_paths,
-        shared_vocab=args.shared_vocab,
-        num_words_source=num_words_source,
-        word_min_count_source=word_min_count_source,
-        num_words_target=num_words_target,
-        word_min_count_target=word_min_count_target,
-        pad_to_multiple_of=args.pad_vocab_to_multiple_of)
+    # Split input into shards and randomly assign data to shards
+    with utils.smart_open(source_paths[0], mode='rb') as infile:
+        num_sents = sum(1 for _ in infile)
+    num_shards = data_io.get_num_shards(num_sents, samples_per_shard, minimum_num_shards)
+    logger.info("%d samples will be split into %d shard(s) (requested samples/shard=%d, min_num_shards=%d)."
+                % (num_sents, num_shards, samples_per_shard, minimum_num_shards))
+    shards, keep_tmp_shard_files = data_io.create_shards(source_fnames=source_paths,
+                                                         target_fnames=target_paths,
+                                                         num_shards=num_shards,
+                                                         output_prefix=output_folder)
+    shard_source_paths, shard_target_paths = [paths for paths in zip(*shards)]
 
-    data_io.prepare_data(source_fnames=source_paths,
-                         target_fnames=target_paths,
-                         source_vocabs=source_vocabs,
-                         target_vocabs=target_vocabs,
-                         source_vocab_paths=source_vocab_paths,
-                         target_vocab_paths=[args.target_vocab],
-                         shared_vocab=args.shared_vocab,
-                         max_seq_len_source=max_seq_len_source,
-                         max_seq_len_target=max_seq_len_target,
-                         bucketing=bucketing,
-                         bucket_width=bucket_width,
-                         samples_per_shard=samples_per_shard,
-                         min_num_shards=minimum_num_shards,
-                         output_prefix=output_folder,
-                         bucket_scaling=bucket_scaling,
-                         max_processes=args.max_processes)
+    # Process shards in parallel using max_processes process
+    with utils.create_pool(args.max_processes) as pool:
+        source_vocabs, target_vocabs = vocab.load_or_create_vocabs(
+            shard_source_paths=shard_source_paths,
+            source_factor_vocab_same_as_source=args.source_factors_use_source_vocab,
+            target_factor_vocab_same_as_target=args.target_factors_use_target_vocab,
+            shard_target_paths=shard_target_paths,
+            source_vocab_paths=source_vocab_paths,
+            target_vocab_paths=target_vocab_paths,
+            shared_vocab=args.shared_vocab,
+            num_words_source=num_words_source,
+            word_min_count_source=word_min_count_source,
+            num_words_target=num_words_target,
+            word_min_count_target=word_min_count_target,
+            pad_to_multiple_of=args.pad_vocab_to_multiple_of,
+            mapper=pool.map)
+
+        data_io.prepare_data(source_fnames=source_paths,
+                             target_fnames=target_paths,
+                             source_vocabs=source_vocabs,
+                             target_vocabs=target_vocabs,
+                             source_vocab_paths=source_vocab_paths,
+                             target_vocab_paths=[args.target_vocab],
+                             shared_vocab=args.shared_vocab,
+                             max_seq_len_source=max_seq_len_source,
+                             max_seq_len_target=max_seq_len_target,
+                             bucketing=bucketing,
+                             bucket_width=bucket_width,
+                             num_shards=num_shards,
+                             output_prefix=output_folder,
+                             bucket_scaling=bucket_scaling,
+                             pool=pool,
+                             shards=shards,
+                             keep_tmp_shard_files=keep_tmp_shard_files)
 
 
 if __name__ == "__main__":

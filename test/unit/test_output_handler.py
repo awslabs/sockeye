@@ -13,7 +13,6 @@
 
 import io
 
-import numpy as np
 import pytest
 
 import sockeye.output_handler
@@ -37,34 +36,20 @@ stream_handler_tests = [(sockeye.output_handler.StringOutputHandler(io.StringIO(
                                           score=0.),
                          0.5,
                          "input=a test\toutput=ein Test\tinput_tokens=2\toutput_tokens=2\ttranslation_time=0.5000\n"),
-                        (sockeye.output_handler.BeamStoringHandler(io.StringIO()),
-                         TranslatorInput(sentence_id=0, tokens=["What"]),
-                         TranslatorOutput(sentence_id=0, translation="Was", tokens=["Was"],
-                                          score=0.,
-                                          beam_histories=[
-                                              {"predicted_ids": [[258, 137, 31],
-                                                                 [0, 0, 3]],
-                                               "predicted_tokens": [["Was", "Wie", "Wo"],
-                                                                    ["<pad>", "<pad>", "</s>"]],
-                                               "parent_ids": [[0, 0, 0],
-                                                              [0, 0, 1]],
-                                               "scores": [[0.05599012225866318, 4.394228935241699, 4.426244735717773],
-                                                          [2.2783169746398926, 3.5674173831939697, 3.648634195327759]],
-                                               "normalized_scores": [[0.05599012225866318, 4.394228935241699, 4.426244735717773],
-                                                                     [0.17525514960289001, 0.2744167149066925, 0.2806641757488251]]}
-                                          ]),
-                         0.5,
-                         '{"id": 0, "normalized_scores": [[0.05599012225866318, 4.394228935241699, 4.426244735717773], [0.17525514960289001, 0.2744167149066925, 0.2806641757488251]], "number_steps": 2, "parent_ids": [[0, 0, 0], [0, 0, 1]], "predicted_ids": [[258, 137, 31], [0, 0, 3]], "predicted_tokens": [["Was", "Wie", "Wo"], ["<pad>", "<pad>", "</s>"]], "scores": [[0.05599012225866318, 4.394228935241699, 4.426244735717773], [2.2783169746398926, 3.5674173831939697, 3.648634195327759]]}\n'),
                         (sockeye.output_handler.JSONOutputHandler(io.StringIO()),
                          TranslatorInput(sentence_id=0, tokens=[], factors=[], constraints=[]),
-                         TranslatorOutput(sentence_id=0, translation="ein Test", tokens=None,
+                         TranslatorOutput(sentence_id=0, translation="ein Test", tokens=['ein', 'Test'],
                                           score=0.,
                                           pass_through_dict={'pass_through_test': 'success!'},
                                           nbest_translations=["ein Test", "der Test"],
-                                          nbest_tokens=[None, None],
-                                          nbest_scores=[0., 0.1]),
+                                          nbest_tokens=[["ein", "Test"], ["der", "Test"]],
+                                          nbest_scores=[0., 0.1],
+                                          factor_translations=['f11 f12', 'f21 f22'],
+                                          factor_scores=[0.1, 0.2],
+                                          nbest_factor_translations=[['f11 f12', 'f21 f22'],
+                                                                     ['f11 f12', 'f21 f22']]),
                          0.5,
-                         '{"pass_through_test": "success!", "score": 0.0, "scores": [0.0, 0.1], "sentence_id": 0, "translation": "ein Test", "translations": ["ein Test", "der Test"]}\n')]
+                         '{"factor1": "f11 f12", "factor1_score": 0.1, "factor2": "f21 f22", "factor2_score": 0.2, "pass_through_test": "success!", "score": 0.0, "scores": [0.0, 0.1], "sentence_id": 0, "translation": "ein Test", "translations": ["ein Test", "der Test"], "translations_factors": [{"factor1": "f11 f12", "factor2": "f21 f22"}, {"factor1": "f11 f12", "factor2": "f21 f22"}]}\n')]
 
 
 @pytest.mark.parametrize("handler, translation_input, translation_output, translation_walltime, expected_string", stream_handler_tests)
