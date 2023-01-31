@@ -48,7 +48,9 @@ class _Inference(ABC):
                     states: List,
                     vocab_slice_ids: Optional[pt.Tensor] = None,
                     target_prefix_factor_mask: Optional[pt.Tensor] = None,
-                    factor_vocab_size: Optional[int] = None):
+                    factor_vocab_size: Optional[int] = None,
+                    step: Optional[int] = None,
+                    target_segment_durations: Optional[List[List[int]]] = None):
         raise NotImplementedError()
 
     @property
@@ -103,10 +105,11 @@ class _SingleModelInference(_Inference):
 
     def _compute_next_factors(self, prev_step: pt.Tensor, target_factors: pt.Tensor, target_segment_durations: List[List[int]]) -> pt.Tensor:
         """
+        Calculates the correct auxiliary numeric factors based on the current and previous step.
+
         :param prev_step: Previous step outputs. Shape: (beam*batch, num_factors+1)
         :param target_factors: target_factors from current decode step. Shape: (beam*batch, num_factors, 2).
         :param target_segment_durations: List of segment durations, required for forcing the next segment duration when a [pause] is generated.
-
         :return: target_factors with auxiliary factors correctly calculated from the current frames and previous output.
         """
         corrected_target_factors = target_factors.clone()
@@ -198,7 +201,10 @@ class _EnsembleInference(_Inference):
                  ensemble_mode: str = 'linear',
                  constant_length_ratio: float = 0.0,
                  knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
-                 force_factors_stepwise: List[str] = []) -> None:
+                 force_factors_stepwise: List[str] = [],
+                 pause_id: int = -1,
+                 eow_id: int = -1,
+                 zero_id: int = -1) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -237,7 +243,9 @@ class _EnsembleInference(_Inference):
                     states: List,
                     vocab_slice_ids: Optional[pt.Tensor] = None,
                     target_prefix_factor_mask: Optional[pt.Tensor] = None,
-                    factor_vocab_size: Optional[int] = None):
+                    factor_vocab_size: Optional[int] = None,
+                    step: Optional[int] = None,
+                    target_segment_durations: Optional[List[List[int]]] = None):
         outputs = []  # type: List[pt.Tensor]
         new_states = []  # type: List[pt.Tensor]
         factor_outputs = []  # type: List[List[pt.Tensor]]
@@ -758,7 +766,8 @@ class GreedySearch(Search):
                 restrict_lexicon: Optional[lexicon.RestrictLexicon] = None,
                 max_output_lengths: pt.Tensor = None,
                 target_prefix: Optional[pt.Tensor] = None,
-                target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
+                target_prefix_factors: Optional[pt.Tensor] = None,
+                target_segment_durations: Optional[List[List[int]]] = None) -> SearchResult:
         """
         Translates a single sentence (batch_size=1) using greedy search.
 
@@ -770,6 +779,7 @@ class GreedySearch(Search):
         :param target_prefix: Target prefix ids. Shape: (batch_size=1, max target prefix length).
         :param target_prefix_factors: Target prefix factor ids.
                 Shape: (batch_size=1, max target prefix factors length, num_target_factors).
+        :param target_segment_durations: List of segment durations for target factor forcing.
         :return SearchResult.
         """
         batch_size = source.size()[0]
@@ -954,7 +964,7 @@ class BeamSearch(Search):
         :param target_prefix: Target prefix ids. Shape: (batch_size, max prefix length).
         :param target_prefix_factors: Target prefix factors ids.
                 Shape: (batch_size, max prefix factors length, num_target_factors).
-        :param target_segment_durations: List of segment durations for target factor forcing
+        :param target_segment_durations: List of segment durations for target factor forcing.
         :return SearchResult.
         """
         batch_size = source.size()[0]
@@ -1056,7 +1066,8 @@ class BeamSearch(Search):
                 target_prefix_factors, self.output_factor_vocab_size, self.dtype)
             target_prefix_factor_masks = target_prefix_factor_masks.unsqueeze(2).expand(-1, -1, self.beam_size, -1, -1)
 
-        target_segment_durations = [d for d in target_segment_durations for _ in range(self.beam_size)]
+        if target_segment_durations is not None:
+            target_segment_durations = [d for d in target_segment_durations for _ in range(self.beam_size)]
 
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results

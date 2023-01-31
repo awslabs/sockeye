@@ -263,7 +263,7 @@ class _TestInference(sockeye.beam_search._Inference):
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List,
-                    vocab_slice_ids: Optional[pt.Tensor] = None, *args):
+                    vocab_slice_ids: Optional[pt.Tensor] = None, *args, **kwargs):
         batch_beam_size, num_target_factors = step_input.size()
         print('step_input', step_input)
 

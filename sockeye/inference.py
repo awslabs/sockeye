@@ -372,10 +372,12 @@ def make_input_from_dict(sentence_id: SentenceId,
         target_segment_durations = input_dict.get(C.JSON_SEGMENT_DURATIONS_KEY)
         # Check the number of segments in the source and target match
         n_src_segments = len(re.findall(C.SRC_SEG_REGEX, ' '.join(tokens)))
-        if len(target_segment_durations) != n_src_segments:
-            logger.warning("Source text has %d segments but there are %d target segment durations. "
-                           "Ignore this warning if you are not specifying input segment bins with %s.",
-                           n_src_segments, len(target_segment_durations), C.SRC_SEG_REGEX)
+        if target_segment_durations is not None:
+            # Target segment durations provided; check if the number matches with the source
+            if len(target_segment_durations) != n_src_segments:
+                logger.warning("Source text has %d segments but there are %d target segment durations. "
+                               "Ignore this warning if you are not specifying input segment bins with %s.",
+                               n_src_segments, len(target_segment_durations), C.SRC_SEG_REGEX)
 
         use_target_prefix_all_chunks = input_dict.get(C.JSON_USE_TARGET_PREFIX_ALL_CHUNKS_KEY, True)
         keep_target_prefix_key = input_dict.get(C.JSON_KEEP_TARGET_PREFIX_KEY, True)

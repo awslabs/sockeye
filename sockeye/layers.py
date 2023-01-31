@@ -777,11 +777,10 @@ class NumericFactorEmbeddings(PositionalEmbeddings):
 
     def forward(self, data: pt.Tensor) -> pt.Tensor:
         """
-        Applies "positional" embeddings to numeric factor data.
+        Applies positional-style sinusoidal embeddings to numeric factor data.
 
         :param data: Input data. Shape: (batch, length or 1, num_embed)
-
-        :return: Factor data embedded with "positional" embeddings
+        :return: Factor data embedded with sinusoidal embeddings
         """
         return F.embedding(data, self.weight).detach()
 

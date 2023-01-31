@@ -129,6 +129,7 @@ def test_device_args(test_params, expected_params):
               target_factors_num_embed=[],
               target_factors_combine=[C.FACTORS_COMBINE_SUM],
               target_factors_share_embedding=[False],
+              target_factors_pos_embed=[C.NO_POSITIONAL_EMBEDDING],
               weight_tying_type="src_trg_softmax",
               transformer_attention_heads=(8, 8),
               transformer_feed_forward_num_hidden=(2048, 2048),
@@ -185,7 +186,10 @@ def test_model_parameters(test_params, expected_params):
                       sample=None,
                       seed=None,
                       nvs_thresh=0.5,
-                      skip_nvs=False)),
+                      skip_nvs=False,
+                      force_factors_stepwise=[],
+                      eow_symbol='<eow>',
+                      pause_symbol='[pause]')),
 ])
 def test_inference_args(test_params, expected_params):
     _test_args(test_params, expected_params, arguments.add_inference_args)

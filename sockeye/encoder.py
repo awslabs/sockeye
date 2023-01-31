@@ -65,7 +65,7 @@ class FactorConfig(config.Config):
     num_embed: int
     combine: str  # From C.FACTORS_COMBINE_CHOICES
     share_embedding: bool
-    pos_embed: str  # C.NO_POSITIONAL_EMBEDDING or C.FIXED_POSITIONAL_EMBEDDING
+    pos_embed: str = C.NO_POSITIONAL_EMBEDDING  # C.NO_POSITIONAL_EMBEDDING or C.FIXED_POSITIONAL_EMBEDDING
 
 
 @dataclass
