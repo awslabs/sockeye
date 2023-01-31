@@ -758,7 +758,7 @@ class PositionalEmbeddings(pt.nn.Module):
 
 class NumericFactorEmbeddings(PositionalEmbeddings):
     """
-    Takes a target factor input sequence and applies sinusoidal positional embeddings to it.
+    Takes a target factor input sequence and applies fixed sinusoidal embeddings to it.
 
     :param num_embed: Embedding size.
     :param max_val: Maximum value of the target factor.

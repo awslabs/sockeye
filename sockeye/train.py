@@ -135,16 +135,16 @@ def check_arg_compatibility(args: argparse.Namespace):
     else:
         # Length 1: expand the list to the appropriate length
         args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
-    if len(args.target_factors_pos_embed) > 1:
-        check_condition(n_target_factors == len(args.target_factors_pos_embed),
+    if len(args.target_factors_embed_type) > 1:
+        check_condition(n_target_factors == len(args.target_factors_embed_type),
                         'The number of embedding types for target factors '
                         'does not match the number of target factors.')
     else:
         # Length 1: expand the list to the appropriate length
-        args.target_factors_pos_embed = args.target_factors_pos_embed * n_target_factors
-    if C.FIXED_POSITIONAL_EMBEDDING in args.target_factors_pos_embed:
-        logger.warning("For numeric factor embeddings, ensure the target factor vocabs are built as a 1:1 mapping between values. "
-                       "There is no internal check for this, and the positional embeddings will be meaningless if the vocab isn't correct.")
+        args.target_factors_embed_type = args.target_factors_embed_type * n_target_factors
+    if C.FIXED_POSITIONAL_EMBEDDING in args.target_factors_embed_type:
+        logger.warning("For sinusoidal factor embeddings, ensure the target factor vocabs are built as a 1:1 mapping between values. "
+                       "There is no internal check for this, and the sinusoidal embeddings will be meaningless if the vocab isn't correct.")
 
     check_condition(not (args.amp and args.apex_amp), 'Use either --amp (safer) or --apex-amp (faster).')
 
@@ -679,12 +679,12 @@ def create_model_config(args: argparse.Namespace,
                                 "summing" if combine == C.FACTORS_COMBINE_SUM else "averaging")
                     target_factors_num_embed[i] = num_embed_target
 
-        target_factor_configs = [encoder.FactorConfig(size, dim, combine, share, pos_embed) \
-                                 for size, dim, combine, share, pos_embed in zip(target_factor_vocab_sizes,
+        target_factor_configs = [encoder.FactorConfig(size, dim, combine, share, embed_type) \
+                                 for size, dim, combine, share, embed_type in zip(target_factor_vocab_sizes,
                                                                                  target_factors_num_embed,
                                                                                  args.target_factors_combine,
                                                                                  args.target_factors_share_embedding,
-                                                                                 args.target_factors_pos_embed)]
+                                                                                 args.target_factors_embed_type)]
 
     config_embed_source = encoder.EmbeddingConfig(vocab_size=source_vocab_size,
                                                   num_embed=num_embed_source,
