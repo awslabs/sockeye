@@ -742,7 +742,10 @@ def add_model_parameters(params):
                               choices=[C.LEARNED_POSITIONAL_EMBEDDING, C.FIXED_POSITIONAL_EMBEDDING],
                               default=[C.LEARNED_POSITIONAL_EMBEDDING],
                               nargs='+',
-                              help='Use learned or fixed sinusoidal embeddings for target factors. Default: %(default)s.')
+                              help='Use learned or fixed sinusoidal embeddings for target factors. '
+                                   'Sinusoidal embeddings require specially created vocabularies with a 1-to-1 mapping '
+                                   'between vocab IDs and numeric values (see sockeye_contrib/create_seq_vocab.py) '
+                                   'to behave correctly. Default: %(default)s.')
     model_params.add_argument('--source-factors-combine', '-sfc',
                               choices=C.FACTORS_COMBINE_CHOICES,
                               default=[C.FACTORS_COMBINE_SUM],
@@ -1441,14 +1444,18 @@ def add_factor_forcing_args(params):
                         nargs='+',
                         choices=C.FACTOR_FORCE_CHOICES,
                         default=[],
-                        help='Compute the right factors based on previous steps at each step. '
-                             'One per target factor if specified. Default: %(default)s')
+                        help='Compute the right factors based on previous step outputs at each time step. '
+                             'Designed for use with dubbing data with durations being predicted as a target factor '
+                             'and other auxiliary factors being forced based on the predicted phones and durations. '
+                             'One factor type per target factor if specified. Default: %(default)s')
     params.add_argument('--pause-symbol',
                         default='[pause]',
-                        help='Pause token that marks the end of segments. Default: %(default)s.')
+                        help='Pause token that marks the end of speech segments in dubbing data. '
+                             'Used only with --force-factors-stepwise. Default: %(default)s.')
     params.add_argument('--eow-symbol',
                         default='<eow>',
-                        help='Symbol that marks the end of words. Default: %(default)s.')
+                        help='Symbol that marks the end of words in phone sequences in dubbing data. '
+                             'Used only with --force-factors-stepwise. Default: %(default)s.')
 
 
 def add_clamp_to_dtype_arg(params):

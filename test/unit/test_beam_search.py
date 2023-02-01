@@ -455,7 +455,7 @@ def test_force_factors_stepwise(prev_step, target_factors, target_segment_durati
     # Check stepwise auxiliary factor calculation
     # Shapes: prev_step: (batch*beam, num_factors+1)
     #         target_factors: (batch*beam, num_factors, 2) dim 1 is indexes, and dim 0 is scores (which are unused here)
-    #         corrected_target_factors: (batch*beam, num_factors, 2)
+    #         correct_target_factors: (batch*beam, num_factors, 2)
     model = Mock(sockeye.model.SockeyeModel)
     inference = sockeye.beam_search._SingleModelInference(model=model,
                                                           force_factors_stepwise=force_factors_stepwise,
