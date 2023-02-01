@@ -13,6 +13,7 @@
 
 from typing import List, Optional
 from typing import Tuple
+from unittest.mock import Mock
 
 import numpy as onp
 import pytest
@@ -23,6 +24,7 @@ import sockeye.beam_search
 import sockeye.constants as C
 import sockeye.lexicon
 import sockeye.utils
+import sockeye.model
 
 
 def test_length_penalty_default():
@@ -420,3 +422,46 @@ def test_get_vocab_slice_ids_blocking():
     )
     expected_vocab_slice_ids = pt.tensor([0, 1, 2, 4, 5, C.EOS_ID, C.EOS_ID, C.EOS_ID])
     pt.testing.assert_close(vocab_slice_ids, expected_vocab_slice_ids)
+
+
+@pytest.mark.parametrize("prev_step, target_factors, target_segment_durations, force_factors_stepwise, correct_target_factors",
+                         [
+                             # No forcing, unchanged
+                             (pt.Tensor([[47, 6, 10], [3, 2, 8]]),
+                              pt.Tensor([[[0.0, 12], [0.0, 46]], [[0.0, 50], [0.0, 5]]]),
+                              [],
+                              [],
+                              pt.Tensor([[[0.0, 12], [0.0, 46]], [[0.0, 50], [0.0, 5]]])),
+                             # Pause durations forced to zero, <eow> durations forced to zero, negative durations forced to zero
+                             (pt.Tensor([[47, 6, 10], [3, 2, 8], [32, 10, 16]]),
+                              pt.Tensor([[[0.0, 12], [0.0, 46]], [[0.0, 50], [0.0, 5]], [[0.0, 5], [0.0, 43]]]),
+                              [],
+                              [C.FORCE_FRAMES, C.FORCE_NONE],
+                              pt.Tensor([[[0.0, 6], [0.0, 46]], [[0.0, 6], [0.0, 5]], [[0.0, 6], [0.0, 43]]])),
+                             # Correct total remaining, threshold at minimum vocab value
+                             (pt.Tensor([[47, 6, 100], [40, 6, 100], [40, 6, 10]]),
+                              pt.Tensor([[[0.0, 12], [0.0, 90]], [[0.0, 50], [0.0, 5]], [[0.0, 50], [0.0, 5]]]),
+                              [],
+                              [C.FORCE_FRAMES, C.FORCE_TOTAL_REMAINING],
+                              pt.Tensor([[[0.0, 6], [0.0, 100]], [[0.0, 50], [0.0, 56]], [[0.0, 50], [0.0, 4]]])),
+                             # Correct segment duration remaining and pauses remaining
+                             (pt.Tensor([[60, 45, 8, 9], [47, 45, 8, 9]]),
+                              pt.Tensor([[[0.0, 42], [0.0, 7], [0.0, 10]], [[0.0, 45], [0.0, 8], [0.0, 6]]]),
+                              [[150, 75, 200], [150, 75, 200]],
+                              [C.FORCE_SEGMENT_REMAINING, C.FORCE_PAUSES_REMAINING, C.FORCE_FRAMES],
+                              pt.Tensor([[[0.0, 41], [0.0, 8], [0.0, 10]], [[0.0, 81], [0.0, 7], [0.0, 6]]]))
+                         ])
+def test_force_factors_stepwise(prev_step, target_factors, target_segment_durations, force_factors_stepwise, correct_target_factors):
+    # Check stepwise auxiliary factor calculation
+    # Shapes: prev_step: (batch*beam, num_factors+1)
+    #         target_factors: (batch*beam, num_factors, 2) dim 1 is indexes, and dim 0 is scores (which are unused here)
+    #         corrected_target_factors: (batch*beam, num_factors, 2)
+    model = Mock(sockeye.model.SockeyeModel)
+    inference = sockeye.beam_search._SingleModelInference(model=model,
+                                                          force_factors_stepwise=force_factors_stepwise,
+                                                          pause_id=47,
+                                                          eow_id=3,
+                                                          zero_id=6)
+
+    output_factors = inference._compute_next_factors(prev_step, target_factors, target_segment_durations)
+    assert pt.equal(output_factors, correct_target_factors)
