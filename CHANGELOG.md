@@ -11,6 +11,15 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.32]
+
+### Added
+
+- Added support for forcing target factors at inference for calculated factors for dubbing applications.
+  - Added arguments `--force-factors-stepwise`, `--pause-symbol`, and `--eow-symbol` to `sockeye-translate` to enable
+    calculating numeric target factors based on phone and duration outputs for dubbing at inference time.
+- Added `--target-factors-embed-type` to add option for sinusoidal embeddings for numerical target factors.
+
 ## [3.1.31]
 
 ### Fixed
