@@ -48,7 +48,9 @@ class _Inference(ABC):
                     states: List,
                     vocab_slice_ids: Optional[pt.Tensor] = None,
                     target_prefix_factor_mask: Optional[pt.Tensor] = None,
-                    factor_vocab_size: Optional[int] = None):
+                    factor_vocab_size: Optional[int] = None,
+                    step: Optional[int] = None,
+                    target_segment_durations: Optional[List[List[int]]] = None):
         raise NotImplementedError()
 
     @property
@@ -66,10 +68,32 @@ class _SingleModelInference(_Inference):
                  model: SockeyeModel,
                  skip_softmax: bool = False,
                  constant_length_ratio: float = 0.0,
-                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
+                 force_factors_stepwise: Optional[List[str]] = [],
+                 pause_id: int = -1,
+                 eow_id: int = -1,
+                 zero_id: int = -1) -> None:
         self._model = model
         self._skip_softmax = skip_softmax
         self._const_lr = constant_length_ratio
+        self._force_factors_stepwise = force_factors_stepwise
+        if not all([f == C.FORCE_NONE for f in self._force_factors_stepwise]):
+            utils.check_condition(zero_id != -1,
+                                  "zero_id should not be -1 when forcing numeric factors.")
+            utils.check_condition(pause_id != -1 or C.FORCE_PAUSES_REMAINING not in self._force_factors_stepwise,
+                                  "pause_id should not be -1 when {} is being forced".format(C.FORCE_PAUSES_REMAINING))
+            if C.FORCE_FRAMES in self._force_factors_stepwise:
+                self.frames_idx = self._force_factors_stepwise.index(C.FORCE_FRAMES)
+            if C.FORCE_TOTAL_REMAINING in self._force_factors_stepwise:
+                self.total_remaining_idx = self._force_factors_stepwise.index(C.FORCE_TOTAL_REMAINING)
+            if C.FORCE_PAUSES_REMAINING in self._force_factors_stepwise:
+                self.pauses_remaining_idx = self._force_factors_stepwise.index(C.FORCE_PAUSES_REMAINING)
+            if C.FORCE_SEGMENT_REMAINING in self._force_factors_stepwise:
+                self.segment_remaining_idx = self._force_factors_stepwise.index(C.FORCE_SEGMENT_REMAINING)
+            self.pause_id = pause_id
+            self.eow_id = eow_id
+            self.zero_id = zero_id
+            self.factor_min_id = len(C.VOCAB_SYMBOLS)
         self.knn_lambda = knn_lambda
 
     def state_structure(self) -> List:
@@ -79,12 +103,54 @@ class _SingleModelInference(_Inference):
         states, predicted_output_length, nvs_prediction = self._model.encode_and_initialize(inputs, valid_length, self._const_lr)
         return states, predicted_output_length, nvs_prediction
 
+    def _compute_next_factors(self, prev_step: pt.Tensor, target_factors: pt.Tensor, target_segment_durations: List[List[int]]) -> pt.Tensor:
+        """
+        Calculates the correct auxiliary numeric factors based on the current and previous step.
+
+        :param prev_step: Previous step outputs. Shape: (beam*batch, num_factors+1)
+        :param target_factors: target_factors from current decode step. Shape: (beam*batch, num_factors, 2).
+        :param target_segment_durations: List of segment durations, required for forcing the next segment duration when a [pause] is generated.
+        :return: target_factors with auxiliary factors correctly calculated from the current frames and previous output.
+        """
+        corrected_target_factors = target_factors.clone()
+
+        if C.FORCE_FRAMES in self._force_factors_stepwise:
+            # Enforce 0 duration for pause and eow (remember factors are one step behind output tokens)
+            corrected_target_factors[prev_step[:, 0].eq(self.eow_id), self.frames_idx, 1] = self.zero_id
+            corrected_target_factors[prev_step[:, 0].eq(self.pause_id), self.frames_idx, 1] = self.zero_id
+            # Make duration 0 if it predicts a negative or non-numeric duration (like <s>; it happens sometimes)
+            corrected_target_factors[target_factors[:, self.frames_idx, 1].lt(self.zero_id), self.frames_idx, 1] = self.zero_id
+
+        if C.FORCE_TOTAL_REMAINING in self._force_factors_stepwise:
+            # Correct total duration remaining = previous total - current duration, but floor at FACTOR_MIN (lower IDs are special tokens)
+            corrected_target_factors[:, self.total_remaining_idx, 1] = pt.maximum(pt.tensor([self.factor_min_id], device=corrected_target_factors.device), prev_step[:, self.total_remaining_idx + 1] - (corrected_target_factors[:, self.frames_idx, 1] - self.zero_id))
+
+        if C.FORCE_PAUSES_REMAINING in self._force_factors_stepwise:
+            # Correct pauses remaining
+            # Decrement if previous token was [pause]. Cannot be negative.
+            corrected_target_factors[prev_step[:, 0].eq(self.pause_id), self.pauses_remaining_idx, 1] = pt.maximum(pt.tensor([self.zero_id], device=corrected_target_factors.device), prev_step[prev_step[:, 0].eq(self.pause_id), self.pauses_remaining_idx + 1] - 1).float()
+            # Unchanged otherwise
+            corrected_target_factors[prev_step[:, 0].ne(self.pause_id), self.pauses_remaining_idx, 1] = prev_step[prev_step[:, 0].ne(self.pause_id), self.pauses_remaining_idx + 1].float()
+
+        if C.FORCE_SEGMENT_REMAINING in self._force_factors_stepwise:
+            # Correct segment duration remaining
+            # Subtract duration if last token was not a pause.
+            corrected_target_factors[prev_step[:, 0].ne(self.pause_id), self.segment_remaining_idx, 1] = pt.maximum(pt.tensor([self.factor_min_id], device=corrected_target_factors.device), (prev_step[:, self.segment_remaining_idx + 1] - (corrected_target_factors[:, self.frames_idx, 1] - self.zero_id))[prev_step[:, 0].ne(self.pause_id)])
+            # If last token was a pause, get segment duration based on pauses remaining.
+            next_segments = pt.tensor([durs[-(corrected_target_factors[:, self.pauses_remaining_idx, 1].int()[i].item() - self.zero_id + 1)] + self.zero_id for i, durs in enumerate(target_segment_durations)],
+                                    device=corrected_target_factors.device, dtype=corrected_target_factors.dtype)
+            corrected_target_factors[prev_step[:, 0].eq(self.pause_id), self.segment_remaining_idx, 1] = next_segments[prev_step[:, 0].eq(self.pause_id)]
+
+        return corrected_target_factors
+
     def decode_step(self,
                     step_input: pt.Tensor,
                     states: List,
                     vocab_slice_ids: Optional[pt.Tensor] = None,
                     target_prefix_factor_mask: Optional[pt.Tensor] = None,
-                    factor_vocab_size: Optional[int] = None):
+                    factor_vocab_size: Optional[int] = None,
+                    step: Optional[int] = None,
+                    target_segment_durations: Optional[List[List[int]]] = None):
         logits, knn_probs, states, target_factor_outputs = self._model.decode_step(step_input, states, vocab_slice_ids)
         if not self._skip_softmax:
             if knn_probs is None:  # no knn used
@@ -112,6 +178,10 @@ class _SingleModelInference(_Inference):
                 predictions.append(tf_prediction)
             # Shape: (batch*beam, num_secondary_factors, 2)
             target_factors = pt.cat(predictions, dim=1) if len(predictions) > 1 else predictions[0]
+            if not all(f == C.FORCE_NONE for f in self._force_factors_stepwise) and step > 2:
+                target_factors = self._compute_next_factors(prev_step=step_input,
+                                                            target_factors=target_factors,
+                                                            target_segment_durations=target_segment_durations)
 
         return scores, states, target_factors
 
@@ -130,7 +200,11 @@ class _EnsembleInference(_Inference):
                  models: List[SockeyeModel],
                  ensemble_mode: str = 'linear',
                  constant_length_ratio: float = 0.0,
-                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA) -> None:
+                 knn_lambda: float = C.DEFAULT_KNN_LAMBDA,
+                 force_factors_stepwise: List[str] = [],
+                 pause_id: int = -1,
+                 eow_id: int = -1,
+                 zero_id: int = -1) -> None:
         self._models = models
         if ensemble_mode == 'linear':
             self._interpolation = self.linear_interpolation
@@ -140,6 +214,9 @@ class _EnsembleInference(_Inference):
             raise ValueError()
         self._const_lr = constant_length_ratio
         self.knn_lambda = knn_lambda
+        self._force_factors_stepwise = force_factors_stepwise
+        utils.check_condition(all(f == C.FORCE_NONE for f in force_factors_stepwise),
+                              "Forcing factors not implemented for ensemble decoding")
 
     def state_structure(self) -> List:
         return [model.state_structure() for model in self._models]
@@ -166,7 +243,9 @@ class _EnsembleInference(_Inference):
                     states: List,
                     vocab_slice_ids: Optional[pt.Tensor] = None,
                     target_prefix_factor_mask: Optional[pt.Tensor] = None,
-                    factor_vocab_size: Optional[int] = None):
+                    factor_vocab_size: Optional[int] = None,
+                    step: Optional[int] = None,
+                    target_segment_durations: Optional[List[List[int]]] = None):
         outputs = []  # type: List[pt.Tensor]
         new_states = []  # type: List[pt.Tensor]
         factor_outputs = []  # type: List[List[pt.Tensor]]
@@ -687,7 +766,8 @@ class GreedySearch(Search):
                 restrict_lexicon: Optional[lexicon.RestrictLexicon] = None,
                 max_output_lengths: pt.Tensor = None,
                 target_prefix: Optional[pt.Tensor] = None,
-                target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
+                target_prefix_factors: Optional[pt.Tensor] = None,
+                target_segment_durations: Optional[List[List[int]]] = None) -> SearchResult:
         """
         Translates a single sentence (batch_size=1) using greedy search.
 
@@ -699,6 +779,7 @@ class GreedySearch(Search):
         :param target_prefix: Target prefix ids. Shape: (batch_size=1, max target prefix length).
         :param target_prefix_factors: Target prefix factor ids.
                 Shape: (batch_size=1, max target prefix factors length, num_target_factors).
+        :param target_segment_durations: List of segment durations for target factor forcing.
         :return SearchResult.
         """
         batch_size = source.size()[0]
@@ -870,7 +951,8 @@ class BeamSearch(Search):
                 restrict_lexicon: Optional[lexicon.RestrictLexicon],
                 max_output_lengths: pt.Tensor,
                 target_prefix: Optional[pt.Tensor] = None,
-                target_prefix_factors: Optional[pt.Tensor] = None) -> SearchResult:
+                target_prefix_factors: Optional[pt.Tensor] = None,
+                target_segment_durations: Optional[List[List[int]]] = None) -> SearchResult:
         """
         Translates multiple sentences using beam search.
 
@@ -882,6 +964,7 @@ class BeamSearch(Search):
         :param target_prefix: Target prefix ids. Shape: (batch_size, max prefix length).
         :param target_prefix_factors: Target prefix factors ids.
                 Shape: (batch_size, max prefix factors length, num_target_factors).
+        :param target_segment_durations: List of segment durations for target factor forcing.
         :return SearchResult.
         """
         batch_size = source.size()[0]
@@ -983,6 +1066,9 @@ class BeamSearch(Search):
                 target_prefix_factors, self.output_factor_vocab_size, self.dtype)
             target_prefix_factor_masks = target_prefix_factor_masks.unsqueeze(2).expand(-1, -1, self.beam_size, -1, -1)
 
+        if target_segment_durations is not None:
+            target_segment_durations = [d for d in target_segment_durations for _ in range(self.beam_size)]
+
         t = 1
         for t in range(1, max_iterations + 1):  # max_iterations + 1 required to get correct results
             # (1) obtain next predictions and advance models' state
@@ -996,7 +1082,9 @@ class BeamSearch(Search):
                                                                                      model_states,
                                                                                      vocab_slice_ids,
                                                                                      target_prefix_factor_mask,
-                                                                                     self.output_factor_vocab_size)
+                                                                                     self.output_factor_vocab_size,
+                                                                                     step=t,
+                                                                                     target_segment_durations=target_segment_durations)
 
             # (2) Produces the accumulated cost of target words in each row.
             # There is special treatment for finished rows.
@@ -1104,7 +1192,11 @@ def get_search_algorithm(models: List[SockeyeModel],
                          prevent_unk: bool = False,
                          greedy: bool = False,
                          skip_nvs: bool = False,
-                         nvs_thresh: Optional[float] = None) -> Union[BeamSearch, GreedySearch]:
+                         nvs_thresh: Optional[float] = None,
+                         force_factors_stepwise: Optional[List[str]] = [],
+                         pause_id: int = -1,
+                         eow_id: int = -1,
+                         zero_id: int = -1) -> Union[BeamSearch, GreedySearch]:
     """
     Returns an instance of BeamSearch or GreedySearch depending.
 
@@ -1119,6 +1211,7 @@ def get_search_algorithm(models: List[SockeyeModel],
         assert constant_length_ratio == -1.0, "Greedy search does not support brevity penalty"
         assert sample is None, "Greedy search does not support sampling"
         assert not prevent_unk, "Greedy Search does not support prevention of unknown tokens"  # TODO: add support
+        assert all(f == C.FORCE_NONE for f in force_factors_stepwise), "Greedy Search does not support re-computing and forcing factors at each step"
         search = GreedySearch(
             dtype=models[0].dtype,
             bos_id=C.BOS_ID,
@@ -1141,11 +1234,14 @@ def get_search_algorithm(models: List[SockeyeModel],
             inference = _SingleModelInference(model=models[0],
                                               skip_softmax=skip_softmax,
                                               constant_length_ratio=constant_length_ratio,
+                                              force_factors_stepwise=force_factors_stepwise,
+                                              pause_id=pause_id, eow_id=eow_id, zero_id=zero_id,
                                               knn_lambda=knn_lambda)
         else:
             inference = _EnsembleInference(models=models,
                                            ensemble_mode=ensemble_mode,
-                                           constant_length_ratio=constant_length_ratio)
+                                           constant_length_ratio=constant_length_ratio,
+                                           force_factors_stepwise=force_factors_stepwise)
 
         search = BeamSearch(
             beam_size=beam_size,

@@ -738,6 +738,14 @@ def add_model_parameters(params):
                               help='Embedding size for additional target factors. '
                                    'You must provide as many dimensions as '
                                    '(validation) target factor files. Default: %(default)s.')
+    model_params.add_argument('--target-factors-embed-type',
+                              choices=[C.LEARNED_POSITIONAL_EMBEDDING, C.FIXED_POSITIONAL_EMBEDDING],
+                              default=[C.LEARNED_POSITIONAL_EMBEDDING],
+                              nargs='+',
+                              help='Use learned or fixed sinusoidal embeddings for target factors. '
+                                   'Sinusoidal embeddings require specially created vocabularies with a 1-to-1 mapping '
+                                   'between vocab IDs and numeric values (see sockeye_contrib/create_seq_vocab.py) '
+                                   'to behave correctly. Default: %(default)s.')
     model_params.add_argument('--source-factors-combine', '-sfc',
                               choices=C.FACTORS_COMBINE_CHOICES,
                               default=[C.FACTORS_COMBINE_SUM],
@@ -1386,6 +1394,7 @@ def add_inference_args(params):
     # common params with score CLI
     add_length_penalty_args(decode_params)
     add_brevity_penalty_args(decode_params)
+    add_factor_forcing_args(decode_params)
 
     decode_params.add_argument('--dtype',
                                default=None,
@@ -1427,6 +1436,26 @@ def add_brevity_penalty_args(params):
                         help='Has effect if --brevity-penalty-type is set to \'constant\'. If positive, overrides the '
                              'length ratio, used for brevity penalty calculation, for all inputs. If zero, uses the '
                              'average of length ratios from the training data over all models. Default: %(default)s.')
+
+
+
+def add_factor_forcing_args(params):
+    params.add_argument('--force-factors-stepwise',
+                        nargs='+',
+                        choices=C.FACTOR_FORCE_CHOICES,
+                        default=[],
+                        help='Compute the right factors based on previous step outputs at each time step. '
+                             'Designed for use with dubbing data with durations being predicted as a target factor '
+                             'and other auxiliary factors being forced based on the predicted phones and durations. '
+                             'One factor type per target factor if specified. Default: %(default)s')
+    params.add_argument('--pause-symbol',
+                        default='[pause]',
+                        help='Pause token that marks the end of speech segments in dubbing data. '
+                             'Used only with --force-factors-stepwise. Default: %(default)s.')
+    params.add_argument('--eow-symbol',
+                        default='<eow>',
+                        help='Symbol that marks the end of words in phone sequences in dubbing data. '
+                             'Used only with --force-factors-stepwise. Default: %(default)s.')
 
 
 def add_clamp_to_dtype_arg(params):

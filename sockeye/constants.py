@@ -73,6 +73,7 @@ NO_POSITIONAL_EMBEDDING = "none"
 FIXED_POSITIONAL_EMBEDDING = "fixed"
 LEARNED_POSITIONAL_EMBEDDING = "learned"
 POSITIONAL_EMBEDDING_TYPES = [NO_POSITIONAL_EMBEDDING, FIXED_POSITIONAL_EMBEDDING, LEARNED_POSITIONAL_EMBEDDING]
+NUMERIC_TARGET_FACTOR_EMBEDDING_MAX = 2048  # Ideally > the highest numeric target factor value in the data
 
 DEFAULT_NUM_EMBED = 512
 
@@ -138,6 +139,7 @@ JSON_KEEP_TARGET_PREFIX_KEY = "keep_target_prefix"
 JSON_RESTRICT_LEXICON_KEY = "restrict_lexicon"
 JSON_CONSTRAINTS_KEY = "constraints"
 JSON_AVOID_KEY = "avoid"
+JSON_SEGMENT_DURATIONS_KEY = "target_segment_durations"
 
 VERSION_NAME = "version"
 CONFIG_NAME = "config"
@@ -389,3 +391,14 @@ KNN_INDEX_NAME = "key_index"
 KNN_EPSILON = 1e-6
 DEFAULT_DATA_STORE_BLOCK_SIZE = 1024 * 1024
 DEFAULT_KNN_LAMBDA = 0.8
+
+# Types of factors for factor forcing at inference time
+FORCE_NONE = 'none'  # No forcing
+FORCE_FRAMES = 'frames'
+FORCE_TOTAL_REMAINING = 'total_remaining'
+FORCE_SEGMENT_REMAINING = 'segment_remaining'
+FORCE_PAUSES_REMAINING = 'pauses_remaining'
+FACTOR_FORCE_CHOICES = [FORCE_NONE, FORCE_FRAMES, FORCE_TOTAL_REMAINING, FORCE_SEGMENT_REMAINING, FORCE_PAUSES_REMAINING]
+
+# Regex to match source segments when target segment durations are provided at inference
+SRC_SEG_REGEX = r'<bin\d+>'
