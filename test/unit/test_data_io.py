@@ -286,6 +286,7 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
                               min_count: int,
                               max_count: int,
                               bucket_counts: Optional[List[Optional[int]]] = None) -> Tuple[List[torch.Tensor],
+                                                                                            List[torch.Tensor],
                                                                                             List[torch.Tensor]]:
     """
     Get random bucket data.
@@ -295,7 +296,7 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
     :param max_count: The maximum number of samples that will be sampled if no exact count is given.
     :param bucket_counts: For each bucket an optional exact example count can be given. If it is not given it will be
                          sampled.
-    :return: The random source and target tensors.
+    :return: The random source, target and metadata tensors.
     """
     if bucket_counts is None:
         bucket_counts = [None for _ in buckets]
@@ -305,12 +306,13 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
               for count, bucket in zip(bucket_counts, buckets)]
     target = [torch.randint(0, 10, (count, random.randint(2, bucket[1]), 1))
               for count, bucket in zip(bucket_counts, buckets)]
-    return source, target
+    metadata = [torch.randint(0, 10, (count, 1)) for count in bucket_counts]
+    return source, target, metadata
 
 
 def test_parallel_data_set():
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
-    source, target = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
+    source, target, metadata = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
 
     def check_equal(tensors1, tensors2):
         assert len(tensors1) == len(tensors2)
@@ -318,12 +320,13 @@ def test_parallel_data_set():
             assert torch.equal(a1, a2)
 
     with TemporaryDirectory() as work_dir:
-        dataset = data_io.ParallelDataSet(source, target)
+        dataset = data_io.ParallelDataSet(source, target, metadata)
         fname = os.path.join(work_dir, 'dataset')
         dataset.save(fname)
         dataset_loaded = data_io.ParallelDataSet.load(fname)
         check_equal(dataset.source, dataset_loaded.source)
         check_equal(dataset.target, dataset_loaded.target)
+        check_equal(dataset.metadata, dataset_loaded.metadata)
 
 
 def test_parallel_data_set_fill_up():
@@ -338,10 +341,12 @@ def test_parallel_data_set_fill_up():
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
     assert len(dataset_filled_up.target) == len(dataset.target)
+    assert len(dataset_filled_up.metadata) == len(dataset.metadata)
     for bidx in range(len(dataset)):
         bucket_batch_size = bucket_batch_sizes[bidx].batch_size
         assert dataset_filled_up.source[bidx].shape[0] == bucket_batch_size
         assert dataset_filled_up.target[bidx].shape[0] == bucket_batch_size
+        assert dataset_filled_up.metadata[bidx].shape[0] == bucket_batch_size
 
 
 def test_get_permutations():
@@ -384,9 +389,11 @@ def test_parallel_data_set_permute():
         if num_samples:
             assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).all()
             assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).all()
+            assert (dataset.metadata[buck_idx] == dataset_restored.metadata[buck_idx]).all()
         else:
             assert not dataset_restored.source[buck_idx].shape[0]
             assert not dataset_restored.target[buck_idx].shape[0]
+            assert not dataset_restored.metadata[buck_idx].shape[0]
 
 
 def test_get_batch_indices():
@@ -468,18 +475,19 @@ def test_get_training_data_iters():
     train_max_length = 30
     dev_line_count = 20
     dev_max_length = 30
-    expected_mean = 1.0
-    expected_std = 0.0
+    expected_mean = 0.9208152692746332
+    expected_std = 0.0698611911724421
     test_line_count = 20
     test_line_count_empty = 0
     test_max_length = 30
     batch_size = 5
     num_source_factors = num_target_factors = 1
+    eop_tag = "<EOP>"
     with tmp_digits_dataset("tmp_corpus",
                             train_line_count, train_line_count_empty, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
-                            test_line_count, test_line_count_empty,
-                            test_max_length - C.SPACE_FOR_XOS) as data:
+                            test_line_count, test_line_count_empty, test_max_length - C.SPACE_FOR_XOS,
+                            source_text_prefix_token=eop_tag) as data:
         # tmp common vocab
         vcb = vocab.build_from_paths([data['train_source'], data['train_target']])
 
@@ -498,7 +506,8 @@ def test_get_training_data_iters():
             max_seq_len_source=train_max_length,
             max_seq_len_target=train_max_length,
             bucketing=True,
-            bucket_width=10)
+            bucket_width=10,
+            end_of_prepending_tag=eop_tag)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
@@ -507,7 +516,7 @@ def test_get_training_data_iters():
         assert data_info.source_vocabs == [None]
         assert data_info.target_vocabs == [None]
         assert config_data.data_statistics.max_observed_len_source == train_max_length
-        assert config_data.data_statistics.max_observed_len_target == train_max_length
+        assert config_data.data_statistics.max_observed_len_target == train_max_length - 1  # no target text prefix
         assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
         assert np.isclose(config_data.data_statistics.length_ratio_std, expected_std)
 

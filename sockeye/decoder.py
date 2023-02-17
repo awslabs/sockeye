@@ -200,26 +200,23 @@ class TransformerDecoder(Decoder):
         [autoregressive state dummies] * num_layers.
 
         :param encoder_outputs: Encoder outputs. Shape: (batch, source_length, encoder_dim).
-        :param encoder_valid_length: Valid lengths of encoder outputs. Shape: (batch,).
+        :param encoder_valid_length: Valid lengths of encoder outputs. Shape: (batch, 2).
         :param target_embed: Target-side embedding layer output. Shape: (batch, target_length, target_embedding_dim).
         :return: Initial states.
         """
         source_max_len = encoder_outputs.size()[1]
+        # (batch * heads, 1, source_max_len)
+        source_mask = layers.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
+                                                        source_max_len, mask_prepended_tokens=
+                                                        self.config.block_prepended_cross_attention)
         if target_embed is None:  # Inference: initial step = 0. Shape: (batch_size, 1)
-            steps = pt.zeros_like(encoder_valid_length).unsqueeze(1)
-            # (batch * heads, 1, source_max_len)
-            source_mask = layers.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
-                                                            source_max_len)
+            steps = pt.zeros_like(encoder_valid_length[:, :1])
             # Shape: (batch, heads, 1, src_max_len)
             source_mask = source_mask.view(-1, self.config.attention_heads, 1, source_max_len)
         else:  # Training: steps up to target length. Shape: (1, target_length)
             target_length = target_embed.size()[1]
             steps = pt.arange(0, target_length, device=target_embed.device).unsqueeze(0)
-            # (batch * heads, 1, source_max_len)
-            source_mask = layers.prepare_source_length_mask(encoder_valid_length, self.config.attention_heads,
-                                                            source_max_len)
             source_mask = source_mask.expand(-1, target_length, -1)  # Shape: (batch * heads, trg_max_len, src_max_len)
-
             # Shape: (batch, heads, trg_max_len, src_max_len)
             source_mask = source_mask.view(-1, self.config.attention_heads, target_length, source_max_len)
 

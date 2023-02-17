@@ -398,6 +398,17 @@ def create_shards(source_fnames: List[str],
     return list(zip(sources_shard_fnames_by_shards, targets_shard_fnames_by_shards)), False
 
 
+def get_prepended_token_length(ids: List[int], eop_id: int) -> int:
+    """
+    Gets the length of prepended tokens before the end-of-prepending tag (inclusive).
+
+    :param ids: List of token ids.
+    :param eop_id: End-of-prepending tag id.
+    :return: Length of prepended tokens.
+    """
+    return ids.index(eop_id) + 1 if eop_id in ids else 0
+
+
 class RawParallelDatasetLoader:
     """
     Loads a data set of variable-length parallel source/target sequences into buckets of tensors.
@@ -406,6 +417,7 @@ class RawParallelDatasetLoader:
     :param eos_id: End-of-sentence id.
     :param pad_id: Padding id.
     :param eos_id: Unknown id.
+    :param eop_id: End-of-prepending tag id.
     :param skip_blanks: Whether to skip blank lines.
     :param dtype: Data type.
     :param shift_target_factors: If true, shift secondary target factors (i>1) to the right.
@@ -428,12 +440,14 @@ class RawParallelDatasetLoader:
                  buckets: List[Tuple[int, int]],
                  eos_id: int,
                  pad_id: int,
+                 eop_id: int = C.INVALID_ID,
                  skip_blanks: bool = True,
                  dtype: str = 'int32',
                  shift_target_factors: bool = C.TARGET_FACTOR_SHIFT) -> None:
         self.buckets = buckets
         self.eos_id = eos_id
         self.pad_id = pad_id
+        self.eop_id = eop_id
         self.skip_blanks = skip_blanks
         self.dtype = dtype
         self.shift_target_factors = shift_target_factors
@@ -451,6 +465,8 @@ class RawParallelDatasetLoader:
                        for (source_len, _), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
                        for (_, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
+        # metadata contains the length of prepended tokens
+        data_meta = [np.full((num_samples, 1), 0, dtype=self.dtype) for num_samples in num_samples_per_bucket]
 
         bucket_sample_index = [0 for _ in self.buckets]
 
@@ -491,18 +507,21 @@ class RawParallelDatasetLoader:
                     # sequence: <BOS> <BOS> ...
                     t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
+            if self.eop_id != C.INVALID_ID:
+                data_meta[buck_index][sample_index, 0] = get_prepended_token_length(sources[0], self.eop_id)
 
             bucket_sample_index[buck_index] += 1
 
         data_source_tensors = [torch.from_numpy(data) for data in data_source]
         data_target_tensors = [torch.from_numpy(data) for data in data_target]
+        data_meta_tensors = [torch.from_numpy(data) for data in data_meta]
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-        return ParallelDataSet(data_source_tensors, data_target_tensors)
+        return ParallelDataSet(data_source_tensors, data_target_tensors, data_meta_tensors)
 
 
 def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
@@ -577,6 +596,21 @@ def save_shard(shard_idx: int,
     return shard_stat_accumulator.statistics
 
 
+def get_eop_id(vocab, end_of_prepending_tag) -> int:
+    """
+    Gets end-of-prepending tag id from the vocabulary.
+
+    :param vocab: Vocabulary dictionary.
+    :param end_of_prepending_tag: Tag indicating the end of prepended text.
+    :return: End-of-prepending tag id.
+    """
+    eop_id = vocab.get(end_of_prepending_tag, C.INVALID_ID)
+    if end_of_prepending_tag is not None:
+        check_condition(eop_id != C.INVALID_ID,
+                        f"The end-of-prepending tag {end_of_prepending_tag} is not found in the vocabulary.")
+    return eop_id
+
+
 def prepare_data(source_fnames: List[str],
                  target_fnames: List[str],
                  source_vocabs: List[vocab.Vocab],
@@ -591,6 +625,7 @@ def prepare_data(source_fnames: List[str],
                  num_shards: int,
                  output_prefix: str,
                  bucket_scaling: bool = True,
+                 end_of_prepending_tag: str = None,
                  keep_tmp_shard_files: bool = False,
                  pool: multiprocessing.pool.Pool = None,
                  shards: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None):
@@ -625,9 +660,11 @@ def prepare_data(source_fnames: List[str],
     logger.info("Buckets: %s", buckets)
 
     # Map sentences to ids, assign to buckets, compute shard statistics and convert each shard to serialized tensors
+    eop_id = get_eop_id(source_vocabs[0], end_of_prepending_tag)  # only the primary vocab contains EOP
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=C.EOS_ID,
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           eop_id=eop_id)
 
 
     # Process shards in parallel
@@ -690,7 +727,8 @@ def prepare_data(source_fnames: List[str],
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
                              num_source_factors=len(source_fnames),
-                             num_target_factors=len(target_fnames))
+                             num_target_factors=len(target_fnames),
+                             eop_id=eop_id)
     config_data_fname = os.path.join(output_prefix, C.DATA_CONFIG)
     logger.info("Writing data config to '%s'", config_data_fname)
     config_data.save(config_data_fname)
@@ -848,7 +886,8 @@ def get_prepared_data_iters(prepared_data_dir: str,
 
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=C.EOS_ID,
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           eop_id=config_data.eop_id)
 
     # Don't shuffle validation data. Different orders can cause different
     # evaluation results.
@@ -883,6 +922,7 @@ def get_training_data_iters(sources: List[str],
                             bucketing: bool,
                             bucket_width: int,
                             bucket_scaling: bool = True,
+                            end_of_prepending_tag: str = None,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter', Optional['BaseParallelSampleIter'],
@@ -906,6 +946,7 @@ def get_training_data_iters(sources: List[str],
     :param bucketing: Whether to use bucketing.
     :param bucket_width: Size of buckets.
     :param bucket_scaling: Scale bucket steps based on source/target length ratio.
+    :param end_of_prepending_tag: Tag indicating the end of prepended text.
     :param allow_empty: Unless True if no sentences are below or equal to the maximum length an exception is raised.
     :param batch_sentences_multiple_of: Round the number of sentences in each
         bucket's batch to a multiple of this value (word-based batching only).
@@ -946,9 +987,11 @@ def get_training_data_iters(sources: List[str],
     data_statistics.log(bucket_batch_sizes)
 
     # Pass 3: Load the data into memory and return the iterator.
+    eop_id = get_eop_id(source_vocabs[0], end_of_prepending_tag)  # only the primary vocab contains EOP
     data_loader = RawParallelDatasetLoader(buckets=buckets,
                                            eos_id=C.EOS_ID,
-                                           pad_id=C.PAD_ID)
+                                           pad_id=C.PAD_ID,
+                                           eop_id=eop_id)
 
     training_data = data_loader.load(sources_sentences, targets_sentences,
                                      data_statistics.num_sents_per_bucket).fill_up(bucket_batch_sizes)
@@ -964,7 +1007,8 @@ def get_training_data_iters(sources: List[str],
                              max_seq_len_source=max_seq_len_source,
                              max_seq_len_target=max_seq_len_target,
                              num_source_factors=len(sources),
-                             num_target_factors=len(targets))
+                             num_target_factors=len(targets),
+                             eop_id=eop_id)
 
     train_iter = ParallelSampleIter(data=training_data,
                                     buckets=buckets,
@@ -997,7 +1041,8 @@ def get_scoring_data_iters(sources: List[str],
                            target_vocabs: List[vocab.Vocab],
                            batch_size: int,
                            max_seq_len_source: int,
-                           max_seq_len_target: int) -> 'BaseParallelSampleIter':
+                           max_seq_len_target: int,
+                           eop_id: int = C.INVALID_ID) -> 'BaseParallelSampleIter':
     """
     Returns a data iterator for scoring. The iterator loads data on demand,
     batch by batch, and does not skip any lines. Lines that are too long
@@ -1010,6 +1055,7 @@ def get_scoring_data_iters(sources: List[str],
     :param batch_size: Batch size.
     :param max_seq_len_source: Maximum source sequence length.
     :param max_seq_len_target: Maximum target sequence length.
+    :param eop_id: End-of-prepending tag id.
     :return: The scoring data iterator.
     """
     logger.info("==============================")
@@ -1023,6 +1069,7 @@ def get_scoring_data_iters(sources: List[str],
     data_loader = RawParallelDatasetLoader(buckets=[bucket],
                                            eos_id=C.EOS_ID,
                                            pad_id=C.PAD_ID,
+                                           eop_id=eop_id,
                                            skip_blanks=False)
 
     # ...one iterator to traverse them all,
@@ -1124,6 +1171,7 @@ class DataConfig(config.Config):
     max_seq_len_target: int
     num_source_factors: int
     num_target_factors: int
+    eop_id: int = C.INVALID_ID
 
 
 def read_content(path: str, limit: Optional[int] = None) -> Iterator[List[str]]:
@@ -1353,11 +1401,14 @@ class ParallelDataSet:
 
     def __init__(self,
                  source: List[torch.Tensor],
-                 target: List[torch.Tensor]) -> None:
-        check_condition(len(source) == len(target),
-                        "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
+                 target: List[torch.Tensor],
+                 metadata: List[torch.Tensor]) -> None:
+        check_condition(len(source) == len(target) == len(metadata),
+                        "Number of buckets for source/target/metadata do not match: %d/%d/%d." %
+                        (len(source), len(target), len(metadata)))
         self.source = source
         self.target = target
+        self.metadata = metadata
 
     def __len__(self) -> int:
         return len(self.source)
@@ -1369,7 +1420,7 @@ class ParallelDataSet:
         """
         Saves the dataset to a binary .npy file.
         """
-        torch.save(self.source + self.target, fname)
+        torch.save(self.source + self.target + self.metadata, fname)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1379,9 +1430,10 @@ class ParallelDataSet:
         on its rank. Specifically, each of N workers loads 1/N of each bucket.
         """
         data = torch.load(fname)
-        n = len(data) // 2
+        n = len(data) // 3
         source = data[:n]
         target = data[n:2 * n]
+        metadata = data[2 * n:3 * n]
         if utils.is_distributed():
             split_index = torch.distributed.get_rank()
             total_splits = torch.distributed.get_world_size()
@@ -1401,6 +1453,7 @@ class ParallelDataSet:
                                     num_sentences, num_copies, total_splits)
                         source[k] = torch.repeat_interleave(source[k], repeats=num_copies, dim=0)
                         target[k] = torch.repeat_interleave(target[k], repeats=num_copies, dim=0)
+                        metadata[k] = torch.repeat_interleave(metadata[k], repeats=num_copies, dim=0)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
@@ -1410,8 +1463,11 @@ class ParallelDataSet:
             target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])]
                       if t.shape[0] > 0
                       else t for t in target]
-        assert len(source) == len(target)
-        return ParallelDataSet(source, target)
+            metadata = [m[math.floor(i * m.shape[0]):math.floor(j * m.shape[0])]
+                        if m.shape[0] > 0
+                        else m for m in metadata]
+        assert len(source) == len(target) == len(metadata)
+        return ParallelDataSet(source, target, metadata)
 
     def fill_up(self,
                 bucket_batch_sizes: List[BucketBatchSize],
@@ -1425,6 +1481,7 @@ class ParallelDataSet:
         """
         source = list(self.source)
         target = list(self.target)
+        metadata = list(self.metadata)
 
         rs = np.random.RandomState(seed)
 
@@ -1432,6 +1489,7 @@ class ParallelDataSet:
             bucket_batch_size = bucket_batch_sizes[bucket_idx].batch_size
             bucket_source = self.source[bucket_idx]
             bucket_target = self.target[bucket_idx]
+            bucket_metadata = self.metadata[bucket_idx]
             num_samples = bucket_source.shape[0]
 
             # Determine the target number of samples (current value or minimally
@@ -1456,8 +1514,10 @@ class ParallelDataSet:
                                                 torch.index_select(bucket_source, 0, desired_indices)), dim=0)
                 target[bucket_idx] = torch.cat((bucket_target,
                                                 torch.index_select(bucket_target, 0, desired_indices)), dim=0)
+                metadata[bucket_idx] = torch.cat((bucket_metadata,
+                                                  torch.index_select(bucket_metadata, 0, desired_indices)), dim=0)
 
-        return ParallelDataSet(source, target)
+        return ParallelDataSet(source, target, metadata)
 
     def permute(self, permutations: List[torch.Tensor]) -> 'ParallelDataSet':
         """
@@ -1470,17 +1530,20 @@ class ParallelDataSet:
         assert len(self) == len(permutations)
         source = []  # type: List[torch.Tensor]
         target = []  # type: List[torch.Tensor]
+        metadata = []  # type: List[torch.Tensor]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not an empty bucket
                 permutation = permutations[buck_idx]
                 source.append(torch.index_select(self.source[buck_idx], 0, permutation))
                 target.append(torch.index_select(self.target[buck_idx], 0, permutation))
+                metadata.append(torch.index_select(self.metadata[buck_idx], 0, permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
+                metadata.append(self.metadata[buck_idx])
 
-        return ParallelDataSet(source, target)
+        return ParallelDataSet(source, target, metadata)
 
 
 def get_permutations(bucket_counts: List[int]) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
@@ -1666,9 +1729,9 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
 
         dataset = self.data_loader.load(sources_sentences, targets_sentences, [num_read])
 
-        source = dataset.source[0]
+        source, metadata = dataset.source[0], dataset.metadata[0]
         target, label = create_target_and_shifted_label_sequences(dataset.target[0])
-        self.next_batch = create_batch_from_parallel_sample(source, target, label)
+        self.next_batch = create_batch_from_parallel_sample(source, target, label, metadata)
         return True
 
     def next(self) -> 'Batch':
@@ -1798,7 +1861,7 @@ class ParallelSampleIter(BaseParallelSampleIter):
                          permute=permute, dtype=dtype)
 
         # create independent lists to be shuffled
-        self.data = ParallelDataSet(list(data.source), list(data.target))
+        self.data = ParallelDataSet(list(data.source), list(data.target), list(data.metadata))
 
         # create index tuples (buck_idx, batch_start_pos) into buckets.
         # This is the list of all batches across all buckets in the dataset. These will be shuffled.
@@ -1850,9 +1913,9 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.curr_batch_index += 1
 
         batch_size = self.bucket_batch_sizes[i].batch_size
-        source = self.data.source[i][j:j + batch_size]
+        source, metadata = self.data.source[i][j:j + batch_size], self.data.metadata[i][j:j + batch_size]
         target, label = create_target_and_shifted_label_sequences(self.data.target[i][j:j + batch_size])
-        return create_batch_from_parallel_sample(source, target, label)
+        return create_batch_from_parallel_sample(source, target, label, metadata)
 
     def save_state(self, fname: str):
         """
@@ -1929,19 +1992,26 @@ def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) ->
     return target, label
 
 
-def create_batch_from_parallel_sample(source: torch.Tensor, target: torch.Tensor, label: torch.Tensor) -> Batch:
+def create_batch_from_parallel_sample(source: torch.Tensor,
+                                      target: torch.Tensor,
+                                      label: torch.Tensor,
+                                      metadata: torch.Tensor) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
-    :param source: Source tensor. Shape: (batch, source_length, num_source_factors).
-    :param target: Target tensor. Shape: (batch, target_length, num_target_factors).
-    :param label: Time-shifted label tensor. Shape: (batch, target_length, num_target_factors).
+    :param source: Source tensor. Shape: (batch, max_source_length, num_source_factors).
+    :param target: Target tensor. Shape: (batch, max_target_length, num_target_factors).
+    :param label: Time-shifted label tensor. Shape: (batch, max_target_length, num_target_factors).
+    :param metadata: Metadata tensor. Shape: (batch, num_metadata_value).
+                     num_metadata_value = 1 for now, and it is the length of prepended tokens
     """
     source_words = source[:, :, 0]
-    source_length = (source_words != C.PAD_ID).sum(dim=1)
+    all_source_length = (source_words != C.PAD_ID).sum(dim=1)  # Shape: (batch,)
+    prepended_source_length = metadata[:, 0]  # Shape: (batch,)
+    source_length = torch.stack((all_source_length, prepended_source_length), dim=1)  # Shape: (batch, 2)
     target_words = target[:, :, 0]
     target_length = (target_words != C.PAD_ID).sum(dim=1)
-    length_ratio = source_length / target_length
+    length_ratio = all_source_length / target_length
 
     samples, tokens, _ = source.shape
     tokens *= samples

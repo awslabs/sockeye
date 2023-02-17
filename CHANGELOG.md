@@ -11,6 +11,16 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.32]
+
+### Added
+
+- Added blocking cross-attention between decoder and encoded prepended tokens.
+  - If the source contains prepended text and a tag indicating the end of prepended text,
+    Sockeye supports blocking the cross-attention between decoder and encoded prepended tokens (including the tag).
+    To enable this operation, specify `--end-of-prepending-tag` for training or data preparation,
+    and `--transformer-block-prepended-cross-attention` for training.
+
 ## [3.1.31]
 
 ### Fixed

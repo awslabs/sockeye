@@ -320,16 +320,26 @@ class DotAttentionCell(pt.nn.Module):
         return interleaved_matmul_encdec_valatt(key_values, probs, heads=self.heads)
 
 
-def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int, expand=True) -> pt.Tensor:
+def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int, expand: bool = True,
+                               mask_prepended_tokens: bool = True) -> pt.Tensor:
     """
-        lengths: (batch_size,)
-        expand: Expand to the heads.
+    Prepare source length masks where positions of invalid tokens are marked as True.
+
+    :param lengths: Total source length and prepended source length. Shape: (batch_size, 2)
+    :param heads: Number of attention heads.
+    :param max_length: Maximum sequence length.
+    :param expand: Expand to the heads.
+    :param mask_prepended_tokens: Mask prepended tokens.
+    :return: Source length mask.
     """
     # (batch_size, max_len)
-    mask = ~(pt.arange(max_length, device=lengths.device).unsqueeze(0) < lengths.reshape((-1, 1)))
+    mask = ~(pt.arange(max_length, device=lengths.device).unsqueeze(0) < lengths[:, :1])
+    if mask_prepended_tokens:
+        prepended_token_mask = pt.arange(max_length, device=lengths.device).unsqueeze(0) < lengths[:, 1:2]
+        mask |= prepended_token_mask
     if expand:
-        # (batch_size*heads, 1, max_len)
-        mask =  mask.unsqueeze(1).expand(-1, heads, -1).reshape((-1, max_length)).unsqueeze(1)
+        # (batch_size * heads, 1, max_len)
+        mask = mask.unsqueeze(1).expand(-1, heads, -1).reshape((-1, max_length)).unsqueeze(1)
     return mask
 
 
@@ -673,7 +683,7 @@ def separate_kv(module: pt.nn.Module):
 def get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
     utils.check_condition(depth % 2 == 0, "Positional embeddings require an even embedding size it "
                                           "is however %d." % depth)
-    # (1, depth)
+    # (1, depth/2)
     channels = pt.arange(depth // 2).unsqueeze(0)
 
     # (length, 1)
@@ -683,7 +693,7 @@ def get_positional_embeddings(length: int, depth: int) -> pt.Tensor:
     sin = pt.sin(scaled_positions)
     # cosines:
     cos = pt.cos(scaled_positions)
-    # interleave: (length, num_embed)
+    # stack sin and cos: (length, depth)
     encodings = pt.hstack([sin, cos])
     return encodings
 

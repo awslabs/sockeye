@@ -443,6 +443,11 @@ def add_training_data_args(params, required=False):
                         required=required,
                         type=regular_file(),
                         help='Target side of parallel training data.')
+    params.add_argument('--end-of-prepending-tag',
+                        type=str,
+                        default=None,
+                        help='Tag indicating the end of prepended text. Prepended tokens before this tag (inclusive) '
+                             'will be marked.')
 
 
 def add_validation_data_params(params):
@@ -687,6 +692,11 @@ def add_model_parameters(params):
                               choices=C.POSITIONAL_EMBEDDING_TYPES,
                               default=C.FIXED_POSITIONAL_EMBEDDING,
                               help='The type of positional embedding. Default: %(default)s.')
+    model_params.add_argument('--transformer-block-prepended-cross-attention',
+                              action='store_true',
+                              default=False,
+                              help='Block cross-attention between decoder and encoded prepended tokens. '
+                                   'Default: %(default)s.')
     model_params.add_argument('--transformer-preprocess',
                               type=multiple_values(num_values=2, greater_or_equal=None, data_type=str),
                               default=('n', 'n'),

@@ -152,13 +152,15 @@ class DecoderStateGenerator:
     def generate_states_and_store(self,
                                   sources: List[str],
                                   targets: List[str],
-                                  batch_size: int) -> None:
+                                  batch_size: int,
+                                  eop_id: int = C.INVALID_ID) -> None:
         """
         Generate decoder states by force-decoding the sentence pairs in `sources` and `targets` with a NMT model.
 
         :param sources: list of source segments.
         :param targets: list of target segments.
         :param batch_size: number of sentence pairs to decode at once.
+        :param eop_id: End-of-prepending tag id.
         """
         assert self.state_store_file != None, \
                "You should call probe_token_count first to initialize the store files."
@@ -171,7 +173,8 @@ class DecoderStateGenerator:
             target_vocabs=self.target_vocabs,
             batch_size=batch_size,
             max_seq_len_source=self.max_seq_len_source,
-            max_seq_len_target=self.max_seq_len_target
+            max_seq_len_target=self.max_seq_len_target,
+            eop_id=eop_id
         )
 
         with pt.inference_mode():
@@ -254,7 +257,7 @@ def store(args: argparse.Namespace):
                                       args.state_dtype, C.KNN_WORD_DATA_STORE_DTYPE, device)
     generator.num_states = DecoderStateGenerator.probe_token_count(targets[0], max_seq_len_target)
     generator.init_store_file(generator.num_states)
-    generator.generate_states_and_store(sources, targets, args.batch_size)
+    generator.generate_states_and_store(sources, targets, args.batch_size, model.eop_id)
     generator.save_config()
 
 
@@ -272,6 +275,8 @@ def main():
                       level=args.loglevel)  # pylint: disable=no-member
 
     utils.log_basic_info(args)
+    if args.end_of_prepending_tag is not None:
+        logger.warning("The end-of-prepending tag defined in the model will be used.")
 
     store(args)
 

@@ -31,7 +31,7 @@ from . import lexicon
 from . import utils
 from . import vocab
 from .beam_search import CandidateScorer, get_search_algorithm, GreedySearch, SearchResult
-from .data_io import tokens2ids
+from .data_io import tokens2ids, get_prepended_token_length
 from .model import SockeyeModel
 
 logger = logging.getLogger(__name__)
@@ -858,6 +858,10 @@ class Translator:
     def num_target_factors(self) -> int:
         return self.models[0].num_target_factors
 
+    @property
+    def eop_id(self) -> int:
+        return self.models[0].eop_id
+
     def translate(self, trans_inputs: List[TranslatorInput], fill_up_batches: bool = True) -> List[TranslatorOutput]:
         """
         Batch-translates a list of TranslatorInputs, returns a list of TranslatorOutputs.
@@ -1001,13 +1005,14 @@ class Translator:
                 optional target prefix, and optional target prefix factors.
         """
         batch_size = len(trans_inputs)
-        lengths = [len(inp) for inp in trans_inputs]
 
         max_target_prefix_length = max(inp.num_target_prefix_tokens for inp in trans_inputs)
         max_target_prefix_factors_length = max(inp.num_target_prefix_factors for inp in trans_inputs)
         max_length = max(len(inp) for inp in trans_inputs)
         # assembling source ids on cpu array (faster) and copy to Translator.device (potentially GPU) in one go below.
         source_np = np.zeros((batch_size, max_length, self.num_source_factors), dtype='int32')
+        # total token length and prepended token length
+        length_np = np.zeros((batch_size, 2), dtype='int32')
 
         target_prefix_np = np.zeros((batch_size, max_target_prefix_length), dtype='int32') \
             if max_target_prefix_length > 0 else None
@@ -1019,9 +1024,13 @@ class Translator:
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
+            length_np[j, 0] = num_tokens
             max_output_lengths.append(self._get_max_output_length(num_tokens))
-            source_np[j, :num_tokens, 0] = tokens2ids(itertools.chain(trans_input.get_source_prefix_tokens(),
-                                                                      trans_input.tokens), self.source_vocabs[0])
+            primary_source_ids = tokens2ids(itertools.chain(trans_input.get_source_prefix_tokens(),
+                                                            trans_input.tokens), self.source_vocabs[0])
+            source_np[j, :num_tokens, 0] = primary_source_ids
+            if self.eop_id != C.INVALID_ID:
+                length_np[j, 1] = get_prepended_token_length(primary_source_ids, self.eop_id)
             if target_prefix_np is not None and trans_input.num_target_prefix_tokens > 0:
                 target_prefix_np[j, :trans_input.num_target_prefix_tokens] = \
                     tokens2ids(trans_input.get_target_prefix_tokens(), self.vocab_targets[0])
@@ -1068,7 +1077,7 @@ class Translator:
                         "will default to not using a restrict lexicon.")
 
         source = pt.tensor(source_np, device=self.device, dtype=pt.int32)
-        source_length = pt.tensor(lengths, device=self.device, dtype=pt.int32)  # shape: (batch_size,)
+        source_length = pt.tensor(length_np, device=self.device, dtype=pt.int32)  # shape: (batch_size, 2)
         max_out_lengths = pt.tensor(max_output_lengths, device=self.device, dtype=pt.int32)
         target_prefix = pt.tensor(target_prefix_np, device=self.device, dtype=pt.int32) \
             if target_prefix_np is not None else None
