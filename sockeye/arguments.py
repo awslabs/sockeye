@@ -447,7 +447,8 @@ def add_training_data_args(params, required=False):
                         type=str,
                         default=None,
                         help='Tag indicating the end of prepended text. Prepended tokens before this tag (inclusive) '
-                             'will be marked.')
+                             'will be marked, and they will not be counted toward source length when calculating '
+                             'maximum output length for beam search.')
 
 
 def add_validation_data_params(params):

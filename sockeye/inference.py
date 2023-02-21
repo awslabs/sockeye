@@ -1024,13 +1024,14 @@ class Translator:
         max_output_lengths = []  # type: List[int]
         for j, trans_input in enumerate(trans_inputs):
             num_tokens = len(trans_input)  # includes eos
-            length_np[j, 0] = num_tokens
-            max_output_lengths.append(self._get_max_output_length(num_tokens))
             primary_source_ids = tokens2ids(itertools.chain(trans_input.get_source_prefix_tokens(),
                                                             trans_input.tokens), self.source_vocabs[0])
             source_np[j, :num_tokens, 0] = primary_source_ids
+            length_np[j, 0] = num_tokens
             if self.eop_id != C.INVALID_ID:
                 length_np[j, 1] = get_prepended_token_length(primary_source_ids, self.eop_id)
+            # the effective source length excludes prepended tokens
+            max_output_lengths.append(self._get_max_output_length(length_np[j, 0] - length_np[j, 1]))
             if target_prefix_np is not None and trans_input.num_target_prefix_tokens > 0:
                 target_prefix_np[j, :trans_input.num_target_prefix_tokens] = \
                     tokens2ids(trans_input.get_target_prefix_tokens(), self.vocab_targets[0])
