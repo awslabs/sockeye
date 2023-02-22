@@ -15,11 +15,16 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 
 ### Added
 
-- Added blocking cross-attention between decoder and encoded prepended tokens.
+- Sockeye now supports blocking cross-attention between decoder and encoded prepended tokens.
   - If the source contains prepended text and a tag indicating the end of prepended text,
     Sockeye supports blocking the cross-attention between decoder and encoded prepended tokens (including the tag).
     To enable this operation, specify `--end-of-prepending-tag` for training or data preparation,
     and `--transformer-block-prepended-cross-attention` for training.
+
+### Changed
+
+- Sockeye uses a new dictionary-based prepared data format that supports storing length of prepended source tokens
+  (version 7). The previous format (version 6) is still supported.
 
 ## [3.1.31]
 

@@ -285,9 +285,10 @@ def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_
 def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
                               min_count: int,
                               max_count: int,
-                              bucket_counts: Optional[List[Optional[int]]] = None) -> Tuple[List[torch.Tensor],
-                                                                                            List[torch.Tensor],
-                                                                                            List[torch.Tensor]]:
+                              bucket_counts: Optional[List[Optional[int]]] = None,
+                              include_prepended_source_length: bool = False) -> Tuple[List[torch.Tensor],
+                                                                                      List[torch.Tensor],
+                                                                                      List[torch.Tensor]]:
     """
     Get random bucket data.
 
@@ -296,7 +297,8 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
     :param max_count: The maximum number of samples that will be sampled if no exact count is given.
     :param bucket_counts: For each bucket an optional exact example count can be given. If it is not given it will be
                          sampled.
-    :return: The random source, target and metadata tensors.
+    :param include_prepended_source_length: Generate random length of prepended source tokens (otherwise return None).
+    :return: The random source, target and optional prepended_source_length tensors.
     """
     if bucket_counts is None:
         bucket_counts = [None for _ in buckets]
@@ -306,13 +308,17 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
               for count, bucket in zip(bucket_counts, buckets)]
     target = [torch.randint(0, 10, (count, random.randint(2, bucket[1]), 1))
               for count, bucket in zip(bucket_counts, buckets)]
-    metadata = [torch.randint(0, 10, (count, 1)) for count in bucket_counts]
-    return source, target, metadata
+    prepended_source_length = [torch.randint(0, 10, (count, 1)) for count in bucket_counts] \
+        if include_prepended_source_length else None
+    return source, target, prepended_source_length
 
 
-def test_parallel_data_set():
+@pytest.mark.parametrize("include_prepended_source_length", [False, True])
+def test_parallel_data_set(include_prepended_source_length):
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
-    source, target, metadata = _get_random_bucketed_data(buckets, min_count=0, max_count=5)
+    source, target, prepended_source_length = \
+        _get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                  include_prepended_source_length=include_prepended_source_length)
 
     def check_equal(tensors1, tensors2):
         assert len(tensors1) == len(tensors2)
@@ -320,33 +326,45 @@ def test_parallel_data_set():
             assert torch.equal(a1, a2)
 
     with TemporaryDirectory() as work_dir:
-        dataset = data_io.ParallelDataSet(source, target, metadata)
+        dataset = data_io.ParallelDataSet(source, target, prepended_source_length)
         fname = os.path.join(work_dir, 'dataset')
         dataset.save(fname)
         dataset_loaded = data_io.ParallelDataSet.load(fname)
         check_equal(dataset.source, dataset_loaded.source)
         check_equal(dataset.target, dataset_loaded.target)
-        check_equal(dataset.metadata, dataset_loaded.metadata)
+        if include_prepended_source_length:
+            check_equal(dataset.prepended_source_length, dataset_loaded.prepended_source_length)
+        else:
+            # Test backward compatibility: with the legacy format (source/target only)
+            dataset.save(fname, use_legacy_format=True)
+            dataset_loaded = data_io.ParallelDataSet.load(fname)
+            check_equal(dataset.source, dataset_loaded.source)
+            check_equal(dataset.target, dataset_loaded.target)
 
 
-def test_parallel_data_set_fill_up():
+@pytest.mark.parametrize("include_prepended_source_length", [False, True])
+def test_parallel_data_set_fill_up(include_prepended_source_length):
     batch_size = 32
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
                                                            data_target_average_len=[None] * len(buckets))
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=1, max_count=5))
+    dataset = data_io.ParallelDataSet(
+        *_get_random_bucketed_data(buckets, min_count=1, max_count=5,
+                                   include_prepended_source_length=include_prepended_source_length))
 
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
     assert len(dataset_filled_up.target) == len(dataset.target)
-    assert len(dataset_filled_up.metadata) == len(dataset.metadata)
+    if include_prepended_source_length:
+        assert len(dataset_filled_up.prepended_source_length) == len(dataset.prepended_source_length)
     for bidx in range(len(dataset)):
         bucket_batch_size = bucket_batch_sizes[bidx].batch_size
         assert dataset_filled_up.source[bidx].shape[0] == bucket_batch_size
         assert dataset_filled_up.target[bidx].shape[0] == bucket_batch_size
-        assert dataset_filled_up.metadata[bidx].shape[0] == bucket_batch_size
+        if include_prepended_source_length:
+            assert dataset_filled_up.prepended_source_length[bidx].shape[0] == bucket_batch_size
 
 
 def test_get_permutations():
@@ -369,14 +387,17 @@ def test_get_permutations():
             assert len(p_set) == 1
 
 
-def test_parallel_data_set_permute():
+@pytest.mark.parametrize("include_prepended_source_length", [False, True])
+def test_parallel_data_set_permute(include_prepended_source_length):
     batch_size = 5
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
                                                            batch_size,
                                                            batch_type=C.BATCH_TYPE_SENTENCE,
                                                            data_target_average_len=[None] * len(buckets))
-    dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5)).fill_up(
+    dataset = data_io.ParallelDataSet(
+        *_get_random_bucketed_data(buckets, min_count=0, max_count=5,
+                                   include_prepended_source_length=include_prepended_source_length)).fill_up(
         bucket_batch_sizes)
 
     permutations, inverse_permutations = data_io.get_permutations(dataset.get_bucket_counts())
@@ -389,11 +410,14 @@ def test_parallel_data_set_permute():
         if num_samples:
             assert (dataset.source[buck_idx] == dataset_restored.source[buck_idx]).all()
             assert (dataset.target[buck_idx] == dataset_restored.target[buck_idx]).all()
-            assert (dataset.metadata[buck_idx] == dataset_restored.metadata[buck_idx]).all()
+            if include_prepended_source_length:
+                assert (dataset.prepended_source_length[buck_idx] ==
+                        dataset_restored.prepended_source_length[buck_idx]).all()
         else:
             assert not dataset_restored.source[buck_idx].shape[0]
             assert not dataset_restored.target[buck_idx].shape[0]
-            assert not dataset_restored.metadata[buck_idx].shape[0]
+            if include_prepended_source_length:
+                assert not dataset_restored.prepended_source_length[buck_idx].shape[0]
 
 
 def test_get_batch_indices():

@@ -472,8 +472,9 @@ class RawParallelDatasetLoader:
                        for (source_len, _), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
                        for (_, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
-        # metadata contains the length of prepended tokens
-        data_meta = [np.full((num_samples, 1), 0, dtype=self.dtype) for num_samples in num_samples_per_bucket]
+        data_prepended_source_length = \
+            [np.full((num_samples,), 0, dtype=self.dtype) for num_samples in num_samples_per_bucket] \
+                if self.eop_id != C.INVALID_ID else None
 
         bucket_sample_index = [0 for _ in self.buckets]
 
@@ -514,20 +515,23 @@ class RawParallelDatasetLoader:
                     # sequence: <BOS> <BOS> ...
                     t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
-            data_meta[buck_index][sample_index, 0] = get_prepended_token_length(sources[0], self.eop_id)
+            if data_prepended_source_length is not None:
+                data_prepended_source_length[buck_index][sample_index] = get_prepended_token_length(sources[0],
+                                                                                                    self.eop_id)
 
             bucket_sample_index[buck_index] += 1
 
         data_source_tensors = [torch.from_numpy(data) for data in data_source]
         data_target_tensors = [torch.from_numpy(data) for data in data_target]
-        data_meta_tensors = [torch.from_numpy(data) for data in data_meta]
+        data_prepended_source_length_tensors = [torch.from_numpy(data) for data in data_prepended_source_length] \
+            if data_prepended_source_length is not None else None
 
         if num_tokens_source > 0 and num_tokens_target > 0:
             logger.info("Created bucketed parallel data set. Introduced padding: source=%.1f%% target=%.1f%%)",
                         num_pad_source / num_tokens_source * 100,
                         num_pad_target / num_tokens_target * 100)
 
-        return ParallelDataSet(data_source_tensors, data_target_tensors, data_meta_tensors)
+        return ParallelDataSet(data_source_tensors, data_target_tensors, data_prepended_source_length_tensors)
 
 
 def get_num_shards(num_samples: int, samples_per_shard: int, min_num_shards: int) -> int:
@@ -837,9 +841,9 @@ def get_prepared_data_iters(prepared_data_dir: str,
     version_file = os.path.join(prepared_data_dir, C.PREPARED_DATA_VERSION_FILE)
     with open(version_file) as version_in:
         version = int(version_in.read())
-        check_condition(version == C.PREPARED_DATA_VERSION,
-                        "The dataset %s was written in an old and incompatible format. Please rerun data "
-                        "preparation with a current version of Sockeye." % prepared_data_dir)
+        check_condition(version in (C.PREPARED_DATA_VERSION, C.PREPARED_DATA_LEGACY_VERSION),
+                        "The dataset %s was written in an incompatible format. "
+                        "Please rerun data preparation with this version of Sockeye." % prepared_data_dir)
     info_file = os.path.join(prepared_data_dir, C.DATA_INFO)
     check_condition(os.path.exists(info_file),
                     "Could not find data info %s. Are you sure %s is a directory created with "
@@ -1408,13 +1412,16 @@ class ParallelDataSet:
     def __init__(self,
                  source: List[torch.Tensor],
                  target: List[torch.Tensor],
-                 metadata: List[torch.Tensor]) -> None:
-        check_condition(len(source) == len(target) == len(metadata),
-                        "Number of buckets for source/target/metadata do not match: %d/%d/%d." %
-                        (len(source), len(target), len(metadata)))
+                 prepended_source_length: Optional[List[torch.Tensor]] = None) -> None:
+        check_condition(len(source) == len(target),
+                        "Number of buckets for source/target do not match: %d/%d." % (len(source), len(target)))
+        if prepended_source_length is not None:
+            check_condition(len(source) == len(prepended_source_length),
+                            "Number of buckets for source/prepended_source_length do not match: %d/%d." %
+                            (len(source), len(prepended_source_length)))
         self.source = source
         self.target = target
-        self.metadata = metadata
+        self.prepended_source_length = prepended_source_length
 
     def __len__(self) -> int:
         return len(self.source)
@@ -1422,11 +1429,21 @@ class ParallelDataSet:
     def get_bucket_counts(self):
         return [len(self.source[buck_idx]) for buck_idx in range(len(self))]
 
-    def save(self, fname: str):
+    def save(self, fname: str, use_legacy_format: bool = False):
         """
-        Saves the dataset to a binary .npy file.
+        Saves the dataset to disk using PyTorch's pickle/zip format. The option
+        to use the legacy data format is included for testing backward
+        compatibility and is not recommended for general use.
         """
-        torch.save(self.source + self.target + self.metadata, fname)
+        if use_legacy_format:
+            check_condition(self.prepended_source_length is None,
+                            'Cannot save data in legacy format when specifying prepended tokens')
+            torch.save(self.source + self.target, fname)
+        else:
+            data_dict = {C.DATA_KEY_SOURCE: self.source, C.DATA_KEY_TARGET: self.target}  # type: Dict[str, Any]
+            if self.prepended_source_length is not None:
+                data_dict[C.DATA_KEY_PREPENDED_SOURCE_LENGTH] = self.prepended_source_length
+            torch.save(data_dict, fname)
 
     @staticmethod
     def load(fname: str) -> 'ParallelDataSet':
@@ -1436,10 +1453,20 @@ class ParallelDataSet:
         on its rank. Specifically, each of N workers loads 1/N of each bucket.
         """
         data = torch.load(fname)
-        n = len(data) // 3
-        source = data[:n]
-        target = data[n:2 * n]
-        metadata = data[2 * n:3 * n]
+        if isinstance(data, list):
+            # Legacy format (data version 6)
+            n = len(data) // 2
+            source = data[:n]
+            target = data[n:2 * n]
+            prepended_source_length = None
+        else:
+            # Current format (data version 7)
+            check_condition(isinstance(data, dict) and C.DATA_KEY_SOURCE in data and C.DATA_KEY_TARGET in data,
+                            f'Unknown data format for file {fname}. '
+                            'Please rerun data preparation with this version of Sockeye.')
+            source = data[C.DATA_KEY_SOURCE]
+            target = data[C.DATA_KEY_TARGET]
+            prepended_source_length = data.get(C.DATA_KEY_PREPENDED_SOURCE_LENGTH, None)
         if utils.is_distributed():
             split_index = torch.distributed.get_rank()
             total_splits = torch.distributed.get_world_size()
@@ -1459,7 +1486,9 @@ class ParallelDataSet:
                                     num_sentences, num_copies, total_splits)
                         source[k] = torch.repeat_interleave(source[k], repeats=num_copies, dim=0)
                         target[k] = torch.repeat_interleave(target[k], repeats=num_copies, dim=0)
-                        metadata[k] = torch.repeat_interleave(metadata[k], repeats=num_copies, dim=0)
+                        if prepended_source_length is not None:
+                            prepended_source_length[k] = torch.repeat_interleave(prepended_source_length[k],
+                                                                                 repeats=num_copies, dim=0)
             # Load this worker's slice of each bucket.  If the bucket is empty,
             # there is no need to slice and attempting to do so will raise an
             # error.
@@ -1469,11 +1498,15 @@ class ParallelDataSet:
             target = [t[math.floor(i * t.shape[0]):math.floor(j * t.shape[0])]
                       if t.shape[0] > 0
                       else t for t in target]
-            metadata = [m[math.floor(i * m.shape[0]):math.floor(j * m.shape[0])]
-                        if m.shape[0] > 0
-                        else m for m in metadata]
-        assert len(source) == len(target) == len(metadata)
-        return ParallelDataSet(source, target, metadata)
+            if prepended_source_length is not None:
+                prepended_source_length = [l[math.floor(i * l.shape[0]):math.floor(j * l.shape[0])]
+                                           if l.shape[0] > 0
+                                           else l for l in prepended_source_length]
+        # Sanity checks
+        assert len(source) == len(target)
+        if prepended_source_length is not None:
+            assert len(source) == len(prepended_source_length)
+        return ParallelDataSet(source, target, prepended_source_length)
 
     def fill_up(self,
                 bucket_batch_sizes: List[BucketBatchSize],
@@ -1487,7 +1520,8 @@ class ParallelDataSet:
         """
         source = list(self.source)
         target = list(self.target)
-        metadata = list(self.metadata)
+        prepended_source_length = list(self.prepended_source_length) \
+            if self.prepended_source_length is not None else None
 
         rs = np.random.RandomState(seed)
 
@@ -1495,7 +1529,8 @@ class ParallelDataSet:
             bucket_batch_size = bucket_batch_sizes[bucket_idx].batch_size
             bucket_source = self.source[bucket_idx]
             bucket_target = self.target[bucket_idx]
-            bucket_metadata = self.metadata[bucket_idx]
+            bucket_prepended_source_length = self.prepended_source_length[bucket_idx] \
+                if self.prepended_source_length is not None else None
             num_samples = bucket_source.shape[0]
 
             # Determine the target number of samples (current value or minimally
@@ -1520,10 +1555,13 @@ class ParallelDataSet:
                                                 torch.index_select(bucket_source, 0, desired_indices)), dim=0)
                 target[bucket_idx] = torch.cat((bucket_target,
                                                 torch.index_select(bucket_target, 0, desired_indices)), dim=0)
-                metadata[bucket_idx] = torch.cat((bucket_metadata,
-                                                  torch.index_select(bucket_metadata, 0, desired_indices)), dim=0)
+                if prepended_source_length is not None:
+                    assert bucket_prepended_source_length is not None
+                    prepended_source_length[bucket_idx] = torch.cat((bucket_prepended_source_length,
+                                                                     torch.index_select(bucket_prepended_source_length,
+                                                                                        0, desired_indices)), dim=0)
 
-        return ParallelDataSet(source, target, metadata)
+        return ParallelDataSet(source, target, prepended_source_length)
 
     def permute(self, permutations: List[torch.Tensor]) -> 'ParallelDataSet':
         """
@@ -1536,20 +1574,25 @@ class ParallelDataSet:
         assert len(self) == len(permutations)
         source = []  # type: List[torch.Tensor]
         target = []  # type: List[torch.Tensor]
-        metadata = []  # type: List[torch.Tensor]
+        prepended_source_length = [] if self.prepended_source_length is not None else None  # type: Optional[List[torch.Tensor]]
         for buck_idx in range(len(self)):
             num_samples = self.source[buck_idx].shape[0]
             if num_samples:  # not an empty bucket
                 permutation = permutations[buck_idx]
                 source.append(torch.index_select(self.source[buck_idx], 0, permutation))
                 target.append(torch.index_select(self.target[buck_idx], 0, permutation))
-                metadata.append(torch.index_select(self.metadata[buck_idx], 0, permutation))
+                if self.prepended_source_length is not None:
+                    assert prepended_source_length is not None
+                    prepended_source_length.append(torch.index_select(self.prepended_source_length[buck_idx],
+                                                                      0, permutation))
             else:
                 source.append(self.source[buck_idx])
                 target.append(self.target[buck_idx])
-                metadata.append(self.metadata[buck_idx])
+                if self.prepended_source_length is not None:
+                    assert prepended_source_length is not None
+                    prepended_source_length.append(self.prepended_source_length[buck_idx])
 
-        return ParallelDataSet(source, target, metadata)
+        return ParallelDataSet(source, target, prepended_source_length)
 
 
 def get_permutations(bucket_counts: List[int]) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
@@ -1735,9 +1778,11 @@ class BatchedRawParallelSampleIter(BaseParallelSampleIter):
 
         dataset = self.data_loader.load(sources_sentences, targets_sentences, [num_read])
 
-        source, metadata = dataset.source[0], dataset.metadata[0]
+        source = dataset.source[0]
         target, label = create_target_and_shifted_label_sequences(dataset.target[0])
-        self.next_batch = create_batch_from_parallel_sample(source, target, label, metadata)
+        prepended_source_length = dataset.prepended_source_length[0] \
+            if dataset.prepended_source_length is not None else None
+        self.next_batch = create_batch_from_parallel_sample(source, target, label, prepended_source_length)
         return True
 
     def next(self) -> 'Batch':
@@ -1867,7 +1912,10 @@ class ParallelSampleIter(BaseParallelSampleIter):
                          permute=permute, dtype=dtype)
 
         # create independent lists to be shuffled
-        self.data = ParallelDataSet(list(data.source), list(data.target), list(data.metadata))
+        self.data = ParallelDataSet(list(data.source),
+                                    list(data.target),
+                                    list(data.prepended_source_length)
+                                    if data.prepended_source_length is not None else None)
 
         # create index tuples (buck_idx, batch_start_pos) into buckets.
         # This is the list of all batches across all buckets in the dataset. These will be shuffled.
@@ -1919,9 +1967,11 @@ class ParallelSampleIter(BaseParallelSampleIter):
         self.curr_batch_index += 1
 
         batch_size = self.bucket_batch_sizes[i].batch_size
-        source, metadata = self.data.source[i][j:j + batch_size], self.data.metadata[i][j:j + batch_size]
+        source = self.data.source[i][j:j + batch_size]
         target, label = create_target_and_shifted_label_sequences(self.data.target[i][j:j + batch_size])
-        return create_batch_from_parallel_sample(source, target, label, metadata)
+        prepended_source_length = self.data.prepended_source_length[i][j:j + batch_size] \
+            if self.data.prepended_source_length is not None else None
+        return create_batch_from_parallel_sample(source, target, label, prepended_source_length)
 
     def save_state(self, fname: str):
         """
@@ -2001,19 +2051,19 @@ def create_target_and_shifted_label_sequences(target_and_label: torch.Tensor) ->
 def create_batch_from_parallel_sample(source: torch.Tensor,
                                       target: torch.Tensor,
                                       label: torch.Tensor,
-                                      metadata: torch.Tensor) -> Batch:
+                                      prepended_source_length: Optional[torch.Tensor] = None) -> Batch:
     """
     Creates a Batch instance from parallel data.
 
     :param source: Source tensor. Shape: (batch, max_source_length, num_source_factors).
     :param target: Target tensor. Shape: (batch, max_target_length, num_target_factors).
     :param label: Time-shifted label tensor. Shape: (batch, max_target_length, num_target_factors).
-    :param metadata: Metadata tensor. Shape: (batch, num_metadata_value).
-                     num_metadata_value = 1 for now, and it is the length of prepended tokens.
+    :param prepended_source_length: Length of prepended source tokens tensor. Shape: (batch,).
     """
     source_words = source[:, :, 0]
     all_source_length = (source_words != C.PAD_ID).sum(dim=1)  # Shape: (batch,)
-    prepended_source_length = metadata[:, 0]  # Shape: (batch,)
+    if prepended_source_length is None:
+        prepended_source_length = torch.zeros_like(all_source_length)
     source_length = torch.stack((all_source_length, prepended_source_length), dim=1)  # Shape: (batch, 2)
     target_words = target[:, :, 0]
     target_length = (target_words != C.PAD_ID).sum(dim=1)
