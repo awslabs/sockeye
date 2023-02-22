@@ -406,7 +406,14 @@ def get_prepended_token_length(ids: List[int], eop_id: int) -> int:
     :param eop_id: End-of-prepending tag id.
     :return: Length of prepended tokens.
     """
-    return ids.index(eop_id) + 1 if eop_id in ids else 0
+    if eop_id == C.INVALID_ID:
+        # the end-of-prepending tag is not specified
+        return 0
+    try:
+        return ids.index(eop_id) + 1
+    except ValueError:
+        # the end-of-prepending tag is not in the token list
+        return 0
 
 
 class RawParallelDatasetLoader:
@@ -507,8 +514,7 @@ class RawParallelDatasetLoader:
                     # sequence: <BOS> <BOS> ...
                     t.insert(0, C.BOS_ID)
                     data_target[buck_index][sample_index, 0:target_len + 1, i] = t
-            if self.eop_id != C.INVALID_ID:
-                data_meta[buck_index][sample_index, 0] = get_prepended_token_length(sources[0], self.eop_id)
+            data_meta[buck_index][sample_index, 0] = get_prepended_token_length(sources[0], self.eop_id)
 
             bucket_sample_index[buck_index] += 1
 
@@ -596,7 +602,7 @@ def save_shard(shard_idx: int,
     return shard_stat_accumulator.statistics
 
 
-def get_eop_id(vocab, end_of_prepending_tag) -> int:
+def get_eop_id(vocab: vocab.Vocab, end_of_prepending_tag: str) -> int:
     """
     Gets end-of-prepending tag id from the vocabulary.
 
@@ -625,7 +631,7 @@ def prepare_data(source_fnames: List[str],
                  num_shards: int,
                  output_prefix: str,
                  bucket_scaling: bool = True,
-                 end_of_prepending_tag: str = None,
+                 end_of_prepending_tag: Optional[str] = None,
                  keep_tmp_shard_files: bool = False,
                  pool: multiprocessing.pool.Pool = None,
                  shards: List[Tuple[Tuple[str, ...], Tuple[str, ...]]] = None):
@@ -922,7 +928,7 @@ def get_training_data_iters(sources: List[str],
                             bucketing: bool,
                             bucket_width: int,
                             bucket_scaling: bool = True,
-                            end_of_prepending_tag: str = None,
+                            end_of_prepending_tag: Optional[str] = None,
                             allow_empty: bool = False,
                             batch_sentences_multiple_of: int = 1,
                             permute: bool = True) -> Tuple['BaseParallelSampleIter', Optional['BaseParallelSampleIter'],
@@ -2003,7 +2009,7 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
     :param target: Target tensor. Shape: (batch, max_target_length, num_target_factors).
     :param label: Time-shifted label tensor. Shape: (batch, max_target_length, num_target_factors).
     :param metadata: Metadata tensor. Shape: (batch, num_metadata_value).
-                     num_metadata_value = 1 for now, and it is the length of prepended tokens
+                     num_metadata_value = 1 for now, and it is the length of prepended tokens.
     """
     source_words = source[:, :, 0]
     all_source_length = (source_words != C.PAD_ID).sum(dim=1)  # Shape: (batch,)
@@ -2011,6 +2017,7 @@ def create_batch_from_parallel_sample(source: torch.Tensor,
     source_length = torch.stack((all_source_length, prepended_source_length), dim=1)  # Shape: (batch, 2)
     target_words = target[:, :, 0]
     target_length = (target_words != C.PAD_ID).sum(dim=1)
+    # length ratio calculation here includes prepended tokens (and the end-of-prepending tag)
     length_ratio = all_source_length / target_length
 
     samples, tokens, _ = source.shape

@@ -1028,8 +1028,7 @@ class Translator:
                                                             trans_input.tokens), self.source_vocabs[0])
             source_np[j, :num_tokens, 0] = primary_source_ids
             length_np[j, 0] = num_tokens
-            if self.eop_id != C.INVALID_ID:
-                length_np[j, 1] = get_prepended_token_length(primary_source_ids, self.eop_id)
+            length_np[j, 1] = get_prepended_token_length(primary_source_ids, self.eop_id)
             # the effective source length excludes prepended tokens
             max_output_lengths.append(self._get_max_output_length(length_np[j, 0] - length_np[j, 1]))
             if target_prefix_np is not None and trans_input.num_target_prefix_tokens > 0:
