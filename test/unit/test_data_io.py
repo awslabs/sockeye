@@ -491,22 +491,27 @@ def test_non_parallel_calculate_length_statistics(sources, targets):
         data_io.calculate_length_statistics(sources, targets, 5, 5)
 
 
-def test_get_training_data_iters():
-    from sockeye.test_utils import tmp_digits_dataset
+@pytest.mark.parametrize("eop_tag", ['', "<EOP>"])
+def test_get_training_data_iters(eop_tag):
+    if eop_tag:
+        end_of_prepending_tag = eop_tag
+        expected_mean = 0.9208152692746332
+        expected_std = 0.0698611911724421
+    else:
+        end_of_prepending_tag = None
+        expected_mean = 1.0
+        expected_std = 0.0
 
     train_line_count = 100
     train_line_count_empty = 0
     train_max_length = 30
     dev_line_count = 20
     dev_max_length = 30
-    expected_mean = 0.9208152692746332
-    expected_std = 0.0698611911724421
     test_line_count = 20
     test_line_count_empty = 0
     test_max_length = 30
     batch_size = 5
     num_source_factors = num_target_factors = 1
-    eop_tag = "<EOP>"
     with tmp_digits_dataset("tmp_corpus",
                             train_line_count, train_line_count_empty, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
@@ -531,7 +536,7 @@ def test_get_training_data_iters():
             max_seq_len_target=train_max_length,
             bucketing=True,
             bucket_width=10,
-            end_of_prepending_tag=eop_tag)
+            end_of_prepending_tag=end_of_prepending_tag)
         assert isinstance(train_iter, data_io.ParallelSampleIter)
         assert isinstance(val_iter, data_io.ParallelSampleIter)
         assert isinstance(config_data, data_io.DataConfig)
@@ -540,7 +545,8 @@ def test_get_training_data_iters():
         assert data_info.source_vocabs == [None]
         assert data_info.target_vocabs == [None]
         assert config_data.data_statistics.max_observed_len_source == train_max_length
-        assert config_data.data_statistics.max_observed_len_target == train_max_length - 1  # no target text prefix
+        assert config_data.data_statistics.max_observed_len_target == train_max_length - 1 \
+            if eop_tag else train_max_length  # no target text prefix
         assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
         assert np.isclose(config_data.data_statistics.length_ratio_std, expected_std)
 

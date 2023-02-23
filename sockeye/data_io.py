@@ -617,7 +617,7 @@ def get_eop_id(vocab: vocab.Vocab, end_of_prepending_tag: str) -> int:
     eop_id = vocab.get(end_of_prepending_tag, C.INVALID_ID)
     if end_of_prepending_tag is not None:
         check_condition(eop_id != C.INVALID_ID,
-                        f"The end-of-prepending tag {end_of_prepending_tag} is not found in the vocabulary.")
+                        f"The end-of-prepending tag '{end_of_prepending_tag}' is not found in the vocabulary.")
     return eop_id
 
 
