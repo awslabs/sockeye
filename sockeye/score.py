@@ -47,6 +47,8 @@ def score(args: argparse.Namespace):
                       level=args.loglevel)  # pylint: disable=no-member
 
     utils.log_basic_info(args)
+    if args.end_of_prepending_tag is not None:
+        logger.warning("The end-of-prepending tag defined in the model will be used.")
 
     device = utils.init_device(args)
     logger.info(f"Scoring device: {device}")
@@ -76,7 +78,8 @@ def score(args: argparse.Namespace):
         target_vocabs=target_vocabs,
         batch_size=args.batch_size,
         max_seq_len_source=max_seq_len_source,
-        max_seq_len_target=max_seq_len_target)
+        max_seq_len_target=max_seq_len_target,
+        eop_id=model.eop_id)
 
     constant_length_ratio = args.brevity_penalty_constant_length_ratio
     if args.brevity_penalty_type == C.BREVITY_PENALTY_CONSTANT:

@@ -185,3 +185,10 @@ This is similar to using `--restrict-lexicon` for `sockeye-translate` with the a
 To use NVS simply specify `--neural-vocab-selection` to `sockeye-train`.
 This will train a model with NVS that is automatically used by `sockeye-translate`.
 If you want look at translations without vocabulary selection specify `--skip-nvs` as an argument to `sockeye-translate`.
+
+## Prepended Source Text
+
+If the source contains prepended text and a tag indicating the end of prepended text,
+Sockeye supports blocking the cross-attention between decoder and encoded prepended tokens (including the tag).
+To enable this operation, specify `--end-of-prepending-tag` for training or data preparation,
+and `--transformer-block-prepended-cross-attention` for training.

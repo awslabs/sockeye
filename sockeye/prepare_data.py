@@ -112,6 +112,7 @@ def prepare_data(args: argparse.Namespace):
                              num_shards=num_shards,
                              output_prefix=output_folder,
                              bucket_scaling=bucket_scaling,
+                             end_of_prepending_tag=args.end_of_prepending_tag,
                              pool=pool,
                              shards=shards,
                              keep_tmp_shard_files=keep_tmp_shard_files)

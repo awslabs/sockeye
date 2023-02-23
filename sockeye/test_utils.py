@@ -26,6 +26,7 @@ import sockeye.prepare_data
 import sockeye.train
 import sockeye.translate
 import sockeye.lexicon
+import sockeye.utils
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,12 @@ def generate_digits_file(source_path: str,
                          line_length: int = 9,
                          sort_target: bool = False,
                          line_count_empty: int = 0,
+                         source_text_prefix_token: str = '',
                          seed=13):
+    source_text_prefix = ''
+    if source_text_prefix_token:
+        line_length -= 1  # The prefix token takes one.
+        source_text_prefix = f"{source_text_prefix_token}{C.TOKEN_SEPARATOR}"
     assert line_count_empty <= line_count
     random_gen = random.Random(seed)
     with open(source_path, "w") as source_out, open(target_path, "w") as target_out:
@@ -52,7 +58,7 @@ def generate_digits_file(source_path: str,
             all_digits.append([])
         random_gen.shuffle(all_digits)
         for digits in all_digits:
-            print(C.TOKEN_SEPARATOR.join(digits), file=source_out)
+            print(f"{source_text_prefix}{C.TOKEN_SEPARATOR.join(digits)}" if digits else '', file=source_out)
             if sort_target:
                 digits.sort()
             print(C.TOKEN_SEPARATOR.join(digits), file=target_out)
@@ -145,12 +151,17 @@ def tmp_digits_dataset(prefix: str,
                        test_line_count: int, test_line_count_empty: int, test_max_length: int,
                        sort_target: bool = False,
                        seed_train: int = 13, seed_dev: int = 13,
+                       source_text_prefix_token: str = '',
                        with_n_source_factors: int = 0,
                        with_n_target_factors: int = 0) -> Dict[str, Any]:
     """
     Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
     files.
     """
+    if source_text_prefix_token:
+        sockeye.utils.check_condition(with_n_source_factors == 0,
+                                      "The digits dataset does not support source factors and source text prefix token "
+                                      "at the same time.")
     with TemporaryDirectory(prefix=prefix) as work_dir:
         # Simple digits files for train/dev data
         train_source_path = os.path.join(work_dir, "train.src")
@@ -161,11 +172,13 @@ def tmp_digits_dataset(prefix: str,
         test_target_path = os.path.join(work_dir, "test.tgt")
         test_source_with_target_prefix_path = os.path.join(work_dir, "test_source_with_target_prefix.json")
         generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
-                             line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train)
+                             line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train,
+                             source_text_prefix_token=source_text_prefix_token)
         generate_digits_file(dev_source_path, dev_target_path, dev_line_count, dev_max_length, sort_target=sort_target,
-                             seed=seed_dev)
+                             seed=seed_dev, source_text_prefix_token=source_text_prefix_token)
         generate_digits_file(test_source_path, test_target_path, test_line_count, test_max_length,
-                             line_count_empty=test_line_count_empty, sort_target=sort_target, seed=seed_dev)
+                             line_count_empty=test_line_count_empty, sort_target=sort_target, seed=seed_dev,
+                             source_text_prefix_token=source_text_prefix_token)
         data = {'work_dir': work_dir,
                 'train_source': train_source_path,
                 'train_target': train_target_path,

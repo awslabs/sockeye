@@ -38,6 +38,7 @@ class TransformerConfig(config.Config):
     max_seq_len_source: int
     max_seq_len_target: int
     decoder_type: str = C.TRANSFORMER_TYPE
+    block_prepended_cross_attention: bool = False
     use_lhuc: bool = False
     depth_key_value: int = 0
     use_glu: bool = False

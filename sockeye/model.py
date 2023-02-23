@@ -219,7 +219,7 @@ class SockeyeModel(pt.nn.Module):
         Encodes the input sequence.
 
         :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
-        :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :param valid_length: Optional Tensor of sequence lengths within this batch. Shape: (batch_size, 2)
         :return: Encoder outputs, encoded output lengths, attention mask
         """
         if self.traced_embedding_source is None:
@@ -240,17 +240,17 @@ class SockeyeModel(pt.nn.Module):
         Used for inference/decoding.
 
         :param inputs: Source input data. Shape: (batch_size, length, num_source_factors).
-        :param valid_length: Tensor of sequence lengths within this batch. Shape: (batch_size,)
+        :param valid_length: Tensor of sequence lengths within this batch. Shape: (batch_size, 2)
         :param constant_length_ratio: Constant length ratio
         :return: Initial states for the decoder, predicted output length of shape (batch_size,), 0 if not available.
                  Returns the neural vocabulary selection model prediction if enabled, None otherwise.
         """
 
-        # Encode input. Shape: (batch, length, num_hidden), (batch,)
+        # Encode input. Shape: (batch, length, num_hidden), (batch, 2), (batch * heads, 1, length)
         source_encoded, source_encoded_lengths, att_mask = self.encode(inputs, valid_length=valid_length)
 
         predicted_output_length = self.predict_output_length(source_encoded,
-                                                             source_encoded_lengths,
+                                                             source_encoded_lengths[:, 0],  # total source length
                                                              constant_length_ratio)
         # Decoder init states
         states = self.decoder.init_state_from_encoder(source_encoded, source_encoded_lengths)
@@ -345,7 +345,7 @@ class SockeyeModel(pt.nn.Module):
 
         if self.length_ratio is not None:
             # predicted_length_ratios: (batch_size,)
-            forward_output[C.LENRATIO_NAME] = self.length_ratio(source_encoded, source_encoded_length)
+            forward_output[C.LENRATIO_NAME] = self.length_ratio(source_encoded, source_encoded_length[:, 0])
 
         if nvs_prediction is not None:
             forward_output[C.NVS_PRED_NAME] = nvs_prediction
@@ -605,6 +605,10 @@ class SockeyeModel(pt.nn.Module):
     @property
     def output_layer_vocab_size(self) -> int:
         return self.output_layer.vocab_size
+
+    @property
+    def eop_id(self) -> int:
+        return self.config.config_data.eop_id
 
     def _cache_wrapper(self, class_func):
         @lru_cache(maxsize=self.forward_pass_cache_size)

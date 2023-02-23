@@ -28,6 +28,7 @@ VOCAB_SYMBOLS = [PAD_SYMBOL, UNK_SYMBOL, BOS_SYMBOL, EOS_SYMBOL]
 UNK_ID = VOCAB_SYMBOLS.index(UNK_SYMBOL)
 BOS_ID = VOCAB_SYMBOLS.index(BOS_SYMBOL)
 EOS_ID = VOCAB_SYMBOLS.index(EOS_SYMBOL)
+INVALID_ID = -1  # an example of invalid ids (i.e., negative integers)
 # reserve extra space for the EOS or BOS symbol that is added to both source and target
 SPACE_FOR_XOS = 1
 
@@ -336,13 +337,18 @@ FIXED_PARAM_STRATEGY_CHOICES = [FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
                                 FIXED_PARAM_STRATEGY_ENCODER_HALF_AND_SOURCE_EMBEDDINGS]
 
 # data sharding
+DATA_KEY_SOURCE = 'source'
+DATA_KEY_TARGET = 'target'
+DATA_KEY_PREPENDED_SOURCE_LENGTH = 'prepended_source_length'
 SHARD_NAME = "shard.%05d"
 SHARD_SOURCE = SHARD_NAME + ".source"
 SHARD_TARGET = SHARD_NAME + ".target"
+SHARD_PREPENDED_SOURCE_LENGTH = SHARD_NAME + ".prepended_source_length"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"
-PREPARED_DATA_VERSION = 6
+PREPARED_DATA_VERSION = 7
+PREPARED_DATA_LEGACY_VERSION = 6
 
 # reranking metric options
 RERANK_BLEU = "bleu"

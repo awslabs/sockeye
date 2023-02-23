@@ -128,10 +128,11 @@ class Scorer:
             self.traced_model = pt.jit.trace(self.model, model_inputs, strict=False)
         outputs = self.traced_model(*model_inputs)  # type: Dict[str, pt.Tensor]
 
+        # batch.source_length[:, 0] contains total source length
         scorer_inputs = [outputs[C.LOGITS_NAME],
                          batch.labels[C.TARGET_LABEL_NAME].long(),
-                         outputs.get(C.LENRATIO_NAME, pt.zeros_like(batch.source_length)),
-                         batch.source_length,
+                         outputs.get(C.LENRATIO_NAME, pt.zeros_like(batch.source_length[:, 0])),
+                         batch.source_length[:, 0],
                          batch.target_length]  # type: List[Union[pt.Tensor, List[Tuple[pt.Tensor, pt.Tensor]]]]
 
         if self.num_target_factors > 1:

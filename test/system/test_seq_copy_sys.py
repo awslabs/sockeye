@@ -34,6 +34,7 @@ _TEST_LINE_COUNT_EMPTY = 10
 _TEST_MAX_LENGTH = 9
 _SEED_TRAIN_DATA = 13
 _SEED_DEV_DATA = 17
+_EOP_TAG = "<EOP>"
 
 # Training on different systems, as it happens in the Travis system tests, always results in different training curves
 # We expect the system tests to be within the bounds of such variations. In order to simulate this variation locally
@@ -65,6 +66,17 @@ COPY_CASES = [
      " --transformer-feed-forward-num-hidden 64 --num-embed 32"
      " --batch-size 16 --batch-type sentence"
      " --neural-vocab-selection logit_max --bow-task-weight 2" + COMMON_TRAINING_PARAMS,
+     "--beam-size 1 --prevent-unk",
+     False,
+     1.02,
+     0.98),
+    ("Copy:transformer:transformer",
+     "--encoder transformer --decoder transformer"
+     " --max-updates 4000"
+     " --num-layers 2 --transformer-attention-heads 4 --transformer-model-size 32"
+     " --transformer-feed-forward-num-hidden 64 --num-embed 32"
+     " --batch-size 16 --batch-type sentence"
+     f" --end-of-prepending-tag {_EOP_TAG} --transformer-block-prepended-cross-attention" + COMMON_TRAINING_PARAMS,
      "--beam-size 1 --prevent-unk",
      False,
      1.02,
@@ -110,6 +122,7 @@ COPY_CASES = [
                          "perplexity_thresh, bleu_thresh", COPY_CASES)
 def test_seq_copy(name, train_params, translate_params, use_prepared_data, perplexity_thresh, bleu_thresh):
     """Task: copy short sequences of digits"""
+    source_text_prefix_token = _EOP_TAG if "--end-of-prepending-tag" in train_params else ''
     with tmp_digits_dataset(prefix="test_seq_copy",
                             train_line_count=_TRAIN_LINE_COUNT,
                             train_line_count_empty=_TRAIN_LINE_COUNT_EMPTY,
@@ -120,7 +133,8 @@ def test_seq_copy(name, train_params, translate_params, use_prepared_data, perpl
                             test_line_count_empty=_TEST_LINE_COUNT_EMPTY,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
-                            with_n_source_factors=0) as data:
+                            with_n_source_factors=0,
+                            source_text_prefix_token=source_text_prefix_token) as data:
         data = check_train_translate(train_params=train_params,
                                      translate_params=translate_params,
                                      data=data,
