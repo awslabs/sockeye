@@ -491,14 +491,14 @@ def test_non_parallel_calculate_length_statistics(sources, targets):
         data_io.calculate_length_statistics(sources, targets, 5, 5)
 
 
-@pytest.mark.parametrize("eop_tag", ['', "<EOP>"])
-def test_get_training_data_iters(eop_tag):
-    if eop_tag:
-        end_of_prepending_tag = eop_tag
+@pytest.mark.parametrize("end_of_prepending_tag", [None, "<EOP>"])
+def test_get_training_data_iters(end_of_prepending_tag):
+    if end_of_prepending_tag:
+        source_text_prefix_token = end_of_prepending_tag
         expected_mean = 0.9208152692746332
         expected_std = 0.0698611911724421
     else:
-        end_of_prepending_tag = None
+        source_text_prefix_token = ''
         expected_mean = 1.0
         expected_std = 0.0
 
@@ -516,7 +516,7 @@ def test_get_training_data_iters(eop_tag):
                             train_line_count, train_line_count_empty, train_max_length - C.SPACE_FOR_XOS,
                             dev_line_count, dev_max_length - C.SPACE_FOR_XOS,
                             test_line_count, test_line_count_empty, test_max_length - C.SPACE_FOR_XOS,
-                            source_text_prefix_token=eop_tag) as data:
+                            source_text_prefix_token=source_text_prefix_token) as data:
         # tmp common vocab
         vcb = vocab.build_from_paths([data['train_source'], data['train_target']])
 
@@ -546,7 +546,7 @@ def test_get_training_data_iters(eop_tag):
         assert data_info.target_vocabs == [None]
         assert config_data.data_statistics.max_observed_len_source == train_max_length
         assert config_data.data_statistics.max_observed_len_target == train_max_length - 1 \
-            if eop_tag else train_max_length  # no target text prefix
+            if end_of_prepending_tag else train_max_length  # The EOP tag occupies one in the source but not target.
         assert np.isclose(config_data.data_statistics.length_ratio_mean, expected_mean)
         assert np.isclose(config_data.data_statistics.length_ratio_std, expected_std)
 
