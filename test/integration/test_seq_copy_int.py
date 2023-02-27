@@ -39,8 +39,9 @@ _TEST_LINE_COUNT = 5
 _TEST_LINE_COUNT_EMPTY = 2
 _LINE_MAX_LENGTH = 9
 _TEST_MAX_LENGTH = 20
+_EOP_TAG = "<EOP>"
 
-# tuple format: (train_params, translate_params, use_prepared_data, use_source_factors)
+# tuple format: (train_params, translate_params, use_prepared_data, n_source_factors, n_target_factors)
 ENCODER_DECODER_SETTINGS_TEMPLATE = [
     # Basic transformer, nbest=2 decoding, no learning rate scheduler
     ("--encoder transformer --decoder {decoder}"
@@ -63,6 +64,17 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 0"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --neural-vocab-selection logit_max --bow-task-weight 2",
+     "--beam-size 2 --nbest-size 2",
+     False, 0, 0),
+    # Basic transformer w/ blocking cross-attention between decoder and encoded prepended tokens.
+    ("--encoder transformer --decoder {decoder}"
+     " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
+     " --transformer-feed-forward-num-hidden 16"
+     " --transformer-dropout-prepost 0.1 --transformer-preprocess n --transformer-postprocess dr"
+     " --weight-tying-type src_trg"
+     " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
+     " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
+     f" --end-of-prepending-tag {_EOP_TAG} --transformer-block-prepended-cross-attention",
      "--beam-size 2 --nbest-size 2",
      False, 0, 0),
     # Basic transformer w/ prepared data & greedy decoding
@@ -133,8 +145,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01 --clamp-to-dtype",
      "--beam-size 2 --clamp-to-dtype",
      False, 0, 0),
-    # Basic transformer, training only the decoder with bfloat16 inference when
-    # running on Linux
+    # Basic transformer, training only the decoder with bfloat16 inference
     ("--encoder transformer --decoder {decoder}"
      " --num-layers 2 --transformer-attention-heads 2 --transformer-model-size 8 --num-embed 8"
      " --transformer-feed-forward-num-hidden 16"
@@ -143,7 +154,7 @@ ENCODER_DECODER_SETTINGS_TEMPLATE = [
      " --batch-size 2 --max-updates 2 --batch-type sentence --decode-and-evaluate 2"
      " --checkpoint-interval 2 --optimizer adam --initial-learning-rate 0.01"
      " --fixed-param-strategy " + C.FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
-     "--beam-size 2" + (" --dtype bfloat16" if platform.system() == "Linux" else ""),
+     "--beam-size 2 --dtype bfloat16",
      False, 0, 0),
 ]
 
@@ -163,7 +174,7 @@ def test_seq_copy(train_params: str,
     """
     Task: copy short sequences of digits
     """
-
+    source_text_prefix_token = _EOP_TAG if "--end-of-prepending-tag" in train_params else ''
     with tmp_digits_dataset(prefix="test_seq_copy",
                             train_line_count=_TRAIN_LINE_COUNT,
                             train_line_count_empty=_TRAIN_LINE_COUNT_EMPTY,
@@ -175,7 +186,8 @@ def test_seq_copy(train_params: str,
                             test_max_length=_TEST_MAX_LENGTH,
                             sort_target=False,
                             with_n_source_factors=n_source_factors,
-                            with_n_target_factors=n_target_factors) as data:
+                            with_n_target_factors=n_target_factors,
+                            source_text_prefix_token=source_text_prefix_token) as data:
         # TODO: Here we temporarily switch off comparing translation and scoring scores, which
         # sometimes produces inconsistent results for --batch-size > 1 (see issue #639 on github).
         check_train_translate(train_params=train_params,

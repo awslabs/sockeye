@@ -45,6 +45,35 @@ def test_lhuc():
     pt.testing.assert_close(2 * inp, out)
 
 
+def test_source_length_mask():
+    heads = 2
+    batch_size = 4
+    total_length = 6
+    prepended_length = 3
+    max_length = 8
+    total_length_tensor = pt.tensor([total_length] * batch_size)
+    # standard source-length mask array is [0, 0, 0, 0, 0, 0, 1, 1]
+
+    for expand in [True, False]:
+        for mask_prepended_tokens in [True, False]:
+            if mask_prepended_tokens:
+                prepended_length_tensor = pt.tensor([prepended_length] * batch_size)
+                # expected mask array is [1, 1, 1, 0, 0, 0, 1, 1]
+                masked_length = max_length - total_length + prepended_length
+            else:
+                prepended_length_tensor = pt.tensor([0] * batch_size)
+                masked_length = max_length - total_length
+            lengths = pt.stack((total_length_tensor, prepended_length_tensor), dim=1)
+            mask = sockeye.layers.prepare_source_length_mask(lengths, heads, max_length, expand, mask_prepended_tokens)
+            if expand:
+                total_size = batch_size * heads
+                assert mask.shape[1] == 1
+            else:
+                total_size = batch_size
+            assert mask.shape[0] == total_size
+            assert pt.sum(mask) == total_size * masked_length
+
+
 def test_positional_embeddings():
     num_embed = 32
     max_seq_len = 10
@@ -124,7 +153,9 @@ def test_interleaved_multihead_attention(qlen, kvlen, batch_size, hidden, heads)
     assert pt.allclose(r_train, r_test, atol=1e-06)
 
     # test with mask
-    valid_length = pt.randint(1, kvlen + 1, (batch_size,))
+    all_source_length = pt.randint(1, kvlen + 1, (batch_size,))
+    prepended_source_length = pt.full((batch_size,), 0)
+    valid_length = pt.stack((all_source_length, prepended_source_length), dim=1)
     mask = sockeye.layers.prepare_source_length_mask(valid_length, heads, kvlen)
     mask = mask.repeat(1, qlen, 1)  # Shape: (batch *h heads, qlen, kvlen)
     mha.train()
@@ -165,7 +196,9 @@ def test_interleaved_multihead_self_attention(seq_len, batch_size, hidden, heads
         r_test, _ = mha(inputs, previous_states=None, mask=mask)
         assert pt.allclose(r_train, r_test, atol=1e-06)
     elif side == 'encoder':
-        valid_length = pt.randint(1, seq_len + 1, (batch_size,))
+        all_source_length = pt.randint(1, seq_len + 1, (batch_size,))
+        prepended_source_length = pt.full((batch_size,), 0)
+        valid_length = pt.stack((all_source_length, prepended_source_length), dim=1)
         # source attention mask. Shape: (batch * heads, 1, seq_len)
         mask = sockeye.layers.prepare_source_length_mask(valid_length, heads, seq_len)
         mask = mask.repeat(1, seq_len, 1)  # Shape: (batch * heads, seq_len, seq_len)

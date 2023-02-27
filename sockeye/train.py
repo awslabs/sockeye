@@ -136,6 +136,12 @@ def check_arg_compatibility(args: argparse.Namespace):
         # Length 1: expand the list to the appropriate length
         args.target_factors_share_embedding = args.target_factors_share_embedding * n_target_factors
 
+    # Check arguments used for blocking cross-attention between decoder and encoded prepended tokens
+    if args.transformer_block_prepended_cross_attention:
+        check_condition(args.end_of_prepending_tag is not None,
+                        'In order to block cross-attention between decoder and encoded prepended tokens, '
+                        'please specify the tag indicating the end of prepended text using --end-of-prepending-tag')
+
     check_condition(not (args.amp and args.apex_amp), 'Use either --amp (safer) or --apex-amp (faster).')
 
     if args.dtype != C.DTYPE_FP32:
@@ -299,6 +305,8 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                                      C.TRAINING_ARG_PREPARED_DATA)
     if args.prepared_data is not None:
         utils.check_condition(args.source is None and args.target is None, either_raw_or_prepared_error_msg)
+        if args.end_of_prepending_tag is not None:
+            logger.warning("The end-of-prepending tag specified in the prepared data will be used.")
         if not resume_training:
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
@@ -421,6 +429,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             bucketing=not args.no_bucketing,
             bucket_width=args.bucket_width,
             bucket_scaling=args.bucket_scaling,
+            end_of_prepending_tag=args.end_of_prepending_tag,
             batch_sentences_multiple_of=args.batch_sentences_multiple_of)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
@@ -521,6 +530,7 @@ def create_decoder_config(args: argparse.Namespace,
         dropout_act=args.transformer_dropout_act[1],
         dropout_prepost=args.transformer_dropout_prepost[1],
         positional_embedding_type=args.transformer_positional_embedding_type,
+        block_prepended_cross_attention=args.transformer_block_prepended_cross_attention,
         preprocess_sequence=decoder_transformer_preprocess,
         postprocess_sequence=decoder_transformer_postprocess,
         max_seq_len_source=max_seq_len_source,

@@ -53,13 +53,13 @@ def check_train_translate(train_params: str,
     # may differ.
     if 'greedy' not in translate_params and 'neural-vocab-selection' not in train_params:
         translate_params_batch = translate_params + " --batch-size 2"
-        test_translate_equivalence(data, translate_params_batch, compare_output=True)
+        test_translate_equivalence(data, translate_params_batch, compare_output=compare_output)
 
     # Run translate with restrict-lexicon
     if 'neural-vocab-selection ' not in train_params:
         data = run_translate_restrict(data, translate_params)
 
-    test_translate_equivalence(data, translate_params, compare_output=True)
+    test_translate_equivalence(data, translate_params, compare_output=compare_output)
 
     # Test scoring by ensuring that the sockeye.scoring module produces the same scores when scoring the output
     # of sockeye.translate. However, since this training is on very small datasets, the output of sockeye.translate
@@ -71,7 +71,7 @@ def check_train_translate(train_params: str,
     if '--max-input-length' not in translate_params and _translate_output_is_valid(data['test_outputs']) \
             and 'greedy' not in translate_params and 'neural-vocab-selection' not in train_params \
             and _translate_output_is_valid(data['test_with_target_prefix_outputs']):
-        test_scoring(data, translate_params, compare_output)
+        test_scoring(data, train_params, translate_params, compare_output)
 
     # Test correct prediction of target factors if enabled
     if compare_output and 'train_target_factors' in data:
@@ -148,18 +148,19 @@ def test_translate_equivalence(data: Dict[str, Any], translate_params_equiv: str
                             f"'{prefix[j - 1][:ending]}' vs. '{factors_from_translation[:ending]}' from . '{json_output_with_target_prefix}'"
 
 
-def test_scoring(data: Dict[str, Any], translate_params: str, test_similar_scores: bool):
+def test_scoring(data: Dict[str, Any], train_params: str, translate_params: str, test_similar_scores: bool):
     """
     Tests the scoring CLI and checks for score equivalence with previously generated translate scores.
     """
-    # Translate params that affect the score need to be used for scoring as well.
-    relevant_params = {'--brevity-penalty-type',
+    # Train and translate params that affect the score need to be used for scoring as well.
+    relevant_params = {'--end-of-prepending-tag',
+                       '--brevity-penalty-type',
                        '--brevity-penalty-weight',
                        '--brevity-penalty-constant-length-ratio',
                        '--length-penalty-alpha',
                        '--length-penalty-beta'}
     score_params = ''
-    params = translate_params.split()
+    params = train_params.split() + translate_params.split()
     for i, param in enumerate(params):
         if param in relevant_params:
             score_params = '{} {}'.format(param, params[i + 1])

@@ -31,6 +31,7 @@ class NeuralVocabSelection(pt.nn.Module):
         self.project_vocab = pt.nn.Linear(model_size, vocab_target_size, bias=True, dtype=dtype)
 
     def forward(self, source_encoded: pt.Tensor, source_length: pt.Tensor, att_mask: pt.Tensor):
+        # TODO: att_mask might need to include prepended token masks
         if self.model_type == C.NVS_TYPE_LOGIT_MAX:
             # ============
             # logit max:
@@ -43,7 +44,7 @@ class NeuralVocabSelection(pt.nn.Module):
             # EOS based:
             # ============
             batch_size, max_len, _ = source_encoded.size()
-            source_encoded = source_encoded[pt.arange(0, batch_size, dtype=pt.long), (source_length-1).long()]
+            source_encoded = source_encoded[pt.arange(0, batch_size, dtype=pt.long), (source_length[:, 0] - 1).long()]
             bow_pred = self.project_vocab(source_encoded)
         else:
             raise ValueError("Unknown neural vocabulary selection type.")
