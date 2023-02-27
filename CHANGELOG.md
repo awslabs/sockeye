@@ -11,6 +11,11 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.33]
+
+### Fixed 
+- Two small fixes to SampleK. Before the device was not set correctly leading to issues when running sampling on GPUs. Furthermore, SampleK did not return the top-k values correctly.
+
 ## [3.1.32]
 
 ### Added
