@@ -475,9 +475,9 @@ class SampleK(pt.nn.Module):
         # n == 0 means sample from the full vocabulary. Otherwise, we sample from the top n.
         if self.n != 0:
             # select the top n in each row, via a mask
-            _, indices = pt.topk(target_dists, k=self.n, dim=1, largest=True, sorted=True)
+            values, indices = pt.topk(target_dists, k=self.n, dim=1, largest=True, sorted=True)
             # set items not chosen by topk to 0
-            target_dists = pt.scatter(pt.zeros_like(target_dists), 1, indices, target_dists)
+            target_dists = pt.scatter(pt.zeros_like(target_dists), 1, indices, values)
             # renormalize
             target_dists = target_dists / target_dists.sum(1, keepdim=True)
 
@@ -489,7 +489,7 @@ class SampleK(pt.nn.Module):
         # (batch, 1)
         values = scores.gather(dim=1, index=best_word_indices.long().unsqueeze(1))
         # (batch,)
-        best_hyp_indices = pt.arange(0, best_word_indices.size()[0])
+        best_hyp_indices = pt.arange(0, best_word_indices.size()[0], device=best_word_indices.device)
 
         return best_hyp_indices, best_word_indices, values
 
