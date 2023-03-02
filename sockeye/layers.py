@@ -321,7 +321,7 @@ class DotAttentionCell(pt.nn.Module):
 
 
 def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int, expand: bool = True,
-                               mask_prepended_tokens: bool = True) -> pt.Tensor:
+                               mask_prepended_tokens: bool = False) -> pt.Tensor:
     """
     Prepare source length masks where positions of invalid tokens are marked as True.
 

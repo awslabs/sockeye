@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.34]
+
+### Fixed
+- Do not mask prepended tokens by default (for self-attention).
+- Do not require specifying `--end-of-prepending-tag` if it is already done when preparing the data.
+
 ## [3.1.33]
 
 ### Fixed 
