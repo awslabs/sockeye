@@ -1,4 +1,3 @@
-# Go through `expected_output_format.et-lt.tsv.gz` and retrieve the sentences from the sentence data (sentences/sentences.et.tsv.gz and sentences/sentences.lt.tsv.gz)
 from collections import defaultdict
 import gzip
 import os
@@ -15,7 +14,36 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def write_out_aligned_sentences(sentence_tsv_file: Path, folder: Path, output_fname: str, sent_ids, sent_id_to_alignment_id, num_sents, expected_alignments, num_tmp_files = 256):
+def write_out_aligned_sentences(alignments_file, output_dir, et_sentences, lt_sentences, num_tmp_files):
+    assert et_sentences.exists(), f"{et_sentences} not found."
+    assert lt_sentences.exists(), f"{lt_sentences} not found."
+
+    et_sent_ids = set()
+    et_sent_id_to_alignment_id = defaultdict(list)
+    lt_sent_ids = set()
+    lt_sent_id_to_alignment_id = defaultdict(list)
+    expected_alignments = set()
+
+    with gzip.open(alignments_file, "rt") as indata:
+        for sent_alignment_id, line in enumerate(indata):
+            et_sent_id, lt_sent_id = line.rstrip("\n").split("\t")
+            et_sent_ids.add(et_sent_id)
+            et_sent_id_to_alignment_id[et_sent_id].append(sent_alignment_id)
+            lt_sent_ids.add(lt_sent_id)
+            lt_sent_id_to_alignment_id[lt_sent_id].append(sent_alignment_id)
+            expected_alignments.add(sent_alignment_id)
+    logger.info(f"Read {len(expected_alignments)} alignments from {alignments_file}.")
+
+    # create output directory if it does not exist
+    if not os.path.exists(output_dir):
+        logger.info(f"Creating output directory {output_dir}")
+        os.makedirs(output_dir)
+
+    write_out_aligned_sentences_for_lang(et_sentences, output_dir / "et_sentences", "aligned_sentences.et.txt", et_sent_ids, et_sent_id_to_alignment_id, 53_279_844, expected_alignments, num_tmp_files)
+    write_out_aligned_sentences_for_lang(lt_sentences, output_dir / "lt_sentences", "aligned_sentences.lt.txt", lt_sent_ids, lt_sent_id_to_alignment_id, 63_556_320, expected_alignments, num_tmp_files)
+
+
+def write_out_aligned_sentences_for_lang(sentence_tsv_file: Path, folder: Path, output_fname: str, sent_ids, sent_id_to_alignment_id, num_sents, expected_alignments, num_tmp_files = 256):
     if not os.path.exists(folder):
         logger.info(f"Creating {folder}")
         os.makedirs(folder)
@@ -81,47 +109,26 @@ def write_out_aligned_sentences(sentence_tsv_file: Path, folder: Path, output_fn
             os.remove(fname)
 
 
+def create_
+
 if __name__ == "__main__":
     # Parse CLI arguments (receive an input tsv file with et-lt alignments and an output directory)
     # Example invocation:
     # python3 get_train_data.py --alignments-file ./expected_output_format.et-lt.tsv --output-dir eval_dir
     parser = argparse.ArgumentParser(description='Evaluate sentence alignments (provide sentence alginments and get a BLEU score).')
     parser.add_argument('-a', '--alignments-file', type=str, help='Input file with et-lt alignments (tsv) format.', required=True)
-    parser.add_argument('-o', '--output-dir', type=str, help='Output directory (we 1. extract sentences, 2. train a model and 3. store BLEU scores in this folder.) Expected to be empty.', required=True)
+    parser.add_argument('-o', '--working-dir', type=str, help='Output directory (we 1. extract sentences, 2. train a model and 3. store BLEU scores in this folder.) Expected to be empty.', required=True)
     parser.add_argument('--et-asentences', type=str, help="path to sentences.et.tsv.gz", default="sentences/sentences.et.tsv.gz", required=False)
     parser.add_argument('--lt-asentences', type=str, help="path to sentences.lt.tsv.gz", default="sentences/sentences.lt.tsv.gz", required=False)
     parser.add_argument('--num-tmp-files', type=int, help="Number of temporary files to write (num. alignments // num_tmp_files lines of text need to fit in memory) ", default=256, required=False)
     args = parser.parse_args()
+
     alignments_file = args.alignments_file
-    output_dir = Path(args.output_dir)
+    working_dir = Path(args.working_dir)
     et_sentences = Path(args.et_asentences)
     lt_sentences = Path(args.lt_asentences)
+    num_tmp_files = args.num_tmp_files
+    write_out_aligned_sentences(alignments_file, working_dir, et_sentences, lt_sentences, num_tmp_files)
 
-    assert et_sentences.exists(), f"{et_sentences} not found."
-    assert lt_sentences.exists(), f"{lt_sentences} not found."
-
-    et_sent_ids = set()
-    et_sent_id_to_alignment_id = defaultdict(list)
-    lt_sent_ids = set()
-    lt_sent_id_to_alignment_id = defaultdict(list)
-    expected_alignments = set()
-
-    with gzip.open(alignments_file, "rt") as indata:
-        for sent_alignment_id, line in enumerate(indata):
-            et_sent_id, lt_sent_id = line.rstrip("\n").split("\t")
-            et_sent_ids.add(et_sent_id)
-            et_sent_id_to_alignment_id[et_sent_id].append(sent_alignment_id)
-            lt_sent_ids.add(lt_sent_id)
-            lt_sent_id_to_alignment_id[lt_sent_id].append(sent_alignment_id)
-            expected_alignments.add(sent_alignment_id)
-    logger.info(f"Read {len(expected_alignments)} alignments from {alignments_file}.")
-
-    # create output directory if it does not exist
-    if not os.path.exists(output_dir):
-        logger.info(f"Creating output directory {output_dir}")
-        os.makedirs(output_dir)
-
-    write_out_aligned_sentences(et_sentences, output_dir / "et_sentences", "aligned_sentences.et.txt", et_sent_ids, et_sent_id_to_alignment_id, 53_279_844, expected_alignments, args.num_tmp_files)
-    write_out_aligned_sentences(lt_sentences, output_dir / "lt_sentences", "aligned_sentences.lt.txt", lt_sent_ids, lt_sent_id_to_alignment_id, 63_556_320, expected_alignments, args.num_tmp_files)
 
     print("done")

@@ -44,12 +44,16 @@ First convert sentence ids into the actual strings:
 python3 get_train_data.py --alignments-file wmt23_data_task_data/top1_cosine.et-lt.tsv.gz --output-dir wmt23_data_task_data/top1_cosine_eval
 ```
 
-This produces the following parallel data files as plain text files:
+Next run the following command to start the evaluation:
+```
+python3 wmt23_data_task_scripts/run_eval.py --alignments-file wmt23_data_task_data/top1_cosine.et-lt.tsv.gz --working-dir wmt23_data_task_data/top1_cosine_eval --test-set-dir ./wmt23_data_task_data/testsets_v2/  --num-gpus 8 --batch-size-per-gpu 4096
+```
+
+Note that this includes model training and will therefore take several hours to complete. If you run into memory issues reduce the batch size using `--batch-size-per-gpu`. The effective batch size will be adjusted accordingly via the update interval. Feel free to also increase the batch size to get faster results if you have the GPU RAM.
+
+
+If you want to take a look at the raw parallel data check out the following files:
 ```
 wmt23_data_task_data/top1_cosine_eval/et_sentences/aligned_sentences.et.txt
 wmt23_data_task_data/top1_cosine_eval/lt_sentences/aligned_sentences.lt.txt
 ```
-
-
-
-
