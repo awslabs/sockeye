@@ -39,12 +39,7 @@ This script simply takes the top1 (highest cosine score) match and writes the da
 
 ## Running end-to-end evaluation
 
-First convert sentence ids into the actual strings:
-```
-python3 get_train_data.py --alignments-file wmt23_data_task_data/top1_cosine.et-lt.tsv.gz --output-dir wmt23_data_task_data/top1_cosine_eval
-```
-
-Next run the following command to start the evaluation:
+Next run the following command to start the evaluation based on the sentence id alignment files:
 ```
 python3 wmt23_data_task_scripts/run_eval.py --alignments-file wmt23_data_task_data/top1_cosine.et-lt.tsv.gz --working-dir wmt23_data_task_data/top1_cosine_eval --test-set-dir ./wmt23_data_task_data/testsets_v2/  --num-gpus 8 --batch-size-per-gpu 4096
 ```
