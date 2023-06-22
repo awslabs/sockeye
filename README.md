@@ -11,6 +11,7 @@ git checkout wmt23_data_task
 ```
 
 First please download all sentence data from the shared task in a folder called: `wmt23_data_task_data`. To do so follow the instructions on http://www2.statmt.org/wmt23/data-task.html 
+or run: `bash wmt23_data_task_scripts/get_data.sh`
 
 We expect the following directory structure:
 ```
@@ -22,19 +23,6 @@ wmt23_data_task_data/testsets_v2/{EMEA,EUBookshop,Europarl,JRC-Acquis}.{dev,test
 wmt23_data_task_data/exclude_sent_ids_et-lt.txt
 ```
 (cosine_similarity files are only needed if you want to reproduce the baseline's evaluation, which is recommended).
-
-Download the dev/test evaluation data:
-```bash
-mkdir wmt23_data_task_data/testsets_v2
-for data_set in dev test
-do
-    for test_set in EMEA EUBookshop Europarl JRC-Acquis
-    do
-        wget https://mtdataexternalpublic.blob.core.windows.net/2023datatask/${data_set}/${test_set}.${data_set}.et-lt.lt
-        wget https://mtdataexternalpublic.blob.core.windows.net/2023datatask/${data_set}/${test_set}.${data_set}.et-lt.et
-    done
-done
-```
 
 Install all dependencies:
 ```
