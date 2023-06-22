@@ -253,7 +253,8 @@ def train_model(data_folder, src_lang, tgt_lang, batch_size, update_interval, ma
 
 
 def evaluate_model(model_dir, data_folder, test_folder, src_lang, tgt_lang, batch_size):
-    test_set_scores = {}
+    bleu_test_set_scores = {}
+    chrf_test_set_scores = {}
     for test_set in TEST_SETS:
         test_input = f"{data_folder}/preproc/test.{test_set}.{src_lang}.bpe"
         test_output = f"{data_folder}/preproc/test.{test_set}.{tgt_lang}.bpe.modelout"
@@ -273,12 +274,17 @@ def evaluate_model(model_dir, data_folder, test_folder, src_lang, tgt_lang, batc
         reference_file = f"{test_folder}/{test_set}.test.{src_lang}-{tgt_lang}.{tgt_lang}"
         hypothesis_lines = [line.rstrip("\n") for line in open(test_output_debpe).readlines()]
         reference_lines = [line.rstrip("\n") for line in open(reference_file).readlines()]
-        score = sacrebleu.corpus_bleu(hypothesis_lines, [reference_lines])
-        test_set_scores[test_set] = score
+        bleu_score = sacrebleu.corpus_bleu(hypothesis_lines, [reference_lines])
+        chrf_score = sacrebleu.corpus_chrf(hypothesis_lines, [reference_lines])
+        bleu_test_set_scores[test_set] = bleu_score
+        chrf_test_set_scores[test_set] = chrf_score
 
-    for test_set, score  in test_set_scores.items():
+    for test_set, score  in bleu_test_set_scores.items():
         score_rounded = round(score.score, 1)
-        print(f"{test_set}: {score_rounded:.1f}")
+        print(f"{test_set} BLEU: {score_rounded:.1f}")
+    for test_set, score  in chrf_test_set_scores.items():
+        score_rounded = round(score.score, 1)
+        print(f"{test_set} chrf: {score_rounded:.1f}")
 
 
 def main():
