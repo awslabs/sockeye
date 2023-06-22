@@ -13,6 +13,7 @@ import logging
 from tqdm import tqdm
 from contextlib import ExitStack
 import math
+import sacrebleu
 
 TEST_SETS = ["EMEA", "EUbookshop", "Europarl", "JRC-Acquis"]
 
@@ -175,26 +176,46 @@ def preprocess_data(data_folder, test_set_folder, src_lang, tgt_lang):
         if not os.path.isfile(bped_data):
             bpe_model[lang](raw_data[lang], bped_data)
 
-    for data_set in ["dev", "test"]:
-        src_file = f"{data_folder}/preproc/{data_set}.{src_lang}"
-        tgt_file = f"{data_folder}/preproc/{data_set}.{tgt_lang}"
-        if not os.path.isfile(f"{tgt_file}.bpe"):
-            if os.path.isfile(f"{tgt_file}"):
-                os.remove(f"{tgt_file}")
-            if os.path.isfile(f"{src_file}.{src_lang}"):
-                os.remove(f"{src_file}.{src_lang}")
+    data_set = "dev"
+    # Files for a combined dev set
+    src_file = f"{data_folder}/preproc/{data_set}.{src_lang}"
+    tgt_file = f"{data_folder}/preproc/{data_set}.{tgt_lang}"
+    if not os.path.isfile(f"{tgt_file}.bpe"):
+        if os.path.isfile(f"{tgt_file}"):
+            os.remove(f"{tgt_file}")
+        if os.path.isfile(f"{src_file}.{src_lang}"):
+            os.remove(f"{src_file}.{src_lang}")
 
-            for test_set in TEST_SETS:
-                logger.info(f"Adding {data_set} set: {test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.*")
-                assert os.path.exists(f"{test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{tgt_lang}")
-                assert os.path.exists(f"{test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{src_lang}")
-                log_and_run(f"cat {test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{tgt_lang} >> {tgt_file}")
-                log_and_run(f"cat {test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{src_lang} >> {src_file}")
+        for test_set in TEST_SETS:
+            logger.info(f"Preprocessing {data_set} set: {test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.*")
+            assert os.path.exists(f"{test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{tgt_lang}")
+            assert os.path.exists(f"{test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{src_lang}")
+            log_and_run(f"cat {test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{tgt_lang} >> {tgt_file}")
+            log_and_run(f"cat {test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{src_lang} >> {src_file}")
 
-            for lang in [src_lang, tgt_lang]:
-                bped_data = f"{data_folder}/preproc/{data_set}.{lang}.bpe"
-                if not os.path.isfile(bped_data):
-                    bpe_model[lang](f"{data_folder}/preproc/{data_set}.{lang}", bped_data)
+        for lang in [src_lang, tgt_lang]:
+            bped_data = f"{data_folder}/preproc/{data_set}.{lang}.bpe"
+            if not os.path.isfile(bped_data):
+                bpe_model[lang](f"{data_folder}/preproc/{data_set}.{lang}", bped_data)
+
+    data_set = "test"
+    for test_set in TEST_SETS:
+        logger.info(f"Preprocessing {data_set} set: {test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.*")
+        test_data = {
+            src_lang: f"{test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{src_lang}",
+            tgt_lang: f"{test_set_folder}/{test_set}.{data_set}.{src_lang}-{tgt_lang}.{tgt_lang}"
+        }
+        test_data_bpe = {
+            src_lang: f"{data_folder}/preproc/{data_set}.{test_set}.{src_lang}.bpe",
+            tgt_lang: f"{data_folder}/preproc/{data_set}.{test_set}.{tgt_lang}.bpe"
+        }
+
+        for lang in [src_lang, tgt_lang]:
+            assert os.path.exists(test_data[lang]), f"Could not find test file {test_data[lang]}."
+            bped_data = test_data_bpe[lang]
+            print(bped_data)
+            if not os.path.isfile(bped_data):
+                bpe_model[lang](test_data[lang], bped_data)
 
 
 def train_model(data_folder, src_lang, tgt_lang, batch_size, update_interval, max_preproc_processes):
@@ -220,23 +241,36 @@ def train_model(data_folder, src_lang, tgt_lang, batch_size, update_interval, ma
         log_and_run(f"torchrun --no_python --nproc_per_node 8 sockeye-train --prepared-data {data_folder}/preproc/train.prepared --validation-source {data_folder}/preproc/dev.{src_lang}.bpe --validation-target {data_folder}/preproc/dev.{tgt_lang}.bpe --output {model_dir} --num-layers {num_layers} --transformer-model-size {model_size} --transformer-attention-heads {num_heads} --transformer-feed-forward-num-hidden {ff_size} {'--amp' if amp else ''} --batch-type max-word --batch-size {batch_size} --update-interval {update_interval} --checkpoint-interval {checkpoint_interval} --max-num-checkpoint-not-improved {max_checkpoint_not_improved} --optimizer-betas {optimizer_betas} --dist --initial-learning-rate {initial_learning_rate} --learning-rate-scheduler-type {learning_rate_scheduler} --learning-rate-warmup {learning_rate_warmup} --seed {seed} {'--quiet-secondary-workers' if quiet_secondary_workers else ''} --decode-and-evaluate {decode_and_evaluate}")
     else:
         logger.info(f"Model directory {model_dir} already exists. Skipping training.")
+    return model_dir
 
 
-def evaluate_model(data_folder, src_lang, tgt_lang):
+def evaluate_model(model_dir, data_folder, test_folder, src_lang, tgt_lang, batch_size):
+    test_set_scores = {}
     for test_set in TEST_SETS:
         test_input = f"{data_folder}/preproc/test.{test_set}.{src_lang}.bpe"
         test_output = f"{data_folder}/preproc/test.{test_set}.{tgt_lang}.bpe.modelout"
         test_output_debpe = f"{data_folder}/preproc/test.{test_set}.{tgt_lang}.modelout"
 
-        if not os.path.isfile(test_output):
-            subprocess.run(f"sockeye-translate -m model -i {test_input} -o {test_output}", shell=True, check=True)
+        if not os.path.isfile(test_output) or os.stat(test_output).st_size == 0:
+            log_and_run(f"sockeye-translate -m {model_dir} -i {test_input} -o {test_output} --batch-size {batch_size}")
+        else:
+            logger.info(f"Test output {test_output} already exists.")
 
-        # TODO: replace with Python code...
-        subprocess.run(f"cat {test_output} | sed 's,@@ ,,g' > {test_output_debpe}", shell=True, check=True)
+        if not os.path.isfile(test_output_debpe) or os.stat(test_output_debpe).st_size == 0:
+            log_and_run(f"cat {test_output} | sed 's,@@ ,,g' > {test_output_debpe}")
 
         print(f"Evaluating {test_set}")
-        # TODO: replace with Python code... (to just get the BLEU scores)
-        subprocess.run(f"cat {test_output_debpe} | sacrebleu -l {tgt_lang}-{src_lang} {data_folder}/testsets_v1/{test_set}.dev.{src_lang}-{tgt_lang}.{tgt_lang}", shell=True, check=True)
+        # at wmt23_data_task_data/top1_cosine_eval/preproc/test.JRC-Acquis.lt.modelout | sacrebleu -l lt-et ./wmt23_data_task_data/testsets_v2//JRC-Acquis.test.et-lt.lt
+        # log_and_run(f"cat {test_output_debpe} | sacrebleu -l {tgt_lang}-{src_lang} {reference_file}")
+        reference_file = f"{test_folder}/{test_set}.test.{src_lang}-{tgt_lang}.{tgt_lang}"
+        hypothesis_lines = [line.rstrip("\n") for line in open(test_output_debpe).readlines()]
+        reference_lines = [line.rstrip("\n") for line in open(reference_file).readlines()]
+        score = sacrebleu.corpus_bleu(hypothesis_lines, [reference_lines])
+        test_set_scores[test_set] = score
+
+    for test_set, score  in test_set_scores.items():
+        score_rounded = round(score.score, 1)
+        print(f"{test_set}: {score_rounded:.1f}")
 
 
 def main():
@@ -251,6 +285,7 @@ def main():
     parser.add_argument("--batch-size-per-gpu", type=int, default=4096, help="Batch size for training (in tokens).", required=True)
     parser.add_argument("--num-gpus", type=int, default=None, help="Number of GPUs available.", required=True)
     parser.add_argument("--max-preproc-processes", type=int, default=8, help="Number of processes working on data preparation.")
+    parser.add_argument("--inference-batch-size", type=int, default=1, help="Batch size for decoding.")
     args = parser.parse_args()
     src_lang = "et"
     tgt_lang = "lt"
@@ -281,8 +316,9 @@ def main():
     update_interval = int(effective_batch_size / args.batch_size_per_gpu)
 
     preprocess_data(args.working_dir, args.test_set_dir, src_lang=src_lang, tgt_lang=tgt_lang)
-    train_model(args.working_dir, src_lang=src_lang, tgt_lang=tgt_lang, batch_size=args.batch_size_per_gpu, update_interval=update_interval, max_preproc_processes=args.max_preproc_processes)
-    # evaluate_model(args.working_dir, src_lang=src_lang, tgt_lang=tgt_lang)
+    model_dir = train_model(args.working_dir, src_lang=src_lang, tgt_lang=tgt_lang, batch_size=args.batch_size_per_gpu, update_interval=update_interval, max_preproc_processes=args.max_preproc_processes)
+    inference_batch_size = args.inference_batch_size
+    evaluate_model(model_dir, args.working_dir, args.test_set_dir, src_lang=src_lang, tgt_lang=tgt_lang, batch_size=inference_batch_size)
 
 if __name__ == "__main__":
     main()

@@ -44,11 +44,20 @@ Next run the following command to start the evaluation based on the sentence id 
 python3 wmt23_data_task_scripts/run_eval.py --alignments-file wmt23_data_task_data/top1_cosine.et-lt.tsv.gz --working-dir wmt23_data_task_data/top1_cosine_eval --test-set-dir ./wmt23_data_task_data/testsets_v2/  --num-gpus 8 --batch-size-per-gpu 4096
 ```
 
-Note that this includes model training and will therefore take several hours to complete. If you run into memory issues reduce the batch size using `--batch-size-per-gpu`. The effective batch size will be adjusted accordingly via the update interval. Feel free to also increase the batch size to get faster results if you have the GPU RAM.
+Note that this includes model training and will therefore take several hours to complete. If you run into memory issues reduce the batch size using `--batch-size-per-gpu`. The effective batch size will be adjusted accordingly via the update interval. Feel free to also increase the batch size to get faster results if you have the GPU RAM. You can also increase the `--inference-batch-size` if you want to decode faster and have the GPU RAM.
 
+Note that the script will cache intermediate outputs. When rerunning all cached outputs will be reused. Note though that partial model trainings will not be detected. If training failed half way through it is best to delete the model folder before rerunning.
 
 If you want to take a look at the raw parallel data check out the following files:
 ```
 wmt23_data_task_data/top1_cosine_eval/et_sentences/aligned_sentences.et.txt
 wmt23_data_task_data/top1_cosine_eval/lt_sentences/aligned_sentences.lt.txt
+```
+
+The above command should give you (roughly) the following BLEU scores:
+```
+EMEA: 
+EUbookshop: 
+Europarl: 
+JRC-Acquis: 
 ```
