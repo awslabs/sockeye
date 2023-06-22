@@ -58,8 +58,8 @@ wmt23_data_task_data/top1_cosine_eval/lt_sentences/aligned_sentences.lt.txt
 
 The above command should give you (roughly) the following BLEU scores:
 ```
-EMEA: 
-EUbookshop: 
-Europarl: 
-JRC-Acquis: 
+EMEA: 18.1
+EUbookshop: 18.9
+Europarl: 17.9
+JRC-Acquis: 24.6
 ```
