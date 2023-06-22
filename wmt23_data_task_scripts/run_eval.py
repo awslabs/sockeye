@@ -22,9 +22,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def write_out_aligned_sentences(alignments_file, output_dir, et_sentences, lt_sentences, num_tmp_files):
+def write_out_aligned_sentences(alignments_file, output_dir, et_sentences, lt_sentences, num_tmp_files, excluded_sentences_file):
     assert et_sentences.exists(), f"{et_sentences} not found."
     assert lt_sentences.exists(), f"{lt_sentences} not found."
+    with open(excluded_sentences_file) as fin:
+        excluded_sentences = set(line.rstrip("\n") for line in fin)
 
     et_sent_ids = set()
     et_sent_id_to_alignment_id = defaultdict(list)
@@ -32,15 +34,19 @@ def write_out_aligned_sentences(alignments_file, output_dir, et_sentences, lt_se
     lt_sent_id_to_alignment_id = defaultdict(list)
     expected_alignments = set()
 
+    num_excluded = 0
     with gzip.open(alignments_file, "rt") as indata:
         for sent_alignment_id, line in enumerate(indata):
             et_sent_id, lt_sent_id = line.rstrip("\n").split("\t")
+            if et_sent_id in excluded_sentences or lt_sent_id in excluded_sentences:
+                num_excluded += 1
+                continue
             et_sent_ids.add(et_sent_id)
             et_sent_id_to_alignment_id[et_sent_id].append(sent_alignment_id)
             lt_sent_ids.add(lt_sent_id)
             lt_sent_id_to_alignment_id[lt_sent_id].append(sent_alignment_id)
             expected_alignments.add(sent_alignment_id)
-    logger.info(f"Read {len(expected_alignments)} alignments from {alignments_file}.")
+    logger.info(f"Read {len(expected_alignments)} alignments from {alignments_file} ({num_excluded} were exlcuded).")
 
     # create output directory if it does not exist
     if not os.path.exists(output_dir):
@@ -279,6 +285,8 @@ def main():
     parser.add_argument('-o', '--working-dir', type=str, help='Output directory (we 1. extract sentences, 2. train a model and 3. store BLEU scores in this folder.) Expected to be empty.', required=True)
     parser.add_argument('--et-sentences', type=str, help="path to sentences.et.tsv.gz", default="wmt23_data_task_data/sentences/sentences.et.tsv.gz", required=False)
     parser.add_argument('--lt-sentences', type=str, help="path to sentences.lt.tsv.gz", default="wmt23_data_task_data/sentences/sentences.lt.tsv.gz", required=False)
+    parser.add_argument('--excluded-sentences', type=str, help="path to exclude_sent_ids_et-lt.txt", default="wmt23_data_task_data/exclude_sent_ids_et-lt.txt", required=False)
+    
     parser.add_argument('--num-tmp-files', type=int, help="Number of temporary files to write (num. alignments // num_tmp_files lines of text need to fit in memory) ", default=256, required=False)
 
     parser.add_argument("--test-set-dir", help="Path to the directory containing the test sets.", required=True)
@@ -303,7 +311,8 @@ def main():
     et_sentences = Path(args.et_sentences)
     lt_sentences = Path(args.lt_sentences)
     num_tmp_files = args.num_tmp_files
-    write_out_aligned_sentences(alignments_file, working_dir, et_sentences, lt_sentences, num_tmp_files)
+    excluded_sentences_file = args.excluded_sentences
+    write_out_aligned_sentences(alignments_file, working_dir, et_sentences, lt_sentences, num_tmp_files, excluded_sentences_file)
 
     # Now let's run training
     num_gpus = args.num_gpus
