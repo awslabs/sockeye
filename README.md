@@ -56,7 +56,7 @@ wmt23_data_task_data/top1_cosine_eval/et_sentences/aligned_sentences.et.txt
 wmt23_data_task_data/top1_cosine_eval/lt_sentences/aligned_sentences.lt.txt
 ```
 
-The above command should give you (roughly) the following BLEU scores:
+The above command should give you (roughly) the following evaluation scores:
 ```
 EMEA BLEU: 18.6
 EUbookshop BLEU: 20.1
