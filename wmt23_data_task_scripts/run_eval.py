@@ -36,7 +36,8 @@ def write_out_aligned_sentences(alignments_file, output_dir, et_sentences, lt_se
 
     num_excluded = 0
     with gzip.open(alignments_file, "rt") as indata:
-        for sent_alignment_id, line in enumerate(indata):
+        sent_alignment_id = 0
+        for line in indata:
             et_sent_id, lt_sent_id = line.rstrip("\n").split("\t")
             if et_sent_id in excluded_sentences or lt_sent_id in excluded_sentences:
                 num_excluded += 1
@@ -46,6 +47,7 @@ def write_out_aligned_sentences(alignments_file, output_dir, et_sentences, lt_se
             lt_sent_ids.add(lt_sent_id)
             lt_sent_id_to_alignment_id[lt_sent_id].append(sent_alignment_id)
             expected_alignments.add(sent_alignment_id)
+            sent_alignment_id += 1
     logger.info(f"Read {len(expected_alignments)} alignments from {alignments_file} ({num_excluded} were exlcuded).")
 
     # create output directory if it does not exist
