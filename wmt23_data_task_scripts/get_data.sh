@@ -3,14 +3,15 @@
 set -e
 
 DATA_FOLDER=wmt23_data_task_data
-mkdir -p ${DATA_FOLDER}
+# if no dir or symlinked dir exists -- mkdir one
+[[ -d $DATA_FOLDER || -L $DATA_FOLDER ]] || mkdir -p ${DATA_FOLDER}
 mkdir -p ${DATA_FOLDER}/testsets_v2
 for data_set in dev test
 do
     for test_set in EMEA EUBookshop Europarl JRC-Acquis
     do
         wget -O ${DATA_FOLDER}/testsets_v2/${test_set}.${data_set}.et-lt.lt https://mtdataexternalpublic.blob.core.windows.net/2023datatask/${data_set}/${test_set}.${data_set}.et-lt.lt
-        wget -O ${DATA_FOLDER}/testsets_v2/${test_set}.${data_set}.et-lt.lt https://mtdataexternalpublic.blob.core.windows.net/2023datatask/${data_set}/${test_set}.${data_set}.et-lt.et
+        wget -O ${DATA_FOLDER}/testsets_v2/${test_set}.${data_set}.et-lt.et https://mtdataexternalpublic.blob.core.windows.net/2023datatask/${data_set}/${test_set}.${data_set}.et-lt.et
     done
 done
 
