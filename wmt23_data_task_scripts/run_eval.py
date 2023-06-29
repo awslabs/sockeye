@@ -1,3 +1,4 @@
+#!/usr//bin/env python3
 import subprocess
 import os
 import sys
@@ -15,10 +16,12 @@ from contextlib import ExitStack
 import math
 import sacrebleu
 
-TEST_SETS = ["EMEA", "EUbookshop", "Europarl", "JRC-Acquis"]
+TEST_SETS = ["EMEA", "EUBookshop", "Europarl", "JRC-Acquis"]
 
 # Create a logger with basic logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s,%(msecs)03d %(levelname)s [%(filename)s:%(lineno)d] %(message)s',
+                    datefmt='%Y-%m-%d:%H:%M:%S',)
 logger = logging.getLogger(__name__)
 
 
