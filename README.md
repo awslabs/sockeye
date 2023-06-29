@@ -58,13 +58,13 @@ wmt23_data_task_data/top1_cosine_eval/lt_sentences/aligned_sentences.lt.txt
 
 The above command should give you (roughly) the following evaluation scores:
 ```
-EMEA BLEU: 18.6
-EUbookshop BLEU: 20.1
-Europarl BLEU: 18.2
-JRC-Acquis BLEU: 26.2
+EMEA BLEU: 18.3
+EUBookshop BLEU: 19.1
+Europarl BLEU: 18.1
+JRC-Acquis BLEU: 24.3
 
-EMEA chrf: 49.9
-EUbookshop chrf: 52.9
+EMEA chrf: 49.7
+EUBookshop chrf: 52.3
 Europarl chrf: 51.8
-JRC-Acquis chrf: 56.0
+JRC-Acquis chrf: 55.2
 ```
