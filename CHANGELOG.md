@@ -16,7 +16,7 @@ Each version section may have subsections for: _Added_, _Changed_, _Removed_, _D
 ### Fixed
 
 - Use fault tolerant symlink wrapper function during training to handle cases of temporary inconsistency in distributed file systems.
-- Updated DeepSpeed requirement file to specify version (`deepspeed<0.9`).
+- Update DeepSpeed requirement file to specify version (`deepspeed<0.9`).
 
 ## [3.1.34]
 
