@@ -634,7 +634,7 @@ class EarlyStoppingTrainer:
         actual_best_params_fname = C.PARAMS_NAME % self.state.best_checkpoint
         if os.path.lexists(self.best_params_fname):
             os.remove(self.best_params_fname)
-        os.symlink(actual_best_params_fname, self.best_params_fname)
+        utils.fault_tolerant_symlink(actual_best_params_fname, self.best_params_fname)
         logger.info("'%s' now points to '%s'", self.best_params_fname, actual_best_params_fname)
 
     def _save_params(self, use_checkpoint: bool = False):
@@ -709,7 +709,7 @@ class EarlyStoppingTrainer:
             params_file = os.path.join(training_state_dirname, C.TRAINING_STATE_PARAMS_NAME)
             if os.path.exists(params_file):
                 os.unlink(params_file)
-            os.symlink(os.path.join("..", params_base_fname), params_file)
+            utils.fault_tolerant_symlink(os.path.join("..", params_base_fname), params_file)
 
             # (2) Optimizer state
             opt_state_fname = os.path.join(training_state_dirname, C.OPT_STATE_LAST)
