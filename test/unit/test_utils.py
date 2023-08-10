@@ -16,6 +16,7 @@ import math
 import os
 import re
 from tempfile import TemporaryDirectory
+import unittest
 
 import numpy as np
 import pytest
@@ -428,3 +429,20 @@ def test_rerank_hypotheses_isometric(hypothesis, hypothesis_score, source, metri
 def test_update_dict_with_prefix_kv(dest, prefix_kv, expected):
     utils.update_dict_with_prefix_kv(dest, prefix_kv)
     assert dest == expected
+
+
+@unittest.mock.patch('time.sleep')
+def test_fault_tolerant_symlink(mock_sleep):
+    with TemporaryDirectory() as temp:
+        src_fname = os.path.join(temp, 'src')
+        dst_fname = os.path.join(temp, 'dst')
+        _touch_file(src_fname, compressed=False, empty=False)
+        # First symlink succeeds
+        utils.fault_tolerant_symlink(src_fname, dst_fname)
+        # Second symlink fails after retries (file exists)
+        with pytest.raises(OSError):
+            utils.fault_tolerant_symlink(src_fname, dst_fname, max_retries=5)
+        assert mock_sleep.called
+        # Same data read from source and destination
+        with utils.smart_open(src_fname) as src_in, utils.smart_open(dst_fname) as dst_in:
+            assert src_in.readlines() == dst_in.readlines()

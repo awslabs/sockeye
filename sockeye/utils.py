@@ -25,6 +25,7 @@ import os
 import pprint
 import random
 import sys
+import time
 from collections import defaultdict
 from contextlib import contextmanager
 from itertools import starmap
@@ -817,3 +818,29 @@ def init_device(args: argparse.Namespace) -> pt.device:
         logger.info('CUDA: allow tf32 (float32 but with 10 bits precision)')
 
     return device
+
+
+def fault_tolerant_symlink(src: str, dst: str, max_retries: int = 5):
+    """
+    Attempt to create a symbolic link from source to destination. If a
+    FileExistsError is raised, assume a distributed filesystem is currently
+    synchronizing, wait, and retry. If the maximum number of retries is
+    exceeded, raise an error.
+
+    :param src: Source file.
+    :param dst: Destination file.
+    :param max_retries: Maximum number of retries.
+    """
+    retries = 0
+    while True:
+        try:
+            os.symlink(src, dst)
+            return
+        except FileExistsError as error:
+            if retries >= max_retries:
+                break
+            wait_time = 2**retries
+            logger.warn(f'Error detected when calling symlink: {error}. Retrying in {wait_time} seconds.')
+            time.sleep(wait_time)
+            retries += 1
+    raise OSError(f'Max retries exceeded when attempting to create symlink: \'{src}\' -> \'{dst}\'')
