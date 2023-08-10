@@ -820,7 +820,7 @@ def init_device(args: argparse.Namespace) -> pt.device:
     return device
 
 
-def fault_tolerant_symlink(src: str, dst: str, max_retries: int = 5):
+def fault_tolerant_symlink(src: str, dst: str, max_retries: int = 6):
     """
     Attempt to create a symbolic link from source to destination. If a
     FileExistsError is raised, assume a distributed filesystem is currently

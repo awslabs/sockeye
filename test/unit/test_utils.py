@@ -441,7 +441,7 @@ def test_fault_tolerant_symlink(mock_sleep):
         utils.fault_tolerant_symlink(src_fname, dst_fname)
         # Second symlink fails after retries (file exists)
         with pytest.raises(OSError):
-            utils.fault_tolerant_symlink(src_fname, dst_fname, max_retries=5)
+            utils.fault_tolerant_symlink(src_fname, dst_fname)
         assert mock_sleep.called
         # Same data read from source and destination
         with utils.smart_open(src_fname) as src_in, utils.smart_open(dst_fname) as dst_in:
