@@ -11,6 +11,15 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.36]
+
+### Changed
+
+- Make the `inference_only` mode switchable.
+- Simplify inference optimizations by
+  (1) using `eval()` to disable dropout instead of explicitly setting dropout modules to None;
+  (2) always using default value `inplace=False` for activation modules.
+
 ## [3.1.35]
 
 ### Fixed

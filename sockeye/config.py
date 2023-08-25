@@ -1,4 +1,4 @@
-# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2023 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -83,15 +83,3 @@ class Config(yaml.YAMLObject, metaclass=TaggedYamlObjectMetaclass):
         for name, value in kwargs.items():
             object.__setattr__(copy_obj, name, value)
         return copy_obj
-
-    def disable_dropout(self):
-        """
-        Sets the value of all float-valued attributes in this config (or any of its children) that contain 'dropout'
-        in their name to 0.0.
-        """
-        for attr, val in self.__dict__.items():
-            if isinstance(val, Config):
-                val.disable_dropout()
-            elif 'dropout' in attr and isinstance(val, float):
-                logger.debug("Setting %s to 0.0", attr)
-                setattr(self, attr, 0.0)
