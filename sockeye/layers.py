@@ -1,4 +1,4 @@
-# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2023 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -26,12 +26,12 @@ from . import config
 logger = logging.getLogger(__name__)
 
 
-def get_activation(act_type: str, inplace: bool = False) -> pt.nn.Module:
+def get_activation(act_type: str) -> pt.nn.Module:
     if act_type == C.SWISH1:
-        return pt.nn.SiLU(inplace=inplace)
+        return pt.nn.SiLU()
     if act_type == C.GELU:
         return pt.nn.GELU()
-    return pt.nn.ReLU(inplace=inplace)
+    return pt.nn.ReLU()
 
 
 class LHUC(pt.nn.Module):
@@ -287,7 +287,7 @@ class DotAttentionCell(pt.nn.Module):
 
     def __init__(self, dropout: float = 0.0, heads: int = 1) -> None:
         super().__init__()
-        self.dropout = pt.nn.Dropout(p=dropout) if dropout > 0.0 else None
+        self.dropout = pt.nn.Dropout(p=dropout)
         self.heads = heads
 
     def forward(self,
@@ -421,6 +421,13 @@ class AutoregressiveLayer(pt.nn.Module):
         raise NotImplementedError
 
     @abstractmethod
+    def set_inference_only(self, inference_only: bool):
+        """
+        Set inference_only.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def forward(self, inputs: pt.Tensor, previous_states: pt.Tensor, *args) -> Tuple:
         """
         :param inputs: layer input
@@ -460,6 +467,12 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
         # indicates whether self.ff_in.weight of shape (depth_att * 3, depth_key_value) is in interleaved format or not.
         # Interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
         self.kv_interleaved = False
+
+    def set_inference_only(self, inference_only: bool):
+        """
+        Set inference_only. Not needed for MultiHeadSelfAttention.
+        """
+        raise NotImplementedError
 
     def separate_kv(self):
         """ write kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention) """
@@ -799,11 +812,9 @@ class SSRU(AutoregressiveLayer):
                  clamp_to_dtype: bool = False,) -> None:
         super().__init__()
         self.model_size = model_size
-        self.inference_only = inference_only
         self.clamp_to_dtype = clamp_to_dtype
 
-        self.cell_state_transform = self._inference_cell_state_transform \
-                                    if inference_only else self._training_cell_state_transform
+        self.set_inference_only(inference_only)
 
         self.forget_gate = pt.nn.Linear(in_features=model_size, out_features=model_size, bias=True, dtype=dtype)
         self.forget_gate_act = pt.nn.Sigmoid()
@@ -811,6 +822,14 @@ class SSRU(AutoregressiveLayer):
         self.linear = pt.nn.Linear(in_features=model_size, out_features=model_size, bias=False, dtype=dtype)
 
         self.relu = pt.nn.ReLU(inplace=False)  # inplace=False because we need to non-activated data as well
+
+    def set_inference_only(self, inference_only: bool):
+        """
+        Set inference_only.
+        """
+        self.inference_only = inference_only
+        self.cell_state_transform = self._inference_cell_state_transform \
+                                    if inference_only else self._training_cell_state_transform
 
     @property
     def num_state_tensors(self) -> int:

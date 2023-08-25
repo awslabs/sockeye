@@ -1,4 +1,4 @@
-# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2023 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -133,6 +133,7 @@ class TransformerDecoderBlock(pt.nn.Module):
                  clamp_to_dtype: bool = False) -> None:
         super().__init__()
         self.decoder_type = config.decoder_type
+        self.inference_only = inference_only
 
         self.autoregr_layer = None
         if self.decoder_type == C.TRANSFORMER_TYPE:
@@ -202,6 +203,14 @@ class TransformerDecoderBlock(pt.nn.Module):
         self.lhuc = None
         if config.use_lhuc:
             self.lhuc = sockeye.layers.LHUC(config.model_size, dtype=dtype)
+
+    def set_inference_only(self, inference_only: bool):
+        """
+        Set inference_only.
+        """
+        self.inference_only = inference_only
+        if self.decoder_type == C.SSRU_TRANSFORMER:
+            self.autoregr_layer.set_inference_only(inference_only)
 
     @property
     def num_state_tensors(self) -> int:
@@ -275,8 +284,7 @@ class TransformerProcessBlock(pt.nn.Module):
             # https://github.com/huggingface/transformers/issues/9377
             self.layer_norm = pt.nn.LayerNorm(num_hidden, eps=1e-06, dtype=dtype)
         self.dropout = dropout
-        if dropout > 0.0:
-            self.drop = pt.nn.Dropout(p=dropout)
+        self.drop = pt.nn.Dropout(p=dropout)
 
     def forward(self, data: pt.Tensor, prev: Optional[pt.Tensor] = None) -> pt.Tensor:
         """
@@ -301,8 +309,7 @@ class TransformerProcessBlock(pt.nn.Module):
                 data = self.layer_norm(data)
 
             elif step == "d":
-                if self.dropout > 0.0:
-                    data = self.drop(data)
+                data = self.drop(data)
             else:
                 raise ValueError("Unknown step in sequence: %s" % step)
 
@@ -324,15 +331,13 @@ class TransformerFeedForward(pt.nn.Module):
                  dtype: Optional[pt.dtype] = None,
                  clamp_to_dtype: bool = False) -> None:
         super().__init__()
-        self.dropout = dropout
         self.use_glu = use_glu
         self.clamp_to_dtype = clamp_to_dtype
         self.ff1 = pt.nn.Linear(in_features=num_model, out_features=num_hidden, dtype=dtype)
-        self.act = sockeye.layers.get_activation(act_type, inplace=inference_only)
+        self.act = sockeye.layers.get_activation(act_type)
         if self.use_glu:
             self.linear = pt.nn.Linear(in_features=num_model, out_features=num_hidden, dtype=dtype)
-        if self.dropout > 0.0:
-            self.drop = pt.nn.Dropout(p=self.dropout, inplace=inference_only)
+        self.drop = pt.nn.Dropout(p=dropout)
         self.ff2 = pt.nn.Linear(in_features=num_hidden, out_features=num_model, dtype=dtype)
 
     def forward(self, x):
@@ -340,8 +345,7 @@ class TransformerFeedForward(pt.nn.Module):
         h = self.act(h)
         if self.use_glu:
             h = h * self.linear(x)
-        if self.dropout > 0.0:
-            h = self.drop(h)
+        h = self.drop(h)
         y = self.ff2(h)
         if self.clamp_to_dtype:
             y = sockeye.layers.clamp_to_dtype_min_max(y)

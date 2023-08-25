@@ -1,4 +1,4 @@
-# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2023 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -116,7 +116,7 @@ class Embedding(Encoder):
                 self.factor_embeds.append(factor_embed)
                 self.factor_combinations.append(fc.combine)
 
-        self.dropout = pt.nn.Dropout(p=self.config.dropout) if self.config.dropout > 0.0 else None
+        self.dropout = pt.nn.Dropout(p=self.config.dropout)
 
     def forward(self, data: pt.Tensor) -> pt.Tensor:
         primary_data = data[:, :, 0]
@@ -177,7 +177,7 @@ class TransformerEncoder(Encoder):
         pt.nn.Module.__init__(self)
         self.config = config
 
-        self.dropout = pt.nn.Dropout(p=config.dropout_prepost) if config.dropout_prepost > 0.0 else None
+        self.dropout = pt.nn.Dropout(p=config.dropout_prepost)
 
         self.pos_embedding = layers.PositionalEmbeddings(weight_type=self.config.positional_embedding_type,
                                                          num_embed=self.config.model_size,

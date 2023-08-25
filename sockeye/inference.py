@@ -1,4 +1,4 @@
-# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2023 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -787,6 +787,8 @@ class Translator:
         if strip_unknown_words:
             self.strip_ids.add(self.unk_id)
         self.models = models
+        for model in self.models:
+            model.eval()
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         # set a common max_output length for all models.
@@ -943,8 +945,7 @@ class Translator:
                 batch = batch + [batch[0]] * rest
 
             translator_inputs = [indexed_translator_input.translator_input for indexed_translator_input in batch]
-            with pt.inference_mode():
-                batch_translations = self._translate_np(*self._get_inference_input(translator_inputs))
+            batch_translations = self._translate_batch(translator_inputs)
 
             # truncate to remove filler translations
             if fill_up_batches and rest > 0:
@@ -987,6 +988,16 @@ class Translator:
         self._search.log_search_stats()
 
         return results
+
+    def _translate_batch(self, translator_inputs: List[TranslatorInput]) -> List[Translation]:
+        """
+        Translate a batch of inputs.
+
+        :param translator_inputs: List of TranslatorInputs.
+        :return: List of Translation.
+        """
+        with pt.inference_mode():
+            return self._translate_np(*self._get_inference_input(translator_inputs))
 
     def _get_inference_input(self,
                              trans_inputs: List[TranslatorInput]) -> Tuple[pt.Tensor,

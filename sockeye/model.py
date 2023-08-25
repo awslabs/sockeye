@@ -1,4 +1,4 @@
-# Copyright 2017--2022 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright 2017--2023 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License"). You may not
 # use this file except in compliance with the License. A copy of the License
@@ -111,7 +111,6 @@ class SockeyeModel(pt.nn.Module):
         super().__init__()
         self.config = copy.deepcopy(config)
         self.dtype = utils.get_torch_dtype(config.dtype)
-        self.inference_only = inference_only
         self.clamp_to_dtype = clamp_to_dtype
         logger.info("%s", self.config)
         self.train_decoder_only = train_decoder_only
@@ -144,10 +143,10 @@ class SockeyeModel(pt.nn.Module):
                                                vocab_size=self.config.vocab_target_size,
                                                weight=output_weight,
                                                dtype=self.dtype)
-        if self.inference_only:
-            # Running this layer scripted with a newly initialized model can
-            # cause an overflow error.
-            self.output_layer = pt.jit.script(self.output_layer)
+        self.output_layer_module_cached = self.output_layer
+        # Running this layer scripted with a newly initialized model can cause an overflow error.
+        self.output_layer_script_cached = pt.jit.script(self.output_layer_module_cached)
+        self.set_inference_only(inference_only)
 
         self.factor_output_layers = pt.nn.ModuleList()
         # Optional target factor output layers
@@ -189,6 +188,14 @@ class SockeyeModel(pt.nn.Module):
 
         self.knn : Optional[layers.KNN] = None
 
+    def set_inference_only(self, inference_only: bool):
+        """
+        Turn inference_only optimization on or off.
+        """
+        self.inference_only = inference_only
+        self.output_layer = self.output_layer_script_cached if self.inference_only else \
+                            self.output_layer_module_cached
+        self.decoder.set_inference_only(self.inference_only)
 
     def cast(self, dtype: Union[pt.dtype, str]):
         dtype = utils.get_torch_dtype(dtype)
@@ -417,7 +424,8 @@ class SockeyeModel(pt.nn.Module):
         # filter their names from the state dictionary to avoid saving redundant
         # copies of their parameters. Copies can also cause errors at loadtime
         # if the traced modules do not yet exist.
-        filtered_state_dict = {name: param for (name, param) in self.state_dict().items() if 'traced' not in name}
+        filtered_state_dict = {name: param for (name, param) in self.state_dict().items()
+                               if 'traced' not in name and 'cached' not in name}
         pt.save(filtered_state_dict, fname)
         self.apply(layers.separate_kv)
         logging.info('Saved params/state_dict to "%s"', fname)
@@ -445,12 +453,12 @@ class SockeyeModel(pt.nn.Module):
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         # Earlier versions of Sockeye may have saved parameters for traced
         # modules. These parameters can be safely ignored.
-        unexpected = [key for key in unexpected if 'traced' not in key]
+        unexpected = [key for key in unexpected if 'traced' not in key and 'cached' not in key]
         # We also ignore cases where traced modules exist and appear to be
         # missing parameters. These modules actually use the same parameters as
         # their original non-traced versions so there are no separate parameters
         # to load.
-        missing = [key for key in missing if 'traced' not in key]
+        missing = [key for key in missing if 'traced' not in key and 'cached' not in key]
         if not allow_missing:
             utils.check_condition(not missing, f"missing keys: {missing}")
         if not ignore_extra:
@@ -706,7 +714,6 @@ def load_model(model_folder: str,
                inference_only: bool = False,
                train_decoder_only: bool = False,
                allow_missing: bool = False,
-               set_grad_req_null: bool = True,
                forward_pass_cache_size: int = 0,
                knn_index: Optional[str] = None) -> Tuple[SockeyeModel, List[vocab.Vocab], List[vocab.Vocab]]:
     """
@@ -721,7 +728,6 @@ def load_model(model_folder: str,
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
     :param allow_missing: Allow missing parameters in the loaded model.
-    :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :param knn_index: Optional path to a folder containing a KNN model index.
     :return: List of models, source vocabularies, target vocabularies.
@@ -732,10 +738,6 @@ def load_model(model_folder: str,
     logger.info("Model version: %s", model_version)
     utils.check_version(model_version)
     model_config = SockeyeModel.load_config(os.path.join(model_folder, C.CONFIG_NAME))
-
-    if inference_only:
-        logger.info("Disabling dropout layers for performance reasons")
-        model_config.disable_dropout()
 
     if checkpoint is None:
         params_fname = os.path.join(model_folder, C.PARAMS_BEST_NAME)
@@ -754,9 +756,6 @@ def load_model(model_folder: str,
         model.load_knn_index(knn_index)
 
     model.to(device)
-
-    if set_grad_req_null:
-        model.eval()
 
     if dtype is None:
         logger.info("Model dtype: %s" % model.dtype)
@@ -783,7 +782,6 @@ def load_models(device: pt.device,
                 inference_only: bool = False,
                 train_decoder_only: bool = False,
                 allow_missing: bool = False,
-                set_grad_req_null: bool = True,
                 forward_pass_cache_size: int = 0,
                 knn_index: Optional[str] = None) -> Tuple[List[SockeyeModel],
                                                           List[vocab.Vocab],
@@ -800,7 +798,6 @@ def load_models(device: pt.device,
     :param train_decoder_only: Training will only update the decoder. Disable
            autograd for encoder and embeddings to save memory.
     :param allow_missing: Allow missing parameters in the loaded models.
-    :param set_grad_req_null: Set grad_req to null for model parameters.
     :param forward_pass_cache_size: If > 0, cache encoder and embedding calculations of forward pass.
     :param knn_index: Optional path to a folder containing a KNN model index.
     :return: List of models, source vocabulary, target vocabulary, source factor vocabularies.
@@ -825,7 +822,6 @@ def load_models(device: pt.device,
                                                inference_only=inference_only,
                                                train_decoder_only=train_decoder_only,
                                                allow_missing=allow_missing,
-                                               set_grad_req_null=set_grad_req_null,
                                                forward_pass_cache_size=forward_pass_cache_size,
                                                knn_index=knn_index)
         models.append(model)
