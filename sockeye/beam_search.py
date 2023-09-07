@@ -905,7 +905,7 @@ class BeamSearch(Search):
         # locations of each batch item when first dimension is (batch * beam)
         batch_indices = pt.arange(0, batch_size * self.beam_size, self.beam_size, dtype=pt.int64, device=self.device)
         first_step_mask = pt.full((batch_size * self.beam_size, 1), fill_value=np.inf, device=self.device, dtype=self.dtype)
-        first_step_mask[batch_indices] = 0.0
+        first_step_mask[batch_indices] = pt.full((batch_size, 1), fill_value=0.0, device=self.device, dtype=self.dtype)
         if target_prefix is not None:
             first_step_mask = utils.adjust_first_step_masking(target_prefix, first_step_mask)
 
