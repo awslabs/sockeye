@@ -11,6 +11,12 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.37]
+
+### Fixed
+
+- Fixed beam_search for running with torch.use_deterministic_algorithms(True)
+
 ## [3.1.36]
 
 ### Changed
