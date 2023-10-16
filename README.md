@@ -91,7 +91,11 @@ For more information about Sockeye, see our papers ([BibTeX](sockeye.bib)).
 Sockeye has been used for both academic and industrial research. A list of known publications that use Sockeye is shown below.
 If you know more, please let us know or submit a pull request (last updated: May 2022).
 
+### 2023
+* Zhang, Xuan, Kevin Duh, Paul McNamee. "A Hyperparameter Optimization Toolkit for Neural Machine Translation Research". Proceedings of ACL (2023).
+
 ### 2022
+* Currey, Anna, Maria Nădejde, Raghavendra Pappagari, Mia Mayer, Stanislas Lauly, Xing Niu, Benjamin Hsu, Georgiana Dinu. "MT-GenEval: A Counterfactual and Contextual Dataset for Evaluating Gender Accuracy in Machine Translation". Proceedings of EMNLP (2022).
 * Domhan, Tobias, Eva Hasler, Ke Tran, Sony Trenous, Bill Byrne and Felix Hieber. "The Devil is in the Details: On the Pitfalls of Vocabulary Selection in Neural Machine Translation". Proceedings of NAACL-HLT (2022)
 * Fischer, Lukas, Patricia Scheurer, Raphael Schwitter, Martin Volk. "Machine Translation of 16th Century Letters from Latin to German". Workshop on Language Technologies for Historical and Ancient Languages (2022).
 * Knowles, Rebecca, Patrick Littell. "Translation Memories as Baselines for Low-Resource Machine Translation". Proceedings of LREC (2022)
