@@ -18,7 +18,7 @@ import argparse
 import logging
 import sys
 from collections import defaultdict
-from functools import partial
+from functools import partial, lru_cache
 from typing import Callable, Iterable, Dict, List, Tuple, Optional
 
 import numpy as np
@@ -118,6 +118,70 @@ def raw_corpus_length_ratio(hypotheses: Iterable[str], references: Iterable[str]
     return sum(ratios)/len(ratios) if len(ratios) else 0.0
 
 
+def serialize_factors(factors: List[Iterable[str]]) -> List[str]:
+    factors_list = zip(*factors)
+    for factors in factors_list:
+        factors_tokens = [f.strip().split(" ") for f in factors]
+        inverse_factors = zip(*factors_tokens)
+        yield " ".join([" ".join(f) for f in inverse_factors])
+
+
+def detokenize_signwriting(strings: List[str]) -> List[str]:
+    from signwriting.tokenizer import SignWritingTokenizer
+    tokenizer = SignWritingTokenizer()
+    signwriting_texts = [tokenizer.tokens_to_text(s.split(" ")) for s in strings]
+    # Regex Replace ([RBLM])00 with the capture group
+    import re
+    return [re.sub(r"([RBLM])00", r"\1", s) for s in signwriting_texts]
+
+
+def raw_corpus_signwriting_similarity(hypotheses_factors: List[Iterable[str]],
+                                      references_factors: List[Iterable[str]]) -> float:
+    """
+    Simple wrapper around the signwriting-evaluation similarity score.
+
+    :param hypotheses_factors: Hypothesis factors streams.
+    :param references_factors: Reference factors streams.
+    :return: Similarity score as float between 0 and 1.
+    """
+    try:
+        from signwriting_evaluation.metrics.similarity import SignWritingSimilarityMetric
+    except ImportError:
+        raise ImportError("Please install signwriting-evaluation to use the SignWriting Similarity metric.")
+
+    hypotheses = detokenize_signwriting(serialize_factors(hypotheses_factors))
+    references = detokenize_signwriting(serialize_factors(references_factors))
+
+    metric = SignWritingSimilarityMetric()
+    return metric.corpus_score(hypotheses, [references])
+
+
+@lru_cache(maxsize=1)
+def load_signwriting_clip():
+    try:
+        from signwriting_evaluation.metrics.clip import SignWritingCLIPScore
+    except ImportError:
+        raise ImportError("Please install signwriting-evaluation to use the SignWriting CLIP metric.")
+
+    return SignWritingCLIPScore()
+
+
+def raw_corpus_signwriting_clip(hypotheses_factors: List[Iterable[str]],
+                                references_factors: List[Iterable[str]]) -> float:
+    """
+    Simple wrapper around the signwriting-evaluation clip score.
+
+    :param hypotheses_factors: Hypothesis factors streams.
+    :param references_factors: Reference factors streams.
+    :return: CLIPScore score as float between -1 and 1.
+    """
+    metric = load_signwriting_clip()
+
+    hypotheses = detokenize_signwriting(serialize_factors(hypotheses_factors))
+    references = detokenize_signwriting(serialize_factors(references_factors))
+    return metric.corpus_score(hypotheses, [references])
+
+
 def main():
     params = argparse.ArgumentParser(description='Evaluate translations by calculating metrics with '
                                                  'respect to a reference set. If multiple hypotheses files are given '
@@ -163,6 +227,10 @@ def main():
             func = raw_corpus_rougel
         elif name == C.TER:
             func = raw_corpus_ter
+        elif name == C.SIGNWRITING_CLIP:
+            func = raw_corpus_signwriting_clip
+        elif name == C.SIGNWRITING_SIMILARITY:
+            func = raw_corpus_signwriting_similarity
         else:
             raise ValueError("Unknown metric %s." % name)
         metrics.append((name, func))

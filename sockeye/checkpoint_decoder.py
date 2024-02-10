@@ -181,24 +181,31 @@ class CheckpointDecoder:
         self.model.train(original_mode)
 
         # 2. Evaluate
-
-        metrics = {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=translations[0],
-                                                    references=self.targets_sentences[0],
+        hypotheses = translations[0]
+        references = self.targets_sentences[0]
+        metrics = {C.BLEU: evaluate.raw_corpus_bleu(hypotheses=hypotheses, references=references,
                                                     offset=evaluate.DEFAULT_OFFSET),
-                   C.CHRF: evaluate.raw_corpus_chrf(hypotheses=translations[0],
-                                                    references=self.targets_sentences[0]),
-                   C.ROUGE1: evaluate.raw_corpus_rouge1(hypotheses=translations[0],
-                                                        references=self.targets_sentences[0]),
-                   C.ROUGE2: evaluate.raw_corpus_rouge2(hypotheses=translations[0],
-                                                        references=self.targets_sentences[0]),
-                   C.ROUGEL: evaluate.raw_corpus_rougel(hypotheses=translations[0],
-                                                        references=self.targets_sentences[0]),
-                   C.LENRATIO: evaluate.raw_corpus_length_ratio(hypotheses=translations[0],
-                                                                references=self.targets_sentences[0]),
-                   C.TER: evaluate.raw_corpus_ter(hypotheses=translations[0],
-                                                  references=self.targets_sentences[0]),
+                   C.CHRF: evaluate.raw_corpus_chrf(hypotheses=hypotheses, references=references),
+                   C.ROUGE1: evaluate.raw_corpus_rouge1(hypotheses=hypotheses, references=references),
+                   C.ROUGE2: evaluate.raw_corpus_rouge2(hypotheses=hypotheses, references=references),
+                   C.ROUGEL: evaluate.raw_corpus_rougel(hypotheses=hypotheses, references=references),
+                   C.LENRATIO: evaluate.raw_corpus_length_ratio(hypotheses=hypotheses, references=references),
+                   C.TER: evaluate.raw_corpus_ter(hypotheses=hypotheses, references=references),
                    C.AVG_TIME: avg_time,
                    C.DECODING_TIME: trans_wall_time}
+
+        # Add SignWriting Evaluation Metrics if the module is available
+        try:
+            import signwriting_evaluation
+            metrics.update({
+                C.SIGNWRITING_CLIP: evaluate.raw_corpus_signwriting_clip(
+                    hypotheses_factors=translations,
+                    references_factors=self.targets_sentences),
+                C.SIGNWRITING_SIMILARITY: evaluate.raw_corpus_signwriting_similarity(
+                    hypotheses_factors=translations,
+                    references_factors=self.targets_sentences)})
+        except ModuleNotFoundError:
+            pass
 
         if len(translations) > 1:  # metrics for other target factors
             for i, _ in enumerate(translations[1:], 1):
