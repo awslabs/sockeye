@@ -266,6 +266,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                                  output_folder: str) -> Tuple['data_io.BaseParallelSampleIter',
                                                               'data_io.BaseParallelSampleIter',
                                                               'data_io.DataConfig',
+                                                              'data_io.DataInfo',
                                                               List[vocab.Vocab], List[vocab.Vocab]]:
     """
     Create the data iterators and the vocabularies.
@@ -293,17 +294,21 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         error_msg = 'Distributed training requires prepared training data. Use `python -m sockeye.prepare_data` and ' \
                     'specify with %s' % C.TRAINING_ARG_PREPARED_DATA
         check_condition(args.prepared_data is not None, error_msg)
-    either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s or a preprocessed corpus " \
-                                       "with %s." % (C.TRAINING_ARG_SOURCE,
-                                                     C.TRAINING_ARG_TARGET,
-                                                     C.TRAINING_ARG_PREPARED_DATA)
+    either_raw_or_prepared_error_msg = "Either specify a raw training corpus with %s and %s and optional %s or a " \
+                                       "preprocessed corpus with %s." % \
+                                       (C.TRAINING_ARG_SOURCE,
+                                        C.TRAINING_ARG_TARGET,
+                                        C.TRAINING_ARG_ALIGNMENT_MATRIX,
+                                        C.TRAINING_ARG_PREPARED_DATA)
     if args.prepared_data is not None:
-        utils.check_condition(args.source is None and args.target is None, either_raw_or_prepared_error_msg)
+        utils.check_condition(args.source is None and args.target is None and args.alignment_matrix is None,
+                              either_raw_or_prepared_error_msg)
         if not resume_training:
             utils.check_condition(args.source_vocab is None and args.target_vocab is None,
                                   "You are using a prepared data folder, which is tied to a vocabulary. "
                                   "To change it you need to rerun data preparation with a different vocabulary.")
-        train_iter, validation_iter, data_config, source_vocabs, target_vocabs = data_io.get_prepared_data_iters(
+        (train_iter, validation_iter, data_config, data_info, source_vocabs,
+         target_vocabs) = data_io.get_prepared_data_iters(
             prepared_data_dir=args.prepared_data,
             validation_sources=validation_sources,
             validation_targets=validation_targets,
@@ -352,7 +357,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
                         ' but found %d and %d.' % (
                             data_config.num_target_factors, len(validation_targets)))
 
-        return train_iter, validation_iter, data_config, source_vocabs, target_vocabs
+        return train_iter, validation_iter, data_config, data_info, source_vocabs, target_vocabs
 
     else:
         utils.check_condition(args.prepared_data is None and args.source is not None and args.target is not None,
@@ -410,6 +415,7 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
         sources = [str(os.path.abspath(s)) for s in sources]
         targets = [args.target] + args.target_factors
         targets = [str(os.path.abspath(t)) for t in targets]
+        alignment_matrix = os.path.abspath(args.alignment_matrix) if args.alignment_matrix is not None else None
 
         check_condition(len(sources) == len(validation_sources),
                         'Training and validation data must have the same number of source factors, '
@@ -436,13 +442,15 @@ def create_data_iters_and_vocabs(args: argparse.Namespace,
             bucket_width=args.bucket_width,
             bucket_scaling=args.bucket_scaling,
             end_of_prepending_tag=args.end_of_prepending_tag,
-            batch_sentences_multiple_of=args.batch_sentences_multiple_of)
+            batch_sentences_multiple_of=args.batch_sentences_multiple_of,
+            alignment_matrix=alignment_matrix,
+            shift_alignments=args.shift_alignments)
 
         data_info_fname = os.path.join(output_folder, C.DATA_INFO)
         logger.info("Writing data config to '%s'", data_info_fname)
         data_info.save(data_info_fname)
 
-        return train_iter, validation_iter, config_data, source_vocabs, target_vocabs
+        return train_iter, validation_iter, config_data, data_info, source_vocabs, target_vocabs
 
 
 def create_encoder_config(args: argparse.Namespace,
@@ -526,6 +534,25 @@ def create_decoder_config(args: argparse.Namespace,
             decoder_transformer_model_size, num_embed_target + total_target_factor_size))
         decoder_transformer_model_size = num_embed_target + total_target_factor_size
 
+    # Figure out attention alignment layer if any parameters imply model should learn attentions.
+    if args.alignment_matrix or args.attention_alignment_layer or args.alignment_matrix_weight or args.align_attention:
+        # Training alignment matrixes provided, so model has to return alignment matrices.
+        if args.attention_alignment_layer is None:
+            # Required setting a reasonable default value.
+            if decoder_num_layers > 1:
+                attention_alignment_layer = decoder_num_layers - 2
+            else:
+                attention_alignment_layer = 0
+            logger.info("attention-alignment-layer not provided, choosing layer %d" % attention_alignment_layer)
+        else:
+            check_condition(args.attention_alignment_layer >= 0 and args.attention_alignment_layer < decoder_num_layers,
+                            'attention-alignment-layer must be between 0 and %d (decoder layer count - 1) inclusive'
+                            ' but got %d' % (decoder_num_layers - 1, args.attention_alignment_layer))
+            attention_alignment_layer = args.attention_alignment_layer
+    else:
+        attention_alignment_layer = None
+
+
     config_decoder = transformer.TransformerConfig(
         model_size=decoder_transformer_model_size,
         attention_heads=args.transformer_attention_heads[1],
@@ -544,7 +571,8 @@ def create_decoder_config(args: argparse.Namespace,
         use_lhuc=args.lhuc is not None and (C.LHUC_DECODER in args.lhuc or C.LHUC_ALL in args.lhuc),
         depth_key_value=encoder_num_hidden,
         decoder_type=args.decoder,
-        use_glu=args.transformer_feed_forward_use_glu)
+        use_glu=args.transformer_feed_forward_use_glu,
+        attention_alignment_layer=attention_alignment_layer)
 
     return config_decoder
 
@@ -775,6 +803,11 @@ def create_losses(args: argparse.Namespace, all_num_classes: List[int]) -> List[
                                                   label_name=C.TARGET_LABEL_NAME,
                                                   metric_prefix="bow")
         losses.append(bow_loss)
+
+    if args.alignment_matrix or args.attention_alignment_layer or args.alignment_matrix_weight or args.align_attention:
+        weight = args.alignment_matrix_weight if args.alignment_matrix_weight is not None else 1.0
+        kldiv_loss = loss.AlignmentMatrixKLDivergenceLoss(weight=weight)
+        losses.append(kldiv_loss)
 
     return losses
 
@@ -1017,7 +1050,7 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
     logger.info(f'Training Device: {device}')
     utils.seed_rngs(args.seed)
 
-    train_iter, eval_iter, config_data, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
+    train_iter, eval_iter, config_data, data_info, source_vocabs, target_vocabs = create_data_iters_and_vocabs(
         args=args,
         max_seq_len_source=max_seq_len_source,
         max_seq_len_target=max_seq_len_target,
@@ -1033,6 +1066,11 @@ def train(args: argparse.Namespace, custom_metrics_logger: Optional[Callable] = 
         logger.info("Maximum target length determined by prepared data. Using %d instead of %d",
                     config_data.max_seq_len_target, max_seq_len_target)
         max_seq_len_target = config_data.max_seq_len_target
+
+    if not data_info.contains_alignment_matrix and (args.attention_alignment_layer or args.alignment_matrix_weight or
+        args.align_attention):
+        raise ValueError("Commandline arguments imply the wish to train alignments, however no alignments were "
+                         "provided in prepared data or --alignment-matrix.")
 
     # Dump the vocabularies if we're just starting up
     if utils.is_primary_worker() and not resume_training:

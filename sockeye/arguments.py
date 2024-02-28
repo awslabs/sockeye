@@ -449,6 +449,15 @@ def add_training_data_args(params, required=False):
                         help='Tag indicating the end of prepended text. Prepended tokens before this tag (inclusive) '
                              'will be marked, and they will not be counted toward source length when calculating '
                              'maximum output length for beam search.')
+    params.add_argument(C.TRAINING_ARG_ALIGNMENT_MATRIX, '-am',
+                        type=regular_file(),
+                        help='Alignments for training examples (line-parallel with source and target files).')
+    params.add_argument('--shift-alignments',
+                        action='store_true',
+                        default=False,
+                        help='If used, shifts alignments in training, such that the current target '
+                             'target token decoding step predicts the alignment of the previous target token, '
+                             'not the current one. Defaults to no shift.')
 
 
 def add_validation_data_params(params):
@@ -814,6 +823,19 @@ def add_model_parameters(params):
                                     'This means that NVS learns to work with the main model\'s representations but '
                                     'does not influence its training.')
 
+    model_params.add_argument('--attention-alignment-layer',
+                              type=int,
+                              default=None,
+                              help='Decoder layer that is trained to align with alignment matrices. Higher number '
+                                   'means closer to output. By default chooses the second to last decoder layer.')
+
+    model_params.add_argument('--align-attention',
+                              action='store_true',
+                              default=False,
+                              help='Tells model to learn alignments. Necessary when attention alignment cannot '
+                                   'be infered from other commandline arguments, like when using --prepared-data '
+                                   'and using defaults for --attention-alignment-layer and --alignment-matrix-weight.')
+
 
 def add_batch_args(params, default_batch_size=4096, default_batch_type=C.BATCH_TYPE_WORD):
     params.add_argument('--batch-size', '-b',
@@ -892,6 +914,14 @@ def add_training_args(params):
                               default=1,
                               help='Number of fully-connected layers for predicting the length ratio. '
                                    'Default %(default)s.')
+
+    train_params.add_argument('--alignment-matrix-weight',
+                              type=float_greater_or_equal(0.0),
+                              default=None,
+                              help='Weight for KL divergence loss (equivalent to Cross entropy) between alignment '
+                                   'matrices and alignment head attentions. Relevant if you pass --alignment-matrix '
+                                   'for training or have use prepared data containing alignment matrices. '
+                                   'Defaults to 1.0')
 
     add_nvs_train_parameters(train_params)
 
@@ -1393,6 +1423,13 @@ def add_inference_args(params):
                                default='translation',
                                choices=C.OUTPUT_HANDLERS,
                                help='Output type. Default: %(default)s.')
+
+    decode_params.add_argument('--shift-alignments',
+                               action='store_true',
+                               default=False,
+                               help='Necessary if you used --shift-alignments in training. If used, crops alignment '
+                                    'head attentions one target token further (unshifts the alignments). Defaults '
+                                    'to assuming there was no shift during training.')
 
     # common params with score CLI
     add_length_penalty_args(decode_params)

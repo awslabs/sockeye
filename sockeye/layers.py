@@ -12,6 +12,7 @@
 # permissions and limitations under the License.
 
 import logging
+import math
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
@@ -311,13 +312,14 @@ class DotAttentionCell(pt.nn.Module):
             logits = logits.masked_fill(mask, -C.LARGE_VALUES[logits.dtype])
 
         probs = F.softmax(logits, dim=-1)
+        attentions = probs
 
         probs = self.dropout(probs) if self.dropout is not None else probs
 
         # key_values: (lk, n, dv * 2)
         # probs: (n*h, lq, lk)
         # result: (n, lq, dv)
-        return interleaved_matmul_encdec_valatt(key_values, probs, heads=self.heads)
+        return interleaved_matmul_encdec_valatt(key_values, probs, heads=self.heads), attentions
 
 
 def prepare_source_length_mask(lengths: pt.Tensor, heads: int, max_length: int, expand: bool = True,
@@ -377,18 +379,20 @@ class MultiHeadAttentionBase(pt.nn.Module):
     def _attend(self,
                 queries: pt.Tensor,
                 key_values: pt.Tensor,
-                mask: Optional[pt.Tensor] = None) -> pt.Tensor:
+                mask: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
         """
-        Returns context vectors of multi-head dot attention.
+        Returns context vectors and (optional) attention distribution of multi-head dot attention.
 
         :param queries: Query tensor. Shape: (queries_length, batch_size, depth).
         :param key_values: Keys/Values. Shape: (keys_values_length, batch_size, depth * 2).
         :param mask: Optional boolean attention mask. See DotAttentionCell for shape requirements.
         :return: Context vectors. Shape: (batch_size, query_max_length, output_depth).
+                 Optionally returns attention probabilities.
+                 Shape: (batch_size * head count, queries_length, keys_vlaues_length)
         """
 
         # (query_max_length, batch, depth)
-        contexts = self.dot_att(queries=queries, key_values=key_values, mask=mask)
+        contexts, attention = self.dot_att(queries=queries, key_values=key_values, mask=mask)
 
         # (query_max_length, batch, output_depth)
         contexts = self.ff_out(contexts)
@@ -396,7 +400,7 @@ class MultiHeadAttentionBase(pt.nn.Module):
         if self.clamp_to_dtype:
             contexts = clamp_to_dtype_min_max(contexts)
 
-        return contexts
+        return contexts, attention
 
 
 class AutoregressiveLayer(pt.nn.Module):
@@ -567,7 +571,45 @@ class MultiHeadSelfAttention(MultiHeadAttentionBase, AutoregressiveLayer):
             if previous_states is not None:
                 states = pt.cat((previous_states, states), dim=0)
 
-            return self._attend(queries=queries, key_values=states, mask=mask), states
+            c, _ = self._attend(queries=queries, key_values=states, mask=mask)
+            return c, states
+
+
+def single_head_attention(query: pt.Tensor,
+                          key: pt.Tensor,
+                          q_proj_weight: pt.Tensor,
+                          k_proj_weight: pt.Tensor,
+                          attn_mask: Optional[pt.Tensor] = None) -> pt.Tensor:
+    """
+    Minimalistic function that calculates attention probability distribution matrix for a single attention head.
+    This function exists to get attention probabilities before dropout, as
+    torch.nn.functional.multi_head_attention_forward returns the attention probability distribution post-dropout.
+    The code of this function should be equivalent to how attentions are calculated in multi_head_attention_forward.
+
+    :param query: Queries produced by decoder. Shape (target length, batch, query size)
+    :param key: Keys produced by encoder. Shape (source length, batch, key size)
+    :param q_proj_weight: Query projection for one attention head. Shape (post projection size, key size)
+    :param k_proj_weight: Key projection. Shape (post projection size, key size)
+    :param attn_mask: Bool tensor where True indicates to block attention to certain elements.
+                      Shape (batch, target length, source length)
+    :return: Attention probability distributions. Shape (batch, target length, source length)
+    """
+    q = F.linear(query, q_proj_weight, None).transpose(0, 1)
+    k = F.linear(key, k_proj_weight, None).transpose(0, 1)
+    target_length, source_length = q.size(-2), k.size(-2)
+    batch = q.size(0)
+    # Condition is necessary because the type changes whether we're tracing or not.
+    if isinstance(q.shape[-1], pt.Tensor):
+        scale_factor = 1 / pt.sqrt(q.size(-1))
+    else:
+        scale_factor = 1 / math.sqrt(q.size(-1))
+    attn_bias = pt.zeros(batch, target_length, source_length, dtype=q.dtype, device=q.device)
+    if attn_mask is not None:
+        attn_bias.masked_fill_(attn_mask, float("-inf"))
+    attn_weight = q @ k.transpose(-2, -1) * scale_factor
+    attn_weight += attn_bias
+    attn_weight = pt.softmax(attn_weight, dim=-1)
+    return attn_weight
 
 
 class MultiHeadAttention(MultiHeadAttentionBase):
@@ -582,6 +624,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
     :param dtype: Torch data type for parameters.
     :param clamp_to_dtype: Avoid -inf/inf by clamping outputs to min/max finite
                            values for their dtype.
+    :param return_attention: Whether to return alignment head's attention. If False, returns None.
     """
 
     def __init__(self,
@@ -591,7 +634,8 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                  dropout: float = 0.0,
                  depth_key_value: int = 512,
                  dtype: Optional[pt.dtype] = None,
-                 clamp_to_dtype: bool = False) -> None:
+                 clamp_to_dtype: bool = False,
+                 return_attention: bool = False) -> None:
         super().__init__(depth_att, heads, depth_out, dropout, dtype, clamp_to_dtype)
         self.ff_q = pt.nn.Linear(in_features=depth_out, out_features=depth_att, bias=False, dtype=dtype)
         self.ff_kv = pt.nn.Linear(in_features=depth_key_value, out_features=depth_att * 2, bias=False, dtype=dtype)
@@ -600,6 +644,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         # indicates whether self.ff_kv.weight of shape (depth_att * 2, depth_key_value) is in interleaved format or not.
         # Interleaved format is used for inference, non-interleaved format is used for fused MHA in training.
         self.kv_interleaved = False
+        self.return_attention = return_attention
 
     def separate_kv(self):
         """Writes kv input projection parameters in non-interleaved format (compatible with F.multi_head_attention). """
@@ -639,7 +684,7 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                 queries: pt.Tensor,
                 key_values: pt.Tensor,
                 mask: Optional[pt.Tensor] = None,
-                projected_memory_kv: Optional[pt.Tensor] = None) -> pt.Tensor:  # mypy: ignore
+                projected_memory_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:  # mypy: ignore
         """
         Computes multi-head attention for queries given a memory tensor.
         If sequence lengths are provided, they will be used to mask the attention scores.
@@ -650,7 +695,8 @@ class MultiHeadAttention(MultiHeadAttentionBase):
         :param key_values: Memory data to attend to. Shape: (key_values_length, batch, input_depth).
         :param mask: Optional attention mask. See DotAttentionCell for shape information.
         :param projected_memory_kv: Optional previously projected memory keys and values.
-        :return: tensor of shape (query_seq_len, batch, output_depth).
+        :return: tensor of shape (query_seq_len, batch, output_depth). Also optionally returns the alignment head's
+                 attention. Shape (batch, queries_length, key_values_length).
         """
         if self.training:  # use fused multi-head attention op during training
             assert not self.kv_interleaved
@@ -671,11 +717,33 @@ class MultiHeadAttention(MultiHeadAttentionBase):
                                                          q_proj_weight=self.ff_q.weight,
                                                          k_proj_weight=self.ff_kv.weight[:self.depth, :],
                                                          v_proj_weight=self.ff_kv.weight[self.depth:, :])
-            return contexts
+
+            alignment_head_attention = None
+            if self.return_attention:
+                one_head = self.ff_kv.weight.shape[1] // self.heads
+                first_head_ff_q_w = self.ff_q.weight[:one_head, :]
+                first_head_ff_kw_w = self.ff_kv.weight[:self.depth, :][:one_head]
+                alignment_head_attention = single_head_attention(query=queries,
+                                                                 key=key_values,
+                                                                 attn_mask=mask[::self.heads]
+                                                                 if mask is not None else None,
+                                                                 q_proj_weight=first_head_ff_q_w,
+                                                                 k_proj_weight=first_head_ff_kw_w)
+
+            if alignment_head_attention is None:
+                alignment_head_attention = pt.zeros(0)
+            return contexts, alignment_head_attention
         else:  # during inference multi-head attention with interleaved key-value parameters is used
             queries = self.ff_q(queries)
             key_values = projected_memory_kv if projected_memory_kv is not None else self.ff_kv(key_values)
-            return self._attend(queries=queries, key_values=key_values, mask=mask)
+            contexts, attention = self._attend(queries=queries, key_values=key_values, mask=mask)
+            if self.return_attention:
+                batch = key_values.size(1)
+                source_length = key_values.size(0)
+                alignment_head_attention = attention.reshape([batch, self.heads, -1, source_length])[:, 0]
+            else:
+                alignment_head_attention = pt.zeros(0)
+            return contexts, alignment_head_attention
 
 
 def interleave_kv(module: pt.nn.Module):

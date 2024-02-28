@@ -45,6 +45,8 @@ def test_simple_dict():
      '--validation-source test_validation_src --validation-target test_validation_tgt '
      '--output test_output',
      dict(source='test_src', target='test_tgt',
+          alignment_matrix=None,
+          shift_alignments=False,
           source_factors=[],
           source_factors_use_source_vocab=[],
           target_factors=[],
@@ -65,6 +67,8 @@ def test_simple_dict():
      '-vs test_validation_src -vt test_validation_tgt '
      '-o test_output',
      dict(source='test_src', target='test_tgt',
+          alignment_matrix=None,
+          shift_alignments=False,
           source_factors=[],
           source_factors_use_source_vocab=[],
           target_factors=[],
@@ -141,6 +145,8 @@ def test_device_args(test_params, expected_params):
               transformer_block_prepended_cross_attention=False,
               transformer_preprocess=('n', 'n'),
               transformer_postprocess=('dr', 'dr'),
+              attention_alignment_layer=None,
+              align_attention=False,
               lhuc=None,
               encoder=C.TRANSFORMER_TYPE,
               decoder=C.TRANSFORMER_TYPE,
@@ -188,6 +194,7 @@ def test_model_parameters(test_params, expected_params):
                       sample=None,
                       seed=None,
                       nvs_thresh=0.5,
+                      shift_alignments=False,
                       skip_nvs=False)),
 ])
 def test_inference_args(test_params, expected_params):
@@ -204,6 +211,7 @@ def test_inference_args(test_params, expected_params):
               length_task_layers=1,
               length_task_weight=1.0,
               target_factors_weight=[1.0],
+              alignment_matrix_weight=None,
               optimized_metric=C.PERPLEXITY,
               checkpoint_interval=4000,
               max_num_checkpoint_not_improved=None,
@@ -291,6 +299,8 @@ def test_tutorial_averaging_args(test_params, expected_params, expected_params_p
     # WMT tutorial
     ('--source corpus.tc.BPE.de --target corpus.tc.BPE.en --output train_data ',
      dict(source='corpus.tc.BPE.de', target='corpus.tc.BPE.en',
+          alignment_matrix=None,
+          shift_alignments=False,
           source_vocab=None,
           target_vocab=None,
           source_factors=[],
@@ -326,6 +336,8 @@ def test_tutorial_prepare_data_cli_args(test_params, expected_params):
 @pytest.mark.parametrize("test_params, expected_params", [
     ('--source test_src --target test_tgt --output prepared_data ',
      dict(source='test_src', target='test_tgt',
+          alignment_matrix=None,
+          shift_alignments=False,
           source_vocab=None,
           target_vocab=None,
           source_factors=[],

@@ -77,9 +77,10 @@ def prepare_data(args: argparse.Namespace):
                 % (num_sents, num_shards, samples_per_shard, minimum_num_shards))
     shards, keep_tmp_shard_files = data_io.create_shards(source_fnames=source_paths,
                                                          target_fnames=target_paths,
+                                                         alignment_matrix_fname=args.alignment_matrix,
                                                          num_shards=num_shards,
                                                          output_prefix=output_folder)
-    shard_source_paths, shard_target_paths = [paths for paths in zip(*shards)]
+    shard_source_paths, shard_target_paths, _ = [paths for paths in zip(*shards)]
 
     # Process shards in parallel using max_processes process
     with utils.create_pool(args.max_processes) as pool:
@@ -115,7 +116,8 @@ def prepare_data(args: argparse.Namespace):
                              end_of_prepending_tag=args.end_of_prepending_tag,
                              pool=pool,
                              shards=shards,
-                             keep_tmp_shard_files=keep_tmp_shard_files)
+                             keep_tmp_shard_files=keep_tmp_shard_files,
+                             shift_alignments=args.shift_alignments)
 
 
 if __name__ == "__main__":

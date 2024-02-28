@@ -189,7 +189,7 @@ class DecoderStateGenerator:
                     trace_inputs = {'get_decoder_states': model_inputs}
                     self.traced_model = pt.jit.trace_module(self.model, trace_inputs, strict=False)
                 # shape: (batch, seq_len, hidden_dim)
-                decoder_states = self.traced_model.get_decoder_states(*model_inputs)  # type: ignore
+                decoder_states, _ = self.traced_model.get_decoder_states(*model_inputs)  # type: ignore
 
                 # flatten batch and seq_len dimensions, remove pads on the target
                 pad_mask = (batch.target != C.PAD_ID)[:, :, 0]  # shape: (batch, seq_len)

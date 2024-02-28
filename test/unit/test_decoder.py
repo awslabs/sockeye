@@ -18,11 +18,12 @@ import sockeye.decoder
 import sockeye.transformer
 
 
-@pytest.mark.parametrize('lhuc', [
-    (False,),
-    (True,)
+@pytest.mark.parametrize('lhuc,attention_alignment_layer', [
+    (False, None),
+    (True, None),
+    (True, 5)
 ])
-def test_get_decoder(lhuc):
+def test_get_decoder(lhuc, attention_alignment_layer):
     config = sockeye.transformer.TransformerConfig(
         model_size=20,
         attention_heads=10,
@@ -38,7 +39,8 @@ def test_get_decoder(lhuc):
         max_seq_len_source=60,
         max_seq_len_target=70,
         block_prepended_cross_attention=True,
-        use_lhuc=lhuc)
+        use_lhuc=lhuc,
+        attention_alignment_layer=attention_alignment_layer)
     decoder = sockeye.decoder.get_decoder(config, inference_only=False)
 
     assert type(decoder) == sockeye.decoder.TransformerDecoder

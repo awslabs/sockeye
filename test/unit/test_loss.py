@@ -164,3 +164,14 @@ def test_perplexity_metric():
         ppl.update(ce, 1)
     expected_ppl = math.exp(sum(ces) / len(ces))
     assert onp.isclose(ppl.get(), expected_ppl)
+
+
+def test_alignment_matrix_kl_divergence_loss():
+    loss = sockeye.loss.AlignmentMatrixKLDivergenceLoss()
+    # Just make sure it returns 0 when the desired result equals the output.
+    data = onp.random.randint(0, 1, size=[67, 2, 3])
+    attentions = pt.tensor(data)
+    ground_truth = pt.tensor(data)
+    result, samples = loss.forward(attentions, ground_truth)
+    assert pt.allclose(result, pt.tensor(0.0))
+    assert samples == 1

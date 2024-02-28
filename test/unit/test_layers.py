@@ -135,22 +135,31 @@ def test_output_layer():
     pt.testing.assert_close(output_restricted, reduced_output, equal_nan=True)
 
 
-@pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads',
-                         [(10, 9, 1, 12, 4), (1, 1, 2, 4, 1), (3, 32, 15, 64, 8),
-                          (10, 32, 15, 32, 8), (1, 1, 1, 1, 1)])
-def test_interleaved_multihead_attention(qlen, kvlen, batch_size, hidden, heads):
+@pytest.mark.parametrize('qlen, kvlen, batch_size, hidden, heads, return_attention',
+                         [(10, 9, 1, 12, 4, False), (1, 1, 2, 4, 1, False), (3, 32, 15, 64, 8, False),
+                          (10, 32, 15, 32, 8, False), (1, 1, 1, 1, 1, False),
+                          (10, 9, 1, 12, 4, True), (1, 1, 2, 4, 1, True), (3, 32, 15, 64, 8, True),
+                          (10, 32, 15, 32, 8, True), (1, 1, 1, 1, 1, True)])
+def test_interleaved_multihead_attention(qlen, kvlen, batch_size, hidden, heads, return_attention):
     queries_pt = pt.rand((qlen, batch_size, hidden))
     memory_pt = pt.rand((kvlen, batch_size, hidden))
 
     # test without mask
-    mha = sockeye.layers.MultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden)
+    mha = sockeye.layers.MultiHeadAttention(hidden, heads, hidden, dropout=0.0, depth_key_value=hidden,
+                                            return_attention=return_attention)
     mha.train()
     assert not mha.kv_interleaved
-    r_train = mha(queries_pt, memory_pt, mask=None, projected_memory_kv=None)
+    r_train, attention_train = mha(queries_pt, memory_pt, mask=None, projected_memory_kv=None)
     mha.eval()
     assert mha.kv_interleaved
-    r_test = mha(queries_pt, memory_pt, mask=None, projected_memory_kv=None)
+    r_test, attention_test = mha(queries_pt, memory_pt, mask=None, projected_memory_kv=None)
     assert pt.allclose(r_train, r_test, atol=1e-06)
+    if return_attention:
+        assert pt.allclose(attention_train, attention_test)
+        assert list(attention_train.shape) == [batch_size, qlen, kvlen]
+    else:
+        assert attention_train.numel() == 0
+        assert attention_test.numel() == 0
 
     # test with mask
     all_source_length = pt.randint(1, kvlen + 1, (batch_size,))
@@ -160,11 +169,17 @@ def test_interleaved_multihead_attention(qlen, kvlen, batch_size, hidden, heads)
     mask = mask.repeat(1, qlen, 1)  # Shape: (batch *h heads, qlen, kvlen)
     mha.train()
     assert not mha.kv_interleaved
-    r_train = mha(queries_pt, memory_pt, mask=mask, projected_memory_kv=None)
+    r_train, attention_train = mha(queries_pt, memory_pt, mask=mask, projected_memory_kv=None)
     mha.eval()
     assert mha.kv_interleaved
-    r_test = mha(queries_pt, memory_pt, mask=mask, projected_memory_kv=None)
+    r_test, attention_test = mha(queries_pt, memory_pt, mask=mask, projected_memory_kv=None)
     assert pt.allclose(r_train, r_test, atol=1e-06)
+    if return_attention:
+        assert pt.allclose(attention_train, attention_test)
+        assert list(attention_train.shape) == [batch_size, qlen, kvlen]
+    else:
+        assert attention_train.numel() == 0
+        assert attention_test.numel() == 0
 
 
 @pytest.mark.parametrize('seq_len, batch_size, hidden, heads, side',

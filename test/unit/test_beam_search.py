@@ -289,7 +289,7 @@ class _TestInference(sockeye.beam_search._Inference):
         num_decode_step_calls += 1
 
         self.states = states = [internal_lengths, pt.tensor([num_decode_step_calls], dtype=pt.int)]
-        return scores, states, None
+        return scores, states, None, pt.zeros(0)
 
     @property
     def model_output_vocab_size(self):

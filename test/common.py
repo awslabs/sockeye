@@ -36,7 +36,8 @@ def check_train_translate(train_params: str,
                           use_prepared_data: bool,
                           max_seq_len: int,
                           compare_output: bool = True,
-                          seed: int = 13) -> Dict[str, Any]:
+                          seed: int = 13,
+                          alignment_matrix: bool = False) -> Dict[str, Any]:
     """
     Tests core features (training, inference).
     """
@@ -76,6 +77,9 @@ def check_train_translate(train_params: str,
     # Test correct prediction of target factors if enabled
     if compare_output and 'train_target_factors' in data:
         test_odd_even_target_factors(data)
+
+    if 'train_alignment_matrix' in data:
+        test_alignment_matrix(data)
 
     return data
 
@@ -294,3 +298,11 @@ def test_odd_even_target_factors(data: Dict):
                 except ValueError:
                     logger.warning("primary token cannot be converted to int, skipping")
                     continue
+
+def test_alignment_matrix(data: Dict):
+    for idx, json in enumerate(data['test_outputs']):
+        if len(data['test_inputs'][idx]) > 0 and len(json['translation']) > 0:
+            assert 'alignment_head_attention' in json
+            alignments = json['alignment_head_attention']
+            assert len(json['translation'].split(' ')) == len(alignments)
+            assert len(data['test_inputs'][idx].split(' ')) == len(alignments[0])

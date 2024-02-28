@@ -491,6 +491,7 @@ class TranslatorOutput:
     factor_translations: List of factor outputs.
     factor_tokens: List of list of secondary factor tokens.
     factor_scores: List of secondary factor scores.
+    alignment_head_attention: List of list (representing a 2D array) of attentions between target and source tokens.
     """
     sentence_id: SentenceId
     translation: str
@@ -505,6 +506,7 @@ class TranslatorOutput:
     factor_scores: Optional[List[float]] = None
     nbest_factor_translations: Optional[List[List[str]]] = None
     nbest_factor_tokens: Optional[List[List[Tokens]]] = None
+    alignment_head_attention: Optional[List[List[float]]] = None
 
     def json(self) -> Dict:
         """
@@ -539,6 +541,9 @@ class TranslatorOutput:
                 _d['translations_factors'].append(
                     {f'factor{i}': factor_translation for i, factor_translation in enumerate(factor_translations, 1)})
 
+        if self.alignment_head_attention is not None:
+            _d['alignment_head_attention'] = self.alignment_head_attention
+
         return _d
 
 
@@ -554,6 +559,7 @@ class Translation:
     scores: List[float]
     nbest_translations: Optional[NBestTranslations] = None
     estimated_reference_length: Optional[float] = None
+    alignment_head_attention: Optional[List[List[float]]] = None
 
 
 def empty_translation(add_nbest: bool = False) -> Translation:
@@ -636,7 +642,8 @@ def _reduce_nbest_translations(nbest_translations_list: List[Translation]) -> Tr
     return Translation(best_translation.target_ids,
                        best_translation.scores,
                        nbest_translations,
-                       best_translation.estimated_reference_length)
+                       best_translation.estimated_reference_length,
+                       alignment_head_attention=best_translation.alignment_head_attention)
 
 
 def _expand_nbest_translation(translation: Translation) -> List[Translation]:
@@ -769,7 +776,8 @@ class Translator:
                  prevent_unk: bool = False,
                  greedy: bool = False,
                  skip_nvs: bool = False,
-                 nvs_thresh: float = 0.5) -> None:
+                 nvs_thresh: float = 0.5,
+                 shift_alignments: bool = False) -> None:
         self.device = device
         self.dtype = models[0].dtype
         self._scorer = scorer
@@ -789,6 +797,7 @@ class Translator:
         self.models = models
         for model in self.models:
             model.eval()
+        self.shift_alignments = shift_alignments
 
         # after models are loaded we ensured that they agree on max_input_length, max_output_length and batch size
         # set a common max_output length for all models.
@@ -1179,7 +1188,8 @@ class Translator:
                                 factor_tokens=factor_tokens,
                                 factor_scores=translation.scores[1:],
                                 nbest_factor_translations=nbest_factor_translations,
-                                nbest_factor_tokens=nbest_factor_tokens)
+                                nbest_factor_tokens=nbest_factor_tokens,
+                                alignment_head_attention=translation.alignment_head_attention)
 
     def _translate_np(self,
                       source: pt.Tensor,
@@ -1201,12 +1211,21 @@ class Translator:
 
         :return: List of translations.
         """
-        return self._get_best_translations(self._search(source,
+        translations = self._get_best_translations(self._search(source,
                                                         source_length,
                                                         restrict_lexicon,
                                                         max_output_lengths,
                                                         target_prefix,
                                                         target_prefix_factors))
+
+        for translation_index, translation in enumerate(translations):
+            if translation.alignment_head_attention is not None:
+                # Crop alignment attentions to source length. Also remove source EOS.
+                source_len = source_length[translation_index][0]
+                translation.alignment_head_attention = [ls[:source_len - 1] for ls in
+                                                        translation.alignment_head_attention]
+
+        return translations
 
     def _get_best_translations(self, result: SearchResult) -> List[Translation]:
         """
@@ -1218,6 +1237,8 @@ class Translator:
         best_hyp_indices = result.best_hyp_indices.cpu().numpy()
         best_word_indices = result.best_word_indices.cpu().numpy()
         result_accumulated_scores_cpu = result.accumulated_scores.cpu()
+        alignment_head_attention = result.alignment_head_attentions.cpu().numpy() \
+            if result.alignment_head_attentions is not None else None
         if self.dtype == pt.bfloat16:
             # NumPy does not currently support bfloat16. Use float32 instead.
             result_accumulated_scores_cpu = result_accumulated_scores_cpu.to(dtype=pt.float32)
@@ -1237,14 +1258,24 @@ class Translator:
             # Obtain sequences for all best hypotheses in the batch. Shape: (batch, length)
             indices = self._get_best_word_indices_for_kth_hypotheses(best_ids, best_hyp_indices)  # type: ignore
             indices_shape_1 = indices.shape[1]  # pylint: disable=unsubscriptable-object
+            # Alignment vectors indexes have a delay compared to best word indices;
+            # choose 0th vector for first alignments because they should all be identical anyway.
+            if alignment_head_attention is not None:
+                alignment_indices = np.concatenate((np.zeros([batch_size, 1], dtype=np.int32), indices[:, :-1]),
+                                                   axis=1)
             nbest_translations.append(
-                    [self._assemble_translation(*x, unshift_target_factors=C.TARGET_FACTOR_SHIFT) for x in
+                    [self._assemble_translation(*x[:-1], unshift_target_factors=C.TARGET_FACTOR_SHIFT,
+                                                alignment_head_attention=x[-1],
+                                                shift_alignments=self.shift_alignments) for x in
                      zip(best_word_indices[indices,
                                            :,  # get all factors
                                            np.arange(indices_shape_1)],
                          lengths[best_ids],
                          accumulated_scores[best_ids],
-                         reference_lengths[best_ids])])  # type: ignore
+                         reference_lengths[best_ids],
+                         alignment_head_attention[alignment_indices,
+                                                  np.arange(indices_shape_1)] if alignment_head_attention is not None
+                         else [None for _ in range(len(best_ids))])])  # type: ignore
 
         # reorder and regroup lists
         reduced_translations = [_reduce_nbest_translations(grouped_nbest) for grouped_nbest in zip(*nbest_translations)]  # type: ignore
@@ -1279,14 +1310,19 @@ class Translator:
                               length: np.ndarray,
                               seq_scores: np.ndarray,
                               estimated_reference_length: Optional[float],
-                              unshift_target_factors: bool = False) -> Translation:
+                              unshift_target_factors: bool = False,
+                              alignment_head_attention: Optional[np.ndarray] = None,
+                              shift_alignments: bool = False) -> Translation:
         """
         Takes a set of data pertaining to a single translated item, performs slightly different
         processing on each, and merges it into a Translation object.
+
         :param sequence: Array of word ids. Shape: (bucketed_length, num_target_factors).
         :param length: The length of the translated segment.
         :param seq_scores: Array of length-normalized negative log-probs, one for each factor.
         :param estimated_reference_length: Estimated reference length (if any).
+        :param alignment_head_attention: Array of alignment head attentions for translation.
+                                         Shape: [target length, source length]
         :return: A Translation object.
         """
         if unshift_target_factors:
@@ -1297,9 +1333,18 @@ class Translator:
         sequence = sequence[:length]  # type: ignore
         scores = seq_scores.tolist()
         estimated_reference_length = float(estimated_reference_length) if estimated_reference_length else None
+        if alignment_head_attention is not None:
+            # Crop attentions to only the translated tokens.
+            if shift_alignments:
+                alignment_head_attention = alignment_head_attention[1:length]
+            else:
+                alignment_head_attention = alignment_head_attention[:length - 1]
+            alignment_head_attention = alignment_head_attention.tolist()
+
         return Translation(sequence, scores,  # type: ignore
                            nbest_translations=None,
-                           estimated_reference_length=estimated_reference_length)
+                           estimated_reference_length=estimated_reference_length,
+                           alignment_head_attention=alignment_head_attention)
 
 
 def _unshift_target_factors(sequence: np.ndarray, fill_last_with: int = C.EOS_ID):

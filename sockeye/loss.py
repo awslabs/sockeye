@@ -56,7 +56,7 @@ class Loss(pt.nn.Module):
         utils.check_condition(self.output_name in outputs,
                               "output '%s' not found. Loss requires this output key" % self.output_name)
         utils.check_condition(self.label_name in labels,
-                              "label '%s' not found. Loss requires this label key" % self.output_name)
+                              "label '%s' not found. Loss requires this label key" % self.label_name)
         output = outputs[self.output_name]
         label = labels[self.label_name]
 
@@ -395,3 +395,43 @@ class MSELoss(Loss):
     def create_metric(self) -> 'LossMetric':
         return LossMetric(name=C.LENRATIO_MSE)
 
+
+class AlignmentMatrixKLDivergenceLoss(Loss):
+    """
+    Computes the KLDivergence between the alignment head's attention probabilities and the ground truth alignment
+    matrix.
+    """
+
+    def __init__(self,
+                 name: str = "alignment-matrix-kl-divergence",
+                 weight: float = 1.0,
+                 output_name: str = C.ATTENTION_NAME,
+                 label_name: str = C.ALIGNMENT_MATRIX_LABEL) -> None:
+        super().__init__(name=name, output_name=output_name, label_name=label_name, weight=weight)
+
+    def forward(self, alignment_head_attention: pt.Tensor, alignment_matrix: pt.Tensor) -> Tuple[pt.Tensor, pt.Tensor]:
+        """
+        Returns the loss.
+
+        :param alignment_head_attention: Attention probability distribution output of alignment attention head.
+                                         Shape [batch, target length, source length]
+        :param alignment_matrix: Ground truth alignments normalized along source length dimension.
+                                 Shape [batch, target length, source length]
+        :return: Loss value over batch, and the number 1.
+        """
+        res_device = alignment_head_attention.device
+        # This is necessary because during evaluation we don't have alignment matrices.
+        if alignment_matrix.numel() == 0:
+            return pt.zeros(1, device=res_device), pt.ones(1, device=res_device)
+
+        loss = -(alignment_matrix * pt.log(alignment_head_attention + 1e-8)).sum(dim=2).sum(dim=1)
+        loss = loss / alignment_matrix.shape[1]
+        num_samples = pt.ones(1, device=res_device)
+        loss = loss * self.weight
+        loss = loss.mean()
+
+        return loss, num_samples
+
+    def create_metric(self) -> 'LossMetric':
+        # There's a problem that the metric is not useful during evaulation, because we don't do translation forcing.
+        return LossMetric(name='alignment-matrix-kl-divergence')

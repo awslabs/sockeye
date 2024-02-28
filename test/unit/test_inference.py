@@ -71,6 +71,7 @@ def mock_translator(batch_size: int = 1,
         translator.inf_array = pt.full((batch_size * beam_size,), fill_value=np.inf, dtype=pt.float32)
         translator.inf_array = translator.inf_array[:beam_size]
         translator.restrict_lexicon = None
+        translator.shift_alignments = False
         return translator
 
 

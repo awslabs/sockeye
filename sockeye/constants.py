@@ -17,6 +17,11 @@ Defines various constants used throughout the project
 import torch as pt
 import numpy as np
 
+# As of version 1.12, PyTorch JIT tracing does not support optional inputs
+# (`t: Optional[Tensor] = None`). Instead, we specify a default value
+# `t: Tensor = NONE_TENSOR` which has the property `t.numel() == 0`.
+NONE_TENSOR = pt.zeros(0)
+
 BOS_SYMBOL = "<s>"
 EOS_SYMBOL = "</s>"
 UNK_SYMBOL = "<unk>"
@@ -105,6 +110,8 @@ TARGET_LABEL_NAME = "target_label"
 TARGET_FACTOR_LABEL_NAME = "target_factor%d_label"
 LENRATIO_LABEL_NAME = "length_ratio_label"
 LENRATIO_NAME = "length_ratio"
+ALIGNMENT_MATRIX_LABEL = 'alignment_matrix_label'
+ATTENTION_NAME = "attention"
 
 LOGITS_NAME = "logits"
 FACTOR_LOGITS_NAME = "factor%d_logits"
@@ -188,6 +195,7 @@ ARGS_MAY_DIFFER = ["device_id", "device_ids", "overwrite_output", "use_tensorboa
 TRAINING_ARG_SOURCE = "--source"
 TRAINING_ARG_TARGET = "--target"
 TRAINING_ARG_PREPARED_DATA = "--prepared-data"
+TRAINING_ARG_ALIGNMENT_MATRIX = "--alignment-matrix"
 TRAINING_ARG_MAX_SEQ_LEN = "--max-seq-len"
 
 VOCAB_ARG_SHARED_VOCAB = "--shared-vocab"
@@ -340,10 +348,12 @@ FIXED_PARAM_STRATEGY_CHOICES = [FIXED_PARAM_STRATEGY_ALL_EXCEPT_DECODER,
 DATA_KEY_SOURCE = 'source'
 DATA_KEY_TARGET = 'target'
 DATA_KEY_PREPENDED_SOURCE_LENGTH = 'prepended_source_length'
+DATA_KEY_ALIGNMENT_MATRIX = 'alignment_matrix'
 SHARD_NAME = "shard.%05d"
 SHARD_SOURCE = SHARD_NAME + ".source"
 SHARD_TARGET = SHARD_NAME + ".target"
 SHARD_PREPENDED_SOURCE_LENGTH = SHARD_NAME + ".prepended_source_length"
+SHARD_ALIGNMENT_MATRIX = SHARD_NAME + ".alignment_matrix"
 DATA_INFO = "data.info"
 DATA_CONFIG = "data.config"
 PREPARED_DATA_VERSION_FILE = "data.version"

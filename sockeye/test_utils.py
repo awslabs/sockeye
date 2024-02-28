@@ -130,6 +130,25 @@ def generate_odd_even_factors(input_path: str, output_path: str):
             print(C.TOKEN_SEPARATOR.join(factors), file=fout)
 
 
+def generate_alignment_matrices_file(input_path: str, output_path: str):
+    """
+    Generates a file of alignments. Each alignment line will be of the form "0-0 1-1 2-2...".
+
+    :param input_path: Path to file containing sequences.
+    :param output_path: Path of file in which alignments will be written.
+    :note: This function assumes the source and target sequences are of the same length, so input_path can point to
+           either source or target. If the sequences are not of equal length, the generated alignments may be
+           invalid.
+    """
+    with open(input_path, 'r') as fin, open(output_path, 'w') as fout:
+        for line in fin:
+            digit_count = len(line.rstrip().split())
+            alignments = [str(i) + '-' + str(i) + ' ' for i in range(digit_count)]
+            if len(alignments) > 0:
+                alignments = alignments[:-1]
+            print(alignments, file=fout)
+
+
 def generate_fast_align_lex(lex_path: str):
     """
     Generate a fast_align format lex table for digits.
@@ -153,7 +172,8 @@ def tmp_digits_dataset(prefix: str,
                        seed_train: int = 13, seed_dev: int = 13,
                        source_text_prefix_token: str = '',
                        with_n_source_factors: int = 0,
-                       with_n_target_factors: int = 0) -> Dict[str, Any]:
+                       with_n_target_factors: int = 0,
+                       alignment_matrix: bool = False) -> Dict[str, Any]:
     """
     Creates a temporary dataset with train, dev, and test. Returns a dictionary with paths to the respective temporary
     files.
@@ -170,6 +190,8 @@ def tmp_digits_dataset(prefix: str,
         dev_target_path = os.path.join(work_dir, "dev.tgt")
         test_source_path = os.path.join(work_dir, "test.src")
         test_target_path = os.path.join(work_dir, "test.tgt")
+        if alignment_matrix:
+            train_alignment_matrix_path = os.path.join(work_dir, "train.align")
         test_source_with_target_prefix_path = os.path.join(work_dir, "test_source_with_target_prefix.json")
         generate_digits_file(train_source_path, train_target_path, train_line_count, train_max_length,
                              line_count_empty=train_line_count_empty, sort_target=sort_target, seed=seed_train,
@@ -218,6 +240,10 @@ def tmp_digits_dataset(prefix: str,
                 data['dev_target_factors'].append(dev_factor_path)
                 data['test_target_factors'].append(test_factor_path)
 
+        if alignment_matrix:
+            data['train_alignment_matrix'] = train_alignment_matrix_path
+            generate_alignment_matrices_file(train_source_path, train_alignment_matrix_path)
+
         source_factors_path = None if 'test_source_factors' not in data else data['test_source_factors']
         target_factors_path = None if 'test_target_factors' not in data else data['test_target_factors']
         generate_json_input_file_with_tgt_prefix(test_source_path, test_target_path, test_source_with_target_prefix_path, \
@@ -236,6 +262,8 @@ TRAIN_WITH_SOURCE_FACTORS_COMMON = " --source-factors {source_factors}"
 DEV_WITH_SOURCE_FACTORS_COMMON = " --validation-source-factors {dev_source_factors}"
 TRAIN_WITH_TARGET_FACTORS_COMMON = " --target-factors {target_factors}"
 DEV_WITH_TARGET_FACTORS_COMMON = " --validation-target-factors {dev_target_factors}"
+
+TRAIN_WITH_ALIGNMENT_MATRIX = " --alignment-matrix {alignment_matrix}"
 
 TRAIN_PARAMS_PREPARED_DATA_COMMON = "--use-cpu --max-seq-len {max_len} --prepared-data {prepared_data}" \
                                      " --validation-source {dev_source} --validation-target {dev_target} " \
@@ -291,6 +319,9 @@ def run_train_translate(train_params: str,
         if 'train_target_factors' in data:
             prepare_params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(
                 target_factors=" ".join(data['train_target_factors']))
+        if 'train_alignment_matrix' in data:
+            prepare_params += TRAIN_WITH_ALIGNMENT_MATRIX.format(
+                alignment_matrix=data['train_alignment_matrix'])
 
         if '--weight-tying-type src_trg' in train_params:
             prepare_params += ' --shared-vocab'
@@ -331,6 +362,8 @@ def run_train_translate(train_params: str,
             params += TRAIN_WITH_SOURCE_FACTORS_COMMON.format(source_factors=" ".join(data['train_source_factors']))
         if 'train_target_factors' in data:
             params += TRAIN_WITH_TARGET_FACTORS_COMMON.format(target_factors=" ".join(data['train_target_factors']))
+        if 'train_alignment_matrix' in data:
+            params += TRAIN_WITH_ALIGNMENT_MATRIX.format(alignment_matrix=data['train_alignment_matrix'])
         if 'dev_source_factors' in data:
             params += DEV_WITH_SOURCE_FACTORS_COMMON.format(dev_source_factors=" ".join(data['dev_source_factors']))
         if 'dev_target_factors' in data:

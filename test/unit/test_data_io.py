@@ -160,7 +160,8 @@ def test_sequence_reader(sequences, use_vocab, add_bos, add_eos):
 def test_nonparallel_iter(source_iterables, target_iterables):
     with pytest.raises(SockeyeError) as e:
         list(data_io.parallel_iter(source_iterables, target_iterables))
-    assert str(e.value) == "Different number of lines in source(s) and target(s) iterables."
+    assert str(e.value) == ("Different number of lines in source(s) or target(s) or"
+                            " alignment matrix (if specified) iterables.")
 
 
 @pytest.mark.parametrize("source_iterables, target_iterables",
@@ -189,41 +190,65 @@ def test_not_target_token_parallel_iter(source_iterables, target_iterables):
     assert str(e.value).startswith("Target sequences are not token-parallel")
 
 
-@pytest.mark.parametrize("source_iterables, target_iterables, expected",
+@pytest.mark.parametrize("source_iterables, target_iterables, alignment_matrix_iterable, expected",
                          [
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[[0], [1]]],
-                                     [([[0], [0]], [[0]]), ([[1, 1], [1, 1]], [[1]])]
+                                     None,
+                                     [([[0], [0]], [[0]], None), ([[1, 1], [1, 1]], [[1]], None)]
                              ),
                              (
                                      [[[0], None], [[0], None]],
                                      [[[0], [1]]],
-                                     [([[0], [0]], [[0]])]
+                                     None,
+                                     [([[0], [0]], [[0]], None)]
                              ),
                              (
                                      [[[0], [1, 1]], [[0], [1, 1]]],
                                      [[[0], None]],
-                                     [([[0], [0]], [[0]])]
+                                     None,
+                                     [([[0], [0]], [[0]], None)]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
                                      [[None, [1]]],
-                                     [([[1, 1], [1, 1]], [[1]])]
+                                     None,
+                                     [([[1, 1], [1, 1]], [[1]], None)]
                              ),
                              (
                                      [[None, [1]]],
                                      [[None, [1, 1]], [None, [1, 1]]],
-                                     [([[1]], [[1, 1], [1, 1]])]
+                                     None,
+                                     [([[1]], [[1, 1], [1, 1]], None)]
                              ),
                              (
                                      [[None, [1, 1]], [None, [1, 1]]],
                                      [[None, None]],
+                                     None,
                                      []
+                             ),
+                             (
+                                     [[[0]], [[1]]],
+                                     [[[2]]],
+                                     [3],
+                                     [([[0], [1]], [[2]], 3)]
+                             ),
+                             (
+                                     [[[0]], [[1]]],
+                                     [[[2]]],
+                                     [3],
+                                     [([[0], [1]], [[2]], 3)]
+                             ),
+                             (
+                                     [[[0], [1]], [[2], None]],
+                                     [[[3], [4]]],
+                                     [5, 6],
+                                     [([[0], [2]], [[3]], 5)]
                              )
                          ])
-def test_parallel_iter(source_iterables, target_iterables, expected):
-    assert list(data_io.parallel_iter(source_iterables, target_iterables)) == expected
+def test_parallel_iter(source_iterables, target_iterables, alignment_matrix_iterable, expected):
+    assert list(data_io.parallel_iter(source_iterables, target_iterables, alignment_matrix_iterable)) == expected
 
 
 def test_sample_based_define_bucket_batch_sizes():
@@ -282,13 +307,36 @@ def test_max_word_based_define_bucket_batch_sizes(length_ratio, batch_sentences_
         assert bbs.average_target_words_per_batch == expected_average_target_words_per_batch
 
 
+def _get_random_alignment_matrix(target_length, source_length, bucket_target_length, bucket_source_length, p=0.2):
+    """
+    Generates a random alignment matrix as a sparse tensor. The format is the same as the one used in ParallelDataSet.
+
+    :param target_length: Target length in tokens.
+    :param source_length: Source length in tokens.
+    :param bucket_target_length: Maximum target length in bucket.
+    :param bucket_source_length: Maximum source length in bucket.
+    :param p: Probability of alignment between any two tokens.
+    :return: Random alignment matrix as a sparse COO tensor.
+    """
+    tensor = torch.zeros(bucket_target_length, bucket_source_length, dtype=torch.int32)
+    tensor[:target_length, :source_length] = torch.bernoulli(torch.full((target_length, source_length), p)).int()
+    # Normalize for each target token.
+    tensor = tensor / (tensor.sum(dim=1).unsqueeze(1) + 1e-8)
+    tensor = tensor.reshape([1, -1])
+    tensor = tensor.to_sparse_coo()
+
+    return tensor
+
+
 def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
                               min_count: int,
                               max_count: int,
                               bucket_counts: Optional[List[Optional[int]]] = None,
-                              include_prepended_source_length: bool = False) -> Tuple[List[torch.Tensor],
-                                                                                      List[torch.Tensor],
-                                                                                      List[torch.Tensor]]:
+                              include_prepended_source_length: bool = False,
+                              include_alignment_matrix: bool = False) -> Tuple[List[torch.Tensor],
+                                                                               List[torch.Tensor],
+                                                                               List[torch.Tensor],
+                                                                               List[torch.Tensor]]:
     """
     Get random bucket data.
 
@@ -310,23 +358,47 @@ def _get_random_bucketed_data(buckets: List[Tuple[int, int]],
               for count, bucket in zip(bucket_counts, buckets)]
     prepended_source_length = [torch.randint(0, 10, (count, 1)) for count in bucket_counts] \
         if include_prepended_source_length else None
-    return source, target, prepended_source_length
+    if include_alignment_matrix:
+        alignment_matrices = []
+        for bucket_index, bucket in enumerate(buckets):
+            alignment_matrices_bucket = []
+            target_length = target[bucket_index].shape[1]
+            source_length = source[bucket_index].shape[1]
+            for sample_index in range(bucket_counts[bucket_index]):
+                alignment_matrices_bucket.append(_get_random_alignment_matrix(target_length,
+                                                                              source_length,
+                                                                              bucket[1],
+                                                                              bucket[0]))
+            if len(alignment_matrices_bucket) > 0:
+                alignment_matrices.append(torch.cat(alignment_matrices_bucket, dim=0))
+                alignment_matrices[-1] = alignment_matrices[-1].to_sparse_csr()
+            else:
+                alignment_matrices.append(C.NONE_TENSOR)
+    else:
+        alignment_matrices = None
+    return source, target, prepended_source_length, alignment_matrices
 
 
-@pytest.mark.parametrize("include_prepended_source_length", [False, True])
-def test_parallel_data_set(include_prepended_source_length):
+@pytest.mark.parametrize("include_prepended_source_length,include_alignment_matrix",
+                         [(False, False), (True, False), (False, True), (True, True)])
+def test_parallel_data_set(include_prepended_source_length, include_alignment_matrix):
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
-    source, target, prepended_source_length = \
+    source, target, prepended_source_length, alignment_matrix = \
         _get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                  include_prepended_source_length=include_prepended_source_length)
+                                  include_prepended_source_length=include_prepended_source_length,
+                                  include_alignment_matrix=include_alignment_matrix)
 
     def check_equal(tensors1, tensors2):
         assert len(tensors1) == len(tensors2)
         for a1, a2 in zip(tensors1, tensors2):
             assert torch.equal(a1, a2)
 
+    def sparse_check_equal(tensors1, tensors2):
+        check_equal([tens.to_dense() for tens in tensors1],
+                    [tens.to_dense() for tens in tensors2])
+
     with TemporaryDirectory() as work_dir:
-        dataset = data_io.ParallelDataSet(source, target, prepended_source_length)
+        dataset = data_io.ParallelDataSet(source, target, prepended_source_length, alignment_matrix=alignment_matrix)
         fname = os.path.join(work_dir, 'dataset')
         dataset.save(fname)
         dataset_loaded = data_io.ParallelDataSet.load(fname)
@@ -334,7 +406,10 @@ def test_parallel_data_set(include_prepended_source_length):
         check_equal(dataset.target, dataset_loaded.target)
         if include_prepended_source_length:
             check_equal(dataset.prepended_source_length, dataset_loaded.prepended_source_length)
-        else:
+        if include_alignment_matrix:
+            sparse_check_equal(dataset.alignment_matrix, dataset_loaded.alignment_matrix)
+
+        if (not include_alignment_matrix) and (not include_prepended_source_length):
             # Test backward compatibility: with the legacy format (source/target only)
             dataset.save(fname, use_legacy_format=True)
             dataset_loaded = data_io.ParallelDataSet.load(fname)
@@ -342,8 +417,9 @@ def test_parallel_data_set(include_prepended_source_length):
             check_equal(dataset.target, dataset_loaded.target)
 
 
-@pytest.mark.parametrize("include_prepended_source_length", [False, True])
-def test_parallel_data_set_fill_up(include_prepended_source_length):
+@pytest.mark.parametrize("include_prepended_source_length,include_alignment_matrix",
+                         [(False, False), (True, False), (False, True), (True, True)])
+def test_parallel_data_set_fill_up(include_prepended_source_length, include_alignment_matrix):
     batch_size = 32
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
@@ -352,19 +428,24 @@ def test_parallel_data_set_fill_up(include_prepended_source_length):
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(
         *_get_random_bucketed_data(buckets, min_count=1, max_count=5,
-                                   include_prepended_source_length=include_prepended_source_length))
+                                   include_prepended_source_length=include_prepended_source_length,
+                                   include_alignment_matrix=include_alignment_matrix))
 
     dataset_filled_up = dataset.fill_up(bucket_batch_sizes)
     assert len(dataset_filled_up.source) == len(dataset.source)
     assert len(dataset_filled_up.target) == len(dataset.target)
     if include_prepended_source_length:
         assert len(dataset_filled_up.prepended_source_length) == len(dataset.prepended_source_length)
+    if include_alignment_matrix:
+        assert len(dataset_filled_up.alignment_matrix) == len(dataset.alignment_matrix)
     for bidx in range(len(dataset)):
         bucket_batch_size = bucket_batch_sizes[bidx].batch_size
         assert dataset_filled_up.source[bidx].shape[0] == bucket_batch_size
         assert dataset_filled_up.target[bidx].shape[0] == bucket_batch_size
         if include_prepended_source_length:
             assert dataset_filled_up.prepended_source_length[bidx].shape[0] == bucket_batch_size
+        if include_alignment_matrix:
+            assert dataset_filled_up.alignment_matrix[bidx].shape[0] == bucket_batch_size
 
 
 def test_get_permutations():
@@ -387,8 +468,9 @@ def test_get_permutations():
             assert len(p_set) == 1
 
 
-@pytest.mark.parametrize("include_prepended_source_length", [False, True])
-def test_parallel_data_set_permute(include_prepended_source_length):
+@pytest.mark.parametrize("include_prepended_source_length,include_alignment_matrix",
+                         [(False, False), (True, False), (False, True), (True, True)])
+def test_parallel_data_set_permute(include_prepended_source_length, include_alignment_matrix):
     batch_size = 5
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     bucket_batch_sizes = data_io.define_bucket_batch_sizes(buckets,
@@ -397,7 +479,8 @@ def test_parallel_data_set_permute(include_prepended_source_length):
                                                            data_target_average_len=[None] * len(buckets))
     dataset = data_io.ParallelDataSet(
         *_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                   include_prepended_source_length=include_prepended_source_length)).fill_up(
+                                   include_prepended_source_length=include_prepended_source_length,
+                                   include_alignment_matrix=include_alignment_matrix)).fill_up(
         bucket_batch_sizes)
 
     permutations, inverse_permutations = data_io.get_permutations(dataset.get_bucket_counts())
@@ -413,11 +496,17 @@ def test_parallel_data_set_permute(include_prepended_source_length):
             if include_prepended_source_length:
                 assert (dataset.prepended_source_length[buck_idx] ==
                         dataset_restored.prepended_source_length[buck_idx]).all()
+            if include_alignment_matrix:
+                assert (dataset.alignment_matrix[buck_idx].to_dense() ==
+                        dataset_restored.alignment_matrix[buck_idx].to_dense()).all()
         else:
+            # This is a fancy way to test that the length of the data is 0.
             assert not dataset_restored.source[buck_idx].shape[0]
             assert not dataset_restored.target[buck_idx].shape[0]
             if include_prepended_source_length:
                 assert not dataset_restored.prepended_source_length[buck_idx].shape[0]
+            if include_alignment_matrix:
+                assert not dataset_restored.alignment_matrix[buck_idx].shape[0]
 
 
 def test_get_batch_indices():
@@ -587,10 +676,14 @@ def _data_batches_equal(db1: data_io.Batch, db2: data_io.Batch) -> bool:
     equal = equal and db1.labels.keys() == db2.labels.keys()
     equal = equal and db1.samples == db2.samples
     equal = equal and db1.tokens == db2.tokens
+    equal = equal and torch.allclose(db1.labels['alignment_matrix_label'].to_dense(),
+                                     db2.labels['alignment_matrix_label'].to_dense())
     return equal
 
 
-def test_parallel_sample_iter():
+@pytest.mark.parametrize("include_alignment_matrix",
+                         [False, True])
+def test_parallel_sample_iter(include_alignment_matrix):
     batch_size = 2
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     # The first bucket is going to be empty:
@@ -601,7 +694,8 @@ def test_parallel_sample_iter():
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                 bucket_counts=bucket_counts))
+                                                                 bucket_counts=bucket_counts,
+                                                                 include_alignment_matrix=include_alignment_matrix))
     it = data_io.ParallelSampleIter(dataset, buckets, batch_size, bucket_batch_sizes)
 
     with TemporaryDirectory() as work_dir:
@@ -647,7 +741,9 @@ def test_parallel_sample_iter():
         assert not it_loaded.iter_next()
 
 
-def test_sharded_parallel_sample_iter():
+@pytest.mark.parametrize("include_alignment_matrix",
+                         [False, True])
+def test_sharded_parallel_sample_iter(include_alignment_matrix):
     batch_size = 2
     buckets = data_io.define_parallel_buckets(100, 100, 10, True, 1.0)
     # The first bucket is going to be empty:
@@ -658,9 +754,11 @@ def test_sharded_parallel_sample_iter():
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts))
+                                                                  bucket_counts=bucket_counts,
+                                                                  include_alignment_matrix=include_alignment_matrix))
     dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts))
+                                                                  bucket_counts=bucket_counts,
+                                                                  include_alignment_matrix=include_alignment_matrix))
 
     with TemporaryDirectory() as work_dir:
         shard1_fname = os.path.join(work_dir, 'shard1')
@@ -713,7 +811,9 @@ def test_sharded_parallel_sample_iter():
         assert not it_loaded.iter_next()
 
 
-def test_sharded_parallel_sample_iter_num_batches():
+@pytest.mark.parametrize("include_alignment_matrix",
+                         [False, True])
+def test_sharded_parallel_sample_iter_num_batches(include_alignment_matrix):
     num_shards = 2
     batch_size = 2
     num_batches_per_bucket = 10
@@ -727,9 +827,11 @@ def test_sharded_parallel_sample_iter_num_batches():
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset1 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts))
+                                                                  bucket_counts=bucket_counts,
+                                                                  include_alignment_matrix=include_alignment_matrix))
     dataset2 = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                  bucket_counts=bucket_counts))
+                                                                  bucket_counts=bucket_counts,
+                                                                  include_alignment_matrix=include_alignment_matrix))
     with TemporaryDirectory() as work_dir:
         shard1_fname = os.path.join(work_dir, 'shard1')
         shard2_fname = os.path.join(work_dir, 'shard2')
@@ -746,7 +848,9 @@ def test_sharded_parallel_sample_iter_num_batches():
         assert num_batches_seen == num_batches
 
 
-def test_sharded_and_parallel_iter_same_num_batches():
+@pytest.mark.parametrize("include_alignment_matrix",
+                         [False, True])
+def test_sharded_and_parallel_iter_same_num_batches(include_alignment_matrix):
     """ Tests that a sharded data iterator with just a single shard produces as many shards as an iterator directly
     using the same dataset. """
     batch_size = 2
@@ -760,7 +864,8 @@ def test_sharded_and_parallel_iter_same_num_batches():
                                                            data_target_average_len=[None] * len(buckets))
 
     dataset = data_io.ParallelDataSet(*_get_random_bucketed_data(buckets, min_count=0, max_count=5,
-                                                                 bucket_counts=bucket_counts))
+                                                                 bucket_counts=bucket_counts,
+                                                                 include_alignment_matrix=include_alignment_matrix))
 
     with TemporaryDirectory() as work_dir:
         shard_fname = os.path.join(work_dir, 'shard1')
@@ -815,3 +920,111 @@ def test_create_target_and_shifted_label_sequences():
     assert torch.allclose(label, expected_label)
     lengths = (target != C.PAD_ID).sum(dim=1).squeeze()
     assert torch.allclose(lengths, expected_lengths)
+
+
+@pytest.mark.parametrize("indexes, bucket_size, dense_form",
+                         [
+                             ([[0, 0]], (1, 1), [1.0]),
+                             ([], (1, 1), [0.0]),
+                             ([[0, 0], [0, 1]], (2, 3),
+                              [[1.0, 0.0],
+                               [1.0, 0.0],
+                               [0.0, 0.0]]),
+                             ([[0, 0], [1, 0]], (2, 3),
+                              [[0.5, 0.5],
+                               [0.0, 0.0],
+                               [0.0, 0.0]]),
+                             ([[0, 2], [1, 2], [1, 0]], (2, 3),
+                              [[0.0, 1.0],
+                               [0.0, 0.0],
+                               [0.5, 0.5]]),
+                         ])
+def test_create_alignment_matrix(indexes, bucket_size, dense_form):
+    am = data_io.create_alignment_matrix(indexes, bucket_size)
+
+    assert isinstance(am, torch.Tensor)
+    assert len(am.shape) == 2
+    assert am.shape[0] == 1
+    assert am.shape[1] == bucket_size[0] * bucket_size[1]
+    assert torch.allclose(am.to_dense().reshape(bucket_size[1], bucket_size[0]), torch.tensor(dense_form))
+
+
+def _generate_alignments_line(indexes, line_prefix='', line_suffix='', dash_prefix='', dash_suffix='',
+                              pair_separator=''):
+    result = ''
+    result += line_prefix
+    for idx, (source, target) in enumerate(indexes):
+        result += str(source) + dash_prefix + '-' + dash_suffix + str(target)
+        if idx != len(indexes) - 1:
+            result += pair_separator
+    result += line_suffix
+
+    return result
+
+
+_alignment_matrix_line_formats = [
+    # "1-2 3-4 5-6"
+    {'pair_separator': ' '},
+    # "1-2 3-4 5-6 "
+    {'pair_separator': ' ', 'line_suffix': ' '},
+    # " 1-2 3-4 5-6"
+    {'pair_separator': ' ', 'line_prefix': ' '},
+    # "1 - 2 3 - 4 5 - 6"
+    {'pair_separator': ' ', 'dash_prefix': ' ', 'dash_suffix': ' '},
+    # "1-2\t3-4\t5-6"
+    {'pair_separator': '\t'},
+    # "\t1-2\t3-4\t5-6\t"
+    {'pair_separator': '\t', 'line_prefix': '\t', 'line_suffix': '\t'}
+]
+
+
+@pytest.mark.parametrize("alignment_matrices",
+                         [[[[0, 0], [0, 1], [0, 2], [1, 1]],
+                           [[228, 1337], [42, 42]],
+                           [[3, 3], [2, 2], [1, 0]]],
+                          [[[0, 0]]],
+                          [[]],
+                          [[],
+                           []],
+                          [],
+                          [[[4, 2]],
+                           []],
+                          [[],
+                           [[4, 2]]]])
+def test_alignment_matrix_reader(alignment_matrices):
+    with TemporaryDirectory() as work_dir:
+        path = os.path.join(work_dir, 'file.txt')
+        for format in _alignment_matrix_line_formats:
+            print('Testing format', format)
+            with open(path, 'w') as f:
+                for indexes in alignment_matrices:
+                    print(_generate_alignments_line(indexes, **format), file=f)
+
+            amreader = data_io.AlignmentMatrixReader(path)
+
+            for idx, indexes in enumerate(amreader):
+                assert isinstance(indexes, list)
+                true_indexes = alignment_matrices[idx]
+                assert len(indexes) == len(true_indexes)
+                assert all(pair[0] == true_indexes[idx2][0] and pair[1] == true_indexes[idx2][1]
+                           for idx2, pair in enumerate(indexes))
+
+            os.remove(path)
+
+
+@pytest.mark.parametrize("indexes",
+                         [[[0, 0], [0, 1], [0, 2], [1, 1]],
+                          [[3, 3], [2, 2], [1, 0]],
+                          [[228, 1337], [42, 42]],
+                          [[42, 42]],
+                          [[0, 0]],
+                          []])
+def test_parse_alignment_matrix_indices(indexes):
+    # Generates each test sample in multiple formats.
+    for format in _alignment_matrix_line_formats:
+        parsed_indexes = data_io.parse_alignment_matrix_indices(_generate_alignments_line(indexes, **format))
+
+        assert isinstance(parsed_indexes, list)
+        assert len(parsed_indexes) == len(indexes)
+        assert all(pair[0] == indexes[idx][0] and pair[1] == indexes[idx][1]
+                   for idx, pair in enumerate(parsed_indexes))

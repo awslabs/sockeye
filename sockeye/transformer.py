@@ -42,6 +42,7 @@ class TransformerConfig(config.Config):
     use_lhuc: bool = False
     depth_key_value: int = 0
     use_glu: bool = False
+    attention_alignment_layer: int = 0
 
 
 class TransformerEncoderBlock(pt.nn.Module):
@@ -124,13 +125,16 @@ class TransformerDecoderBlock(pt.nn.Module):
     """
     A transformer decoder block consists of an autoregressive attention block, encoder attention,
     and a feed-forward layer with pre/post process blocks in between.
+
+    :param return_attention: Bool flag for whether decoder block should return alignment head attentions.
     """
 
     def __init__(self,
                  config: TransformerConfig,
                  inference_only: bool,
                  dtype: Optional[pt.dtype] = None,
-                 clamp_to_dtype: bool = False) -> None:
+                 clamp_to_dtype: bool = False,
+                 return_attention: bool = False) -> None:
         super().__init__()
         self.decoder_type = config.decoder_type
         self.inference_only = inference_only
@@ -174,7 +178,8 @@ class TransformerDecoderBlock(pt.nn.Module):
                                                                dropout=config.dropout_attention,
                                                                depth_key_value=config.depth_key_value,
                                                                dtype=dtype,
-                                                               clamp_to_dtype=clamp_to_dtype)
+                                                               clamp_to_dtype=clamp_to_dtype,
+                                                               return_attention=return_attention)
         self.post_enc_attention = TransformerProcessBlock(sequence=config.postprocess_sequence,
                                                           dropout=config.dropout_prepost,
                                                           num_hidden=config.model_size,
@@ -235,7 +240,7 @@ class TransformerDecoderBlock(pt.nn.Module):
                 source: pt.Tensor,
                 source_mask: Optional[pt.Tensor],
                 autoregr_states: Optional[pt.Tensor],
-                enc_att_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor]:
+                enc_att_kv: Optional[pt.Tensor] = None) -> Tuple[pt.Tensor, pt.Tensor, pt.Tensor]:
         target_autoregr, *new_autoregr_states = self.autoregr_layer(inputs=self.pre_autoregr_layer(target),
                                                                     previous_states=autoregr_states,
                                                                     mask=target_mask)
@@ -243,10 +248,10 @@ class TransformerDecoderBlock(pt.nn.Module):
         target = self.post_autoregr_layer(target_autoregr, target)
 
         # encoder attention
-        target_enc_att = self.enc_attention(queries=self.pre_enc_attention(target),
-                                            key_values=source,
-                                            mask=source_mask,
-                                            projected_memory_kv=enc_att_kv)
+        target_enc_att, alignment_head_attention = self.enc_attention(queries=self.pre_enc_attention(target),
+                                                                      key_values=source,
+                                                                      mask=source_mask,
+                                                                      projected_memory_kv=enc_att_kv)
 
         target = self.post_enc_attention(target_enc_att, target)
 
@@ -257,7 +262,7 @@ class TransformerDecoderBlock(pt.nn.Module):
         if self.lhuc:
             target = self.lhuc(target)
 
-        return target, new_autoregr_states
+        return target, new_autoregr_states, alignment_head_attention
 
 
 class TransformerProcessBlock(pt.nn.Module):

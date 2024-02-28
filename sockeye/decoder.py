@@ -159,12 +159,16 @@ class TransformerDecoder(Decoder):
                                                          dtype=dtype)
         self.autoregressive_mask = transformer.AutoRegressiveMask()
 
+        module_list = []
+        for layer in range(config.num_layers):
+            return_attention = True if layer == config.attention_alignment_layer else False
+            module_list.append(transformer.TransformerDecoderBlock(
+                config,
+                inference_only=inference_only,
+                dtype=dtype,
+                return_attention=return_attention))
         self.layers = pt.nn.ModuleList(  # using ModuleList because we have additional inputs
-            transformer.TransformerDecoderBlock(config,
-                                                inference_only=inference_only,
-                                                dtype=dtype,
-                                                clamp_to_dtype=clamp_to_dtype)
-            for _ in range(config.num_layers))
+            module_list)
 
         self.final_process = transformer.TransformerProcessBlock(sequence=config.preprocess_sequence,
                                                                  dropout=config.dropout_prepost,
@@ -252,7 +256,7 @@ class TransformerDecoder(Decoder):
         states += dummy_autoregr_states
         return states
 
-    def decode_seq(self, inputs: pt.Tensor, states: List[pt.Tensor]) -> pt.Tensor:
+    def decode_seq(self, inputs: pt.Tensor, states: List[pt.Tensor]) -> Tuple[pt.Tensor, pt.Tensor]:
         """
         Decodes a sequence of embedded target words and returns sequence of last decoder
         representations for each time step.
@@ -260,11 +264,13 @@ class TransformerDecoder(Decoder):
         :param inputs: Encoded source: (batch_size, source_encoded_max_length, encoder_depth).
         :param states: List of initial states, as given by init_state_from_encoder().
         :return: Decoder output. Shape: (batch_size, target_embed_max_length, decoder_depth).
+                 Optionally also returns alignment head attentions.
+                 Shape: (batch_size, target_embed_max_length, source_encoded_max_length).
         """
-        outputs, _ = self.forward(inputs, states)
-        return outputs
+        outputs, _, alignment_head_attention = self.forward(inputs, states)
+        return outputs, alignment_head_attention
 
-    def forward(self, step_input: pt.Tensor, states: List[pt.Tensor]) -> Tuple[pt.Tensor, List[pt.Tensor]]:
+    def forward(self, step_input: pt.Tensor, states: List[pt.Tensor]) -> Tuple[pt.Tensor, List[pt.Tensor], pt.Tensor]:
         target_mask = None
         if self.inference_only:
             steps, source_mask, *other = states
@@ -293,13 +299,17 @@ class TransformerDecoder(Decoder):
         target = self.dropout(target)
 
         new_autoregr_states = []  # type: List[pt.Tensor]
-        for layer, layer_autoregr_state, layer_enc_att_kv in zip(self.layers, autoregr_states, enc_att_kv):
-            target, new_layer_autoregr_state = layer(target=target,
-                                                     target_mask=target_mask,
-                                                     source=source_encoded,
-                                                     source_mask=source_mask_view,
-                                                     autoregr_states=layer_autoregr_state,
-                                                     enc_att_kv=layer_enc_att_kv)
+        alignment_head_attention = pt.zeros(0)
+        for idx, (layer, layer_autoregr_state, layer_enc_att_kv) in enumerate(zip(self.layers, autoregr_states,
+                                                                                  enc_att_kv)):
+            target, new_layer_autoregr_state, attention = layer(target=target,
+                                                                target_mask=target_mask,
+                                                                source=source_encoded,
+                                                                source_mask=source_mask_view,
+                                                                autoregr_states=layer_autoregr_state,
+                                                                enc_att_kv=layer_enc_att_kv)
+            if idx == self.config.attention_alignment_layer:
+                alignment_head_attention = attention
 
             new_autoregr_states += [*new_layer_autoregr_state]
 
@@ -316,7 +326,10 @@ class TransformerDecoder(Decoder):
         else:
             new_states = [steps, states[1], states[2]] + new_autoregr_states
 
-        return target, new_states
+        if alignment_head_attention is None:
+            alignment_head_attention = pt.zeros(0)
+
+        return target, new_states, alignment_head_attention
 
     def get_num_hidden(self):
         return self.config.model_size
