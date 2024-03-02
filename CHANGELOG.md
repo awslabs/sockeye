@@ -11,6 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [3.1.38]
+
+### Changed
+
+- Added support for [signwriting-evaluation](https://github.com/sign-language-processing/signwriting-evaluation) to
+  allow evaluating SignWriting text translation outputs.
+
 ## [3.1.37]
 
 ### Fixed
