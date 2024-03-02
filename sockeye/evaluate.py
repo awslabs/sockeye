@@ -163,7 +163,8 @@ def load_signwriting_clip():
     except ImportError:
         raise ImportError("Please install signwriting-evaluation to use the SignWriting CLIP metric.")
 
-    return SignWritingCLIPScore()
+    # Not using cache_directory to avoid multiple processes accessing at the same time
+    return SignWritingCLIPScore(cache_directory=None)
 
 
 def raw_corpus_signwriting_clip(hypotheses_factors: List[Iterable[str]],
