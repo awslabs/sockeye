@@ -482,7 +482,7 @@ def create_alignment_matrix(indexes: List[Tuple[int, int]], size: Tuple[int, int
     for _, target_idx in indexes:
         amounts[target_idx] += 1
     # Then calculate normalized value for each target token.
-    normalized_values = [0] * size[1]
+    normalized_values = [0.0] * size[1]
     for target_idx, amount in enumerate(amounts):
         if amount != 0:
             normalized_values[target_idx] = 1 / amount
@@ -558,6 +558,7 @@ class RawParallelDatasetLoader:
                        for (source_len, _), num_samples in zip(self.buckets, num_samples_per_bucket)]
         data_target = [np.full((num_samples, target_len + 1, num_target_factors), self.pad_id, dtype=self.dtype)
                        for (_, target_len), num_samples in zip(self.buckets, num_samples_per_bucket)]
+        data_alignment_matrix: List[List[List[Tuple[int, int]]]]
         data_alignment_matrix = [[] for _ in self.buckets] if alignment_matrix_iterable is not None else None
 
         data_prepended_source_length = \
@@ -1606,8 +1607,8 @@ def slice_csr_tensor(tens: torch.Tensor, start: int, end: int) -> torch.Tensor:
     col_indices = tens.col_indices()
     values = tens.values()
 
-    start_crow = crow_indices[start]
-    end_crow = crow_indices[end]
+    start_crow = int(crow_indices[start].item())
+    end_crow = int(crow_indices[end].item())
 
     result_col_indices = col_indices[start_crow:end_crow]
     result_values = values[start_crow:end_crow]

@@ -749,7 +749,7 @@ class GreedySearch(Search):
             target_prefix_factor_masks, target_prefix_factor_length = utils.gen_prefix_masking(
                 target_prefix_factors, self.output_factor_vocab_size, self.dtype)
 
-        attentions = []
+        attentions = [] #type: Optional[List[pt.Tensor]]
         t = 1
         for t in range(1, max_iterations + 1):
             target_prefix_factor_mask = target_prefix_factor_masks[:, t-1] \
@@ -788,14 +788,16 @@ class GreedySearch(Search):
         # TODO: return unnormalized proper score
         scores = pt.zeros(1, self.num_target_factors) - 1
         if attentions is not None:
-            attentions = pt.cat(attentions, dim=1)
+            stacked_attentions = pt.cat(attentions, dim=1)
+        else:
+            stacked_attentions = None
 
         return SearchResult(best_hyp_indices=hyp_indices,
                             best_word_indices=stacked_outputs,
                             accumulated_scores=scores,
                             lengths=length,
                             estimated_reference_lengths=None,
-                            alignment_head_attentions=attentions)  # type: ignore
+                            alignment_head_attentions=stacked_attentions)  # type: ignore
 
 
 class GreedyTop1(pt.nn.Module):
@@ -926,7 +928,7 @@ class BeamSearch(Search):
         # Best word and hypotheses indices across beam search steps from topk operation.
         best_hyp_indices_list = []  # type: List[pt.Tensor]
         best_word_indices_list = []  # type: List[pt.Tensor]
-        attentions = []
+        attentions = [] # type: List[pt.Tensor]
 
         lengths = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.int32)
         finished = pt.zeros(batch_size * self.beam_size, device=self.device, dtype=pt.bool)
@@ -1096,7 +1098,9 @@ class BeamSearch(Search):
         best_hyp_indices_list.append(best_hyp_indices)
         lengths = lengths.index_select(0, best_hyp_indices)
         if attentions is not None:
-            attentions = pt.cat(attentions, dim=1)
+            stacked_attentions = pt.cat(attentions, dim=1)
+        else:
+            stacked_attentions = None
         all_best_hyp_indices = pt.stack(best_hyp_indices_list, dim=1)
         all_best_word_indices = pt.stack(best_word_indices_list, dim=2)
 
@@ -1105,7 +1109,7 @@ class BeamSearch(Search):
                             accumulated_scores=scores_accumulated,
                             lengths=lengths,
                             estimated_reference_lengths=estimated_reference_lengths,
-                            alignment_head_attentions=attentions)
+                            alignment_head_attentions=stacked_attentions)
 
     def _should_stop(self, finished: pt.Tensor, batch_size: int) -> bool:
         if self.beam_search_stop == C.BEAM_SEARCH_STOP_FIRST:

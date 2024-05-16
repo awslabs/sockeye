@@ -1221,7 +1221,7 @@ class Translator:
         for translation_index, translation in enumerate(translations):
             if translation.alignment_head_attention is not None:
                 # Crop alignment attentions to source length. Also remove source EOS.
-                source_len = source_length[translation_index][0]
+                source_len = int(source_length[translation_index][0].item())
                 translation.alignment_head_attention = [ls[:source_len - 1] for ls in
                                                         translation.alignment_head_attention]
 
@@ -1336,15 +1336,15 @@ class Translator:
         if alignment_head_attention is not None:
             # Crop attentions to only the translated tokens.
             if shift_alignments:
-                alignment_head_attention = alignment_head_attention[1:length]
+                alignment_head_attention = alignment_head_attention[1:length] # type: ignore
             else:
-                alignment_head_attention = alignment_head_attention[:length - 1]
+                alignment_head_attention = alignment_head_attention[:length - 1] # type: ignore
             alignment_head_attention = alignment_head_attention.tolist()
 
         return Translation(sequence, scores,  # type: ignore
                            nbest_translations=None,
                            estimated_reference_length=estimated_reference_length,
-                           alignment_head_attention=alignment_head_attention)
+                           alignment_head_attention=alignment_head_attention) # type: ignore
 
 
 def _unshift_target_factors(sequence: np.ndarray, fill_last_with: int = C.EOS_ID):
