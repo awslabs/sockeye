@@ -11,13 +11,13 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
-## [???]
+## [3.1.38]
 
 ### Added
 
 - Added the option to make models learn token alignments. Added the following line arguments:
-  - Use `--alignment-matrix <file path>` in training or data preperation to specify file to read alignments from.
-  - Use `--alignment-matrix-weight <float>` to specify loss weight of alignment matrix kl divergence/crossentropy.
+  - Use `--alignment-matrix <file path>` in training or data preparation to specify file to read alignments from.
+  - Use `--alignment-matrix-weight <float>` to specify loss weight of alignment matrix kl divergence/cross entropy.
   - Use `--attention-alignment-layer <int>` to specify decoder layer of attention head used for learning alignments.
   - Use `--shift-alignments` flag during data preparation to shift alignments one target token forward.
   - Use `--shift-alignments` flag during translation to shift alignments one target token backward.
