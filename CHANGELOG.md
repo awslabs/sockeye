@@ -11,6 +11,30 @@ Note that Sockeye has checks in place to not translate with an old model that wa
 
 Each version section may have subsections for: _Added_, _Changed_, _Removed_, _Deprecated_, and _Fixed_.
 
+## [???]
+
+### Added
+
+- Added the option to make models learn token alignments. Added the following line arguments:
+  - Use `--alignment-matrix <file path>` in training or data preperation to specify file to read alignments from.
+  - Use `--alignment-matrix-weight <float>` to specify loss weight of alignment matrix kl divergence/crossentropy.
+  - Use `--attention-alignment-layer <int>` to specify decoder layer of attention head used for learning alignments.
+  - Use `--shift-alignments` flag during data preparation to shift alignments one target token forward.
+  - Use `--shift-alignments` flag during translation to shift alignments one target token backward.
+  - Use `--align-attention` flag to force model to learn alignments, when such intent cannot be inferred from other CL arguments.
+- Created data_io.create_alignment_matrix to turn alignment indexes to coordinate sparse tensor.
+- Created data_io.AlignmentMatrixReader for reading list of alignment indices from a file.
+- Created data_io.parse_alignment_matrix_indices for parsing a string of alignments into a list of indices of alignments.
+- Created data_io.slice_csr_tensor for slicing column sparse, row dense torch tensors.
+- Added 'alignment_head_attention' to json output if model uses `--output-type json`.
+- Created layers.single_head_attention to calculate attention of a single attention head we're aligning.
+- Created loss.AlignmentMatrixKLDivergenceLoss as a loss for alignment matrix learning.
+- Created unit, integration and system tests for alignment matrices.
+
+### Changed
+
+- Made changes in data_io, decoder, inference, layers, model, prepare_data, train, transformer and translate, to support returning attention matrices and alignment matrix learning. 
+
 ## [3.1.37]
 
 ### Fixed
