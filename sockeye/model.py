@@ -449,7 +449,7 @@ class SockeyeModel(pt.nn.Module):
         utils.check_condition(os.path.exists(filename), "No model parameter file found under %s. "
                                                         "This is either not a model directory or the first training "
                                                         "checkpoint has not happened yet." % filename)
-        state_dict = pt.load(filename, map_location=device)
+        state_dict = pt.load(filename, weights_only=True, map_location=device)
         missing, unexpected = self.load_state_dict(state_dict, strict=False)
         # Earlier versions of Sockeye may have saved parameters for traced
         # modules. These parameters can be safely ignored.
