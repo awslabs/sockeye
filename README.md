@@ -1,5 +1,7 @@
 # Sockeye
 
+**Sockeye has entered maintenance mode and is no longer adding new features. We are grateful to everyone who has contributed to Sockeye throughout its development with pull requests, issue reports, and more.**
+
 [![PyPI version](https://badge.fury.io/py/sockeye.svg)](https://badge.fury.io/py/sockeye)
 [![GitHub license](https://img.shields.io/github/license/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/blob/main/LICENSE)
 [![GitHub issues](https://img.shields.io/github/issues/awslabs/sockeye.svg)](https://github.com/awslabs/sockeye/issues)
