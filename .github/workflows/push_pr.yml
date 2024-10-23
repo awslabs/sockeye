@@ -30,8 +30,6 @@ jobs:
       run: python -m pip install --upgrade pip
     - name: Sockeye requirements
       run: pip install -r requirements/requirements.txt
-    - name: DeepSpeed requirements
-      run: pip install -r requirements/requirements.deepspeed.txt
     - name: Faiss requirements
       run: |
         if [ "$RUNNER_OS" == "Linux" ]; then
@@ -57,4 +55,4 @@ jobs:
       run: check-manifest --ignore sockeye/git_version.py
     - name: System tests
       run: |
-        pytest test/system 
+        pytest test/system
