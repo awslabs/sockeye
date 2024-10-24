@@ -24,8 +24,6 @@ jobs:
         pip install setuptools wheel twine
     - name: Sockeye requirements
       run: pip install -r requirements/requirements.txt
-    - name: DeepSpeed requirements
-      run: pip install -r requirements/requirements.deepspeed.txt
     - name: Development requirements
       run: pip install -r requirements/requirements.dev.txt
     - name: Unit tests
